@@ -9,11 +9,17 @@ const elements = {
   editDocBtn: document.getElementById("editDocBtn"),
   editCurrentDocBtn: document.getElementById("editCurrentDocBtn"),
   activeDocLabel: document.getElementById("activeDocLabel"),
+  dockSearch: document.getElementById("dockSearch"),
   dockOpenDocs: document.getElementById("dockOpenDocs"),
   dockUpload: document.getElementById("dockUpload"),
   dockNew: document.getElementById("dockNew"),
   dockEdit: document.getElementById("dockEdit"),
+  searchWrap: document.querySelector(".search-wrap"),
   searchInput: document.getElementById("searchInput"),
+  clearSearchBtn: document.getElementById("clearSearchBtn"),
+  superSearchPanel: document.getElementById("superSearchPanel"),
+  superSearchCount: document.getElementById("superSearchCount"),
+  superSearchList: document.getElementById("superSearchList"),
   searchMeta: document.getElementById("searchMeta"),
   statusMsg: document.getElementById("statusMsg"),
   docList: document.getElementById("docList"),
@@ -37,10 +43,13 @@ const state = {
   editorFile: null,
   editorOpen: false,
   mermaidReady: false,
-  panZoomCounter: 0
+  panZoomCounter: 0,
+  searchResults: [],
+  searchPanelOpen: false
 };
 
 const MOBILE_BREAKPOINT = 920;
+const SUPERSEARCH_LIMIT = 8;
 
 marked.setOptions({
   gfm: true,
@@ -67,6 +76,261 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function tokenizeSearchQuery(query) {
+  return normalize(query)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function hasLooseSubsequence(needle, haystack) {
+  const compactNeedle = normalize(needle).replace(/\s+/g, "");
+  const compactHaystack = normalize(haystack).replace(/\s+/g, "");
+  if (!compactNeedle || !compactHaystack) {
+    return false;
+  }
+
+  let index = 0;
+  for (const char of compactHaystack) {
+    if (char === compactNeedle[index]) {
+      index += 1;
+      if (index === compactNeedle.length) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function highlightMatches(text, searchTerms) {
+  const raw = String(text || "");
+  const tokens = [...new Set((searchTerms || [])
+    .map((term) => normalize(term).trim())
+    .filter((term) => term.length >= 2))]
+    .sort((left, right) => right.length - left.length);
+
+  if (tokens.length === 0) {
+    return escapeHtml(raw);
+  }
+
+  const pattern = new RegExp(`(${tokens.map(escapeRegExp).join("|")})`, "ig");
+  return raw
+    .split(pattern)
+    .map((part, index) => (
+      index % 2 === 1
+        ? `<mark>${escapeHtml(part)}</mark>`
+        : escapeHtml(part)
+    ))
+    .join("");
+}
+
+function buildSearchSnippet(content, query, tokens) {
+  const raw = String(content || "").replace(/\s+/g, " ").trim();
+  if (!raw) {
+    return "No preview available.";
+  }
+
+  const normalizedContent = normalize(raw);
+  const searchTerms = [...new Set([normalize(query), ...(tokens || [])]
+    .map((token) => normalize(token).trim())
+    .filter(Boolean))];
+
+  let matchIndex = -1;
+  let matchToken = "";
+
+  for (const token of searchTerms) {
+    const index = normalizedContent.indexOf(token);
+    if (index >= 0 && (matchIndex === -1 || index < matchIndex)) {
+      matchIndex = index;
+      matchToken = token;
+    }
+  }
+
+  if (matchIndex === -1) {
+    return raw.length > 140 ? `${raw.slice(0, 140)}...` : raw;
+  }
+
+  const focusLength = Math.max(matchToken.length, 18);
+  const start = Math.max(0, matchIndex - 56);
+  const end = Math.min(raw.length, matchIndex + focusLength + 72);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < raw.length ? "..." : "";
+  return `${prefix}${raw.slice(start, end)}${suffix}`;
+}
+
+function scoreDocForQuery(doc, normalizedQuery, tokens) {
+  const title = normalize(doc.title);
+  const file = normalize(doc.file);
+  const content = normalize(state.contentCache.get(doc.file));
+
+  let score = 0;
+  let matched = false;
+
+  if (title.startsWith(normalizedQuery)) {
+    score += 1200;
+    matched = true;
+  }
+
+  if (file.startsWith(normalizedQuery)) {
+    score += 1000;
+    matched = true;
+  }
+
+  if (title.includes(normalizedQuery)) {
+    score += 850;
+    matched = true;
+  }
+
+  if (file.includes(normalizedQuery)) {
+    score += 760;
+    matched = true;
+  }
+
+  const contentIndex = content.indexOf(normalizedQuery);
+  if (contentIndex >= 0) {
+    score += 520 + Math.max(0, 140 - (contentIndex / 11));
+    matched = true;
+  }
+
+  if (!matched && hasLooseSubsequence(normalizedQuery, `${title} ${file}`)) {
+    score += 240;
+    matched = true;
+  }
+
+  let tokenHits = 0;
+  for (const token of tokens) {
+    if (title.includes(token)) {
+      score += 220;
+      tokenHits += 1;
+      continue;
+    }
+
+    if (file.includes(token)) {
+      score += 190;
+      tokenHits += 1;
+      continue;
+    }
+
+    if (content.includes(token)) {
+      score += 110;
+      tokenHits += 1;
+      continue;
+    }
+
+    score -= 20;
+  }
+
+  if (!matched && tokenHits === 0) {
+    return null;
+  }
+
+  return score + Math.min(180, tokenHits * 45);
+}
+
+function buildSuperSearchMatches(query) {
+  const normalizedQuery = normalize(query).trim();
+  const tokens = tokenizeSearchQuery(normalizedQuery);
+  const searchTerms = [...new Set([normalizedQuery, ...tokens].filter(Boolean))];
+
+  if (!normalizedQuery) {
+    return { matches: [], searchTerms };
+  }
+
+  const matches = [];
+  for (const doc of state.docs) {
+    const score = scoreDocForQuery(doc, normalizedQuery, tokens);
+    if (score === null) {
+      continue;
+    }
+
+    const content = String(state.contentCache.get(doc.file) || "");
+    matches.push({
+      ...doc,
+      score,
+      snippet: buildSearchSnippet(content, normalizedQuery, searchTerms)
+    });
+  }
+
+  matches.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+
+    const rightTime = Date.parse(right.updatedAt || "") || 0;
+    const leftTime = Date.parse(left.updatedAt || "") || 0;
+    if (rightTime !== leftTime) {
+      return rightTime - leftTime;
+    }
+
+    return left.file.localeCompare(right.file);
+  });
+
+  return { matches, searchTerms };
+}
+
+function setSuperSearchOpen(isOpen) {
+  state.searchPanelOpen = Boolean(isOpen);
+  elements.superSearchPanel.hidden = !state.searchPanelOpen;
+}
+
+function syncSearchInputState(query) {
+  const hasQuery = String(query || "").trim().length > 0;
+  elements.searchWrap.classList.toggle("has-value", hasQuery);
+}
+
+function renderSuperSearchPanel(query, matches, searchTerms) {
+  const trimmedQuery = String(query || "").trim();
+  syncSearchInputState(query);
+
+  if (!trimmedQuery) {
+    state.searchResults = [];
+    elements.superSearchList.innerHTML = "";
+    elements.superSearchCount.textContent = "0 results";
+    setSuperSearchOpen(false);
+    return;
+  }
+
+  const topResults = matches.slice(0, SUPERSEARCH_LIMIT);
+  state.searchResults = topResults;
+  elements.superSearchCount.textContent = `${matches.length} result(s)`;
+
+  if (topResults.length === 0) {
+    elements.superSearchList.innerHTML = "<li class=\"supersearch-empty\">No matches. Try fewer keywords or part of the filename.</li>";
+    setSuperSearchOpen(true);
+    return;
+  }
+
+  elements.superSearchList.innerHTML = topResults.map((doc) => `
+    <li>
+      <button class="supersearch-item" type="button" data-file="${escapeHtml(doc.file)}">
+        <span class="supersearch-item-title"><i class="fa-solid ${escapeHtml(doc.icon)}"></i>${highlightMatches(doc.title, searchTerms)}</span>
+        <span class="supersearch-item-file">${highlightMatches(doc.file, searchTerms)}</span>
+        <span class="supersearch-item-snippet">${highlightMatches(doc.snippet, searchTerms)}</span>
+      </button>
+    </li>
+  `).join("");
+
+  elements.superSearchList.querySelectorAll(".supersearch-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      const file = button.getAttribute("data-file");
+      if (!file) {
+        return;
+      }
+
+      openDocument(file, true);
+      closeSidebarOnMobile();
+      setSuperSearchOpen(false);
+    });
+  });
+
+  setSuperSearchOpen(true);
 }
 
 function setNavOpen(isOpen) {
@@ -604,7 +868,10 @@ function renderDocList() {
 }
 
 function applySearch(query) {
-  const q = normalize(query).trim();
+  const rawQuery = String(query || "");
+  const q = normalize(rawQuery).trim();
+  const { matches, searchTerms } = buildSuperSearchMatches(rawQuery);
+  renderSuperSearchPanel(rawQuery, matches, searchTerms);
 
   if (!q) {
     state.filteredDocs = [...state.docs];
@@ -613,13 +880,15 @@ function applySearch(query) {
     return;
   }
 
-  state.filteredDocs = state.docs.filter((doc) => {
-    const content = normalize(state.contentCache.get(doc.file));
-    const searchable = `${normalize(doc.title)} ${normalize(doc.file)} ${content}`;
-    return searchable.includes(q);
-  });
+  state.filteredDocs = matches.map((match) => ({
+    file: match.file,
+    title: match.title,
+    size: match.size,
+    updatedAt: match.updatedAt,
+    icon: match.icon
+  }));
 
-  setMeta(`${state.filteredDocs.length} result(s) for "${query.trim()}"`);
+  setMeta(`${state.filteredDocs.length} result(s) for "${rawQuery.trim()}"`);
   renderDocList();
 }
 
@@ -833,6 +1102,7 @@ async function openEditorForCurrentDoc() {
 async function initialize() {
   setMeta("Loading documents...");
   updateActiveDocUI(null);
+  syncSearchInputState(elements.searchInput.value);
 
   try {
     const hashFile = decodeURIComponent(window.location.hash.replace(/^#/, ""));
@@ -845,8 +1115,34 @@ async function initialize() {
   }
 }
 
-elements.searchInput.addEventListener("input", (event) => {
+function handleSearchEvent(event) {
   applySearch(event.target.value);
+}
+
+elements.searchInput.addEventListener("input", handleSearchEvent);
+elements.searchInput.addEventListener("search", handleSearchEvent);
+elements.searchInput.addEventListener("change", handleSearchEvent);
+
+elements.searchInput.addEventListener("focus", () => {
+  if (elements.searchInput.value.trim()) {
+    applySearch(elements.searchInput.value);
+  }
+});
+
+elements.searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && state.searchResults.length > 0) {
+    event.preventDefault();
+    openDocument(state.searchResults[0].file, true);
+    closeSidebarOnMobile();
+    setSuperSearchOpen(false);
+    elements.searchInput.blur();
+  }
+});
+
+elements.clearSearchBtn.addEventListener("click", () => {
+  elements.searchInput.value = "";
+  applySearch("");
+  elements.searchInput.focus();
 });
 
 elements.refreshDocs.addEventListener("click", async () => {
@@ -873,6 +1169,10 @@ window.addEventListener("keydown", (event) => {
 
   if (event.key === "Escape" && state.editorOpen) {
     closeEditor();
+  }
+
+  if (event.key === "Escape" && state.searchPanelOpen) {
+    setSuperSearchOpen(false);
   }
 });
 
@@ -927,6 +1227,14 @@ elements.dockOpenDocs.addEventListener("click", () => {
   setNavOpen(true);
 });
 
+elements.dockSearch.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  elements.searchInput.focus();
+  if (elements.searchInput.value.trim()) {
+    applySearch(elements.searchInput.value);
+  }
+});
+
 elements.dockUpload.addEventListener("click", () => {
   elements.uploadInput.click();
 });
@@ -948,6 +1256,22 @@ window.addEventListener("hashchange", () => {
   if (hashFile && hashFile !== state.activeFile && state.docs.some((doc) => doc.file === hashFile)) {
     openDocument(hashFile, false);
   }
+});
+
+document.addEventListener("click", (event) => {
+  if (!state.searchPanelOpen) {
+    return;
+  }
+
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  if (elements.superSearchPanel.contains(event.target) || elements.searchWrap.contains(event.target)) {
+    return;
+  }
+
+  setSuperSearchOpen(false);
 });
 
 initialize();

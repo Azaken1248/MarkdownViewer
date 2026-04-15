@@ -39,6 +39,9 @@
       <label class="search-wrap" for="searchInput">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input id="searchInput" type="search" placeholder="Search docs, tags, and content..." autocomplete="off" />
+        <button class="search-clear" id="clearSearchBtn" type="button" aria-label="Clear search" title="Clear search">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </label>
 
       <div class="header-actions" aria-label="Document actions">
@@ -57,6 +60,15 @@
         </button>
       </div>
     </header>
+
+    <section class="supersearch-panel" id="superSearchPanel" aria-live="polite" hidden>
+      <div class="supersearch-head">
+        <p><i class="fa-solid fa-bolt"></i> Supersearch</p>
+        <span id="superSearchCount">0 results</span>
+      </div>
+
+      <ul id="superSearchList" class="supersearch-list" aria-label="Supersearch results"></ul>
+    </section>
 
     <div class="layout">
       <aside class="sidebar" id="sidebar" aria-label="Markdown documents panel">
@@ -100,6 +112,11 @@
   </div>
 
   <nav class="mobile-dock" aria-label="Mobile actions">
+    <button class="dock-btn" id="dockSearch" type="button" aria-label="Search markdowns">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <span>Search</span>
+    </button>
+
     <button class="dock-btn" id="dockOpenDocs" type="button" aria-label="Open document list">
       <i class="fa-solid fa-list"></i>
       <span>Docs</span>
