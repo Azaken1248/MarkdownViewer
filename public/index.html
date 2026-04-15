@@ -3,8 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cart Docs Viewer</title>
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>__EMBED_TITLE__</title>
+  <meta name="description" content="__EMBED_DESCRIPTION__" />
+  <meta name="theme-color" content="__EMBED_THEME_COLOR__" />
+
+  <link rel="canonical" href="__EMBED_CANONICAL_URL__" />
+  <link rel="alternate" type="application/json+oembed" href="__EMBED_OEMBED_URL__" title="__EMBED_TITLE__" />
+  <link rel="icon" type="image/svg+xml" href="__EMBED_FAVICON_URL__" />
+  <link rel="apple-touch-icon" href="__EMBED_FAVICON_URL__" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="__EMBED_TITLE__" />
+  <meta property="og:description" content="__EMBED_DESCRIPTION__" />
+  <meta property="og:url" content="__EMBED_CANONICAL_URL__" />
+  <meta property="og:site_name" content="__EMBED_SITE_NAME__" />
+  <meta property="og:image" content="__EMBED_IMAGE_URL__" />
+  <meta property="og:image:alt" content="Pretty share card featuring the Markdown Docs Viewer favicon." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="__EMBED_TITLE__" />
+  <meta name="twitter:description" content="__EMBED_DESCRIPTION__" />
+  <meta name="twitter:image" content="__EMBED_IMAGE_URL__" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
@@ -15,7 +36,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/highlight.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
 <body>
@@ -73,10 +94,17 @@
     <div class="layout">
       <aside class="sidebar" id="sidebar" aria-label="Markdown documents panel">
         <div class="sidebar-top">
-          <h2><i class="fa-solid fa-folder-tree"></i> Markdowns</h2>
-          <button class="icon-btn" id="refreshDocs" aria-label="Refresh document list">
-            <i class="fa-solid fa-rotate"></i>
-          </button>
+          <h2 id="sidebarTitle"><i class="fa-solid fa-folder-tree"></i> Markdowns</h2>
+
+          <div class="sidebar-actions">
+            <button class="icon-btn" id="toggleRecycleBinBtn" aria-label="Open recycle bin" title="Open recycle bin">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+
+            <button class="icon-btn" id="refreshDocs" aria-label="Refresh document list" title="Refresh list">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
         </div>
 
         <p id="searchMeta" class="meta">Loading documents...</p>
@@ -92,8 +120,39 @@
             No document selected
           </p>
 
-          <button class="btn" id="editCurrentDocBtn" type="button" aria-label="Edit currently open markdown">
+          <div class="match-nav" id="matchNav" aria-live="polite" hidden>
+            <span class="match-nav-meta" aria-hidden="true">
+              <i class="fa-solid fa-crosshairs"></i>
+              <span class="match-nav-label" id="matchNavLabel">0 / 0</span>
+            </span>
+
+            <button class="icon-btn match-nav-btn" id="matchPrevBtn" type="button" aria-label="Previous match">
+              <i class="fa-solid fa-chevron-left"></i>
+            </button>
+
+            <button class="icon-btn match-nav-btn" id="matchNextBtn" type="button" aria-label="Next match">
+              <i class="fa-solid fa-chevron-right"></i>
+            </button>
+
+            <button class="icon-btn match-nav-btn match-nav-close" id="matchCloseBtn" type="button" aria-label="Exit search mode" title="Exit search mode">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <button class="btn viewer-action-btn" id="editCurrentDocBtn" type="button" aria-label="Edit currently open markdown">
             <i class="fa-solid fa-pen-to-square"></i> Edit This Doc
+          </button>
+
+          <button class="btn viewer-action-btn" id="softDeleteDocBtn" type="button" aria-label="Move current markdown to recycle bin" title="Move to recycle bin">
+            <i class="fa-solid fa-trash-can"></i> Soft Delete
+          </button>
+
+          <button class="btn btn-danger viewer-action-btn" id="hardDeleteDocBtn" type="button" aria-label="Hard delete current markdown" title="Hard delete to deleted_markdowns">
+            <i class="fa-solid fa-trash"></i> Hard Delete
+          </button>
+
+          <button class="btn viewer-action-btn" id="restoreDocBtn" type="button" aria-label="Restore deleted markdown" title="Restore from recycle bin" hidden>
+            <i class="fa-solid fa-trash-arrow-up"></i> Restore
           </button>
         </div>
 
@@ -112,7 +171,7 @@
   </div>
 
   <nav class="mobile-dock" aria-label="Mobile actions">
-    <button class="dock-btn" id="dockSearch" type="button" aria-label="Search markdowns">
+    <button class="dock-btn dock-redundant" id="dockSearch" type="button" aria-label="Search markdowns">
       <i class="fa-solid fa-magnifying-glass"></i>
       <span>Search</span>
     </button>
@@ -132,7 +191,7 @@
       <span>New</span>
     </button>
 
-    <button class="dock-btn" id="dockEdit" type="button" aria-label="Edit current markdown">
+    <button class="dock-btn dock-redundant" id="dockEdit" type="button" aria-label="Edit current markdown">
       <i class="fa-solid fa-pen-to-square"></i>
       <span>Edit</span>
     </button>
@@ -171,6 +230,26 @@
           <p class="editor-label"><i class="fa-solid fa-eye"></i> Live Preview</p>
           <article id="editorPreview" class="markdown-body editor-preview visible"></article>
         </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="confirm-modal" id="confirmModal" aria-hidden="true">
+    <button class="confirm-backdrop" id="confirmBackdrop" aria-label="Cancel confirmation"></button>
+
+    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <p class="confirm-eyebrow">Confirm Action</p>
+      <h2 id="confirmTitle">Please confirm this action</h2>
+      <p id="confirmMessage">Are you sure you want to continue?</p>
+
+      <div class="confirm-actions">
+        <button class="btn" id="confirmCancelBtn" type="button">
+          <i class="fa-solid fa-ban"></i> Cancel
+        </button>
+
+        <button class="btn btn-danger" id="confirmProceedBtn" type="button">
+          <i class="fa-solid fa-check"></i> Continue
+        </button>
       </div>
     </section>
   </div>

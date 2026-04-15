@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Markdown Docs Viewer share preview</title>
+  <desc id="desc">A rich share card with a gradient background, title text, and the app favicon-style book icon.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="45%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#1f2937" />
+    </linearGradient>
+
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1020" />
+      <stop offset="100%" stop-color="#0f1a31" />
+    </linearGradient>
+
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#7dc4ff" />
+    </linearGradient>
+
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="22" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)" />
+
+  <circle cx="1110" cy="88" r="205" fill="#1d4ed8" opacity="0.22" filter="url(#softGlow)" />
+  <circle cx="205" cy="586" r="190" fill="#22d3ee" opacity="0.14" filter="url(#softGlow)" />
+
+  <rect x="64" y="62" width="1072" height="506" rx="30" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+
+  <rect x="122" y="144" width="170" height="170" rx="34" fill="#091223" stroke="url(#accent)" stroke-width="3" />
+  <g transform="translate(153,171) scale(5.8)" fill="none" stroke="url(#accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </g>
+
+  <text x="338" y="280" fill="#f8fafc" font-size="68" font-weight="700" font-family="Segoe UI, Arial, sans-serif">Markdown Docs Viewer</text>
+  <text x="338" y="342" fill="#d1d5db" font-size="34" font-family="Segoe UI, Arial, sans-serif">Search. Edit. Share. Ship docs faster.</text>
+
+  <line x1="338" y1="385" x2="860" y2="385" stroke="url(#accent)" stroke-width="5" stroke-linecap="round" opacity="0.95" />
+
+  <text x="338" y="454" fill="#93c5fd" font-size="28" font-family="Segoe UI, Arial, sans-serif">Includes ER diagrams, markdown previews, and full-text search.</text>
+</svg>

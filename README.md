@@ -70,6 +70,12 @@ The application runs on port 3000 by default. To change the port:
 PORT=8080 npm start
 ```
 
+For production unfurl/embed accuracy, set a public base URL so metadata always uses your real domain:
+
+```bash
+PUBLIC_BASE_URL=https://docs.example.com npm start
+```
+
 ## Document Management
 
 ### Uploading Documents
@@ -106,7 +112,13 @@ The application uses the Catppuccin Mocha color palette:
 - `GET /api/docs/:file` - Get document content
 - `POST /api/docs` - Create a new document
 - `PUT /api/docs/:file` - Update a document
-- `DELETE /api/docs/:file` - Delete a document
+- `POST /api/docs/:file/delete` - Soft or hard delete (`mode: "soft" | "hard"`), always moved to `deleted_markdowns/`
+- `GET /api/recycle-bin` - List recycle bin documents (soft-deleted)
+- `GET /api/recycle-bin/:entry/content` - Get recycle bin document content
+- `POST /api/recycle-bin/:entry/restore` - Restore a soft-deleted document back to docs
+- `POST /api/recycle-bin/:entry/hard-delete` - Move recycle bin document to hard-deleted archive
+- `ALL /graphql` - GraphQL endpoint (includes GraphiQL) with `embedMeta`, `docsCount`, and `health`
+- `GET /oembed` - oEmbed metadata endpoint for unfurl/link-preview consumers
 
 ## Deployment
 
