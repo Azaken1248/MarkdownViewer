@@ -1,0 +1,16 @@
+{
+  "docs": [
+    {
+      "file": "SRS-Cart-Application.md",
+      "title": "SRS - Cart Application",
+      "tags": ["requirements", "srs", "backend"],
+      "icon": "fa-file-contract"
+    },
+    {
+      "file": "ERD-Guideline-Cart-Application.md",
+      "title": "ER Diagram Guideline - Cart Application",
+      "tags": ["erd", "database", "design"],
+      "icon": "fa-diagram-project"
+    }
+  ]
+}
