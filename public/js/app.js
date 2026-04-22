@@ -81,6 +81,11 @@ const MOBILE_BREAKPOINT = 920;
 const SUPERSEARCH_LIMIT = 8;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
+const SANITIZE_ALLOWED_URI_PATTERN = /^(?:(?:(?:f|ht)tps?|mailto|tel):|data:image\/(?:bmp|gif|jpe?g|png|svg\+xml|webp|avif)(?:;charset=[^;,]+)?(?:;base64)?,|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+const MARKDOWN_SANITIZE_OPTIONS = {
+  ALLOWED_URI_REGEXP: SANITIZE_ALLOWED_URI_PATTERN,
+  ADD_DATA_URI_TAGS: ["img"]
+};
 const CODE_LANGUAGE_ALIAS = {
   js: "javascript",
   jsx: "javascript",
@@ -1086,7 +1091,7 @@ function showEmptyState(title, message, icon = "fa-file-circle-question") {
 
 function renderMarkdown(markdown) {
   const unsafeHtml = marked.parse(markdown || "");
-  return DOMPurify.sanitize(unsafeHtml);
+  return DOMPurify.sanitize(unsafeHtml, MARKDOWN_SANITIZE_OPTIONS);
 }
 
 function waitForNextFrame() {
