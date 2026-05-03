@@ -1094,6 +1094,27 @@ function renderMarkdown(markdown) {
   return DOMPurify.sanitize(unsafeHtml, MARKDOWN_SANITIZE_OPTIONS);
 }
 
+function renderMathBlocks(root) {
+  if (!root || !window.renderMathInElement) {
+    return;
+  }
+
+  try {
+    window.renderMathInElement(root, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false }
+      ],
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
+      throwOnError: false,
+      errorColor: "#f38ba8"
+    });
+  } catch (error) {
+    console.error("Math rendering failed", error);
+  }
+}
+
 function waitForNextFrame() {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
@@ -1400,6 +1421,8 @@ function applyPanZoom(root) {
 async function renderMermaidBlocks(root) {
   ensureMermaidInitialized();
   if (!window.mermaid) {
+    highlightCodeBlocks(root);
+    renderMathBlocks(root);
     return;
   }
 
@@ -1409,6 +1432,7 @@ async function renderMermaidBlocks(root) {
   const nodes = root.querySelectorAll(".mermaid");
   if (nodes.length === 0) {
     highlightCodeBlocks(root);
+    renderMathBlocks(root);
     return;
   }
 
@@ -1422,6 +1446,7 @@ async function renderMermaidBlocks(root) {
 
   highlightCodeBlocks(root);
   applyPanZoom(root);
+  renderMathBlocks(root);
   if (hadFailure) {
     setStatus("One or more Mermaid blocks were auto-simplified or could not be parsed.", "error");
   }
