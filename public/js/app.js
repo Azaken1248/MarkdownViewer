@@ -133,6 +133,55 @@ function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeMarkdownMath(markdown) {
+  const source = String(markdown || "");
+  if (!source.includes("[") && !source.includes("]") && !source.includes("\\[")) {
+    return source;
+  }
+
+  const lines = source.split(/\r?\n/);
+  const normalizedLines = [];
+  let inCodeFence = false;
+  let codeFenceMarker = "";
+  let inBracketMathBlock = false;
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[2][0];
+      if (!inCodeFence) {
+        inCodeFence = true;
+        codeFenceMarker = marker;
+      } else if (marker === codeFenceMarker) {
+        inCodeFence = false;
+        codeFenceMarker = "";
+      }
+
+      normalizedLines.push(line);
+      continue;
+    }
+
+    if (!inCodeFence) {
+      const trimmed = line.trim();
+      if (!inBracketMathBlock && (trimmed === "[" || trimmed === "\\[")) {
+        inBracketMathBlock = true;
+        normalizedLines.push("$$");
+        continue;
+      }
+
+      if (inBracketMathBlock && (trimmed === "]" || trimmed === "\\]")) {
+        inBracketMathBlock = false;
+        normalizedLines.push("$$");
+        continue;
+      }
+    }
+
+    normalizedLines.push(line);
+  }
+
+  return normalizedLines.join("\n");
+}
+
 function tokenizeSearchQuery(query) {
   return normalize(query)
     .split(/\s+/)
@@ -1090,7 +1139,8 @@ function showEmptyState(title, message, icon = "fa-file-circle-question") {
 }
 
 function renderMarkdown(markdown) {
-  const unsafeHtml = marked.parse(markdown || "");
+  const normalizedMarkdown = normalizeMarkdownMath(markdown);
+  const unsafeHtml = marked.parse(normalizedMarkdown);
   return DOMPurify.sanitize(unsafeHtml, MARKDOWN_SANITIZE_OPTIONS);
 }
 
@@ -1104,9 +1154,11 @@ function renderMathBlocks(root) {
       delimiters: [
         { left: "$$", right: "$$", display: true },
         { left: "\\[", right: "\\]", display: true },
-        { left: "\\(", right: "\\)", display: false }
+        { left: "\\(", right: "\\)", display: false },
+        { left: "$", right: "$", display: false }
       ],
       ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
+      processEscapes: true,
       throwOnError: false,
       errorColor: "#f38ba8"
     });

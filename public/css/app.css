@@ -702,6 +702,11 @@ body.lock-scroll {
   color: var(--blue);
 }
 
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+
 .markdown-body mark.doc-jump-highlight {
   border-radius: 0.28rem;
   padding: 0 0.12rem;
