@@ -1,10 +1,10 @@
 # Cart Documentation Viewer
 
-A modern markdown documentation viewer with support for Mermaid ER diagrams, syntax highlighting, and full-text search.
+A modern document viewer with support for markdown, Jupyter notebooks, Mermaid ER diagrams, syntax highlighting, and full-text search.
 
 ## Features
 
-- Markdown Support: View and edit markdown files with live preview
+- Markdown and Notebook Support: View markdown files and render `.ipynb` notebooks inline
 - Full-Text Search: Search across documents, filenames, and content
 - Mermaid Diagrams: Render Entity-Relationship diagrams inline
 - Syntax Highlighting: Code blocks with Catppuccin theme
@@ -81,7 +81,7 @@ PUBLIC_BASE_URL=https://docs.example.com npm start
 ### Uploading Documents
 
 1. Click the "Upload" button in the header
-2. Select a markdown file (.md, .markdown, .mmd, .mermaid)
+2. Select a markdown file or notebook file (`.md`, `.markdown`, `.mmd`, `.mermaid`, `.ipynb`)
 3. The file will be saved to `public/docs/`
 
 ### Editing Documents
@@ -144,6 +144,11 @@ pm2 startup
 - Ensure Mermaid CDN is accessible
 - Check browser console for parsing errors
 - Verify ER diagram syntax is correct
+
+### Notebook not rendering
+- Verify the file is valid `.ipynb` JSON
+- Check browser console for malformed notebook cell data
+- Large notebook outputs may need to be trimmed before upload
 
 ### Documents not appearing
 - Check that files are in `public/docs/` directory

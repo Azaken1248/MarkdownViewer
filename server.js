@@ -15,7 +15,7 @@ const DELETED_MARKDOWN_DIR = path.join(ROOT_DIR, "deleted_markdowns");
 const DELETED_SOFT_DIR = path.join(DELETED_MARKDOWN_DIR, "soft");
 const DELETED_HARD_DIR = path.join(DELETED_MARKDOWN_DIR, "hard");
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
-const ALLOWED_DOC_EXTENSIONS = new Set([".md", ".markdown", ".mmd", ".mermaid"]);
+const ALLOWED_DOC_EXTENSIONS = new Set([".md", ".markdown", ".mmd", ".mermaid", ".ipynb"]);
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SITE_NAME = "Markdown Docs Viewer";
 const EMBED_TITLE = "Markdown Docs Viewer | Cart Knowledge Hub";
@@ -35,7 +35,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase();
     if (!ALLOWED_DOC_EXTENSIONS.has(ext)) {
-      cb(new Error("Only .md, .markdown, .mmd, or .mermaid files are supported"));
+      cb(new Error("Only .md, .markdown, .mmd, .mermaid, or .ipynb files are supported"));
       return;
     }
     cb(null, true);
@@ -55,7 +55,7 @@ function sanitizeFilename(rawName) {
   }
 
   let candidate = baseName;
-  const hasKnownExtension = /\.(md|markdown|mmd|mermaid)$/i.test(candidate);
+  const hasKnownExtension = /\.(md|markdown|mmd|mermaid|ipynb)$/i.test(candidate);
   if (!hasKnownExtension) {
     candidate = `${candidate}.md`;
   }
@@ -78,7 +78,7 @@ function sanitizeFilename(rawName) {
 
 function toDocTitle(fileName) {
   return fileName
-    .replace(/\.md$/i, "")
+    .replace(/\.(md|markdown|mmd|mermaid|ipynb)$/i, "")
     .replace(/[-_]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -564,7 +564,7 @@ app.post("/api/docs", async (req, res, next) => {
     const overwrite = Boolean(req.body.overwrite);
 
     if (!fileName) {
-      res.status(400).json({ error: "Invalid markdown file name" });
+      res.status(400).json({ error: "Invalid document file name" });
       return;
     }
 
@@ -575,7 +575,7 @@ app.post("/api/docs", async (req, res, next) => {
 
     const fullPath = path.join(MARKDOWN_DIR, fileName);
     if (!overwrite && (await fileExists(fullPath))) {
-      res.status(409).json({ error: "A markdown file with that name already exists" });
+      res.status(409).json({ error: "A document with that name already exists" });
       return;
     }
 
@@ -599,7 +599,7 @@ app.put("/api/docs/:file", async (req, res, next) => {
     const content = String(req.body.content || "");
 
     if (!fileName) {
-      res.status(400).json({ error: "Invalid markdown file name" });
+      res.status(400).json({ error: "Invalid document file name" });
       return;
     }
 
@@ -610,7 +610,7 @@ app.put("/api/docs/:file", async (req, res, next) => {
 
     const fullPath = path.join(MARKDOWN_DIR, fileName);
     if (!(await fileExists(fullPath))) {
-      res.status(404).json({ error: "Markdown file not found" });
+      res.status(404).json({ error: "Document not found" });
       return;
     }
 
@@ -631,14 +631,14 @@ app.put("/api/docs/:file", async (req, res, next) => {
 app.post("/api/docs/upload", upload.single("markdownFile"), async (req, res, next) => {
   try {
     if (!req.file) {
-      res.status(400).json({ error: "No markdown file uploaded" });
+      res.status(400).json({ error: "No document file uploaded" });
       return;
     }
 
     const requestedName = req.body.fileName || req.file.originalname;
     const sanitizedName = sanitizeFilename(requestedName);
     if (!sanitizedName) {
-      res.status(400).json({ error: "Invalid markdown file name" });
+      res.status(400).json({ error: "Invalid document file name" });
       return;
     }
 
@@ -672,7 +672,7 @@ app.use((error, req, res, next) => {
     return;
   }
 
-  if (error && error.message === "Only .md, .markdown, .mmd, or .mermaid files are supported") {
+  if (error && error.message === "Only .md, .markdown, .mmd, .mermaid, or .ipynb files are supported") {
     res.status(400).json({ error: error.message });
     return;
   }

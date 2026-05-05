@@ -110,8 +110,7 @@ marked.setOptions({
 });
 
 function filenameToTitle(filename) {
-  return filename
-    .replace(/\.md$/i, "")
+  return stripDocumentExtension(filename)
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
@@ -131,6 +130,14 @@ function escapeHtml(value) {
 
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripDocumentExtension(filename) {
+  return String(filename || "").replace(/\.(md|markdown|mmd|mermaid|ipynb)$/i, "");
+}
+
+function isNotebookFile(fileName) {
+  return /\.ipynb$/i.test(String(fileName || ""));
 }
 
 function encodeBase64Utf8(value) {
@@ -913,6 +920,10 @@ function syncBodyLock() {
 
 function inferIcon(fileName) {
   const value = normalize(fileName);
+  if (isNotebookFile(value)) {
+    return "fa-file-code";
+  }
+
   if (value.includes("srs") || value.includes("spec")) {
     return "fa-file-contract";
   }
@@ -995,6 +1006,7 @@ function setMeta(message) {
 function updateActiveDocUI(fileName) {
   if (!fileName) {
     elements.activeDocLabel.innerHTML = '<i class="fa-solid fa-file-lines"></i>No document selected';
+    elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
     elements.softDeleteDocBtn.disabled = true;
@@ -1007,6 +1019,7 @@ function updateActiveDocUI(fileName) {
     const deletedDoc = state.deletedDocs.find((doc) => doc.file === fileName);
     const label = deletedDoc?.originalFile || fileName;
     elements.activeDocLabel.innerHTML = `<i class="fa-solid fa-trash-can"></i>${escapeHtml(label)}`;
+    elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
     elements.softDeleteDocBtn.disabled = true;
@@ -1015,9 +1028,11 @@ function updateActiveDocUI(fileName) {
     return;
   }
 
-  elements.activeDocLabel.innerHTML = `<i class="fa-solid fa-file-lines"></i>${escapeHtml(fileName)}`;
-  elements.editCurrentDocBtn.disabled = false;
-  elements.dockEdit.disabled = false;
+  const notebookFile = isNotebookFile(fileName);
+  elements.activeDocLabel.innerHTML = `<i class="fa-solid ${notebookFile ? "fa-file-code" : "fa-file-lines"}"></i>${escapeHtml(fileName)}`;
+  elements.editDocBtn.disabled = notebookFile;
+  elements.editCurrentDocBtn.disabled = notebookFile;
+  elements.dockEdit.disabled = notebookFile;
   elements.softDeleteDocBtn.disabled = false;
   elements.hardDeleteDocBtn.disabled = false;
   elements.restoreDocBtn.disabled = true;
@@ -1196,6 +1211,7 @@ async function hydrateDeletedSearchContent() {
 function showEmptyState(title, message, icon = "fa-file-circle-question") {
   elements.emptyState.style.display = "block";
   elements.docContent.classList.remove("visible");
+  elements.docContent.classList.remove("notebook-viewer");
   elements.docContent.innerHTML = "";
   elements.emptyState.innerHTML = `
     <i class="fa-solid ${icon}"></i>
@@ -1257,6 +1273,247 @@ function renderMathBlocks(root) {
 
 function waitForNextFrame() {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function normalizeNotebookText(value) {
+  if (Array.isArray(value)) {
+    return value.join("");
+  }
+
+  if (value == null) {
+    return "";
+  }
+
+  return String(value);
+}
+
+function inferNotebookLanguage(notebook) {
+  const rawLanguage = normalize(
+    notebook?.metadata?.language_info?.name
+      || notebook?.metadata?.language_info?.codemirror_mode?.name
+      || notebook?.metadata?.kernelspec?.language
+      || "python"
+  ).trim();
+
+  if (!rawLanguage) {
+    return "python";
+  }
+
+  if (rawLanguage.startsWith("python")) {
+    return "python";
+  }
+
+  return CODE_LANGUAGE_ALIAS[rawLanguage] || rawLanguage;
+}
+
+function getNotebookImageSource(mimeType, payload) {
+  const source = normalizeNotebookText(payload).trim();
+
+  if (mimeType === "image/svg+xml") {
+    const compactSource = source.replace(/\s+/g, "");
+    if (/^[A-Za-z0-9+/=]+$/.test(compactSource)) {
+      return `data:image/svg+xml;base64,${compactSource}`;
+    }
+
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+  }
+
+  return `data:${mimeType};base64,${source.replace(/\s+/g, "")}`;
+}
+
+function renderNotebookMimePayload(mimeType, payload) {
+  const text = normalizeNotebookText(payload);
+
+  switch (mimeType) {
+    case "text/html":
+      return `<div class="notebook-output-html">${DOMPurify.sanitize(text, MARKDOWN_SANITIZE_OPTIONS)}</div>`;
+    case "image/svg+xml":
+    case "image/png":
+    case "image/jpeg":
+    case "image/gif":
+    case "image/webp":
+    case "image/avif":
+      return `<figure class="notebook-output notebook-output-image"><img src="${escapeHtml(getNotebookImageSource(mimeType, text))}" alt="Notebook output image" loading="lazy" /></figure>`;
+    case "text/markdown":
+      return `<div class="notebook-output-markdown">${renderMarkdown(text)}</div>`;
+    case "application/json": {
+      let formattedText = text;
+
+      try {
+        formattedText = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        formattedText = text;
+      }
+
+      return `<pre class="notebook-output-json">${escapeHtml(formattedText)}</pre>`;
+    }
+    case "text/plain":
+    default:
+      return `<pre class="notebook-output-text">${escapeHtml(text)}</pre>`;
+  }
+}
+
+function renderNotebookOutput(output) {
+  const outputType = String(output?.output_type || "").toLowerCase();
+
+  if (outputType === "stream") {
+    const streamName = escapeHtml(String(output?.name || "stream"));
+    const streamText = escapeHtml(normalizeNotebookText(output?.text));
+    return `
+      <section class="notebook-output notebook-output-stream">
+        <div class="notebook-output-label">${streamName}</div>
+        <pre class="notebook-output-text">${streamText}</pre>
+      </section>
+    `;
+  }
+
+  if (outputType === "error") {
+    const errorName = escapeHtml(String(output?.ename || "Error"));
+    const errorValue = escapeHtml(String(output?.evalue || ""));
+    const traceback = Array.isArray(output?.traceback)
+      ? output.traceback.map((line) => normalizeNotebookText(line)).join("\n")
+      : `${normalizeNotebookText(output?.ename)}: ${normalizeNotebookText(output?.evalue)}`;
+
+    return `
+      <section class="notebook-output notebook-output-error">
+        <div class="notebook-output-label">Error</div>
+        <div class="notebook-output-error-name">${errorName}</div>
+        <div class="notebook-output-error-value">${errorValue}</div>
+        <pre class="notebook-output-text">${escapeHtml(traceback)}</pre>
+      </section>
+    `;
+  }
+
+  const data = output?.data || {};
+  const mimeOrder = [
+    "text/html",
+    "image/svg+xml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "text/markdown",
+    "application/json",
+    "text/plain"
+  ];
+
+  for (const mimeType of mimeOrder) {
+    if (data[mimeType] != null) {
+      const mimeClass = mimeType.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+      return `<section class="notebook-output notebook-output-${mimeClass}">${renderNotebookMimePayload(mimeType, data[mimeType])}</section>`;
+    }
+  }
+
+  return "";
+}
+
+function renderNotebookCell(cell, index, notebookLanguage) {
+  const cellType = normalize(cell?.cell_type || "").trim();
+  const cellNumber = index + 1;
+  const source = normalizeNotebookText(cell?.source);
+
+  if (cellType === "markdown") {
+    return `
+      <section class="notebook-cell notebook-cell-markdown">
+        <div class="notebook-cell-head">
+          <span class="notebook-cell-badge">Markdown</span>
+          <span class="notebook-cell-index">Cell ${cellNumber}</span>
+        </div>
+        <div class="notebook-cell-content">
+          ${renderMarkdown(source)}
+        </div>
+      </section>
+    `;
+  }
+
+  if (cellType === "code") {
+    const executionCount = Number.isFinite(Number(cell?.execution_count))
+      ? Number(cell.execution_count)
+      : null;
+    const outputHtml = Array.isArray(cell?.outputs)
+      ? cell.outputs.map((output) => renderNotebookOutput(output)).filter(Boolean).join("")
+      : "";
+
+    return `
+      <section class="notebook-cell notebook-cell-code">
+        <div class="notebook-cell-head">
+          <span class="notebook-cell-badge">Code</span>
+          <span class="notebook-cell-index">${executionCount != null ? `In [${executionCount}]` : `Cell ${cellNumber}`}</span>
+        </div>
+        <div class="notebook-cell-content">
+          <pre class="notebook-code-block"><code class="language-${escapeHtml(notebookLanguage)}">${escapeHtml(source)}</code></pre>
+          ${outputHtml ? `<div class="notebook-outputs">${outputHtml}</div>` : ""}
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="notebook-cell notebook-cell-raw">
+      <div class="notebook-cell-head">
+        <span class="notebook-cell-badge">Raw</span>
+        <span class="notebook-cell-index">Cell ${cellNumber}</span>
+      </div>
+      <div class="notebook-cell-content">
+        <pre class="notebook-raw-block">${escapeHtml(source)}</pre>
+      </div>
+    </section>
+  `;
+}
+
+function renderNotebookDocument(rawContent, title) {
+  const notebook = JSON.parse(String(rawContent || "").replace(/^\uFEFF/, ""));
+  const cells = Array.isArray(notebook?.cells) ? notebook.cells : null;
+
+  if (!cells) {
+    throw new Error("Invalid notebook file");
+  }
+
+  const notebookLanguage = inferNotebookLanguage(notebook);
+  const cellCounts = cells.reduce((counts, cell) => {
+    const type = normalize(cell?.cell_type || "").trim();
+    if (type === "markdown") {
+      counts.markdown += 1;
+    } else if (type === "code") {
+      counts.code += 1;
+    } else if (type === "raw") {
+      counts.raw += 1;
+    }
+
+    return counts;
+  }, { markdown: 0, code: 0, raw: 0 });
+
+  const totalCells = cells.length;
+  const renderedCells = cells.map((cell, index) => renderNotebookCell(cell, index, notebookLanguage)).join("");
+
+  return `
+    <section class="notebook-summary">
+      <p class="notebook-eyebrow"><i class="fa-solid fa-file-code"></i> Jupyter Notebook</p>
+      <h1>${escapeHtml(title || notebook?.metadata?.title || "Notebook")}</h1>
+      <p class="notebook-meta">
+        ${totalCells} cell${totalCells === 1 ? "" : "s"}
+        · ${cellCounts.markdown} markdown
+        · ${cellCounts.code} code
+        ${cellCounts.raw ? `· ${cellCounts.raw} raw` : ""}
+      </p>
+    </section>
+    <section class="notebook-cells">
+      ${renderedCells || '<p class="notebook-empty">This notebook has no cells.</p>'}
+    </section>
+  `;
+}
+
+function renderDocumentContent(fileName, rawContent, title) {
+  if (isNotebookFile(fileName)) {
+    return renderNotebookDocument(rawContent, title);
+  }
+
+  const renderedSource = isDiagramFile(fileName)
+    ? toMermaidMarkdown(rawContent)
+    : rawContent;
+
+  return renderMarkdown(renderedSource);
 }
 
 function ensureMermaidInitialized() {
@@ -1741,10 +1998,9 @@ async function openDocument(file, pushHash, options = {}) {
       return;
     }
 
-    const renderedSource = isDiagramFile(file)
-      ? toMermaidMarkdown(rawContent)
-      : rawContent;
-    const safeHtml = renderMarkdown(renderedSource);
+    const safeHtml = renderDocumentContent(file, rawContent, doc.title || file);
+
+    elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
 
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
@@ -1799,7 +2055,7 @@ async function openDocument(file, pushHash, options = {}) {
       return;
     }
 
-    showEmptyState("Could not load this markdown", error.message, "fa-triangle-exclamation");
+    showEmptyState(isNotebookFile(file) ? "Could not load this notebook" : "Could not load this markdown", error.message, "fa-triangle-exclamation");
     setStatus(error.message, "error");
   }
 }
@@ -1812,10 +2068,10 @@ async function openRecycleBinDocument(file) {
     }
 
     const rawContent = await loadDeletedDocContent(file);
-    const renderedSource = isDiagramFile(doc.originalFile || doc.file)
-      ? toMermaidMarkdown(rawContent)
-      : rawContent;
-    const safeHtml = renderMarkdown(renderedSource);
+    const originalFile = doc.originalFile || doc.file;
+    const safeHtml = renderDocumentContent(originalFile, rawContent, doc.title || originalFile);
+
+    elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(originalFile));
 
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
@@ -1830,7 +2086,7 @@ async function openRecycleBinDocument(file) {
     document.title = `${doc.title} | Recycle Bin | Markdown Docs Viewer`;
     setStatus(`Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
   } catch (error) {
-    showEmptyState("Could not load deleted markdown", error.message, "fa-triangle-exclamation");
+    showEmptyState("Could not load deleted document", error.message, "fa-triangle-exclamation");
     setStatus(error.message, "error");
   }
 }
@@ -2162,6 +2418,11 @@ async function openEditorForCurrentDoc() {
 
   if (!state.activeFile) {
     setStatus("Select a markdown first, then choose Edit.", "error");
+    return;
+  }
+
+  if (isNotebookFile(state.activeFile)) {
+    setStatus("Notebook files are view-only in this viewer.", "neutral");
     return;
   }
 

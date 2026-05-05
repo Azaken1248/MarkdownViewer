@@ -718,6 +718,167 @@ body.lock-scroll {
   height: auto;
 }
 
+.markdown-body .notebook-summary {
+  margin-bottom: 1rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: rgba(17, 17, 27, 0.72);
+}
+
+.markdown-body .notebook-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.markdown-body .notebook-summary h1 {
+  margin: 0;
+  color: var(--mauve);
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+}
+
+.markdown-body .notebook-meta {
+  margin: 0.4rem 0 0;
+  color: var(--subtext);
+  line-height: 1.5;
+}
+
+.markdown-body .notebook-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.markdown-body .notebook-cell {
+  overflow: hidden;
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: rgba(17, 17, 27, 0.82);
+}
+
+.markdown-body .notebook-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.95rem;
+  border-bottom: 1px solid rgba(69, 71, 90, 0.9);
+  background: rgba(24, 24, 37, 0.95);
+  color: var(--subtext);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.markdown-body .notebook-cell-badge {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.markdown-body .notebook-cell-index {
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body .notebook-cell-content {
+  padding: 0.9rem 0.95rem 1rem;
+}
+
+.markdown-body .notebook-cell-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body .notebook-cell-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body .notebook-code-block,
+.markdown-body .notebook-output-text,
+.markdown-body .notebook-output-json,
+.markdown-body .notebook-raw-block {
+  margin: 0;
+  overflow-x: auto;
+  word-break: break-word;
+}
+
+.markdown-body .notebook-output-text,
+.markdown-body .notebook-output-json,
+.markdown-body .notebook-raw-block {
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(17, 17, 27, 0.56);
+  white-space: pre-wrap;
+}
+
+.markdown-body .notebook-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.9rem;
+}
+
+.markdown-body .notebook-output {
+  padding: 0.8rem 0.85rem;
+  border: 1px solid rgba(137, 180, 250, 0.2);
+  border-radius: 0.8rem;
+  background: rgba(30, 30, 46, 0.72);
+}
+
+.markdown-body .notebook-output-label {
+  margin-bottom: 0.4rem;
+  color: var(--blue);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.markdown-body .notebook-output-error {
+  border-color: rgba(243, 139, 168, 0.35);
+  background: rgba(243, 139, 168, 0.08);
+}
+
+.markdown-body .notebook-output-error-name {
+  color: #f9b3c6;
+  font-weight: 700;
+}
+
+.markdown-body .notebook-output-error-value {
+  margin-top: 0.25rem;
+  color: #ffd3df;
+}
+
+.markdown-body .notebook-output-html,
+.markdown-body .notebook-output-markdown {
+  overflow-x: auto;
+}
+
+.markdown-body .notebook-output-image {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0;
+  padding: 0.5rem;
+}
+
+.markdown-body .notebook-output-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body .notebook-empty {
+  margin: 0;
+  color: var(--subtext);
+  font-style: italic;
+}
+
 .markdown-body mark.doc-jump-highlight {
   border-radius: 0.28rem;
   padding: 0 0.12rem;
@@ -1376,6 +1537,18 @@ body.lock-scroll {
   .markdown-body,
   .empty-state {
     padding: 1rem;
+  }
+
+  .markdown-body .notebook-summary {
+    padding: 0.85rem;
+  }
+
+  .markdown-body .notebook-cell-head {
+    padding: 0.6rem 0.75rem;
+  }
+
+  .markdown-body .notebook-cell-content {
+    padding: 0.8rem 0.75rem 0.85rem;
   }
 
   .doc-item {
