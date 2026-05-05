@@ -702,6 +702,17 @@ body.lock-scroll {
   color: var(--blue);
 }
 
+.markdown-body .math-block {
+  display: block;
+  width: 100%;
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.markdown-body .math-block .katex-display {
+  margin: 0;
+}
+
 .markdown-body img {
   max-width: 100%;
   height: auto;

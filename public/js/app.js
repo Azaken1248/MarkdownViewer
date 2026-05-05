@@ -133,9 +133,26 @@ function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function encodeBase64Utf8(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+
+  return window.btoa(binary);
+}
+
+function decodeBase64Utf8(value) {
+  const binary = window.atob(String(value || ""));
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 function normalizeMarkdownMath(markdown) {
   const source = String(markdown || "");
-  if (!source.includes("[") && !source.includes("]") && !source.includes("\\[")) {
+  if (!source.includes("[") && !source.includes("]") && !source.includes("\\[") && !source.includes("$$")) {
     return source;
   }
 
@@ -143,7 +160,20 @@ function normalizeMarkdownMath(markdown) {
   const normalizedLines = [];
   let inCodeFence = false;
   let codeFenceMarker = "";
-  let inBracketMathBlock = false;
+  let inDisplayMathBlock = false;
+  let displayMathMode = "";
+  let displayMathLines = [];
+
+  const flushDisplayMathBlock = () => {
+    const tex = displayMathLines.join("\n").trim();
+    if (tex) {
+      normalizedLines.push(`<div class="math-block" data-math-tex="${encodeBase64Utf8(tex)}"></div>`);
+    }
+
+    displayMathLines = [];
+    inDisplayMathBlock = false;
+    displayMathMode = "";
+  };
 
   for (const line of lines) {
     const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})/);
@@ -163,20 +193,32 @@ function normalizeMarkdownMath(markdown) {
 
     if (!inCodeFence) {
       const trimmed = line.trim();
-      if (!inBracketMathBlock && (trimmed === "[" || trimmed === "\\[")) {
-        inBracketMathBlock = true;
-        normalizedLines.push("$$");
+      if (!inDisplayMathBlock && (trimmed === "[" || trimmed === "\\[" || trimmed === "$$")) {
+        inDisplayMathBlock = true;
+        displayMathMode = trimmed;
+        displayMathLines = [];
         continue;
       }
 
-      if (inBracketMathBlock && (trimmed === "]" || trimmed === "\\]")) {
-        inBracketMathBlock = false;
-        normalizedLines.push("$$");
+      if (inDisplayMathBlock) {
+        const isClosingBracket = (displayMathMode === "[" || displayMathMode === "\\[") && (trimmed === "]" || trimmed === "\\]");
+        const isClosingDollar = displayMathMode === "$$" && trimmed === "$$";
+
+        if (isClosingBracket || isClosingDollar) {
+          flushDisplayMathBlock();
+          continue;
+        }
+
+        displayMathLines.push(line);
         continue;
       }
     }
 
     normalizedLines.push(line);
+  }
+
+  if (inDisplayMathBlock && displayMathLines.length > 0) {
+    normalizedLines.push(...displayMathLines);
   }
 
   return normalizedLines.join("\n");
@@ -1145,7 +1187,29 @@ function renderMarkdown(markdown) {
 }
 
 function renderMathBlocks(root) {
-  if (!root || !window.renderMathInElement) {
+  if (!root) {
+    return;
+  }
+
+  if (window.katex) {
+    const blockNodes = root.querySelectorAll(".math-block[data-math-tex]");
+    for (const node of blockNodes) {
+      const tex = decodeBase64Utf8(node.getAttribute("data-math-tex") || "");
+
+      try {
+        window.katex.render(tex, node, {
+          displayMode: true,
+          throwOnError: false,
+          errorColor: "#f38ba8"
+        });
+      } catch (error) {
+        console.error("Math block rendering failed", error);
+        node.textContent = tex;
+      }
+    }
+  }
+
+  if (!window.renderMathInElement) {
     return;
   }
 
