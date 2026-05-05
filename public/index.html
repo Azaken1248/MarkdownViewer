@@ -100,6 +100,10 @@
           <h2 id="sidebarTitle"><i class="fa-solid fa-folder-tree"></i> Markdowns</h2>
 
           <div class="sidebar-actions">
+            <button class="icon-btn" id="createFolderBtn" aria-label="Create folder" title="Create folder">
+              <i class="fa-solid fa-folder-plus"></i>
+            </button>
+
             <button class="icon-btn" id="toggleRecycleBinBtn" aria-label="Open recycle bin" title="Open recycle bin">
               <i class="fa-solid fa-trash-can"></i>
             </button>
@@ -252,6 +256,46 @@
 
         <button class="btn btn-danger" id="confirmProceedBtn" type="button">
           <i class="fa-solid fa-check"></i> Continue
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="folder-modal" id="folderModal" aria-hidden="true">
+    <button class="folder-backdrop" id="folderBackdrop" aria-label="Close folder manager"></button>
+
+    <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle" aria-describedby="folderDescription">
+      <div class="folder-dialog-head">
+        <div class="folder-dialog-copy">
+          <p class="folder-eyebrow">Folders</p>
+          <h2 id="folderTitle">Manage folders</h2>
+          <p id="folderDescription">Create, rename, delete, or move documents without changing the physical file layout.</p>
+        </div>
+
+        <button class="icon-btn" id="closeFolderModalBtn" aria-label="Close folder manager" type="button">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <label class="folder-name-field" for="folderNameInput">
+        <span>Folder name</span>
+        <div class="folder-create-row">
+          <input id="folderNameInput" type="text" placeholder="Project Alpha" autocomplete="off" />
+          <button class="btn btn-primary" id="createFolderConfirmBtn" type="button">
+            <i class="fa-solid fa-folder-plus"></i> Create Folder
+          </button>
+        </div>
+      </label>
+
+      <div class="folder-picker" id="folderPicker">
+        <div class="folder-picker-head">
+          <span>Existing folders</span>
+        </div>
+
+        <div class="folder-picker-list" id="folderPickerList"></div>
+
+        <button class="btn folder-root-btn" id="moveToRootBtn" type="button">
+          <i class="fa-solid fa-layer-group"></i> Move To Ungrouped
         </button>
       </div>
     </section>

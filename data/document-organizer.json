@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "folders": [
+    {
+      "id": "folder_61f9211ea51249fdbf3a046ec06d4985",
+      "name": "Cart Application",
+      "order": 0,
+      "createdAt": "2026-05-05T12:16:39.311Z",
+      "updatedAt": "2026-05-05T12:16:39.311Z"
+    }
+  ],
+  "fileFolders": {
+    "ERD-Guideline-Cart-Application.md": "folder_61f9211ea51249fdbf3a046ec06d4985"
+  }
+}

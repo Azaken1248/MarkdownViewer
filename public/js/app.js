@@ -7,6 +7,7 @@ const elements = {
   toggleRecycleBinBtn: document.getElementById("toggleRecycleBinBtn"),
   uploadTrigger: document.getElementById("uploadTrigger"),
   uploadInput: document.getElementById("uploadInput"),
+  createFolderBtn: document.getElementById("createFolderBtn"),
   newDocBtn: document.getElementById("newDocBtn"),
   editDocBtn: document.getElementById("editDocBtn"),
   editCurrentDocBtn: document.getElementById("editCurrentDocBtn"),
@@ -47,12 +48,25 @@ const elements = {
   confirmTitle: document.getElementById("confirmTitle"),
   confirmMessage: document.getElementById("confirmMessage"),
   confirmCancelBtn: document.getElementById("confirmCancelBtn"),
-  confirmProceedBtn: document.getElementById("confirmProceedBtn")
+  confirmProceedBtn: document.getElementById("confirmProceedBtn"),
+  folderModal: document.getElementById("folderModal"),
+  folderBackdrop: document.getElementById("folderBackdrop"),
+  folderTitle: document.getElementById("folderTitle"),
+  folderDescription: document.getElementById("folderDescription"),
+  folderNameInput: document.getElementById("folderNameInput"),
+  createFolderConfirmBtn: document.getElementById("createFolderConfirmBtn"),
+  folderPicker: document.getElementById("folderPicker"),
+  folderPickerList: document.getElementById("folderPickerList"),
+  moveToRootBtn: document.getElementById("moveToRootBtn"),
+  closeFolderModalBtn: document.getElementById("closeFolderModalBtn")
 };
 
 const state = {
   docs: [],
   deletedDocs: [],
+  folders: [],
+  foldersById: new Map(),
+  rootFolderLabel: "Ungrouped",
   isRecycleBinMode: false,
   filteredDocs: [],
   contentCache: new Map(),
@@ -64,6 +78,9 @@ const state = {
   panZoomCounter: 0,
   searchResults: [],
   searchPanelOpen: false,
+  searchRequestId: 0,
+  searchInputTimer: null,
+  searchResultsQuery: "",
   jumpHighlightTimer: null,
   jumpQuery: "",
   jumpTerms: [],
@@ -73,11 +90,19 @@ const state = {
   jumpMatchFile: null,
   openDocumentRequestId: 0,
   editorScrollSyncLock: false,
+  folderModalOpen: false,
+  folderModalMode: "create",
+  folderModalTargetFile: null,
+  folderModalTargetFolderId: null,
+  treeMenu: null,
+  treeMenuSuppressClickKey: null,
+  collapsedFolderIds: new Set(),
   confirmOpen: false,
   confirmResolver: null
 };
 
 const MOBILE_BREAKPOINT = 920;
+const TREE_MENU_HOLD_DELAY = 420;
 const SUPERSEARCH_LIMIT = 8;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
@@ -341,7 +366,8 @@ function buildSearchSnippet(content, query, tokens) {
 function scoreDocForQuery(doc, normalizedQuery, tokens) {
   const title = normalize(doc.title);
   const file = normalize(doc.originalFile || doc.file);
-  const content = normalize(state.contentCache.get(doc.file));
+  const folderName = normalize(doc.folderName || "");
+  const content = normalize(state.contentCache.get(doc.file)?.content || "");
 
   let score = 0;
   let matched = false;
@@ -366,6 +392,16 @@ function scoreDocForQuery(doc, normalizedQuery, tokens) {
     matched = true;
   }
 
+  if (folderName.startsWith(normalizedQuery)) {
+    score += 680;
+    matched = true;
+  }
+
+  if (folderName.includes(normalizedQuery)) {
+    score += 560;
+    matched = true;
+  }
+
   const contentIndex = content.indexOf(normalizedQuery);
   if (contentIndex >= 0) {
     score += 520 + Math.max(0, 140 - (contentIndex / 11));
@@ -387,6 +423,12 @@ function scoreDocForQuery(doc, normalizedQuery, tokens) {
 
     if (file.includes(token)) {
       score += 190;
+      tokenHits += 1;
+      continue;
+    }
+
+    if (folderName.includes(token)) {
+      score += 150;
       tokenHits += 1;
       continue;
     }
@@ -427,7 +469,7 @@ function buildSuperSearchMatches(query, docsCollection = getCurrentDocsCollectio
       continue;
     }
 
-    const content = String(state.contentCache.get(doc.file) || "");
+    const content = String(state.contentCache.get(doc.file)?.content || "");
     matches.push({
       ...doc,
       score,
@@ -461,6 +503,322 @@ function buildJumpSearchTerms(query, terms = []) {
 
   return [...new Set(normalizedSeedTerms.filter((term) => term.length >= 2))]
     .sort((left, right) => right.length - left.length);
+}
+
+function getFolderRecord(folderId) {
+  if (!folderId) {
+    return null;
+  }
+
+  return state.foldersById.get(folderId) || null;
+}
+
+function getFolderLabel(folderId) {
+  if (!folderId) {
+    return state.rootFolderLabel || "Ungrouped";
+  }
+
+  return getFolderRecord(folderId)?.name || state.rootFolderLabel || "Ungrouped";
+}
+
+function getFolderOrder(folderId) {
+  if (!folderId) {
+    return -1;
+  }
+
+  const folder = getFolderRecord(folderId);
+  if (!folder) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Number.isFinite(Number(folder.order)) ? Number(folder.order) : Number.MAX_SAFE_INTEGER;
+}
+
+function getDocCacheVersion(doc) {
+  return String(doc?.updatedAt || doc?.deletedAt || "");
+}
+
+function getTreeMenuKey(menuType, itemKey) {
+  return `${menuType}:${itemKey}`;
+}
+
+function isTreeMenuOpen(menuType, itemKey) {
+  return Boolean(state.treeMenu && state.treeMenu.type === menuType && state.treeMenu.key === getTreeMenuKey(menuType, itemKey));
+}
+
+function syncTreeMenuUI() {
+  if (!elements.docList) {
+    return;
+  }
+
+  elements.docList.querySelectorAll(".is-menu-open").forEach((node) => {
+    node.classList.remove("is-menu-open");
+  });
+
+  elements.docList.querySelectorAll(".tree-menu-trigger").forEach((button) => {
+    button.setAttribute("aria-expanded", "false");
+  });
+
+  if (!state.treeMenu) {
+    return;
+  }
+
+  const target = elements.docList.querySelector(`[data-menu-key="${state.treeMenu.key}"]`);
+  if (target) {
+    target.classList.add("is-menu-open");
+    target.querySelectorAll(".tree-menu-trigger").forEach((button) => {
+      button.setAttribute("aria-expanded", "true");
+    });
+    return;
+  }
+
+  state.treeMenu = null;
+  state.treeMenuSuppressClickKey = null;
+}
+
+function openTreeMenu(menuType, itemKey, { suppressNextClick = false } = {}) {
+  const key = getTreeMenuKey(menuType, itemKey);
+  state.treeMenu = {
+    type: menuType,
+    key
+  };
+  state.treeMenuSuppressClickKey = suppressNextClick ? key : null;
+  syncTreeMenuUI();
+}
+
+function toggleTreeMenu(menuType, itemKey) {
+  if (isTreeMenuOpen(menuType, itemKey)) {
+    closeTreeMenus();
+    return;
+  }
+
+  openTreeMenu(menuType, itemKey);
+}
+
+function closeTreeMenus() {
+  state.treeMenu = null;
+  state.treeMenuSuppressClickKey = null;
+  syncTreeMenuUI();
+}
+
+function consumeTreeMenuSuppress(menuType, itemKey) {
+  const key = getTreeMenuKey(menuType, itemKey);
+  if (state.treeMenuSuppressClickKey !== key) {
+    return false;
+  }
+
+  state.treeMenuSuppressClickKey = null;
+  return true;
+}
+
+function wireLongPressMenu(target, menuType, itemKey) {
+  let holdTimer = null;
+  let longPressTriggered = false;
+
+  const clearHoldTimer = () => {
+    if (holdTimer !== null) {
+      window.clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  };
+
+  target.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" || event.button !== 0) {
+      return;
+    }
+
+    longPressTriggered = false;
+    clearHoldTimer();
+    holdTimer = window.setTimeout(() => {
+      holdTimer = null;
+      longPressTriggered = true;
+      openTreeMenu(menuType, itemKey, { suppressNextClick: true });
+    }, TREE_MENU_HOLD_DELAY);
+  });
+
+  target.addEventListener("pointerup", clearHoldTimer);
+  target.addEventListener("pointercancel", clearHoldTimer);
+  target.addEventListener("pointerleave", clearHoldTimer);
+
+  target.addEventListener("click", (event) => {
+    if (!longPressTriggered) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    longPressTriggered = false;
+  });
+}
+
+function groupDocsByFolder(docs) {
+  const groups = new Map();
+
+  for (const doc of docs) {
+    const folderId = doc.folderId || null;
+    const key = folderId || "__root__";
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        folderId,
+        folderName: getFolderLabel(folderId),
+        folderOrder: getFolderOrder(folderId),
+        docs: []
+      });
+    }
+
+    groups.get(key).docs.push(doc);
+  }
+
+  return [...groups.values()].sort((left, right) => {
+    if (left.folderOrder !== right.folderOrder) {
+      return left.folderOrder - right.folderOrder;
+    }
+
+    return left.folderName.localeCompare(right.folderName);
+  });
+}
+
+function syncFolderModalUI() {
+  if (!elements.folderModal) {
+    return;
+  }
+
+  const mode = state.folderModalMode;
+  const targetFile = state.folderModalTargetFile ? getDocByFile(state.folderModalTargetFile, true) : null;
+  const targetFolder = state.folderModalTargetFolderId ? getFolderRecord(state.folderModalTargetFolderId) : null;
+
+  if (mode === "move") {
+    elements.folderTitle.textContent = targetFile
+      ? `Move ${targetFile.title || targetFile.file} to a folder`
+      : "Move document to a folder";
+    elements.folderDescription.textContent = targetFile
+      ? `Choose an existing folder or create a new one for ${targetFile.file}.`
+      : "Choose an existing folder or create a new one.";
+    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create And Move';
+    elements.moveToRootBtn.hidden = false;
+    elements.folderPicker.hidden = false;
+  } else if (mode === "rename") {
+    elements.folderTitle.textContent = targetFolder ? `Rename ${targetFolder.name}` : "Rename folder";
+    elements.folderDescription.textContent = targetFolder
+      ? "Update the logical folder name without moving any files."
+      : "Update the logical folder name without moving any files.";
+    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Rename Folder';
+    elements.moveToRootBtn.hidden = true;
+    elements.folderPicker.hidden = true;
+  } else {
+    elements.folderTitle.textContent = "Create folder";
+    elements.folderDescription.textContent = "Create a logical folder to group documents without changing the physical layout.";
+    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create Folder';
+    elements.moveToRootBtn.hidden = true;
+    elements.folderPicker.hidden = true;
+  }
+
+  elements.folderNameInput.value = targetFolder ? targetFolder.name : "";
+  elements.folderNameInput.placeholder = mode === "rename" ? "Rename folder" : "Project Alpha";
+}
+
+function renderFolderPickerList() {
+  if (!elements.folderPickerList) {
+    return;
+  }
+
+  const moveMode = state.folderModalMode === "move";
+  const docsCollection = state.isRecycleBinMode ? state.deletedDocs : state.docs;
+  const counts = new Map();
+
+  for (const doc of docsCollection) {
+    const key = doc.folderId || "__root__";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  const folders = [...state.folders].sort((left, right) => {
+    if (left.order !== right.order) {
+      return left.order - right.order;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  if (folders.length === 0) {
+    elements.folderPickerList.innerHTML = '<div class="folder-empty">No folders yet. Create one to organize documents.</div>';
+    return;
+  }
+
+  elements.folderPickerList.innerHTML = folders.map((folder) => `
+    <button class="folder-choice" type="button" data-folder-id="${escapeHtml(folder.id)}" ${moveMode ? "" : "disabled"}>
+      <span class="folder-choice-title"><i class="fa-solid fa-folder"></i>${escapeHtml(folder.name)}</span>
+      <span class="folder-choice-meta">${escapeHtml(String(counts.get(folder.id) || 0))} doc(s)</span>
+    </button>
+  `).join("");
+
+  elements.folderPickerList.querySelectorAll(".folder-choice").forEach((button) => {
+    if (!moveMode) {
+      return;
+    }
+
+    button.addEventListener("click", async () => {
+      const folderId = button.getAttribute("data-folder-id");
+      if (state.folderModalTargetFile) {
+        try {
+          await moveDocumentToFolder(state.folderModalTargetFile, folderId);
+          closeFolderModal();
+        } catch (error) {
+          setStatus(error.message, "error");
+        }
+      }
+    });
+  });
+}
+
+function openFolderModal({ mode = "create", file = null, folderId = null } = {}) {
+  closeTreeMenus();
+  state.folderModalOpen = true;
+  state.folderModalMode = mode;
+  state.folderModalTargetFile = file;
+  state.folderModalTargetFolderId = folderId;
+  syncFolderModalUI();
+  renderFolderPickerList();
+
+  elements.folderModal.classList.add("open");
+  elements.folderModal.setAttribute("aria-hidden", "false");
+  syncBodyLock();
+  window.requestAnimationFrame(() => elements.folderNameInput.focus());
+  window.requestAnimationFrame(() => {
+    if (mode === "rename") {
+      elements.folderNameInput.select();
+    }
+  });
+}
+
+function closeFolderModal() {
+  state.folderModalOpen = false;
+  state.folderModalMode = "create";
+  state.folderModalTargetFile = null;
+  state.folderModalTargetFolderId = null;
+  elements.folderNameInput.value = "";
+  elements.folderModal.classList.remove("open");
+  elements.folderModal.setAttribute("aria-hidden", "true");
+  syncBodyLock();
+}
+
+function toggleFolderCollapse(folderKey) {
+  if (!folderKey) {
+    return;
+  }
+
+  if (state.collapsedFolderIds.has(folderKey)) {
+    state.collapsedFolderIds.delete(folderKey);
+  } else {
+    state.collapsedFolderIds.add(folderKey);
+  }
+
+  renderDocList();
+}
+
+function getDocByFile(file, includeDeleted = false) {
+  const docsCollection = includeDeleted ? [...state.docs, ...state.deletedDocs] : getCurrentDocsCollection();
+  return docsCollection.find((doc) => doc.file === file) || null;
 }
 
 function clearDocumentJumpDecorations() {
@@ -854,6 +1212,7 @@ function renderSuperSearchPanel(query, matches, searchTerms) {
 
   if (!trimmedQuery) {
     state.searchResults = [];
+    state.searchResultsQuery = "";
     elements.superSearchList.innerHTML = "";
     elements.superSearchCount.textContent = "0 results";
     setSuperSearchOpen(false);
@@ -862,6 +1221,7 @@ function renderSuperSearchPanel(query, matches, searchTerms) {
 
   const topResults = matches.slice(0, SUPERSEARCH_LIMIT);
   state.searchResults = topResults;
+  state.searchResultsQuery = trimmedQuery;
   elements.superSearchCount.textContent = `${matches.length} result(s)`;
 
   if (topResults.length === 0) {
@@ -914,7 +1274,7 @@ function setNavOpen(isOpen) {
 }
 
 function syncBodyLock() {
-  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen;
+  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen;
   document.body.classList.toggle("lock-scroll", shouldLock);
 }
 
@@ -1114,11 +1474,24 @@ async function requestJson(url, options = {}) {
 async function fetchDocs() {
   const payload = await requestJson("/api/docs", { cache: "no-store" });
 
+  state.rootFolderLabel = payload.rootFolderLabel || "Ungrouped";
+  state.folders = (payload.folders || []).map((folder, index) => ({
+    id: folder.id,
+    name: folder.name || folder.id,
+    order: Number.isFinite(Number(folder.order)) ? Number(folder.order) : index,
+    createdAt: folder.createdAt || "",
+    updatedAt: folder.updatedAt || ""
+  }));
+  state.foldersById = new Map(state.folders.map((folder) => [folder.id, folder]));
+
   state.docs = (payload.docs || []).map((doc) => ({
     file: doc.file,
     title: doc.title || filenameToTitle(doc.file),
     size: Number(doc.size || 0),
     updatedAt: doc.updatedAt || "",
+    folderId: doc.folderId || null,
+    folderName: doc.folderName || null,
+    folderOrder: Number.isFinite(Number(doc.folderOrder)) ? Number(doc.folderOrder) : getFolderOrder(doc.folderId),
     icon: inferIcon(doc.file)
   }));
 }
@@ -1133,29 +1506,56 @@ async function fetchDeletedDocs() {
     size: Number(doc.size || 0),
     updatedAt: doc.deletedAt || doc.updatedAt || "",
     deletedAt: doc.deletedAt || doc.updatedAt || "",
+    folderId: doc.folderId || null,
+    folderName: doc.folderName || null,
+    folderOrder: Number.isFinite(Number(doc.folderOrder)) ? Number(doc.folderOrder) : getFolderOrder(doc.folderId),
     icon: "fa-trash-can"
   }));
 }
 
-async function loadDocContent(file) {
-  if (state.contentCache.has(file)) {
-    return state.contentCache.get(file);
+async function loadDocContent(file, { forceReload = false } = {}) {
+  const doc = getDocByFile(file);
+  const cacheVersion = getDocCacheVersion(doc);
+  const cached = state.contentCache.get(file);
+
+  if (!forceReload && cached && cached.version === cacheVersion) {
+    return cached.content;
   }
 
-  const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}`);
+  const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}`, { cache: "no-store" });
   const content = String(payload.content || "");
-  state.contentCache.set(file, content);
+  const version = String(payload.updatedAt || cacheVersion || "");
+  state.contentCache.set(file, {
+    content,
+    version
+  });
+
+  if (doc) {
+    doc.updatedAt = payload.updatedAt || doc.updatedAt || version;
+    doc.folderId = payload.folderId || doc.folderId || null;
+    doc.folderName = payload.folderName || doc.folderName || null;
+  }
+
   return content;
 }
 
-async function loadDeletedDocContent(entryFile) {
-  if (state.contentCache.has(entryFile)) {
-    return state.contentCache.get(entryFile);
+async function loadDeletedDocContent(entryFile, { forceReload = false } = {}) {
+  const doc = state.deletedDocs.find((candidate) => candidate.file === entryFile) || null;
+  const cacheVersion = getDocCacheVersion(doc);
+  const cached = state.contentCache.get(entryFile);
+
+  if (!forceReload && cached && cached.version === cacheVersion) {
+    return cached.content;
   }
 
-  const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(entryFile)}/content`);
+  const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(entryFile)}/content`, { cache: "no-store" });
   const content = String(payload.content || "");
-  state.contentCache.set(entryFile, content);
+  const version = String(doc?.deletedAt || doc?.updatedAt || "");
+  state.contentCache.set(entryFile, {
+    content,
+    version
+  });
+
   return content;
 }
 
@@ -1172,6 +1572,7 @@ function syncModeUI() {
   elements.softDeleteDocBtn.hidden = inRecycleBin;
   elements.hardDeleteDocBtn.hidden = false;
   elements.restoreDocBtn.hidden = !inRecycleBin;
+  elements.createFolderBtn.hidden = inRecycleBin;
 
   if (inRecycleBin) {
     elements.hardDeleteDocBtn.innerHTML = '<i class="fa-solid fa-box-archive"></i> Move To Hard Archive';
@@ -1867,46 +2268,266 @@ function renderDocList() {
     return;
   }
 
-  for (const doc of docs) {
-    const li = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `doc-item${state.activeFile === doc.file ? " active" : ""}`;
+  const shouldShowFolderChip = Boolean(elements.searchInput.value.trim()) || state.isRecycleBinMode;
+  const groupedDocs = groupDocsByFolder(docs);
 
-    const escapedTitle = escapeHtml(doc.title);
-    const escapedFile = escapeHtml(state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file);
-    const timeLabel = state.isRecycleBinMode ? "fa-solid fa-clock-rotate-left" : "fa-regular fa-clock";
-    const tags = `
-      <span class=\"tag-chip\"><i class=\"${timeLabel}\"></i>${escapeHtml(formatDate(doc.updatedAt))}</span>
-      <span class=\"tag-chip muted\"><i class=\"fa-solid fa-weight-hanging\"></i>${escapeHtml(formatBytes(doc.size))}</span>
-    `;
+  for (const group of groupedDocs) {
+    const groupKey = group.folderId || "__root__";
+    const groupMenuKey = getTreeMenuKey("folder", groupKey);
+    const groupItem = document.createElement("li");
+    groupItem.className = "doc-group";
+    groupItem.dataset.folderKey = groupKey;
+    groupItem.dataset.menuKey = groupMenuKey;
 
-    button.innerHTML = `
-      <span class="doc-head">
-        <span class="doc-title"><i class="fa-solid ${escapeHtml(doc.icon)}"></i>${escapedTitle}</span>
-        <span class="doc-file">${escapedFile}</span>
+    if (state.collapsedFolderIds.has(groupKey)) {
+      groupItem.classList.add("is-collapsed");
+    }
+
+    if (isTreeMenuOpen("folder", groupKey)) {
+      groupItem.classList.add("is-menu-open");
+    }
+
+    const groupHead = document.createElement("div");
+    groupHead.className = "folder-group-head";
+
+    const groupToggle = document.createElement("button");
+    groupToggle.type = "button";
+    groupToggle.className = "folder-group-toggle";
+    groupToggle.setAttribute("aria-expanded", String(!state.collapsedFolderIds.has(groupKey)));
+    groupToggle.setAttribute("aria-haspopup", "menu");
+    groupToggle.innerHTML = `
+      <span class="folder-group-title">
+        <i class="fa-solid ${group.folderId ? "fa-folder" : "fa-layer-group"}"></i>
+        ${escapeHtml(group.folderName || state.rootFolderLabel || "Ungrouped")}
       </span>
-      <span class="doc-tags">${tags}</span>
+      <span class="folder-group-count">
+        ${escapeHtml(String(group.docs.length))} doc(s)
+        <i class="fa-solid fa-chevron-down folder-toggle-icon"></i>
+      </span>
     `;
+    groupToggle.addEventListener("click", (event) => {
+      if (consumeTreeMenuSuppress("folder", groupKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
 
-    button.addEventListener("click", async () => {
+      closeTreeMenus();
+      toggleFolderCollapse(groupKey);
+    });
+    wireLongPressMenu(groupToggle, "folder", groupKey);
+    groupHead.appendChild(groupToggle);
+
+    if (!state.isRecycleBinMode && group.folderId) {
+      const groupActions = document.createElement("div");
+      groupActions.className = "folder-group-actions";
+
+      const groupMenuTrigger = document.createElement("button");
+      groupMenuTrigger.type = "button";
+      groupMenuTrigger.className = "icon-btn tree-menu-trigger";
+      groupMenuTrigger.title = "Folder actions";
+      groupMenuTrigger.setAttribute("aria-label", `Folder actions for ${group.folderName}`);
+      groupMenuTrigger.setAttribute("aria-haspopup", "menu");
+      groupMenuTrigger.setAttribute("aria-expanded", String(isTreeMenuOpen("folder", groupKey)));
+      groupMenuTrigger.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
+      groupMenuTrigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleTreeMenu("folder", groupKey);
+      });
+
+      const groupMenu = document.createElement("div");
+      groupMenu.className = "tree-menu folder-group-menu";
+      groupMenu.setAttribute("role", "menu");
+      groupMenu.innerHTML = `
+        <button class="tree-menu-item" type="button" data-action="rename"><i class="fa-solid fa-pen-to-square"></i> Rename folder</button>
+        <button class="tree-menu-item danger" type="button" data-action="delete"><i class="fa-solid fa-trash-can"></i> Delete folder</button>
+      `;
+
+      groupMenu.querySelector('[data-action="rename"]')?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeTreeMenus();
+        openFolderModal({ mode: "rename", folderId: group.folderId });
+      });
+
+      groupMenu.querySelector('[data-action="delete"]')?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeTreeMenus();
+
+        const shouldProceed = await requestConfirmation({
+          title: `Delete ${group.folderName}?`,
+          message: "Documents in this logical folder will move back to Ungrouped. The files themselves will stay in place.",
+          confirmLabel: "Delete Folder",
+          confirmIcon: "fa-trash-can",
+          tone: "danger"
+        });
+
+        if (!shouldProceed) {
+          return;
+        }
+
+        try {
+          await requestJson(`/api/folders/${encodeURIComponent(group.folderId)}`, {
+            method: "DELETE"
+          });
+          await refreshDocs({ preserveSearch: true });
+          setStatus(`Deleted folder ${group.folderName}.`, "success");
+        } catch (error) {
+          setStatus(error.message, "error");
+        }
+      });
+
+      groupActions.append(groupMenuTrigger, groupMenu);
+      groupHead.appendChild(groupActions);
+    }
+
+    groupItem.appendChild(groupHead);
+
+    const groupList = document.createElement("ul");
+    groupList.className = "folder-group-list";
+
+    for (const doc of group.docs) {
+      const row = document.createElement("li");
+      row.className = "doc-row";
+      const docMenuItemKey = encodeURIComponent(doc.file);
+      row.dataset.menuKey = getTreeMenuKey("doc", docMenuItemKey);
+
+      if (isTreeMenuOpen("doc", docMenuItemKey)) {
+        row.classList.add("is-menu-open");
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `doc-item${state.activeFile === doc.file ? " active" : ""}`;
+      button.setAttribute("aria-haspopup", "menu");
+
+      const escapedTitle = escapeHtml(doc.title);
+      const escapedFile = escapeHtml(state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file);
+      const timeLabel = state.isRecycleBinMode ? "fa-solid fa-clock-rotate-left" : "fa-regular fa-clock";
+      const folderChip = shouldShowFolderChip
+        ? `<span class="tag-chip folder-chip"><i class="fa-solid fa-folder"></i>${escapeHtml(doc.folderName || state.rootFolderLabel || "Ungrouped")}</span>`
+        : "";
+      const tags = `
+        <span class="tag-chip"><i class="${timeLabel}"></i>${escapeHtml(formatDate(doc.updatedAt))}</span>
+        <span class="tag-chip muted"><i class="fa-solid fa-weight-hanging"></i>${escapeHtml(formatBytes(doc.size))}</span>
+        ${folderChip}
+      `;
+
+      button.innerHTML = `
+        <span class="doc-icon"><i class="fa-solid ${escapeHtml(doc.icon)}"></i></span>
+        <span class="doc-main">
+          <span class="doc-title">${escapedTitle}</span>
+          <span class="doc-file">${escapedFile}</span>
+        </span>
+        <span class="doc-meta">${tags}</span>
+      `;
+
+      button.addEventListener("click", async (event) => {
+        if (consumeTreeMenuSuppress("doc", docMenuItemKey)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
+        closeTreeMenus();
+
+        if (state.isRecycleBinMode) {
+          await openRecycleBinDocument(doc.file);
+        } else {
+          await openDocument(doc.file, true, {
+            jumpQuery: elements.searchInput.value
+          });
+        }
+
+        closeSidebarOnMobile();
+      });
+
+      wireLongPressMenu(button, "doc", docMenuItemKey);
+
+      const actions = document.createElement("div");
+      actions.className = "doc-row-actions";
+
+      const menuTrigger = document.createElement("button");
+      menuTrigger.type = "button";
+      menuTrigger.className = "icon-btn tree-menu-trigger";
+      menuTrigger.title = "Document actions";
+      menuTrigger.setAttribute("aria-label", `Document actions for ${doc.title}`);
+      menuTrigger.setAttribute("aria-haspopup", "menu");
+      menuTrigger.setAttribute("aria-expanded", String(isTreeMenuOpen("doc", docMenuItemKey)));
+      menuTrigger.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
+      menuTrigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleTreeMenu("doc", docMenuItemKey);
+      });
+
+      const menu = document.createElement("div");
+      menu.className = "tree-menu doc-row-menu";
+      menu.setAttribute("role", "menu");
+
       if (state.isRecycleBinMode) {
-        await openRecycleBinDocument(doc.file);
+        menu.innerHTML = `
+          <button class="tree-menu-item" type="button" data-action="restore"><i class="fa-solid fa-box-archive"></i> Restore</button>
+          <button class="tree-menu-item danger" type="button" data-action="hard-delete"><i class="fa-solid fa-trash-can"></i> Hard Delete</button>
+        `;
+
+        menu.querySelector('[data-action="restore"]')?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeTreeMenus();
+          await restoreDeletedDocumentByFile(doc.file);
+        });
+
+        menu.querySelector('[data-action="hard-delete"]')?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeTreeMenus();
+          await hardDeleteDeletedDocumentByFile(doc.file);
+        });
       } else {
-        await openDocument(doc.file, true, {
-          jumpQuery: elements.searchInput.value
+        menu.innerHTML = `
+          <button class="tree-menu-item" type="button" data-action="edit"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+          <button class="tree-menu-item" type="button" data-action="move"><i class="fa-solid fa-folder-tree"></i> Move</button>
+          <button class="tree-menu-item danger" type="button" data-action="delete"><i class="fa-solid fa-trash-can"></i> Delete</button>
+        `;
+
+        menu.querySelector('[data-action="edit"]')?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeTreeMenus();
+          await openEditorForDocument(doc.file);
+        });
+
+        menu.querySelector('[data-action="move"]')?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeTreeMenus();
+          openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null });
+        });
+
+        menu.querySelector('[data-action="delete"]')?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeTreeMenus();
+          await deleteDocumentByFile(doc.file, "soft");
         });
       }
 
-      closeSidebarOnMobile();
-    });
+      actions.append(menuTrigger, menu);
+      row.append(button, actions);
+      groupList.appendChild(row);
+    }
 
-    li.appendChild(button);
-    elements.docList.appendChild(li);
+    groupItem.appendChild(groupList);
+    elements.docList.appendChild(groupItem);
   }
+
+  syncTreeMenuUI();
 }
 
-function applySearch(query) {
+async function applySearch(query) {
   const rawQuery = String(query || "");
   const q = normalize(rawQuery).trim();
   const currentDocs = getCurrentDocsCollection();
@@ -1915,29 +2536,73 @@ function applySearch(query) {
     resetJumpNavigation();
   }
 
-  const { matches, searchTerms } = buildSuperSearchMatches(rawQuery, currentDocs);
-  renderSuperSearchPanel(rawQuery, matches, searchTerms);
-
   if (!q) {
+    state.searchRequestId += 1;
     state.filteredDocs = [...currentDocs];
     setMeta(state.isRecycleBinMode
       ? `${state.filteredDocs.length} deleted document(s)`
       : `${state.filteredDocs.length} document(s)`);
+    renderSuperSearchPanel(rawQuery, [], []);
     renderDocList();
     return;
   }
 
-  state.filteredDocs = matches.map((match) => ({
-    file: match.file,
-    title: match.title,
-    size: match.size,
-    updatedAt: match.updatedAt,
-    icon: match.icon
-  }));
-
+  const requestId = ++state.searchRequestId;
   const contextLabel = state.isRecycleBinMode ? "recycle bin" : "documents";
-  setMeta(`${state.filteredDocs.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
-  renderDocList();
+  setMeta(`Searching ${contextLabel}...`);
+
+  try {
+    const payload = await requestJson(`/api/docs/search?scope=${encodeURIComponent(state.isRecycleBinMode ? "recycle-bin" : "docs")}&q=${encodeURIComponent(rawQuery)}`, { cache: "no-store" });
+    if (requestId !== state.searchRequestId) {
+      return;
+    }
+
+    const matches = (payload.matches || []).map((match) => ({
+      file: match.file,
+      originalFile: match.originalFile || "",
+      title: match.title || filenameToTitle(match.originalFile || match.file),
+      size: Number(match.size || 0),
+      updatedAt: match.updatedAt || match.deletedAt || "",
+      deletedAt: match.deletedAt || match.updatedAt || "",
+      folderId: match.folderId || null,
+      folderName: match.folderName || null,
+      folderOrder: Number.isFinite(Number(match.folderOrder)) ? Number(match.folderOrder) : getFolderOrder(match.folderId),
+      icon: inferIcon(match.originalFile || match.file),
+      snippet: match.snippet || "No preview available."
+    }));
+
+    const searchTerms = buildJumpSearchTerms(rawQuery, payload.searchTerms || []);
+    state.filteredDocs = matches;
+    renderSuperSearchPanel(rawQuery, matches, searchTerms);
+    setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
+    renderDocList();
+  } catch (error) {
+    if (requestId !== state.searchRequestId) {
+      return;
+    }
+
+    console.error(error);
+    const fallback = buildSuperSearchMatches(rawQuery, currentDocs);
+    const matches = fallback.matches.map((match) => ({
+      file: match.file,
+      originalFile: match.originalFile || "",
+      title: match.title || filenameToTitle(match.originalFile || match.file),
+      size: Number(match.size || 0),
+      updatedAt: match.updatedAt || match.deletedAt || "",
+      deletedAt: match.deletedAt || match.updatedAt || "",
+      folderId: match.folderId || null,
+      folderName: match.folderName || null,
+      folderOrder: Number.isFinite(Number(match.folderOrder)) ? Number(match.folderOrder) : getFolderOrder(match.folderId),
+      icon: inferIcon(match.originalFile || match.file),
+      snippet: match.snippet || "No preview available."
+    }));
+
+    state.filteredDocs = matches;
+    renderSuperSearchPanel(rawQuery, matches, fallback.searchTerms);
+    setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
+    renderDocList();
+    setStatus("Search fell back to local metadata results.", "neutral");
+  }
 }
 
 async function openDocument(file, pushHash, options = {}) {
@@ -1954,8 +2619,9 @@ async function openDocument(file, pushHash, options = {}) {
     const jumpIndex = Number.isFinite(Number(options.jumpIndex)) ? Number(options.jumpIndex) : 0;
     const scrollBehavior = String(options.scrollBehavior || "auto");
     const hasJumpQuery = jumpQuery.trim().length > 0;
+    const forceReload = Boolean(options.forceReload);
 
-    if (file === state.activeFile && elements.docContent.classList.contains("visible")) {
+    if (file === state.activeFile && elements.docContent.classList.contains("visible") && !forceReload) {
       let jumpResult = {
         found: false,
         index: -1,
@@ -1993,7 +2659,7 @@ async function openDocument(file, pushHash, options = {}) {
       return;
     }
 
-    const rawContent = await loadDocContent(file);
+    const rawContent = await loadDocContent(file, { forceReload });
     if (requestId !== state.openDocumentRequestId) {
       return;
     }
@@ -2060,14 +2726,14 @@ async function openDocument(file, pushHash, options = {}) {
   }
 }
 
-async function openRecycleBinDocument(file) {
+async function openRecycleBinDocument(file, options = {}) {
   try {
     const doc = state.deletedDocs.find((candidate) => candidate.file === file);
     if (!doc) {
       return;
     }
 
-    const rawContent = await loadDeletedDocContent(file);
+    const rawContent = await loadDeletedDocContent(file, { forceReload: Boolean(options.forceReload) });
     const originalFile = doc.originalFile || doc.file;
     const safeHtml = renderDocumentContent(originalFile, rawContent, doc.title || originalFile);
 
@@ -2095,14 +2761,13 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
   setMeta("Loading recycle bin...");
 
   await fetchDeletedDocs();
-  await hydrateDeletedSearchContent();
 
   const query = preserveSearch ? elements.searchInput.value : "";
   if (!preserveSearch) {
     elements.searchInput.value = "";
   }
 
-  applySearch(query);
+  await applySearch(query);
 
   if (state.deletedDocs.length === 0) {
     state.activeFile = null;
@@ -2114,9 +2779,17 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
 
   const target = state.deletedDocs.find((doc) => doc.file === openFile)?.file
     || state.deletedDocs.find((doc) => doc.file === state.activeFile)?.file
-    || state.deletedDocs[0].file;
+    || null;
 
-  await openRecycleBinDocument(target);
+  if (!target) {
+    state.activeFile = null;
+    updateActiveDocUI(null);
+    showEmptyState("Select a recycle bin document", "Choose a soft-deleted file from the list to load it.", "fa-trash-can");
+    setStatus("Recycle bin loaded. Select a file to view it.", "neutral");
+    return;
+  }
+
+  await openRecycleBinDocument(target, { forceReload: true });
 }
 
 async function deleteCurrentDocument(mode) {
@@ -2218,6 +2891,79 @@ async function hardDeleteCurrentDeletedDocument() {
   }
 }
 
+async function createFolderOnServer(folderName) {
+  return requestJson("/api/folders", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ name: folderName })
+  });
+}
+
+async function renameFolderOnServer(folderId, folderName) {
+  return requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ name: folderName })
+  });
+}
+
+async function moveDocumentToFolder(file, folderId) {
+  const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/folder`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ folderId: folderId || null })
+  });
+
+  state.contentCache.delete(file);
+  await refreshDocs({ openFile: file, preserveSearch: true });
+  setStatus(`Moved ${payload.file} to ${payload.folderName || state.rootFolderLabel || "Ungrouped"}.`, "success");
+  return payload;
+}
+
+async function handleFolderModalAction() {
+  const folderName = String(elements.folderNameInput.value || "").trim();
+  if (!folderName) {
+    setStatus("Folder name is required.", "error");
+    elements.folderNameInput.focus();
+    return;
+  }
+
+  try {
+    if (state.folderModalMode === "rename") {
+      if (!state.folderModalTargetFolderId) {
+        setStatus("Select a folder to rename.", "error");
+        return;
+      }
+
+      await renameFolderOnServer(state.folderModalTargetFolderId, folderName);
+      closeFolderModal();
+      await refreshDocs({ preserveSearch: true });
+      setStatus(`Renamed folder to ${folderName}.`, "success");
+      return;
+    }
+
+    const created = await createFolderOnServer(folderName);
+
+    if (state.folderModalMode === "move" && state.folderModalTargetFile) {
+      await moveDocumentToFolder(state.folderModalTargetFile, created.folder.id);
+      closeFolderModal();
+      return;
+    }
+
+    closeFolderModal();
+    await refreshDocs({ preserveSearch: true });
+    setStatus(`Created folder ${created.folder.name}.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 async function renderEditorPreview() {
   const inputScrollMax = Math.max(0, elements.editorInput.scrollHeight - elements.editorInput.clientHeight);
   const inputScrollRatio = inputScrollMax > 0
@@ -2257,6 +3003,7 @@ function syncEditorPaneScroll(sourceElement, targetElement) {
 }
 
 function openEditor({ mode, fileName, content }) {
+  closeTreeMenus();
   state.editorMode = mode;
   state.editorFile = mode === "edit" ? fileName : null;
   state.editorOpen = true;
@@ -2292,15 +3039,12 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
 
   await fetchDocs();
 
-  state.contentCache.clear();
-  await hydrateSearchContent();
-
   const query = preserveSearch ? elements.searchInput.value : "";
   if (!preserveSearch) {
     elements.searchInput.value = "";
   }
 
-  applySearch(query);
+  await applySearch(query);
 
   if (state.docs.length === 0) {
     state.activeFile = null;
@@ -2312,9 +3056,17 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
 
   const target = state.docs.find((doc) => doc.file === openFile)?.file
     || state.docs.find((doc) => doc.file === state.activeFile)?.file
-    || state.docs[0].file;
+    || null;
 
-  await openDocument(target, false);
+  if (!target) {
+    state.activeFile = null;
+    updateActiveDocUI(null);
+    showEmptyState("Select a markdown document", "Choose a file from a folder to load its content.", "fa-file-lines");
+    setStatus("Documents loaded. Select a file to view it.", "neutral");
+    return;
+  }
+
+  await openDocument(target, false, { forceReload: true });
 }
 
 async function uploadMarkdown(file) {
@@ -2427,12 +3179,129 @@ async function openEditorForCurrentDoc() {
   }
 
   try {
-    const content = await loadDocContent(state.activeFile);
-    openEditor({
-      mode: "edit",
-      fileName: state.activeFile,
-      content
+    await openEditorForDocument(state.activeFile);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function openEditorForDocument(file) {
+  const doc = getDocByFile(file);
+  if (!doc) {
+    setStatus("Select a markdown first, then choose Edit.", "error");
+    return;
+  }
+
+  if (state.isRecycleBinMode) {
+    setStatus("Restore a recycle bin document before editing.", "error");
+    return;
+  }
+
+  if (isNotebookFile(file)) {
+    setStatus("Notebook files are view-only in this viewer.", "neutral");
+    return;
+  }
+
+  const content = await loadDocContent(file);
+  openEditor({
+    mode: "edit",
+    fileName: file,
+    content
+  });
+}
+
+async function deleteDocumentByFile(file, mode) {
+  if (!file || state.isRecycleBinMode) {
+    setStatus("Select a markdown to delete.", "error");
+    return;
+  }
+
+  const shouldProceed = await requestConfirmation({
+    title: mode === "hard" ? "Hard delete this markdown?" : "Move markdown to recycle bin?",
+    message: mode === "hard"
+      ? `${file} will be moved into deleted_markdowns/hard.`
+      : `${file} will be moved into the recycle bin and can be restored later.`,
+    confirmLabel: mode === "hard" ? "Hard Delete" : "Move To Bin",
+    confirmIcon: mode === "hard" ? "fa-trash" : "fa-trash-can",
+    tone: mode === "hard" ? "danger" : "primary"
+  });
+
+  if (!shouldProceed) {
+    setStatus("Delete cancelled.", "neutral");
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ mode })
     });
+
+    state.contentCache.delete(file);
+    await refreshDocs({ preserveSearch: true });
+    setStatus(payload.message || `${payload.originalFile} deleted.`, "success");
+  } catch (error) {
+    if (normalize(error.message).includes("request failed (404)")) {
+      setStatus("Delete endpoint returned 404. Restart the server so the recycle-bin API routes are loaded.", "error");
+      return;
+    }
+
+    setStatus(error.message, "error");
+  }
+}
+
+async function restoreDeletedDocumentByFile(file) {
+  if (!state.isRecycleBinMode || !file) {
+    setStatus("Select a recycle bin markdown to restore.", "error");
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(file)}/restore`, {
+      method: "POST"
+    });
+
+    state.contentCache.delete(file);
+    state.isRecycleBinMode = false;
+    syncModeUI();
+    resetJumpNavigation();
+    await refreshDocs({ openFile: payload.file, preserveSearch: false });
+    setStatus(`Restored ${payload.file} from recycle bin.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function hardDeleteDeletedDocumentByFile(file) {
+  if (!state.isRecycleBinMode || !file) {
+    setStatus("Select a recycle bin markdown to hard delete.", "error");
+    return;
+  }
+
+  const shouldProceed = await requestConfirmation({
+    title: "Move recycle-bin markdown to hard archive?",
+    message: "This keeps the file in storage but moves it to deleted_markdowns/hard and removes it from recycle bin view.",
+    confirmLabel: "Move To Hard Archive",
+    confirmIcon: "fa-box-archive",
+    tone: "danger"
+  });
+
+  if (!shouldProceed) {
+    setStatus("Hard delete cancelled.", "neutral");
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(file)}/hard-delete`, {
+      method: "POST"
+    });
+
+    state.contentCache.delete(file);
+    await refreshDeletedDocs({ preserveSearch: true });
+    setStatus(payload.message || `${payload.originalFile} moved to hard archive.`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -2469,13 +3338,26 @@ function mountMatchNavToViewportLayer() {
 }
 
 function handleSearchEvent(event) {
-  applySearch(event.target.value);
+  const query = event.target.value;
+  if (state.searchInputTimer) {
+    window.clearTimeout(state.searchInputTimer);
+  }
+
+  state.searchInputTimer = window.setTimeout(() => {
+    state.searchInputTimer = null;
+    void applySearch(query);
+  }, 160);
 }
 
 function exitSearchMode() {
   const hadQuery = Boolean(state.jumpQuery.trim() || elements.searchInput.value.trim());
+  if (state.searchInputTimer) {
+    window.clearTimeout(state.searchInputTimer);
+    state.searchInputTimer = null;
+  }
+
   elements.searchInput.value = "";
-  applySearch("");
+  void applySearch("");
   setSuperSearchOpen(false);
 
   if (hadQuery) {
@@ -2531,7 +3413,7 @@ elements.searchInput.addEventListener("keydown", async (event) => {
     return;
   }
 
-  if (state.searchResults.length > 0) {
+  if (state.searchResults.length > 0 && normalize(query) === normalize(state.searchResultsQuery)) {
     event.preventDefault();
     if (state.isRecycleBinMode) {
       await openRecycleBinDocument(state.searchResults[0].file);
@@ -2550,35 +3432,6 @@ elements.searchInput.addEventListener("keydown", async (event) => {
 elements.matchPrevBtn.addEventListener("click", async () => {
   await navigateMatches(-1, state.jumpQuery);
 });
-
-elements.matchNextBtn.addEventListener("click", async () => {
-  await navigateMatches(1, state.jumpQuery);
-});
-
-elements.matchCloseBtn.addEventListener("click", () => {
-  exitSearchMode();
-});
-
-let docSwipeStart = null;
-
-elements.docContent.addEventListener("touchstart", (event) => {
-  if (!state.jumpQuery.trim() || event.touches.length !== 1) {
-    docSwipeStart = null;
-    return;
-  }
-
-  if (event.target instanceof Element
-    && event.target.closest("a, button, input, textarea, select, pre, code, .mermaid-block, .svg-pan-zoom-control")) {
-    docSwipeStart = null;
-    return;
-  }
-
-  const touch = event.touches[0];
-  docSwipeStart = {
-    x: touch.clientX,
-    y: touch.clientY
-  };
-}, { passive: true });
 
 elements.docContent.addEventListener("touchend", (event) => {
   if (!docSwipeStart || event.changedTouches.length === 0 || !state.jumpQuery.trim()) {
@@ -2610,6 +3463,44 @@ elements.docContent.addEventListener("touchcancel", () => {
 elements.clearSearchBtn.addEventListener("click", () => {
   exitSearchMode();
   elements.searchInput.focus();
+});
+
+elements.createFolderBtn.addEventListener("click", () => {
+  openFolderModal({ mode: "create" });
+});
+
+elements.createFolderConfirmBtn.addEventListener("click", async () => {
+  await handleFolderModalAction();
+});
+
+elements.closeFolderModalBtn.addEventListener("click", () => {
+  closeFolderModal();
+});
+
+elements.folderBackdrop.addEventListener("click", () => {
+  closeFolderModal();
+});
+
+elements.moveToRootBtn.addEventListener("click", async () => {
+  if (!state.folderModalTargetFile) {
+    return;
+  }
+
+  try {
+    await moveDocumentToFolder(state.folderModalTargetFile, null);
+    closeFolderModal();
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+
+elements.folderNameInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  event.preventDefault();
+  await handleFolderModalAction();
 });
 
 elements.refreshDocs.addEventListener("click", async () => {
@@ -2678,8 +3569,20 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && state.treeMenu) {
+    event.preventDefault();
+    closeTreeMenus();
+    return;
+  }
+
   if (event.key === "Escape" && elements.appShell.classList.contains("nav-open")) {
     setNavOpen(false);
+  }
+
+  if (event.key === "Escape" && state.folderModalOpen) {
+    event.preventDefault();
+    closeFolderModal();
+    return;
   }
 
   if (event.key === "Escape" && state.editorOpen) {
@@ -2795,6 +3698,10 @@ window.addEventListener("hashchange", () => {
 
 document.addEventListener("click", (event) => {
   if (!state.searchPanelOpen) {
+    if (state.treeMenu && event.target instanceof Element && !event.target.closest(".doc-row, .doc-group")) {
+      closeTreeMenus();
+    }
+
     return;
   }
 
@@ -2807,6 +3714,10 @@ document.addEventListener("click", (event) => {
   }
 
   setSuperSearchOpen(false);
+
+  if (state.treeMenu && !event.target.closest(".doc-row, .doc-group")) {
+    closeTreeMenus();
+  }
 });
 
 initialize();
