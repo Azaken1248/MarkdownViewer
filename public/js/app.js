@@ -150,6 +150,30 @@ function decodeBase64Utf8(value) {
   return new TextDecoder().decode(bytes);
 }
 
+function normalizeMatrixEnvironments(tex) {
+  const source = String(tex || "");
+  const matrixEnvironmentPattern = /\\begin\{(matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|smallmatrix)\}([\s\S]*?)\\end\{\1\}/g;
+
+  return source.replace(matrixEnvironmentPattern, (match, environmentName, body) => {
+    if (body.includes("\\\\")) {
+      return match;
+    }
+
+    const rows = body
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => line.replace(/\\+\s*$/, "").trim())
+      .filter((line) => line.length > 0);
+
+    if (rows.length <= 1) {
+      return match;
+    }
+
+    return `\\begin{${environmentName}}\n${rows.join(" \\\\ \n")}\n\\end{${environmentName}}`;
+  });
+}
+
 function normalizeMarkdownMath(markdown) {
   const source = String(markdown || "");
   if (!source.includes("[") && !source.includes("]") && !source.includes("\\[") && !source.includes("$$")) {
@@ -165,7 +189,7 @@ function normalizeMarkdownMath(markdown) {
   let displayMathLines = [];
 
   const flushDisplayMathBlock = () => {
-    const tex = displayMathLines.join("\n").trim();
+    const tex = normalizeMatrixEnvironments(displayMathLines.join("\n").trim());
     if (tex) {
       normalizedLines.push(`<div class="math-block" data-math-tex="${encodeBase64Utf8(tex)}"></div>`);
     }
