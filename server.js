@@ -7,7 +7,7 @@ const { createHandler } = require("graphql-http/lib/use/express");
 const { buildSchema } = require("graphql");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4321;
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const MARKDOWN_DIR = path.join(PUBLIC_DIR, "docs");
