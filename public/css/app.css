@@ -512,6 +512,10 @@ body.lock-scroll {
   }
 }
 
+.icon-btn.mobile-folder-menu-btn {
+  display: none;
+}
+
 @media (hover: none) {
   .row-quick-actions {
     opacity: 1;
@@ -520,10 +524,42 @@ body.lock-scroll {
     top: auto;
     right: auto;
     background: transparent;
-    box-shadow: none;
     border: none;
-    padding: 0 0.5rem 0.5rem 0;
+    box-shadow: none;
+    padding: 0.15rem 0.75rem 0.4rem 0;
     justify-content: flex-end;
+  }
+
+  .row-quick-actions .icon-btn,
+  .sidebar-actions .icon-btn {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .count-text {
+    display: none;
+  }
+
+  .icon-btn.mobile-folder-menu-btn {
+    display: inline-flex;
+    position: absolute;
+    right: 0.4rem;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    color: var(--subtext);
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .folder-group-head .row-quick-actions,
+  .doc-row .row-quick-actions {
+    display: none;
+  }
+
+  .folder-group-head.show-mobile-actions .row-quick-actions,
+  .doc-row.active-row .row-quick-actions {
+    display: flex;
   }
 }
 
@@ -758,6 +794,13 @@ body.lock-scroll {
 
 .viewer-title i {
   color: var(--blue);
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
 .match-nav {
@@ -1327,17 +1370,7 @@ body.lock-scroll {
   cursor: not-allowed;
 }
 
-.viewer-action-btn {
-  min-height: 2.3rem;
-  min-width: 9.8rem;
-  justify-content: center;
-  line-height: 1;
-}
 
-.viewer-action-btn i {
-  width: 1rem;
-  text-align: center;
-}
 
 .btn-primary {
   border-color: rgba(137, 180, 250, 0.7);
@@ -1452,17 +1485,18 @@ body.lock-scroll {
 
 .folder-dialog {
   position: relative;
-  width: min(760px, calc(100vw - 2.2rem));
+  width: min(480px, calc(100vw - 2.2rem));
   margin: 1.1rem auto;
-  border: 1px solid rgba(88, 91, 112, 0.82);
+  border: 1px solid rgba(88, 91, 112, 0.5);
   border-radius: var(--radius-lg);
   background: rgba(30, 30, 46, 0.98);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
-  padding: 1rem;
-  height: min(780px, calc(100dvh - 2.2rem));
+  padding: 1.25rem;
+  height: auto;
   max-height: calc(100dvh - 2.2rem);
-  display: grid;
-  gap: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
   overflow: auto;
 }
 
@@ -1499,12 +1533,9 @@ body.lock-scroll {
 }
 
 .folder-name-field {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.45rem;
-  padding: 0.9rem;
-  border: 1px solid rgba(88, 91, 112, 0.72);
-  border-radius: var(--radius-lg);
-  background: rgba(49, 50, 68, 0.5);
 }
 
 .folder-name-field span {
@@ -1539,13 +1570,12 @@ body.lock-scroll {
 }
 
 .folder-picker {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.6rem;
   min-height: 0;
-  padding: 0.9rem;
-  border: 1px solid rgba(88, 91, 112, 0.72);
-  border-radius: var(--radius-lg);
-  background: rgba(49, 50, 68, 0.42);
+  border-top: 1px solid rgba(88, 91, 112, 0.3);
+  padding-top: 1rem;
 }
 
 .folder-picker-head {
@@ -1570,10 +1600,10 @@ body.lock-scroll {
 
 .folder-choice {
   width: 100%;
-  border: 1px solid rgba(88, 91, 112, 0.82);
-  background: rgba(49, 50, 68, 0.78);
+  border: 1px solid rgba(88, 91, 112, 0.4);
+  background: rgba(49, 50, 68, 0.4);
   border-radius: var(--radius-md);
-  padding: 0.72rem 0.82rem;
+  padding: 0.6rem 0.75rem;
   color: var(--text);
   cursor: pointer;
   transition: 160ms ease;
@@ -2006,9 +2036,7 @@ body.lock-scroll {
     align-self: flex-end;
   }
 
-  .viewer-action-btn {
-    min-width: 0;
-  }
+
 
   .viewer-title {
     max-width: 100%;

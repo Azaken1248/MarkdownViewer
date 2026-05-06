@@ -36,7 +36,7 @@
     referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/catppuccin-mocha.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="css/app.css?v=13" />
+  <link rel="stylesheet" href="css/app.css?v=23" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
@@ -44,7 +44,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" defer></script>
-  <script src="js/app.js?v=11" defer></script>
+  <script src="js/app.js?v=23" defer></script>
 </head>
 
 <body>
@@ -156,25 +156,27 @@
             </button>
           </div>
 
-          <button class="btn viewer-action-btn" id="editCurrentDocBtn" type="button"
-            aria-label="Edit currently open markdown">
-            <i class="fa-solid fa-pen-to-square"></i> Edit This Doc
-          </button>
+          <div class="viewer-actions">
+            <button class="icon-btn viewer-action-btn" id="editCurrentDocBtn" type="button"
+              aria-label="Edit currently open markdown" title="Edit this document">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
 
-          <button class="btn viewer-action-btn" id="softDeleteDocBtn" type="button"
-            aria-label="Move current markdown to recycle bin" title="Move to recycle bin">
-            <i class="fa-solid fa-trash-can"></i> Soft Delete
-          </button>
+            <button class="icon-btn viewer-action-btn" id="softDeleteDocBtn" type="button"
+              aria-label="Move current markdown to recycle bin" title="Move to recycle bin">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
 
-          <button class="btn btn-danger viewer-action-btn" id="hardDeleteDocBtn" type="button"
-            aria-label="Hard delete current markdown" title="Hard delete to deleted_markdowns">
-            <i class="fa-solid fa-trash"></i> Hard Delete
-          </button>
+            <button class="icon-btn danger viewer-action-btn" id="hardDeleteDocBtn" type="button"
+              aria-label="Hard delete current markdown" title="Permanently delete">
+              <i class="fa-solid fa-trash"></i>
+            </button>
 
-          <button class="btn viewer-action-btn" id="restoreDocBtn" type="button" aria-label="Restore deleted markdown"
-            title="Restore from recycle bin" hidden>
-            <i class="fa-solid fa-trash-arrow-up"></i> Restore
-          </button>
+            <button class="icon-btn viewer-action-btn" id="restoreDocBtn" type="button" aria-label="Restore deleted markdown"
+              title="Restore from recycle bin" hidden>
+              <i class="fa-solid fa-trash-arrow-up"></i>
+            </button>
+          </div>
         </div>
 
         <p class="status-msg" id="statusMsg" role="status" aria-live="polite"></p>

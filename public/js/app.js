@@ -1459,12 +1459,13 @@ function syncModeUI() {
   elements.restoreDocBtn.hidden = !inRecycleBin;
   elements.createFolderBtn.hidden = inRecycleBin;
 
+  const hardDeleteIcon = elements.hardDeleteDocBtn.querySelector("i");
   if (inRecycleBin) {
-    elements.hardDeleteDocBtn.innerHTML = '<i class="fa-solid fa-box-archive"></i> Move To Hard Archive';
+    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
     elements.hardDeleteDocBtn.setAttribute("aria-label", "Move recycle bin markdown to hard archive");
     elements.hardDeleteDocBtn.title = "Move to deleted_markdowns/hard";
   } else {
-    elements.hardDeleteDocBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Hard Delete';
+    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-trash";
     elements.hardDeleteDocBtn.setAttribute("aria-label", "Hard delete current markdown");
     elements.hardDeleteDocBtn.title = "Hard delete to deleted_markdowns";
   }
@@ -2180,7 +2181,7 @@ function renderDocList() {
         ${escapeHtml(group.folderName || state.rootFolderLabel || "Ungrouped")}
       </span>
       <span class="folder-group-count">
-        ${escapeHtml(String(group.docs.length))} doc(s)
+        <span class="count-text">${escapeHtml(String(group.docs.length))} doc(s)</span>
         <i class="fa-solid fa-chevron-down folder-toggle-icon"></i>
       </span>
     `;
@@ -2190,6 +2191,16 @@ function renderDocList() {
     groupHead.appendChild(groupToggle);
 
     if (!state.isRecycleBinMode && group.folderId) {
+      const mobileMenuBtn = document.createElement("button");
+      mobileMenuBtn.className = "icon-btn mobile-folder-menu-btn";
+      mobileMenuBtn.title = "Folder Actions";
+      mobileMenuBtn.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
+      mobileMenuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        groupHead.classList.toggle("show-mobile-actions");
+      });
+      groupHead.appendChild(mobileMenuBtn);
+
       const groupActions = document.createElement("div");
       groupActions.className = "row-quick-actions folder-group-actions";
 
@@ -2248,12 +2259,13 @@ function renderDocList() {
     groupList.className = "folder-group-list";
 
     for (const doc of group.docs) {
+      const isActive = state.activeFile === doc.file;
       const row = document.createElement("li");
-      row.className = "doc-row";
+      row.className = `doc-row ${isActive ? "active-row" : ""}`;
 
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `doc-item${state.activeFile === doc.file ? " active" : ""}`;
+      button.className = `doc-item${isActive ? " active" : ""}`;
       button.setAttribute("aria-haspopup", "menu");
 
       const escapedTitle = escapeHtml(doc.title);
