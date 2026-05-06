@@ -94,8 +94,6 @@ const state = {
   folderModalMode: "create",
   folderModalTargetFile: null,
   folderModalTargetFolderId: null,
-  treeMenu: null,
-  treeMenuSuppressClickKey: null,
   collapsedFolderIds: new Set(),
   confirmOpen: false,
   confirmResolver: null
@@ -538,118 +536,6 @@ function getDocCacheVersion(doc) {
   return String(doc?.updatedAt || doc?.deletedAt || "");
 }
 
-function getTreeMenuKey(menuType, itemKey) {
-  return `${menuType}:${itemKey}`;
-}
-
-function isTreeMenuOpen(menuType, itemKey) {
-  return Boolean(state.treeMenu && state.treeMenu.type === menuType && state.treeMenu.key === getTreeMenuKey(menuType, itemKey));
-}
-
-function syncTreeMenuUI() {
-  if (!elements.docList) {
-    return;
-  }
-
-  elements.docList.querySelectorAll(".is-menu-open").forEach((node) => {
-    node.classList.remove("is-menu-open");
-  });
-
-  elements.docList.querySelectorAll(".tree-menu-trigger").forEach((button) => {
-    button.setAttribute("aria-expanded", "false");
-  });
-
-  if (!state.treeMenu) {
-    return;
-  }
-
-  const target = elements.docList.querySelector(`[data-menu-key="${state.treeMenu.key}"]`);
-  if (target) {
-    target.classList.add("is-menu-open");
-    target.querySelectorAll(".tree-menu-trigger").forEach((button) => {
-      button.setAttribute("aria-expanded", "true");
-    });
-    return;
-  }
-
-  state.treeMenu = null;
-  state.treeMenuSuppressClickKey = null;
-}
-
-function openTreeMenu(menuType, itemKey, { suppressNextClick = false } = {}) {
-  const key = getTreeMenuKey(menuType, itemKey);
-  state.treeMenu = {
-    type: menuType,
-    key
-  };
-  state.treeMenuSuppressClickKey = suppressNextClick ? key : null;
-  syncTreeMenuUI();
-}
-
-function toggleTreeMenu(menuType, itemKey) {
-  if (isTreeMenuOpen(menuType, itemKey)) {
-    closeTreeMenus();
-    return;
-  }
-
-  openTreeMenu(menuType, itemKey);
-}
-
-function closeTreeMenus() {
-  state.treeMenu = null;
-  state.treeMenuSuppressClickKey = null;
-  syncTreeMenuUI();
-}
-
-function consumeTreeMenuSuppress(menuType, itemKey) {
-  const key = getTreeMenuKey(menuType, itemKey);
-  if (state.treeMenuSuppressClickKey !== key) {
-    return false;
-  }
-
-  state.treeMenuSuppressClickKey = null;
-  return true;
-}
-
-function wireLongPressMenu(target, menuType, itemKey) {
-  let holdTimer = null;
-  let longPressTriggered = false;
-
-  const clearHoldTimer = () => {
-    if (holdTimer !== null) {
-      window.clearTimeout(holdTimer);
-      holdTimer = null;
-    }
-  };
-
-  target.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse" || event.button !== 0) {
-      return;
-    }
-
-    longPressTriggered = false;
-    clearHoldTimer();
-    holdTimer = window.setTimeout(() => {
-      holdTimer = null;
-      longPressTriggered = true;
-      openTreeMenu(menuType, itemKey, { suppressNextClick: true });
-    }, TREE_MENU_HOLD_DELAY);
-  });
-
-  target.addEventListener("pointerup", clearHoldTimer);
-  target.addEventListener("pointercancel", clearHoldTimer);
-  target.addEventListener("pointerleave", clearHoldTimer);
-
-  target.addEventListener("click", (event) => {
-    if (!longPressTriggered) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    longPressTriggered = false;
-  });
-}
 
 function groupDocsByFolder(docs) {
   const groups = new Map();
@@ -772,7 +658,6 @@ function renderFolderPickerList() {
 }
 
 function openFolderModal({ mode = "create", file = null, folderId = null } = {}) {
-  closeTreeMenus();
   state.folderModalOpen = true;
   state.folderModalMode = mode;
   state.folderModalTargetFile = file;
@@ -2273,18 +2158,12 @@ function renderDocList() {
 
   for (const group of groupedDocs) {
     const groupKey = group.folderId || "__root__";
-    const groupMenuKey = getTreeMenuKey("folder", groupKey);
     const groupItem = document.createElement("li");
     groupItem.className = "doc-group";
     groupItem.dataset.folderKey = groupKey;
-    groupItem.dataset.menuKey = groupMenuKey;
 
     if (state.collapsedFolderIds.has(groupKey)) {
       groupItem.classList.add("is-collapsed");
-    }
-
-    if (isTreeMenuOpen("folder", groupKey)) {
-      groupItem.classList.add("is-menu-open");
     }
 
     const groupHead = document.createElement("div");
@@ -2306,55 +2185,35 @@ function renderDocList() {
       </span>
     `;
     groupToggle.addEventListener("click", (event) => {
-      if (consumeTreeMenuSuppress("folder", groupKey)) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
-      closeTreeMenus();
       toggleFolderCollapse(groupKey);
     });
-    wireLongPressMenu(groupToggle, "folder", groupKey);
     groupHead.appendChild(groupToggle);
 
     if (!state.isRecycleBinMode && group.folderId) {
       const groupActions = document.createElement("div");
-      groupActions.className = "folder-group-actions";
+      groupActions.className = "row-quick-actions folder-group-actions";
 
-      const groupMenuTrigger = document.createElement("button");
-      groupMenuTrigger.type = "button";
-      groupMenuTrigger.className = "icon-btn tree-menu-trigger";
-      groupMenuTrigger.title = "Folder actions";
-      groupMenuTrigger.setAttribute("aria-label", `Folder actions for ${group.folderName}`);
-      groupMenuTrigger.setAttribute("aria-haspopup", "menu");
-      groupMenuTrigger.setAttribute("aria-expanded", String(isTreeMenuOpen("folder", groupKey)));
-      groupMenuTrigger.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
-      groupMenuTrigger.addEventListener("click", (event) => {
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "icon-btn";
+      renameBtn.title = "Rename folder";
+      renameBtn.setAttribute("aria-label", `Rename ${group.folderName}`);
+      renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+      renameBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        toggleTreeMenu("folder", groupKey);
-      });
-
-      const groupMenu = document.createElement("div");
-      groupMenu.className = "tree-menu folder-group-menu";
-      groupMenu.setAttribute("role", "menu");
-      groupMenu.innerHTML = `
-        <button class="tree-menu-item" type="button" data-action="rename"><i class="fa-solid fa-pen-to-square"></i> Rename folder</button>
-        <button class="tree-menu-item danger" type="button" data-action="delete"><i class="fa-solid fa-trash-can"></i> Delete folder</button>
-      `;
-
-      groupMenu.querySelector('[data-action="rename"]')?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        closeTreeMenus();
         openFolderModal({ mode: "rename", folderId: group.folderId });
       });
 
-      groupMenu.querySelector('[data-action="delete"]')?.addEventListener("click", async (event) => {
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "icon-btn danger";
+      deleteBtn.title = "Delete folder";
+      deleteBtn.setAttribute("aria-label", `Delete ${group.folderName}`);
+      deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+      deleteBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        closeTreeMenus();
 
         const shouldProceed = await requestConfirmation({
           title: `Delete ${group.folderName}?`,
@@ -2379,7 +2238,7 @@ function renderDocList() {
         }
       });
 
-      groupActions.append(groupMenuTrigger, groupMenu);
+      groupActions.append(renameBtn, deleteBtn);
       groupHead.appendChild(groupActions);
     }
 
@@ -2391,12 +2250,6 @@ function renderDocList() {
     for (const doc of group.docs) {
       const row = document.createElement("li");
       row.className = "doc-row";
-      const docMenuItemKey = encodeURIComponent(doc.file);
-      row.dataset.menuKey = getTreeMenuKey("doc", docMenuItemKey);
-
-      if (isTreeMenuOpen("doc", docMenuItemKey)) {
-        row.classList.add("is-menu-open");
-      }
 
       const button = document.createElement("button");
       button.type = "button";
@@ -2416,23 +2269,16 @@ function renderDocList() {
       `;
 
       button.innerHTML = `
-        <span class="doc-icon"><i class="fa-solid ${escapeHtml(doc.icon)}"></i></span>
-        <span class="doc-main">
+        <span class="doc-item-top">
+          <span class="doc-icon"><i class="fa-solid ${escapeHtml(doc.icon)}"></i></span>
           <span class="doc-title">${escapedTitle}</span>
-          <span class="doc-file">${escapedFile}</span>
         </span>
-        <span class="doc-meta">${tags}</span>
+        <span class="doc-details">
+          <span class="doc-meta">${tags}</span>
+        </span>
       `;
 
       button.addEventListener("click", async (event) => {
-        if (consumeTreeMenuSuppress("doc", docMenuItemKey)) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-
-        closeTreeMenus();
-
         if (state.isRecycleBinMode) {
           await openRecycleBinDocument(doc.file);
         } else {
@@ -2444,78 +2290,69 @@ function renderDocList() {
         closeSidebarOnMobile();
       });
 
-      wireLongPressMenu(button, "doc", docMenuItemKey);
-
       const actions = document.createElement("div");
-      actions.className = "doc-row-actions";
-
-      const menuTrigger = document.createElement("button");
-      menuTrigger.type = "button";
-      menuTrigger.className = "icon-btn tree-menu-trigger";
-      menuTrigger.title = "Document actions";
-      menuTrigger.setAttribute("aria-label", `Document actions for ${doc.title}`);
-      menuTrigger.setAttribute("aria-haspopup", "menu");
-      menuTrigger.setAttribute("aria-expanded", String(isTreeMenuOpen("doc", docMenuItemKey)));
-      menuTrigger.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
-      menuTrigger.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleTreeMenu("doc", docMenuItemKey);
-      });
-
-      const menu = document.createElement("div");
-      menu.className = "tree-menu doc-row-menu";
-      menu.setAttribute("role", "menu");
+      actions.className = "row-quick-actions doc-row-actions";
 
       if (state.isRecycleBinMode) {
-        menu.innerHTML = `
-          <button class="tree-menu-item" type="button" data-action="restore"><i class="fa-solid fa-box-archive"></i> Restore</button>
-          <button class="tree-menu-item danger" type="button" data-action="hard-delete"><i class="fa-solid fa-trash-can"></i> Hard Delete</button>
-        `;
-
-        menu.querySelector('[data-action="restore"]')?.addEventListener("click", async (event) => {
+        const restoreBtn = document.createElement("button");
+        restoreBtn.type = "button";
+        restoreBtn.className = "icon-btn";
+        restoreBtn.title = "Restore";
+        restoreBtn.innerHTML = '<i class="fa-solid fa-box-archive"></i>';
+        restoreBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          closeTreeMenus();
           await restoreDeletedDocumentByFile(doc.file);
         });
 
-        menu.querySelector('[data-action="hard-delete"]')?.addEventListener("click", async (event) => {
+        const hardDeleteBtn = document.createElement("button");
+        hardDeleteBtn.type = "button";
+        hardDeleteBtn.className = "icon-btn danger";
+        hardDeleteBtn.title = "Hard Delete";
+        hardDeleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        hardDeleteBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          closeTreeMenus();
           await hardDeleteDeletedDocumentByFile(doc.file);
         });
-      } else {
-        menu.innerHTML = `
-          <button class="tree-menu-item" type="button" data-action="edit"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
-          <button class="tree-menu-item" type="button" data-action="move"><i class="fa-solid fa-folder-tree"></i> Move</button>
-          <button class="tree-menu-item danger" type="button" data-action="delete"><i class="fa-solid fa-trash-can"></i> Delete</button>
-        `;
 
-        menu.querySelector('[data-action="edit"]')?.addEventListener("click", async (event) => {
+        actions.append(restoreBtn, hardDeleteBtn);
+      } else {
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "icon-btn";
+        editBtn.title = "Edit";
+        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        editBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          closeTreeMenus();
           await openEditorForDocument(doc.file);
         });
 
-        menu.querySelector('[data-action="move"]')?.addEventListener("click", (event) => {
+        const moveBtn = document.createElement("button");
+        moveBtn.type = "button";
+        moveBtn.className = "icon-btn";
+        moveBtn.title = "Move";
+        moveBtn.innerHTML = '<i class="fa-solid fa-folder-tree"></i>';
+        moveBtn.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          closeTreeMenus();
           openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null });
         });
 
-        menu.querySelector('[data-action="delete"]')?.addEventListener("click", async (event) => {
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "icon-btn danger";
+        deleteBtn.title = "Delete";
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        deleteBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          closeTreeMenus();
           await deleteDocumentByFile(doc.file, "soft");
         });
-      }
 
-      actions.append(menuTrigger, menu);
+        actions.append(editBtn, moveBtn, deleteBtn);
+      }
       row.append(button, actions);
       groupList.appendChild(row);
     }
@@ -2523,8 +2360,6 @@ function renderDocList() {
     groupItem.appendChild(groupList);
     elements.docList.appendChild(groupItem);
   }
-
-  syncTreeMenuUI();
 }
 
 async function applySearch(query) {
@@ -3003,7 +2838,6 @@ function syncEditorPaneScroll(sourceElement, targetElement) {
 }
 
 function openEditor({ mode, fileName, content }) {
-  closeTreeMenus();
   state.editorMode = mode;
   state.editorFile = mode === "edit" ? fileName : null;
   state.editorOpen = true;
@@ -3569,11 +3403,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "Escape" && state.treeMenu) {
-    event.preventDefault();
-    closeTreeMenus();
-    return;
-  }
+
 
   if (event.key === "Escape" && elements.appShell.classList.contains("nav-open")) {
     setNavOpen(false);
@@ -3698,10 +3528,6 @@ window.addEventListener("hashchange", () => {
 
 document.addEventListener("click", (event) => {
   if (!state.searchPanelOpen) {
-    if (state.treeMenu && event.target instanceof Element && !event.target.closest(".doc-row, .doc-group")) {
-      closeTreeMenus();
-    }
-
     return;
   }
 
@@ -3714,10 +3540,6 @@ document.addEventListener("click", (event) => {
   }
 
   setSuperSearchOpen(false);
-
-  if (state.treeMenu && !event.target.closest(".doc-row, .doc-group")) {
-    closeTreeMenus();
-  }
 });
 
 initialize();
