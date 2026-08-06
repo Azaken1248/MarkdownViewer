@@ -9,6 +9,7 @@ const elements = {
   uploadTrigger: document.getElementById("uploadTrigger"),
   uploadInput: document.getElementById("uploadInput"),
   createFolderBtn: document.getElementById("createFolderBtn"),
+  collapseAllBtn: document.getElementById("collapseAllBtn"),
   newDocBtn: document.getElementById("newDocBtn"),
   editDocBtn: document.getElementById("editDocBtn"),
   editCurrentDocBtn: document.getElementById("editCurrentDocBtn"),
@@ -16,6 +17,7 @@ const elements = {
   hardDeleteDocBtn: document.getElementById("hardDeleteDocBtn"),
   restoreDocBtn: document.getElementById("restoreDocBtn"),
   activeDocLabel: document.getElementById("activeDocLabel"),
+  activeDocMeta: document.getElementById("activeDocMeta"),
   matchNav: document.getElementById("matchNav"),
   matchNavLabel: document.getElementById("matchNavLabel"),
   matchPrevBtn: document.getElementById("matchPrevBtn"),
@@ -33,7 +35,8 @@ const elements = {
   superSearchCount: document.getElementById("superSearchCount"),
   superSearchList: document.getElementById("superSearchList"),
   searchMeta: document.getElementById("searchMeta"),
-  statusMsg: document.getElementById("statusMsg"),
+  toastStack: document.getElementById("toastStack"),
+  toastStackUrgent: document.getElementById("toastStackUrgent"),
   docList: document.getElementById("docList"),
   sidebar: document.getElementById("sidebar"),
   emptyState: document.getElementById("emptyState"),
@@ -124,6 +127,7 @@ const state = {
   folderModalTargetFolderId: null,
   collapsedFolderIds: new Set(),
   groupRevealCounts: new Map(),
+  draggingFile: null,
   confirmOpen: false,
   confirmResolver: null,
   writeToken: "",
@@ -636,8 +640,8 @@ function syncFolderModalUI() {
     const pendingName = state.pendingUploadFile?.name || "this file";
     elements.folderTitle.textContent = `Upload ${pendingName}`;
     elements.folderDescription.textContent = "Pick the folder it should land in, or create a new one.";
-    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create And Upload';
-    elements.moveToRootBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> Upload To Ungrouped';
+    elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create And Upload';
+    elements.moveToRootBtn.innerHTML = '<i class="ph ph-stack"></i> Upload To Ungrouped';
     elements.moveToRootBtn.hidden = false;
     elements.folderPicker.hidden = false;
   } else if (mode === "move") {
@@ -647,8 +651,8 @@ function syncFolderModalUI() {
     elements.folderDescription.textContent = targetFile
       ? `Choose an existing folder or create a new one for ${targetFile.file}.`
       : "Choose an existing folder or create a new one.";
-    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create And Move';
-    elements.moveToRootBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> Move To Ungrouped';
+    elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create And Move';
+    elements.moveToRootBtn.innerHTML = '<i class="ph ph-stack"></i> Move To Ungrouped';
     elements.moveToRootBtn.hidden = false;
     elements.folderPicker.hidden = false;
   } else if (mode === "rename") {
@@ -656,13 +660,13 @@ function syncFolderModalUI() {
     elements.folderDescription.textContent = targetFolder
       ? "Update the logical folder name without moving any files."
       : "Update the logical folder name without moving any files.";
-    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Rename Folder';
+    elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-pencil-simple"></i> Rename Folder';
     elements.moveToRootBtn.hidden = true;
     elements.folderPicker.hidden = true;
   } else {
     elements.folderTitle.textContent = "Create folder";
     elements.folderDescription.textContent = "Create a logical folder to group documents without changing the physical layout.";
-    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create Folder';
+    elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create Folder';
     elements.moveToRootBtn.hidden = true;
     elements.folderPicker.hidden = true;
   }
@@ -700,7 +704,7 @@ function renderFolderPickerList() {
 
   elements.folderPickerList.innerHTML = folders.map((folder) => `
     <button class="folder-choice" type="button" data-folder-id="${escapeHtml(folder.id)}" ${moveMode ? "" : "disabled"}>
-      <span class="folder-choice-title"><i class="fa-solid fa-folder"></i>${escapeHtml(folder.name)}</span>
+      <span class="folder-choice-title"><i class="ph ph-folder"></i>${escapeHtml(folder.name)}</span>
       <span class="folder-choice-meta">${escapeHtml(String(counts.get(folder.id) || 0))} doc(s)</span>
     </button>
   `).join("");
@@ -1228,7 +1232,7 @@ function renderSuperSearchPanel(query, matches, searchTerms) {
   elements.superSearchList.innerHTML = topResults.map((doc) => `
     <li>
       <button class="supersearch-item" type="button" data-file="${escapeHtml(doc.file)}">
-        <span class="supersearch-item-title"><i class="fa-solid ${escapeHtml(doc.icon)}"></i>${highlightMatches(doc.title, searchTerms)}</span>
+        <span class="supersearch-item-title"><i class="ph ${escapeHtml(doc.icon)}"></i>${highlightMatches(doc.title, searchTerms)}</span>
         <span class="supersearch-item-file">${highlightMatches(doc.originalFile || doc.file, searchTerms)}</span>
         <span class="supersearch-item-snippet">${highlightMatches(doc.snippet, searchTerms)}</span>
       </button>
@@ -1276,26 +1280,26 @@ function syncBodyLock() {
 function inferIcon(fileName) {
   const value = normalize(fileName);
   if (isNotebookFile(value)) {
-    return "fa-file-code";
+    return "ph-file-code";
   }
 
   if (value.includes("srs") || value.includes("spec")) {
-    return "fa-file-contract";
+    return "ph-scroll";
   }
 
   if (value.includes("erd") || value.includes("schema") || value.includes("db")) {
-    return "fa-diagram-project";
+    return "ph-graph";
   }
 
   if (value.includes("readme")) {
-    return "fa-book";
+    return "ph-book-open-text";
   }
 
   if (value.endsWith(".mmd") || value.endsWith(".mermaid")) {
-    return "fa-diagram-project";
+    return "ph-graph";
   }
 
-  return "fa-file-lines";
+  return "ph-file-text";
 }
 
 function ensureDocFilename(fileName) {
@@ -1358,9 +1362,20 @@ function setMeta(message) {
   elements.searchMeta.textContent = message;
 }
 
+// The tree rows are one line each, so the size/date/folder facts they used to
+// carry as chips live here instead, next to the file they describe.
+function setViewerHeading(iconClass, label, metaParts) {
+  elements.activeDocLabel.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i><span></span>`;
+  elements.activeDocLabel.querySelector("span").textContent = label;
+
+  if (elements.activeDocMeta) {
+    elements.activeDocMeta.textContent = (metaParts || []).filter(Boolean).join("  ·  ");
+  }
+}
+
 function updateActiveDocUI(fileName) {
   if (!fileName) {
-    elements.activeDocLabel.innerHTML = '<i class="fa-solid fa-file-lines"></i>No document selected';
+    setViewerHeading("ph-file-text", "No file selected", []);
     elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
@@ -1373,8 +1388,12 @@ function updateActiveDocUI(fileName) {
   if (state.isRecycleBinMode) {
     const deletedDoc = state.deletedDocs.find((doc) => doc.file === fileName);
     const label = deletedDoc?.originalFile || fileName;
-    const modeIcon = state.viewMode === "archive" ? "fa-box-archive" : "fa-trash-can";
-    elements.activeDocLabel.innerHTML = `<i class="fa-solid ${modeIcon}"></i>${escapeHtml(label)}`;
+    const inArchive = state.viewMode === "archive";
+    setViewerHeading(inArchive ? "ph-archive-box" : "ph-trash", label, [
+      inArchive ? "Archived" : "In recycle bin",
+      deletedDoc ? formatBytes(deletedDoc.size) : "",
+      deletedDoc?.deletedAt ? `deleted ${formatDate(deletedDoc.deletedAt)}` : ""
+    ]);
     elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
@@ -1385,7 +1404,12 @@ function updateActiveDocUI(fileName) {
   }
 
   const notebookFile = isNotebookFile(fileName);
-  elements.activeDocLabel.innerHTML = `<i class="fa-solid ${notebookFile ? "fa-file-code" : "fa-file-lines"}"></i>${escapeHtml(fileName)}`;
+  const doc = getDocByFile(fileName);
+  setViewerHeading(notebookFile ? "ph-file-code" : "ph-file-text", fileName, [
+    doc ? getFolderLabel(doc.folderId) : "",
+    doc ? formatBytes(doc.size) : "",
+    doc?.updatedAt ? `updated ${formatDate(doc.updatedAt)}` : ""
+  ]);
   elements.editDocBtn.disabled = notebookFile;
   elements.editCurrentDocBtn.disabled = notebookFile;
   elements.dockEdit.disabled = notebookFile;
@@ -1394,9 +1418,124 @@ function updateActiveDocUI(fileName) {
   elements.restoreDocBtn.disabled = true;
 }
 
+// --- Notifications --------------------------------------------------------
+// A single inline status line could only ever show the most recent thing that
+// happened, and it showed it somewhere nobody was looking. Toasts stack, say
+// what happened, and clear themselves.
+
+const TOAST_TONES = {
+  success: { icon: "ph-check-circle", title: "Done", duration: 4000 },
+  error: { icon: "ph-warning-circle", title: "Something went wrong", duration: 8000 },
+  warning: { icon: "ph-warning", title: "Heads up", duration: 6000 },
+  info: { icon: "ph-info", title: "", duration: 4500 },
+  neutral: { icon: "ph-info", title: "", duration: 4500 }
+};
+
+const TOAST_MAX_VISIBLE = 4;
+const activeToasts = new Set();
+
+function dismissToast(toast) {
+  if (!toast || !activeToasts.has(toast)) {
+    return;
+  }
+
+  activeToasts.delete(toast);
+  window.clearTimeout(toast.dataset.timerId ? Number(toast.dataset.timerId) : 0);
+  toast.classList.add("is-leaving");
+
+  // Fall back to removing it outright if the animation never fires (reduced
+  // motion, background tab), otherwise the stack would fill up with corpses.
+  const remove = () => toast.remove();
+  toast.addEventListener("animationend", remove, { once: true });
+  window.setTimeout(remove, 400);
+}
+
+function notify(message, tone = "info", options = {}) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const preset = TOAST_TONES[tone] || TOAST_TONES.info;
+  const toneClass = TOAST_TONES[tone] ? tone : "info";
+  const title = options.title !== undefined ? options.title : preset.title;
+  const duration = Number.isFinite(options.duration) ? options.duration : preset.duration;
+  const isUrgent = toneClass === "error";
+
+  const stack = isUrgent ? elements.toastStackUrgent : elements.toastStack;
+  if (!stack) {
+    return null;
+  }
+
+  // Collapse a repeat of the message already on screen instead of stacking
+  // duplicates, which is what a retry loop or a double-click produces.
+  for (const existing of activeToasts) {
+    if (existing.dataset.toastKey === `${toneClass}:${text}`) {
+      dismissToast(existing);
+      break;
+    }
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${toneClass}`;
+  toast.dataset.toastKey = `${toneClass}:${text}`;
+  toast.setAttribute("role", isUrgent ? "alert" : "status");
+
+  const icon = document.createElement("i");
+  icon.className = `ph ${preset.icon} toast-icon`;
+  icon.setAttribute("aria-hidden", "true");
+
+  const body = document.createElement("div");
+  body.className = "toast-body";
+
+  if (title) {
+    const titleNode = document.createElement("p");
+    titleNode.className = "toast-title";
+    titleNode.textContent = title;
+    body.appendChild(titleNode);
+  }
+
+  const messageNode = document.createElement("p");
+  messageNode.className = "toast-message";
+  messageNode.textContent = text;
+  body.appendChild(messageNode);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "toast-close";
+  closeBtn.setAttribute("aria-label", "Dismiss notification");
+  closeBtn.innerHTML = '<i class="ph ph-x" aria-hidden="true"></i>';
+  closeBtn.addEventListener("click", () => dismissToast(toast));
+
+  const timer = document.createElement("span");
+  timer.className = "toast-timer";
+  timer.setAttribute("aria-hidden", "true");
+  timer.style.animationDuration = `${duration}ms`;
+
+  toast.append(icon, body, closeBtn, timer);
+  stack.appendChild(toast);
+  activeToasts.add(toast);
+
+  const timerId = window.setTimeout(() => dismissToast(toast), duration);
+  toast.dataset.timerId = String(timerId);
+
+  // Oldest first, so trimming the overflow drops the stalest message.
+  while (activeToasts.size > TOAST_MAX_VISIBLE) {
+    const [oldest] = activeToasts;
+    dismissToast(oldest);
+  }
+
+  return toast;
+}
+
+// Existing call sites speak in "neutral"/"success"/"error"; keep that vocabulary
+// working rather than rewriting ninety of them by hand.
 function setStatus(message, tone = "neutral") {
-  elements.statusMsg.textContent = message || "";
-  elements.statusMsg.dataset.tone = tone;
+  if (!message) {
+    return;
+  }
+
+  notify(message, tone === "neutral" ? "info" : tone);
 }
 
 function resolveConfirmDialog(confirmed) {
@@ -1420,7 +1559,6 @@ function requestConfirmation({
   title,
   message,
   confirmLabel = "Continue",
-  confirmIcon = "fa-check",
   tone = "danger"
 }) {
   return new Promise((resolve) => {
@@ -1432,7 +1570,7 @@ function requestConfirmation({
 
     elements.confirmTitle.textContent = title || "Please confirm this action";
     elements.confirmMessage.textContent = message || "Are you sure you want to continue?";
-    elements.confirmProceedBtn.innerHTML = `<i class="fa-solid ${confirmIcon}"></i> ${escapeHtml(confirmLabel)}`;
+    elements.confirmProceedBtn.textContent = confirmLabel || "Continue";
     elements.confirmProceedBtn.classList.remove("btn-danger", "btn-primary");
 
     if (tone === "primary") {
@@ -1490,7 +1628,7 @@ function syncLockUI() {
 
   const icon = elements.lockToggleBtn.querySelector("i");
   if (icon) {
-    icon.className = state.canWrite ? "fa-solid fa-lock-open" : "fa-solid fa-lock";
+    icon.className = state.canWrite ? "ph ph-lock-simple-open" : "ph ph-lock-simple";
   }
 
   elements.lockToggleBtn.classList.toggle("active", state.canWrite);
@@ -1638,7 +1776,7 @@ async function fetchDeletedDocs() {
     folderId: doc.folderId || null,
     folderName: doc.folderName || null,
     folderOrder: Number.isFinite(Number(doc.folderOrder)) ? Number(doc.folderOrder) : getFolderOrder(doc.folderId),
-    icon: "fa-trash-can"
+    icon: "ph-trash"
   }));
 }
 
@@ -1694,38 +1832,40 @@ function syncModeUI() {
   const inArchive = state.viewMode === "archive";
   const inTrashView = inRecycleBin || inArchive;
 
-  elements.sidebarTitle.innerHTML = inArchive
-    ? '<i class="fa-solid fa-box-archive"></i> Archive'
-    : inRecycleBin
-      ? '<i class="fa-solid fa-trash-can"></i> Recycle Bin'
-      : '<i class="fa-solid fa-folder-tree"></i> Markdowns';
+  elements.sidebarTitle.textContent = inArchive ? "Archive" : inRecycleBin ? "Recycle bin" : "Files";
 
   elements.toggleRecycleBinBtn.classList.toggle("active", inRecycleBin);
-  elements.toggleRecycleBinBtn.setAttribute("aria-label", inRecycleBin ? "Exit recycle bin" : "Open recycle bin");
-  elements.toggleRecycleBinBtn.title = inRecycleBin ? "Exit recycle bin" : "Open recycle bin";
+  elements.toggleRecycleBinBtn.setAttribute("aria-pressed", String(inRecycleBin));
+  elements.toggleRecycleBinBtn.setAttribute("aria-label", inRecycleBin ? "Exit recycle bin" : "Show recycle bin");
+  elements.toggleRecycleBinBtn.title = inRecycleBin ? "Exit recycle bin" : "Recycle bin";
 
   elements.toggleArchiveBtn.classList.toggle("active", inArchive);
-  elements.toggleArchiveBtn.setAttribute("aria-label", inArchive ? "Exit archive" : "Open archive");
-  elements.toggleArchiveBtn.title = inArchive ? "Exit archive" : "Open archive";
+  elements.toggleArchiveBtn.setAttribute("aria-pressed", String(inArchive));
+  elements.toggleArchiveBtn.setAttribute("aria-label", inArchive ? "Exit archive" : "Show archive");
+  elements.toggleArchiveBtn.title = inArchive ? "Exit archive" : "Archive";
 
   elements.softDeleteDocBtn.hidden = inTrashView;
   elements.hardDeleteDocBtn.hidden = false;
   elements.restoreDocBtn.hidden = !inTrashView;
   elements.createFolderBtn.hidden = inTrashView;
 
+  if (elements.collapseAllBtn) {
+    elements.collapseAllBtn.hidden = inTrashView;
+  }
+
   // The button keeps its slot in all three modes but means something different in each:
   // archive from the viewer, archive from the recycle bin, erase from the archive.
   const hardDeleteIcon = elements.hardDeleteDocBtn.querySelector("i");
   if (inArchive) {
-    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-trash";
+    if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-trash";
     elements.hardDeleteDocBtn.setAttribute("aria-label", "Permanently delete archived markdown");
     elements.hardDeleteDocBtn.title = "Delete forever";
   } else if (inRecycleBin) {
-    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
+    if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-archive-box";
     elements.hardDeleteDocBtn.setAttribute("aria-label", "Move recycle bin markdown to archive");
     elements.hardDeleteDocBtn.title = "Archive";
   } else {
-    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
+    if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-archive-box";
     elements.hardDeleteDocBtn.setAttribute("aria-label", "Archive current markdown");
     elements.hardDeleteDocBtn.title = "Archive";
   }
@@ -1755,14 +1895,14 @@ async function hydrateDeletedSearchContent() {
   );
 }
 
-function showEmptyState(title, message, icon = "fa-file-circle-question") {
-  elements.emptyState.style.display = "block";
+function showEmptyState(title, message, icon = "ph-file-dashed") {
+  elements.emptyState.style.display = "grid";
   elements.docContent.classList.remove("visible");
   elements.docContent.classList.remove("notebook-viewer");
   destroyPanZoomInstances(elements.docContent);
   elements.docContent.innerHTML = "";
   elements.emptyState.innerHTML = `
-    <i class="fa-solid ${icon}"></i>
+    <i class="ph ${icon}"></i>
     <h3>${escapeHtml(title)}</h3>
     <p>${escapeHtml(message)}</p>
   `;
@@ -1788,7 +1928,7 @@ function renderMathBlocks(root) {
         window.katex.render(tex, node, {
           displayMode: true,
           throwOnError: false,
-          errorColor: "#f38ba8"
+          errorColor: "#f85149"
         });
       } catch (error) {
         console.error("Math block rendering failed", error);
@@ -1812,7 +1952,7 @@ function renderMathBlocks(root) {
       ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
       processEscapes: true,
       throwOnError: false,
-      errorColor: "#f38ba8"
+      errorColor: "#f85149"
     });
   } catch (error) {
     console.error("Math rendering failed", error);
@@ -2037,7 +2177,7 @@ function renderNotebookDocument(rawContent, title) {
 
   return `
     <section class="notebook-summary">
-      <p class="notebook-eyebrow"><i class="fa-solid fa-file-code"></i> Jupyter Notebook</p>
+      <p class="notebook-eyebrow"><i class="ph ph-file-code"></i> Jupyter Notebook</p>
       <h1>${escapeHtml(title || notebook?.metadata?.title || "Notebook")}</h1>
       <p class="notebook-meta">
         ${totalCells} cell${totalCells === 1 ? "" : "s"}
@@ -2078,60 +2218,50 @@ function ensureMermaidInitialized() {
     securityLevel: "antiscript",
     theme: "base",
     darkMode: true,
-    fontFamily: '"Space Grotesk", sans-serif',
+    fontFamily: '"Inter", sans-serif',
     themeVariables: {
-      primaryColor: "#1e1e2e",
-      primaryTextColor: "#cdd6f4",
-      primaryBorderColor: "#89b4fa",
-      lineColor: "#cba6f7",
-      textColor: "#cdd6f4"
+      primaryColor: "#161b22",
+      primaryTextColor: "#e6edf3",
+      primaryBorderColor: "#30363d",
+      lineColor: "#8b949e",
+      textColor: "#e6edf3"
     },
     er: {
       useMaxWidth: true
     },
     themeCSS: `
-      /* Override ALL fill colors to be dark */
+      /* Mermaid's base theme still paints light shapes, so pin every fill to
+         the surface colour rather than fighting it case by case. */
       rect, polygon, path, circle {
-        fill: #1e1e2e !important;
-        stroke: #585b70 !important;
+        fill: #161b22 !important;
+        stroke: #30363d !important;
       }
-      
-      /* Make entity headers stand out */
+
       .er.entityBox, .entityBox {
-        fill: #313244 !important;
-        stroke: #89b4fa !important;
-        stroke-width: 2px !important;
+        fill: #21262d !important;
+        stroke: #484f58 !important;
+        stroke-width: 1px !important;
       }
-      
-      /* Ensure all text is white/light */
+
       text, tspan {
-        fill: #cdd6f4 !important;
+        fill: #e6edf3 !important;
         font-family: "JetBrains Mono", monospace !important;
         font-size: 11px !important;
       }
-      
-      /* Make connections purple */
+
       line, .relationshipLine {
-        stroke: #cba6f7 !important;
-        stroke-width: 2px !important;
+        stroke: #8b949e !important;
+        stroke-width: 1px !important;
       }
-      
-      /* Kill any default light colors */
-      [fill="#f5e0dc"],
-      [fill="#f2cdcd"],
-      [fill="#f5c2e7"],
-      [fill="#fab387"],
-      [fill="#a6e3a1"],
-      [fill="#94e2d5"],
-      [fill="#89dceb"],
-      [fill="#89b4fa"],
-      [fill="#b4befe"],
-      [fill="#cdd6f4"],
+
+      /* Anything still light after the above gets flattened to the surface. */
       [fill="#ffffff"],
       [fill="#f0f0f0"],
       [fill="#e8e8e8"],
+      [fill="#ECECFF"],
+      [fill="#fff5ad"],
       [fill="white"] {
-        fill: #1e1e2e !important;
+        fill: #161b22 !important;
       }
     `
   });
@@ -2439,180 +2569,410 @@ function closeSidebarOnMobile() {
 // rows and their listeners for that was both wasteful and visible: emptying the
 // list collapsed the page height and threw the scroll position back to the top.
 function updateActiveRowHighlight() {
-  for (const row of elements.docList.querySelectorAll(".doc-row")) {
+  for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
     const isActive = row.dataset.file === state.activeFile;
-    row.classList.toggle("active-row", isActive);
-
-    const button = row.querySelector(".doc-item");
-    if (button) {
-      button.classList.toggle("active", isActive);
-    }
+    row.classList.toggle("is-active", isActive);
+    row.setAttribute("aria-current", isActive ? "true" : "false");
   }
+}
+
+// --- File tree ------------------------------------------------------------
+
+function getVisibleTreeButtons() {
+  // offsetParent is null for rows inside a collapsed folder, which is exactly
+  // the set arrow keys should skip.
+  return [...elements.docList.querySelectorAll(".tree-row-btn")]
+    .filter((button) => button.offsetParent !== null);
+}
+
+function moveTreeFocus(from, offset) {
+  const buttons = getVisibleTreeButtons();
+  const index = buttons.indexOf(from);
+  if (index < 0) {
+    return;
+  }
+
+  const next = buttons[Math.min(Math.max(index + offset, 0), buttons.length - 1)];
+  if (next && next !== from) {
+    next.focus();
+  }
+}
+
+function handleTreeKeydown(event) {
+  const button = event.target.closest(".tree-row-btn");
+  if (!button) {
+    return;
+  }
+
+  const group = button.closest(".tree-group");
+  const isFolderRow = button.closest(".tree-row-folder") !== null;
+
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      moveTreeFocus(button, 1);
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      moveTreeFocus(button, -1);
+      break;
+    case "Home": {
+      event.preventDefault();
+      const [first] = getVisibleTreeButtons();
+      if (first) first.focus();
+      break;
+    }
+    case "End": {
+      const buttons = getVisibleTreeButtons();
+      event.preventDefault();
+      if (buttons.length) buttons[buttons.length - 1].focus();
+      break;
+    }
+    case "ArrowRight":
+      // Right opens a closed folder, then steps into it; on a file it does nothing.
+      if (isFolderRow && group?.classList.contains("is-collapsed")) {
+        event.preventDefault();
+        toggleFolderCollapse(group.dataset.folderKey);
+      } else if (isFolderRow) {
+        event.preventDefault();
+        moveTreeFocus(button, 1);
+      }
+      break;
+    case "ArrowLeft":
+      // Left closes an open folder, or jumps a file back up to its folder row.
+      if (isFolderRow && !group?.classList.contains("is-collapsed")) {
+        event.preventDefault();
+        toggleFolderCollapse(group.dataset.folderKey);
+      } else if (!isFolderRow) {
+        event.preventDefault();
+        const folderButton = group?.querySelector(".tree-row-folder .tree-row-btn");
+        if (folderButton) folderButton.focus();
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+function buildTreeAction(label, iconClass, handler, { danger = false, disabled = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = danger ? "tree-action danger" : "tree-action";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.disabled = disabled;
+  button.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i>`;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handler();
+  });
+  return button;
+}
+
+// Dragging a file onto a folder is the shortest path between "this is filed
+// wrong" and "this is filed right". The modal still exists for keyboard users.
+function enableDocDrag(row, doc) {
+  row.draggable = true;
+
+  row.addEventListener("dragstart", (event) => {
+    state.draggingFile = doc.file;
+    row.classList.add("is-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", doc.file);
+    }
+  });
+
+  row.addEventListener("dragend", () => {
+    state.draggingFile = null;
+    row.classList.remove("is-dragging");
+    elements.docList.querySelectorAll(".is-drop-target").forEach((node) => {
+      node.classList.remove("is-drop-target");
+    });
+  });
+}
+
+function enableFolderDrop(zone, folderRow, folderId) {
+  zone.addEventListener("dragover", (event) => {
+    if (!state.draggingFile) {
+      return;
+    }
+
+    // Dropping a file back into the folder it already lives in is a no-op, so
+    // do not advertise it as a target.
+    const dragged = getDocByFile(state.draggingFile);
+    if (dragged && (dragged.folderId || null) === (folderId || null)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    folderRow.classList.add("is-drop-target");
+  });
+
+  zone.addEventListener("dragleave", (event) => {
+    // dragleave also fires crossing into a child, so ignore those.
+    if (event.relatedTarget && zone.contains(event.relatedTarget)) {
+      return;
+    }
+    folderRow.classList.remove("is-drop-target");
+  });
+
+  zone.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    folderRow.classList.remove("is-drop-target");
+
+    const file = event.dataTransfer?.getData("text/plain") || state.draggingFile;
+    state.draggingFile = null;
+    if (!file) {
+      return;
+    }
+
+    try {
+      await moveDocumentToFolder(file, folderId);
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  });
+}
+
+function buildFolderRow(group, groupKey, isCollapsed) {
+  const row = document.createElement("div");
+  row.className = "tree-row tree-row-folder";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tree-row-btn";
+  button.style.setProperty("--depth", "0");
+  button.setAttribute("aria-expanded", String(!isCollapsed));
+  button.innerHTML = `
+    <i class="ph ph-caret-down tree-caret" aria-hidden="true"></i>
+    <i class="ph ${group.folderId ? "ph-folder" : "ph-stack"} tree-icon" aria-hidden="true"></i>
+    <span class="tree-label"></span>
+    <span class="tree-count"></span>
+  `;
+  button.querySelector(".tree-label").textContent = group.folderName || state.rootFolderLabel || "Ungrouped";
+  button.querySelector(".tree-count").textContent = String(group.docs.length);
+  button.addEventListener("click", () => toggleFolderCollapse(groupKey));
+
+  row.appendChild(button);
+  return row;
+}
+
+function buildFolderActions(group) {
+  const actions = document.createElement("div");
+  actions.className = "tree-actions";
+
+  const orderedFolderIds = [...state.folders]
+    .sort((left, right) => left.order - right.order)
+    .map((folder) => folder.id);
+  const position = orderedFolderIds.indexOf(group.folderId);
+
+  actions.append(
+    buildTreeAction(`Move ${group.folderName} up`, "ph-arrow-up", () => {
+      void moveFolderBy(group.folderId, -1);
+    }, { disabled: position <= 0 }),
+
+    buildTreeAction(`Move ${group.folderName} down`, "ph-arrow-down", () => {
+      void moveFolderBy(group.folderId, 1);
+    }, { disabled: position < 0 || position >= orderedFolderIds.length - 1 }),
+
+    buildTreeAction(`Rename ${group.folderName}`, "ph-pencil-simple", () => {
+      openFolderModal({ mode: "rename", folderId: group.folderId });
+    }),
+
+    buildTreeAction(`Delete ${group.folderName}`, "ph-trash", async () => {
+      const shouldProceed = await requestConfirmation({
+        title: `Delete ${group.folderName}?`,
+        message: "Documents in this folder move back to Ungrouped. The files themselves stay in place.",
+        confirmLabel: "Delete folder",
+        tone: "danger"
+      });
+
+      if (!shouldProceed) {
+        return;
+      }
+
+      try {
+        await requestJson(`/api/folders/${encodeURIComponent(group.folderId)}`, { method: "DELETE" });
+        await refreshDocs({ preserveSearch: true });
+        notify(`Deleted folder "${group.folderName}".`, "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }, { danger: true })
+  );
+
+  return actions;
+}
+
+function buildDocRow(doc) {
+  const row = document.createElement("li");
+  row.className = "tree-row tree-row-doc";
+  row.dataset.file = doc.file;
+
+  const isActive = state.activeFile === doc.file;
+  if (isActive) {
+    row.classList.add("is-active");
+  }
+  row.setAttribute("aria-current", isActive ? "true" : "false");
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tree-row-btn";
+  button.style.setProperty("--depth", "1");
+
+  const displayName = state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file;
+  const sizeLabel = formatBytes(doc.size);
+  const timeLabel = state.isRecycleBinMode
+    ? `deleted ${formatDate(doc.deletedAt || doc.updatedAt)}`
+    : `updated ${formatDate(doc.updatedAt)}`;
+  // The chips this row used to carry now live in the tooltip and the viewer
+  // header, which is what buys the row its single-line height.
+  button.title = `${displayName}\n${sizeLabel} · ${timeLabel}`;
+
+  button.innerHTML = `
+    <i class="ph ${doc.icon} tree-icon" aria-hidden="true"></i>
+    <span class="tree-label"></span>
+  `;
+  button.querySelector(".tree-label").textContent = doc.title;
+
+  button.addEventListener("click", async () => {
+    if (state.isRecycleBinMode) {
+      await openRecycleBinDocument(doc.file);
+    } else {
+      await openDocument(doc.file, true, { jumpQuery: elements.searchInput.value });
+    }
+
+    closeSidebarOnMobile();
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "tree-actions";
+
+  if (state.isRecycleBinMode) {
+    const inArchive = state.viewMode === "archive";
+
+    actions.append(
+      buildTreeAction("Restore", "ph-arrow-counter-clockwise", async () => {
+        if (inArchive) {
+          await restoreArchivedDocumentByFile(doc.file);
+        } else {
+          await restoreDeletedDocumentByFile(doc.file);
+        }
+      }),
+
+      // Recycle bin rows archive the file; archive rows are the only place it
+      // can actually be erased.
+      buildTreeAction(
+        inArchive ? "Delete forever" : "Archive",
+        inArchive ? "ph-trash" : "ph-archive-box",
+        async () => {
+          if (inArchive) {
+            await permanentlyDeleteArchivedDocument(doc.file);
+          } else {
+            await hardDeleteDeletedDocumentByFile(doc.file);
+          }
+        },
+        { danger: true }
+      )
+    );
+  } else {
+    actions.append(
+      buildTreeAction("Edit", "ph-pencil-simple", async () => {
+        await openEditorForDocument(doc.file);
+      }),
+
+      buildTreeAction("Move to folder", "ph-folder", () => {
+        openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null });
+      }),
+
+      buildTreeAction("Move to recycle bin", "ph-trash", async () => {
+        await deleteDocumentByFile(doc.file, "soft");
+      }, { danger: true })
+    );
+
+    enableDocDrag(row, doc);
+  }
+
+  row.append(button, actions);
+  return row;
 }
 
 function renderDocList() {
   const docs = state.filteredDocs;
 
   // A genuine rebuild still shortens the list mid-flight, so hold the scroll
-  // offsets across it. The sidebar scrolls itself on mobile; the window scrolls
-  // on desktop.
+  // offsets across it.
+  const treeScrollTop = elements.docList.scrollTop || 0;
   const sidebarScrollTop = elements.sidebar?.scrollTop || 0;
-  const windowScrollY = window.scrollY;
 
   elements.docList.innerHTML = "";
 
-  if (docs.length === 0) {
-    const item = document.createElement("li");
-    item.className = "doc-item is-empty";
-    item.innerHTML = "<span class=\"doc-title\"><i class=\"fa-solid fa-face-frown\"></i>No matching markdowns</span>";
-    elements.docList.appendChild(item);
+  const isSearching = Boolean(elements.searchInput.value.trim());
+  const groupedDocs = groupDocsByFolder(docs);
 
-    if (elements.sidebar) {
-      elements.sidebar.scrollTop = sidebarScrollTop;
+  // An empty folder used to be invisible, which made it impossible to tell a
+  // folder you had just created from one that had failed to save. Show them —
+  // but not while searching, where an empty folder is only noise.
+  if (!isSearching && !state.isRecycleBinMode) {
+    const seen = new Set(groupedDocs.map((group) => group.folderId));
+    for (const folder of state.folders) {
+      if (!seen.has(folder.id)) {
+        groupedDocs.push({
+          folderId: folder.id,
+          folderName: folder.name,
+          folderOrder: folder.order,
+          docs: []
+        });
+      }
     }
 
+    groupedDocs.sort((left, right) => {
+      if (left.folderOrder !== right.folderOrder) {
+        return left.folderOrder - right.folderOrder;
+      }
+      return String(left.folderName).localeCompare(String(right.folderName));
+    });
+  }
+
+  if (groupedDocs.length === 0) {
+    const item = document.createElement("li");
+    item.className = "tree-empty";
+    item.textContent = isSearching ? "No files match this search." : "No files yet.";
+    elements.docList.appendChild(item);
+    elements.docList.scrollTop = treeScrollTop;
     return;
   }
 
-  const shouldShowFolderChip = Boolean(elements.searchInput.value.trim()) || state.isRecycleBinMode;
-  const groupedDocs = groupDocsByFolder(docs);
-
   for (const group of groupedDocs) {
     const groupKey = group.folderId || "__root__";
+    const isCollapsed = state.collapsedFolderIds.has(groupKey);
+
     const groupItem = document.createElement("li");
-    groupItem.className = "doc-group";
+    groupItem.className = isCollapsed ? "tree-group is-collapsed" : "tree-group";
     groupItem.dataset.folderKey = groupKey;
 
-    if (state.collapsedFolderIds.has(groupKey)) {
-      groupItem.classList.add("is-collapsed");
-    }
-
-    const groupHead = document.createElement("div");
-    groupHead.className = "folder-group-head";
-
-    const groupToggle = document.createElement("button");
-    groupToggle.type = "button";
-    groupToggle.className = "folder-group-toggle";
-    groupToggle.setAttribute("aria-expanded", String(!state.collapsedFolderIds.has(groupKey)));
-    groupToggle.setAttribute("aria-haspopup", "menu");
-    groupToggle.innerHTML = `
-      <span class="folder-group-title">
-        <i class="fa-solid ${group.folderId ? "fa-folder" : "fa-layer-group"}"></i>
-        ${escapeHtml(group.folderName || state.rootFolderLabel || "Ungrouped")}
-      </span>
-      <span class="folder-group-count">
-        <span class="count-text">${escapeHtml(String(group.docs.length))} doc(s)</span>
-        <i class="fa-solid fa-chevron-down folder-toggle-icon"></i>
-      </span>
-    `;
-    groupToggle.addEventListener("click", (event) => {
-      toggleFolderCollapse(groupKey);
-    });
-    groupHead.appendChild(groupToggle);
+    const folderRow = buildFolderRow(group, groupKey, isCollapsed);
 
     if (!state.isRecycleBinMode && group.folderId) {
-      const mobileMenuBtn = document.createElement("button");
-      mobileMenuBtn.className = "icon-btn mobile-folder-menu-btn";
-      mobileMenuBtn.title = "Folder Actions";
-      mobileMenuBtn.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
-      mobileMenuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        groupHead.classList.toggle("show-mobile-actions");
-      });
-      groupHead.appendChild(mobileMenuBtn);
-
-      const groupActions = document.createElement("div");
-      groupActions.className = "row-quick-actions folder-group-actions";
-
-      const renameBtn = document.createElement("button");
-      renameBtn.type = "button";
-      renameBtn.className = "icon-btn";
-      renameBtn.title = "Rename folder";
-      renameBtn.setAttribute("aria-label", `Rename ${group.folderName}`);
-      renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
-      renameBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openFolderModal({ mode: "rename", folderId: group.folderId });
-      });
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "icon-btn danger";
-      deleteBtn.title = "Delete folder";
-      deleteBtn.setAttribute("aria-label", `Delete ${group.folderName}`);
-      deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
-      deleteBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const shouldProceed = await requestConfirmation({
-          title: `Delete ${group.folderName}?`,
-          message: "Documents in this logical folder will move back to Ungrouped. The files themselves will stay in place.",
-          confirmLabel: "Delete Folder",
-          confirmIcon: "fa-trash-can",
-          tone: "danger"
-        });
-
-        if (!shouldProceed) {
-          return;
-        }
-
-        try {
-          await requestJson(`/api/folders/${encodeURIComponent(group.folderId)}`, {
-            method: "DELETE"
-          });
-          await refreshDocs({ preserveSearch: true });
-          setStatus(`Deleted folder ${group.folderName}.`, "success");
-        } catch (error) {
-          setStatus(error.message, "error");
-        }
-      });
-
-      // Folder order used to be fixed at creation time with no way to change it.
-      const orderedFolderIds = [...state.folders]
-        .sort((left, right) => left.order - right.order)
-        .map((folder) => folder.id);
-      const folderPosition = orderedFolderIds.indexOf(group.folderId);
-
-      const moveUpBtn = document.createElement("button");
-      moveUpBtn.type = "button";
-      moveUpBtn.className = "icon-btn";
-      moveUpBtn.title = "Move folder up";
-      moveUpBtn.setAttribute("aria-label", `Move ${group.folderName} up`);
-      moveUpBtn.innerHTML = '<i class="fa-solid fa-arrow-up"></i>';
-      moveUpBtn.disabled = folderPosition <= 0;
-      moveUpBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void moveFolderBy(group.folderId, -1);
-      });
-
-      const moveDownBtn = document.createElement("button");
-      moveDownBtn.type = "button";
-      moveDownBtn.className = "icon-btn";
-      moveDownBtn.title = "Move folder down";
-      moveDownBtn.setAttribute("aria-label", `Move ${group.folderName} down`);
-      moveDownBtn.innerHTML = '<i class="fa-solid fa-arrow-down"></i>';
-      moveDownBtn.disabled = folderPosition < 0 || folderPosition >= orderedFolderIds.length - 1;
-      moveDownBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void moveFolderBy(group.folderId, 1);
-      });
-
-      groupActions.append(moveUpBtn, moveDownBtn, renameBtn, deleteBtn);
-      groupHead.appendChild(groupActions);
+      folderRow.appendChild(buildFolderActions(group));
     }
 
-    groupItem.appendChild(groupHead);
+    groupItem.appendChild(folderRow);
 
-    const groupList = document.createElement("ul");
-    groupList.className = "folder-group-list";
+    if (!state.isRecycleBinMode) {
+      enableFolderDrop(groupItem, folderRow, group.folderId);
+    }
 
-    // Rendering every row of every folder up front is unbounded work: each row
-    // carries a button plus ~3 action buttons with their own listeners. Reveal a
-    // page at a time instead, always including whichever document is open.
+    const childList = document.createElement("ul");
+    childList.className = "tree-children";
+
+    // Rendering every row of every folder up front is unbounded work, so reveal
+    // a page at a time — always including whichever document is open.
     const revealed = state.groupRevealCounts.get(groupKey) || DOC_LIST_PAGE_SIZE;
     const activeIndex = group.docs.findIndex((doc) => doc.file === state.activeFile);
     const visibleCount = Math.max(revealed, activeIndex + 1);
@@ -2620,160 +2980,42 @@ function renderDocList() {
     const hiddenCount = group.docs.length - visibleDocs.length;
 
     for (const doc of visibleDocs) {
-      const isActive = state.activeFile === doc.file;
-      const row = document.createElement("li");
-      row.className = `doc-row ${isActive ? "active-row" : ""}`;
-      // Lets updateActiveRowHighlight find rows without re-rendering them.
-      row.dataset.file = doc.file;
+      childList.appendChild(buildDocRow(doc));
+    }
 
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `doc-item${isActive ? " active" : ""}`;
-      button.setAttribute("aria-haspopup", "menu");
-
-      const escapedTitle = escapeHtml(doc.title);
-      const escapedFile = escapeHtml(state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file);
-      const timeLabel = state.isRecycleBinMode ? "fa-solid fa-clock-rotate-left" : "fa-regular fa-clock";
-      const folderChip = shouldShowFolderChip
-        ? `<span class="tag-chip folder-chip"><i class="fa-solid fa-folder"></i>${escapeHtml(doc.folderName || state.rootFolderLabel || "Ungrouped")}</span>`
-        : "";
-      const tags = `
-        <span class="tag-chip"><i class="${timeLabel}"></i>${escapeHtml(formatDate(doc.updatedAt))}</span>
-        <span class="tag-chip muted"><i class="fa-solid fa-weight-hanging"></i>${escapeHtml(formatBytes(doc.size))}</span>
-        ${folderChip}
-      `;
-
-      button.innerHTML = `
-        <span class="doc-item-top">
-          <span class="doc-icon"><i class="fa-solid ${escapeHtml(doc.icon)}"></i></span>
-          <span class="doc-title">${escapedTitle}</span>
-        </span>
-        <span class="doc-details">
-          <span class="doc-meta">${tags}</span>
-        </span>
-      `;
-
-      button.addEventListener("click", async (event) => {
-        if (state.isRecycleBinMode) {
-          await openRecycleBinDocument(doc.file);
-        } else {
-          await openDocument(doc.file, true, {
-            jumpQuery: elements.searchInput.value
-          });
-        }
-
-        closeSidebarOnMobile();
-      });
-
-      const actions = document.createElement("div");
-      actions.className = "row-quick-actions doc-row-actions";
-
-      if (state.isRecycleBinMode) {
-        const inArchive = state.viewMode === "archive";
-
-        const restoreBtn = document.createElement("button");
-        restoreBtn.type = "button";
-        restoreBtn.className = "icon-btn";
-        restoreBtn.title = "Restore";
-        restoreBtn.innerHTML = '<i class="fa-solid fa-trash-arrow-up"></i>';
-        restoreBtn.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (inArchive) {
-            await restoreArchivedDocumentByFile(doc.file);
-          } else {
-            await restoreDeletedDocumentByFile(doc.file);
-          }
-        });
-
-        // Recycle bin rows archive the file; archive rows are the only place it can be erased.
-        const purgeBtn = document.createElement("button");
-        purgeBtn.type = "button";
-        purgeBtn.className = "icon-btn danger";
-        purgeBtn.title = inArchive ? "Delete forever" : "Archive";
-        purgeBtn.innerHTML = inArchive
-          ? '<i class="fa-solid fa-trash"></i>'
-          : '<i class="fa-solid fa-box-archive"></i>';
-        purgeBtn.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (inArchive) {
-            await permanentlyDeleteArchivedDocument(doc.file);
-          } else {
-            await hardDeleteDeletedDocumentByFile(doc.file);
-          }
-        });
-
-        actions.append(restoreBtn, purgeBtn);
-      } else {
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "icon-btn";
-        editBtn.title = "Edit";
-        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
-        editBtn.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          await openEditorForDocument(doc.file);
-        });
-
-        const moveBtn = document.createElement("button");
-        moveBtn.type = "button";
-        moveBtn.className = "icon-btn";
-        moveBtn.title = "Move";
-        moveBtn.innerHTML = '<i class="fa-solid fa-folder-tree"></i>';
-        moveBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null });
-        });
-
-        const deleteBtn = document.createElement("button");
-        deleteBtn.type = "button";
-        deleteBtn.className = "icon-btn danger";
-        deleteBtn.title = "Delete";
-        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
-        deleteBtn.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          await deleteDocumentByFile(doc.file, "soft");
-        });
-
-        actions.append(editBtn, moveBtn, deleteBtn);
-      }
-      row.append(button, actions);
-      groupList.appendChild(row);
+    if (group.docs.length === 0) {
+      const emptyRow = document.createElement("li");
+      emptyRow.className = "tree-empty";
+      emptyRow.textContent = "Empty";
+      childList.appendChild(emptyRow);
     }
 
     if (hiddenCount > 0) {
-      const revealRow = document.createElement("li");
-      revealRow.className = "doc-row doc-reveal-row";
+      const moreRow = document.createElement("li");
 
-      const revealBtn = document.createElement("button");
-      revealBtn.type = "button";
-      revealBtn.className = "doc-reveal-btn";
-      revealBtn.innerHTML = `<i class="fa-solid fa-chevron-down"></i> Show ${Math.min(hiddenCount, DOC_LIST_PAGE_SIZE)} more of ${escapeHtml(String(group.docs.length))}`;
-      revealBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button";
+      moreBtn.className = "tree-more";
+      moreBtn.style.setProperty("--depth", "1");
+      moreBtn.innerHTML = '<i class="ph ph-caret-down" aria-hidden="true"></i><span></span>';
+      moreBtn.querySelector("span").textContent =
+        `Show ${Math.min(hiddenCount, DOC_LIST_PAGE_SIZE)} more of ${group.docs.length}`;
+      moreBtn.addEventListener("click", () => {
         state.groupRevealCounts.set(groupKey, visibleCount + DOC_LIST_PAGE_SIZE);
         renderDocList();
       });
 
-      revealRow.appendChild(revealBtn);
-      groupList.appendChild(revealRow);
+      moreRow.appendChild(moreBtn);
+      childList.appendChild(moreRow);
     }
 
-    groupItem.appendChild(groupList);
+    groupItem.appendChild(childList);
     elements.docList.appendChild(groupItem);
   }
 
+  elements.docList.scrollTop = treeScrollTop;
   if (elements.sidebar) {
     elements.sidebar.scrollTop = sidebarScrollTop;
-  }
-
-  if (window.scrollY !== windowScrollY) {
-    window.scrollTo({ top: windowScrollY });
   }
 }
 
@@ -2990,7 +3232,7 @@ async function openDocument(file, pushHash, options = {}) {
       return;
     }
 
-    showEmptyState(isNotebookFile(file) ? "Could not load this notebook" : "Could not load this markdown", error.message, "fa-triangle-exclamation");
+    showEmptyState(isNotebookFile(file) ? "Could not load this notebook" : "Could not load this markdown", error.message, "ph-warning");
     setStatus(error.message, "error");
   }
 }
@@ -3029,7 +3271,7 @@ async function openRecycleBinDocument(file, options = {}) {
       ? `Viewing archived doc ${doc.originalFile || doc.file}`
       : `Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
   } catch (error) {
-    showEmptyState("Could not load deleted document", error.message, "fa-triangle-exclamation");
+    showEmptyState("Could not load deleted document", error.message, "ph-warning");
     setStatus(error.message, "error");
   }
 }
@@ -3052,10 +3294,10 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
     state.activeFile = null;
     updateActiveDocUI(null);
     if (inArchive) {
-      showEmptyState("Archive is empty", "Archived markdowns will appear here.", "fa-box-archive");
+      showEmptyState("Archive is empty", "Archived markdowns will appear here.", "ph-archive-box");
       setStatus("Archive is empty.", "neutral");
     } else {
-      showEmptyState("Recycle bin is empty", "Soft-deleted markdowns will appear here.", "fa-trash-can");
+      showEmptyState("Recycle bin is empty", "Soft-deleted markdowns will appear here.", "ph-trash");
       setStatus("Recycle bin is empty.", "neutral");
     }
     return;
@@ -3068,8 +3310,9 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
   if (!target) {
     state.activeFile = null;
     updateActiveDocUI(null);
-    showEmptyState("Select a recycle bin document", "Choose a soft-deleted file from the list to load it.", "fa-trash-can");
-    setStatus("Recycle bin loaded. Select a file to view it.", "neutral");
+    // No toast here: the empty state on screen already says this, and a toast
+    // that fires on every refresh is what teaches people to ignore toasts.
+    showEmptyState("No file selected", "Choose a deleted file from the explorer to read it.", "ph-trash");
     return;
   }
 
@@ -3089,7 +3332,6 @@ async function deleteCurrentDocument(mode) {
       ? `${targetFile} will be moved straight to the archive, skipping the recycle bin. It can still be restored from there.`
       : `${targetFile} will be moved into the recycle bin and can be restored later.`,
     confirmLabel: mode === "hard" ? "Archive" : "Move To Bin",
-    confirmIcon: mode === "hard" ? "fa-box-archive" : "fa-trash-can",
     tone: mode === "hard" ? "danger" : "primary"
   });
 
@@ -3153,7 +3395,6 @@ async function hardDeleteCurrentDeletedDocument() {
     title: "Archive this markdown?",
     message: "The file stays on disk. It moves out of the recycle bin and into the archive, where it can still be restored or erased for good.",
     confirmLabel: "Archive",
-    confirmIcon: "fa-box-archive",
     tone: "danger"
   });
 
@@ -3403,8 +3644,8 @@ function openEditor({ mode, fileName, content }) {
   void renderEditorPreview();
 
   elements.saveDocBtn.innerHTML = mode === "edit"
-    ? '<i class="fa-solid fa-floppy-disk"></i> Save Changes'
-    : '<i class="fa-solid fa-floppy-disk"></i> Save New';
+    ? '<i class="ph ph-floppy-disk"></i> Save Changes'
+    : '<i class="ph ph-floppy-disk"></i> Save New';
 
   elements.editorModal.classList.add("open");
   elements.editorModal.setAttribute("aria-hidden", "false");
@@ -3454,7 +3695,6 @@ async function requestEditorClose() {
     title: "Discard unsaved changes?",
     message: "This document has edits that have not been saved. Closing the editor will lose them.",
     confirmLabel: "Discard Changes",
-    confirmIcon: "fa-trash-can",
     tone: "danger"
   });
 
@@ -3482,7 +3722,7 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
   if (state.docs.length === 0) {
     state.activeFile = null;
     updateActiveDocUI(null);
-    showEmptyState("No markdowns yet", "Upload a markdown or create one in the live editor.", "fa-file-circle-plus");
+    showEmptyState("No markdowns yet", "Upload a markdown or create one in the live editor.", "ph-file-plus");
     setStatus("No documents yet. Create or upload one to get started.", "neutral");
     return;
   }
@@ -3494,8 +3734,7 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
   if (!target) {
     state.activeFile = null;
     updateActiveDocUI(null);
-    showEmptyState("Select a markdown document", "Choose a file from a folder to load its content.", "fa-file-lines");
-    setStatus("Documents loaded. Select a file to view it.", "neutral");
+    showEmptyState("No file selected", "Pick a file from the explorer, or search across every document.", "ph-file-dashed");
     return;
   }
 
@@ -3592,7 +3831,6 @@ async function saveEditorDocument() {
           title: "Replace existing markdown?",
           message: `${fileName} already exists. Replace its content with what is in the editor now?`,
           confirmLabel: "Replace File",
-          confirmIcon: "fa-file-circle-check",
           tone: "primary"
         });
 
@@ -3679,7 +3917,6 @@ async function deleteDocumentByFile(file, mode) {
       ? `${file} will be moved straight to the archive, skipping the recycle bin. It can still be restored from there.`
       : `${file} will be moved into the recycle bin and can be restored later.`,
     confirmLabel: mode === "hard" ? "Archive" : "Move To Bin",
-    confirmIcon: mode === "hard" ? "fa-box-archive" : "fa-trash-can",
     tone: mode === "hard" ? "danger" : "primary"
   });
 
@@ -3767,7 +4004,6 @@ async function permanentlyDeleteArchivedDocument(file) {
     title: `Permanently delete ${originalFile}?`,
     message: "This erases the file from disk. It is the only action in this app that destroys data, and it cannot be undone.",
     confirmLabel: "Delete Forever",
-    confirmIcon: "fa-triangle-exclamation",
     tone: "danger"
   });
 
@@ -3809,7 +4045,6 @@ async function hardDeleteDeletedDocumentByFile(file) {
     title: "Archive this markdown?",
     message: "The file stays on disk. It moves out of the recycle bin and into the archive, where it can still be restored or erased for good.",
     confirmLabel: "Archive",
-    confirmIcon: "fa-box-archive",
     tone: "danger"
   });
 
@@ -3847,7 +4082,7 @@ async function initialize() {
   } catch (error) {
     console.error(error);
     setMeta("Failed to load documents");
-    showEmptyState("Document loading failed", error.message, "fa-triangle-exclamation");
+    showEmptyState("Document loading failed", error.message, "ph-warning");
     setStatus(error.message, "error");
   }
 }
@@ -4023,6 +4258,26 @@ elements.createFolderBtn.addEventListener("click", () => {
   openFolderModal({ mode: "create" });
 });
 
+// Arrow-key navigation over the tree, delegated so it survives every rebuild.
+elements.docList.addEventListener("keydown", handleTreeKeydown);
+
+elements.collapseAllBtn?.addEventListener("click", () => {
+  const groups = [...elements.docList.querySelectorAll(".tree-group")];
+  const anyExpanded = groups.some((group) => !group.classList.contains("is-collapsed"));
+
+  if (anyExpanded) {
+    for (const group of groups) {
+      state.collapsedFolderIds.add(group.dataset.folderKey);
+    }
+  } else {
+    state.collapsedFolderIds.clear();
+  }
+
+  elements.collapseAllBtn.setAttribute("aria-label", anyExpanded ? "Expand all folders" : "Collapse all folders");
+  elements.collapseAllBtn.title = anyExpanded ? "Expand all folders" : "Collapse all folders";
+  renderDocList();
+});
+
 elements.createFolderConfirmBtn.addEventListener("click", async () => {
   await handleFolderModalAction();
 });
@@ -4144,6 +4399,26 @@ elements.toggleSidebar.addEventListener("click", () => {
 
 elements.sidebarOverlay.addEventListener("click", () => {
   setNavOpen(false);
+});
+
+// "/" focuses search, the way it does in every other document browser. Ignored
+// while typing so it never eats a literal slash.
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+
+  const target = event.target;
+  const isTyping = target instanceof HTMLElement
+    && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+  if (isTyping || state.editorOpen || state.confirmOpen || state.unlockOpen || state.folderModalOpen) {
+    return;
+  }
+
+  event.preventDefault();
+  elements.searchInput.focus();
+  elements.searchInput.select();
 });
 
 // Escape dismisses exactly one layer, topmost first. The nav used to be checked
@@ -4283,7 +4558,8 @@ elements.dockOpenDocs.addEventListener("click", () => {
 });
 
 elements.dockSearch.addEventListener("click", () => {
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
   elements.searchInput.focus();
   if (elements.searchInput.value.trim()) {
     applySearch(elements.searchInput.value);

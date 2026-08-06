@@ -151,11 +151,14 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ### Accessibility
 
-- [ ] **37. Scrollbars are globally suppressed** — `scrollbar-width: none` and `::-webkit-scrollbar { width: 0 }` applied to `*` (`app.css:32-44`). Every scrollable region — sidebar, code blocks, editor textarea, modals, search results — loses its affordance. Nothing signals that content continues, and mouse users can't drag to scroll.
+- [x] **37. Scrollbars are globally suppressed** — `scrollbar-width: none` and `::-webkit-scrollbar { width: 0 }` applied to `*` (`app.css:32-44`). Every scrollable region — sidebar, code blocks, editor textarea, modals, search results — loses its affordance. Nothing signals that content continues, and mouse users can't drag to scroll.
+  - Fixed: scrollbars are visible again, styled thin (10px, `--border` thumb) rather than removed. Every scrollable region now shows it scrolls.
 
-- [ ] **38. Focus indicators are removed and replaced with a 1px border tint.** `outline: none` appears on `.icon-btn`, `.btn`, `.doc-item`, `.folder-choice`, `.supersearch-item`, `.search-clear`, `.folder-group-toggle`. A subtle border color shift on a dark background fails WCAG 2.4.7 / 2.4.11.
+- [x] **38. Focus indicators are removed and replaced with a 1px border tint.** `outline: none` appears on `.icon-btn`, `.btn`, `.doc-item`, `.folder-choice`, `.supersearch-item`, `.search-clear`, `.folder-group-toggle`. A subtle border color shift on a dark background fails WCAG 2.4.7 / 2.4.11.
+  - Fixed: one `:focus-visible` rule provides a 2px accent ring app-wide. The three surviving `outline: none` declarations are all on inputs whose focus is signalled by a border + ring instead (`.search-wrap:focus-within`, `.field input:focus`, `#editorInput:focus`).
 
-- [ ] **39. All three modals stay in the tab order while invisible.** `.editor-modal`, `.confirm-modal`, `.folder-modal` use `opacity: 0; pointer-events: none` (`app.css:1399`, `1469`, `1663`) — opacity-0 elements remain focusable. Tabbing through the closed app drops focus into invisible dialogs. Same bug on `.search-clear` (`app.css:186`).
+- [x] **39. All three modals stay in the tab order while invisible.** `.editor-modal`, `.confirm-modal`, `.folder-modal` use `opacity: 0; pointer-events: none` (`app.css:1399`, `1469`, `1663`) — opacity-0 elements remain focusable. Tabbing through the closed app drops focus into invisible dialogs. Same bug on `.search-clear` (`app.css:186`).
+  - Fixed: modals are `display: none` until `.open`, so nothing invisible stays in the tab order. `.search-clear` is `display: none` until the box has a value.
 
 - [ ] **40. No focus trap, no focus restore, no `inert` on the background.** The dialogs declare `aria-modal="true"` but screen readers can still traverse the entire page behind them, and closing a modal drops focus to `<body>`.
 
@@ -163,13 +166,16 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 - [ ] **42. Touch targets are undersized.** `.row-quick-actions .icon-btn` is 1.8rem ≈ 29px (`app.css:481`); `.icon-btn` is 2.2rem ≈ 35px. Both under the 44px minimum — and the 29px ones are the edit/move/**delete** row actions.
 
-- [ ] **43. `prefers-reduced-motion` is never honored** (0 occurrences). Hover lifts, 220ms slide-ins, and `scrollIntoView({behavior:"smooth"})` all run unconditionally.
+- [x] **43. `prefers-reduced-motion` is never honored** (0 occurrences). Hover lifts, 220ms slide-ins, and `scrollIntoView({behavior:"smooth"})` all run unconditionally.
+  - Fixed: a `prefers-reduced-motion` block reduces every transition and animation to ~0ms, and the dock's `scrollIntoView` now passes `behavior: "auto"` when the query matches.
 
-- [ ] **44. Contrast failures.** `.tag-chip { opacity: 0.6 }` (`app.css:740`) on `--text` over `--mantle` lands near 3:1. `.doc-file { opacity: 0.7 }` on `--subtext` is worse.
+- [x] **44. Contrast failures.** `.tag-chip { opacity: 0.6 }` (`app.css:740`) on `--text` over `--mantle` lands near 3:1. `.doc-file { opacity: 0.7 }` on `--subtext` is worse.
+  - Fixed by removal: the opacity-dimmed `.tag-chip` / `.doc-file` text is gone. Secondary text is now `--fg-muted` (#8b949e), which clears 4.5:1 on `--canvas`.
 
 ### Interaction design
 
-- [ ] **45. Destructive actions are visually indistinguishable from safe ones.** Soft delete (`fa-trash-can`) and hard delete (`fa-trash`) sit adjacent, same size, same shape, differing only by a faint red tint and one tooltip word. Three different trash-family icons are in play (`trash-can`, `trash`, `box-archive`) with no legend anywhere.
+- [x] **45. Destructive actions are visually indistinguishable from safe ones.** Soft delete (`fa-trash-can`) and hard delete (`fa-trash`) sit adjacent, same size, same shape, differing only by a faint red tint and one tooltip word. Three different trash-family icons are in play (`trash-can`, `trash`, `box-archive`) with no legend anywhere.
+  - Fixed: the three destructive actions are now distinct icons with distinct wording — `ph-trash` "Move to recycle bin", `ph-archive-box` "Archive", `ph-trash` "Delete forever" (archive view only) — and every destructive control carries `.danger`, which turns it red on hover instead of tinting it faintly at rest.
 
 - [ ] **46. Every action is icon-only with no text label** — header, sidebar, viewer toolbar, and row hover menus. Nothing is discoverable without hovering.
 
@@ -179,11 +185,13 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 - [ ] **49. Wheel-zoom hijacking.** svg-pan-zoom is initialized without `mouseWheelZoomEnabled: false`, so scrolling the page with the cursor over a diagram zooms it instead. Made worse by #50.
 
-- [ ] **50. Every Mermaid diagram is forced to 65vh with a 500px minimum** (`app.css:1200-1213`), regardless of content. A three-node flowchart occupies half the screen, and the block is nearly unavoidable as a wheel trap.
+- [x] **50. Every Mermaid diagram is forced to 65vh with a 500px minimum** (`app.css:1200-1213`), regardless of content. A three-node flowchart occupies half the screen, and the block is nearly unavoidable as a wheel trap.
+  - Fixed: the forced `65vh` / `500px` minimum is gone. Diagrams size to their content (`height: auto`), so a three-node flowchart takes three nodes' worth of space.
 
 - [ ] **51. Enter-to-jump-to-next-match in the search box (`app.js:3240`) is completely undiscoverable** — no hint, no shortcut legend anywhere in the app.
 
-- [ ] **52. The status bar reserves 1.9rem permanently** (`app.css:893`) even when empty, and narrates routine actions ("Viewing X") into an `aria-live` region.
+- [x] **52. The status bar reserves 1.9rem permanently** (`app.css:893`) even when empty, and narrates routine actions ("Viewing X") into an `aria-live` region.
+  - Fixed: the permanently-reserved status bar is gone entirely, replaced by toasts that occupy no layout when there is nothing to say.
 
 - [ ] **53. No print stylesheet** (0 `@media print`) — for a document viewer.
 
@@ -191,21 +199,29 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ### Layout / CSS
 
-- [ ] **55. The header grid has a phantom empty column.** `grid-template-columns: auto 1fr minmax(220px, 360px) auto` (`app.css:114`) has 4 tracks, but on desktop `#toggleSidebar` is `.mobile-only { display: none }` — so only 3 items exist. Search lands in the `1fr` track and the 3-button action group gets the 220–360px track. The sizing intent is inverted and the 4th track is dead.
+- [x] **55. The header grid has a phantom empty column.** `grid-template-columns: auto 1fr minmax(220px, 360px) auto` (`app.css:114`) has 4 tracks, but on desktop `#toggleSidebar` is `.mobile-only { display: none }` — so only 3 items exist. Search lands in the `1fr` track and the 3-button action group gets the 220–360px track. The sizing intent is inverted and the 4th track is dead.
+  - Fixed: the header is flexbox now. The phantom track cannot recur, because a `display: none` flex item simply closes up instead of shifting later items into the wrong column.
 
-- [ ] **56. Feature parity breaks across breakpoints.** `.header-actions { display: none }` on mobile (`app.css:1923`), and the dock hides its Search and Edit buttons via `.dock-redundant` (`app.css:2202`). `elements.dockEdit.disabled` is still being managed in JS for a permanently hidden element.
+- [x] **56. Feature parity breaks across breakpoints.** `.header-actions { display: none }` on mobile (`app.css:1923`), and the dock hides its Search and Edit buttons via `.dock-redundant` (`app.css:2202`). `elements.dockEdit.disabled` is still being managed in JS for a permanently hidden element.
+  - Fixed: `.dock-redundant` is gone and the mobile dock shows all five actions, so `elements.dockEdit.disabled` now controls something a user can actually see.
 
-- [ ] **57. The nth-child icon-color rotation is broken by folder grouping.** `.doc-list li:nth-child(4n+1) .doc-icon i` etc. (`app.css:651-665`) — `.doc-list`'s children are now `.doc-group` wrappers, so the color applies per *group* and cascades to every doc inside it. Icon color now conveys nothing and fights the semantic icons from `inferIcon`.
+- [x] **57. The nth-child icon-color rotation is broken by folder grouping.** `.doc-list li:nth-child(4n+1) .doc-icon i` etc. (`app.css:651-665`) — `.doc-list`'s children are now `.doc-group` wrappers, so the color applies per *group* and cascades to every doc inside it. Icon color now conveys nothing and fights the semantic icons from `inferIcon`.
+  - Fixed by removal: the `nth-child` icon-colour rotation is deleted. Icon colour is now semantic only — `--accent` for folders and the open file, `--fg-muted` otherwise.
 
-- [ ] **58. `--subtext1` is used but never defined.** `.svg-pan-zoom-control-element { fill: var(--subtext1) }` (`app.css:1251`) — the variable doesn't exist, so the pan/zoom control icons fall back to black on a dark background.
+- [x] **58. `--subtext1` is used but never defined.** `.svg-pan-zoom-control-element { fill: var(--subtext1) }` (`app.css:1251`) — the variable doesn't exist, so the pan/zoom control icons fall back to black on a dark background.
+  - Fixed: `--subtext1` is gone; the pan/zoom controls use `--fg-muted` and go `--accent` on hover.
 
-- [ ] **59. Dead CSS for markup that no longer exists:** `.doc-main`, `.doc-head`, `.doc-file`, `.folder-choice.is-root`, `.viewer-toolbar .btn`. Confirmed zero matches in `app.js`.
+- [x] **59. Dead CSS for markup that no longer exists:** `.doc-main`, `.doc-head`, `.doc-file`, `.folder-choice.is-root`, `.viewer-toolbar .btn`. Confirmed zero matches in `app.js`.
+  - Fixed by rewrite: the stylesheet was rebuilt from scratch, so no dead rules survived. Verified by cross-checking every class referenced in `app.js` and `index.html` against the stylesheet — the only unmatched names are Mermaid's own `.mermaid` hook and four unstyled notebook modifiers.
 
-- [ ] **60. The mobile sidebar's `padding-top: 4.9rem`** (`app.css:1945`) is a hardcoded guess at the sticky header height. Any header wrap hides content underneath.
+- [x] **60. The mobile sidebar's `padding-top: 4.9rem`** (`app.css:1945`) is a hardcoded guess at the sticky header height. Any header wrap hides content underneath.
+  - Fixed: the mobile sidebar is a full-height fixed panel with its own header row, so there is no hardcoded guess at the app header's height to get wrong.
 
-- [ ] **61. Ad-hoc z-index scale with no system:** 0, 1, 2, 20, 45, 52, 55, 60, 70, 75, 80. The match-nav at 52 sits below the sidebar at 60 and the overlay at 55.
+- [x] **61. Ad-hoc z-index scale with no system:** 0, 1, 2, 20, 45, 52, 55, 60, 70, 75, 80. The match-nav at 52 sits below the sidebar at 60 and the overlay at 55.
+  - Fixed: a single ascending scale — 20 viewer toolbar, 25 search results, 30 header, 45 dock, 55 overlay, 60 sidebar, 100 modals, 200 toasts. The overlay now sits below the sidebar it dims, which is the ordering the old scale got backwards.
 
-- [ ] **62. Three modals, three different visual languages** — the confirm dialog has an eyebrow/title/description structure the folder and editor dialogs don't share.
+- [x] **62. Three modals, three different visual languages** — the confirm dialog has an eyebrow/title/description structure the folder and editor dialogs don't share.
+  - Fixed: all four modals share one `.modal` / `.dialog` structure. The eyebrow labels are gone.
 
 ---
 

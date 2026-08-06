@@ -30,17 +30,20 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
   <!-- Third-party assets are pinned to exact versions and integrity-checked.
        When bumping a version, recompute the hash:
          curl -s <url> | openssl dgst -sha384 -binary | openssl base64 -A -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css"
-    integrity="sha384-h/hnnw1Bi4nbpD6kE7nYfCXzovi622sY5WBxww8ARKwpdLj5kUWjRuyiXaD1U2JT" crossorigin="anonymous"
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css"
+    integrity="sha384-6p9AefaqUhEVheRlj1mpAkbngHXy9mbYMrIdcIt4Jlc9lOLIablJq3bBsLOjGwZ7" crossorigin="anonymous"
+    referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/fill/style.css"
+    integrity="sha384-pPVoXE8ft+zxKtxIDDI7SfTK6y95NHm4qa+hKEg/hs8VkjW5IP+9/dGOPCbDpUPl" crossorigin="anonymous"
     referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
     integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
-  <link rel="stylesheet" href="css/app.css?v=28" />
+  <link rel="stylesheet" href="css/app.css?v=29" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -62,33 +65,28 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/app.js?v=28" defer></script>
+  <script src="js/app.js?v=29" defer></script>
 </head>
 
 <body>
-  <div class="bg-orb orb-1" aria-hidden="true"></div>
-  <div class="bg-orb orb-2" aria-hidden="true"></div>
-
   <div class="app-shell" id="appShell">
     <header class="app-header">
-      <button class="icon-btn mobile-only" id="toggleSidebar" aria-label="Toggle document list" aria-controls="sidebar"
+      <button class="icon-btn mobile-only" id="toggleSidebar" aria-label="Toggle file list" aria-controls="sidebar"
         aria-expanded="false">
-        <i class="fa-solid fa-bars"></i>
+        <i class="ph ph-list" aria-hidden="true"></i>
       </button>
 
-      <div class="brand">
-        <i class="fa-solid fa-book-open-reader"></i>
-        <div>
-          <h1>Markdown Docs Viewer</h1>
-          <p>Browse and search documents</p>
-        </div>
-      </div>
+      <a class="brand" href="#" aria-label="Markdown Docs Viewer home">
+        <span class="brand-mark" aria-hidden="true"><i class="ph ph-book-open-text"></i></span>
+        <span class="brand-text">Markdown Docs</span>
+      </a>
 
       <label class="search-wrap" for="searchInput">
-        <i class="fa-solid fa-magnifying-glass"></i>
-        <input id="searchInput" type="search" placeholder="Search docs, tags, and content..." autocomplete="off" />
+        <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+        <input id="searchInput" type="search" placeholder="Search files and contents" autocomplete="off" />
+        <kbd class="search-hint" aria-hidden="true">/</kbd>
         <button class="search-clear" id="clearSearchBtn" type="button" aria-label="Clear search" title="Clear search">
-          <i class="fa-solid fa-xmark"></i>
+          <i class="ph ph-x" aria-hidden="true"></i>
         </button>
       </label>
 
@@ -96,121 +94,128 @@
         <input id="uploadInput" type="file" accept=".md,.markdown,.mmd,.mermaid,.ipynb,text/markdown,text/plain"
           hidden />
 
-        <button class="icon-btn action-btn" id="uploadTrigger" aria-label="Upload document file"
-          title="Upload document">
-          <i class="fa-solid fa-file-arrow-up"></i>
+        <button class="icon-btn" id="lockToggleBtn" aria-label="Unlock editing" title="Unlock editing">
+          <i class="ph ph-lock-simple" aria-hidden="true"></i>
         </button>
 
-        <button class="icon-btn action-btn" id="newDocBtn" aria-label="Create new markdown" title="New markdown">
-          <i class="fa-solid fa-file-circle-plus"></i>
+        <button class="icon-btn" id="uploadTrigger" aria-label="Upload document file" title="Upload document">
+          <i class="ph ph-upload-simple" aria-hidden="true"></i>
         </button>
 
-        <button class="icon-btn action-btn" id="editDocBtn" aria-label="Edit current markdown"
-          title="Edit current markdown">
-          <i class="fa-solid fa-pen-to-square"></i>
+        <button class="icon-btn" id="editDocBtn" aria-label="Edit current document" title="Edit current document">
+          <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+        </button>
+
+        <button class="btn btn-primary btn-compact" id="newDocBtn" aria-label="Create new document" title="New document">
+          <i class="ph ph-plus" aria-hidden="true"></i>
+          <span>New</span>
         </button>
       </div>
     </header>
 
     <section class="supersearch-panel" id="superSearchPanel" aria-live="polite" hidden>
       <div class="supersearch-head">
-        <p><i class="fa-solid fa-bolt"></i> Supersearch</p>
+        <p>Top results</p>
         <span id="superSearchCount">0 results</span>
       </div>
 
-      <ul id="superSearchList" class="supersearch-list" aria-label="Supersearch results"></ul>
+      <ul id="superSearchList" class="supersearch-list" aria-label="Top search results"></ul>
     </section>
 
     <div class="layout">
-      <aside class="sidebar" id="sidebar" aria-label="Markdown documents panel">
-        <div class="sidebar-top">
-          <h2 id="sidebarTitle"><i class="fa-solid fa-folder-tree"></i> Markdowns</h2>
+      <aside class="sidebar" id="sidebar" aria-label="File explorer">
+        <div class="sidebar-head">
+          <h2 id="sidebarTitle">Files</h2>
 
           <div class="sidebar-actions">
-            <button class="icon-btn" id="lockToggleBtn" aria-label="Unlock editing" title="Unlock editing">
-              <i class="fa-solid fa-lock"></i>
+            <button class="icon-btn icon-btn-sm" id="createFolderBtn" aria-label="New folder" title="New folder">
+              <i class="ph ph-folder-plus" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn" id="createFolderBtn" aria-label="Create folder" title="Create folder">
-              <i class="fa-solid fa-folder-plus"></i>
+            <button class="icon-btn icon-btn-sm" id="collapseAllBtn" aria-label="Collapse all folders"
+              title="Collapse all folders">
+              <i class="ph ph-arrows-in-simple" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn" id="toggleRecycleBinBtn" aria-label="Open recycle bin" title="Open recycle bin">
-              <i class="fa-solid fa-trash-can"></i>
+            <button class="icon-btn icon-btn-sm" id="toggleRecycleBinBtn" aria-label="Show recycle bin"
+              aria-pressed="false" title="Recycle bin">
+              <i class="ph ph-trash" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn" id="toggleArchiveBtn" aria-label="Open archive" title="Open archive">
-              <i class="fa-solid fa-box-archive"></i>
+            <button class="icon-btn icon-btn-sm" id="toggleArchiveBtn" aria-label="Show archive" aria-pressed="false"
+              title="Archive">
+              <i class="ph ph-archive-box" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn" id="refreshDocs" aria-label="Refresh document list" title="Refresh list">
-              <i class="fa-solid fa-rotate"></i>
+            <button class="icon-btn icon-btn-sm" id="refreshDocs" aria-label="Refresh file list" title="Refresh">
+              <i class="ph ph-arrow-clockwise" aria-hidden="true"></i>
             </button>
           </div>
         </div>
 
-        <p id="searchMeta" class="meta">Loading documents...</p>
-        <ul id="docList" class="doc-list" aria-label="Markdown documents"></ul>
+        <p id="searchMeta" class="sidebar-meta">Loading files...</p>
+
+        <ul id="docList" class="tree" aria-labelledby="sidebarTitle"></ul>
       </aside>
 
-      <button class="sidebar-overlay" id="sidebarOverlay" aria-label="Close document list"></button>
+      <button class="sidebar-overlay" id="sidebarOverlay" aria-label="Close file list"></button>
 
       <main class="viewer">
         <div class="viewer-toolbar" id="viewerToolbar">
-          <p class="viewer-title" id="activeDocLabel">
-            <i class="fa-solid fa-file-lines"></i>
-            No document selected
-          </p>
+          <div class="viewer-heading">
+            <p class="viewer-title" id="activeDocLabel">
+              <i class="ph ph-file-text" aria-hidden="true"></i>
+              <span>No file selected</span>
+            </p>
+            <p class="viewer-meta" id="activeDocMeta"></p>
+          </div>
 
           <div class="match-nav" id="matchNav" aria-live="polite" hidden>
-            <span class="match-nav-meta" aria-hidden="true">
-              <i class="fa-solid fa-crosshairs"></i>
-              <span class="match-nav-label" id="matchNavLabel">0 / 0</span>
-            </span>
+            <span class="match-nav-label" id="matchNavLabel">0 / 0</span>
 
-            <button class="icon-btn match-nav-btn" id="matchPrevBtn" type="button" aria-label="Previous match">
-              <i class="fa-solid fa-chevron-left"></i>
+            <button class="icon-btn icon-btn-sm" id="matchPrevBtn" type="button" aria-label="Previous match"
+              title="Previous match">
+              <i class="ph ph-caret-left" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn match-nav-btn" id="matchNextBtn" type="button" aria-label="Next match">
-              <i class="fa-solid fa-chevron-right"></i>
+            <button class="icon-btn icon-btn-sm" id="matchNextBtn" type="button" aria-label="Next match"
+              title="Next match">
+              <i class="ph ph-caret-right" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn match-nav-btn match-nav-close" id="matchCloseBtn" type="button"
-              aria-label="Exit search mode" title="Exit search mode">
-              <i class="fa-solid fa-xmark"></i>
+            <button class="icon-btn icon-btn-sm" id="matchCloseBtn" type="button" aria-label="Exit search mode"
+              title="Exit search mode">
+              <i class="ph ph-x" aria-hidden="true"></i>
             </button>
           </div>
 
           <div class="viewer-actions">
-            <button class="icon-btn viewer-action-btn" id="editCurrentDocBtn" type="button"
-              aria-label="Edit currently open markdown" title="Edit this document">
-              <i class="fa-solid fa-pen-to-square"></i>
+            <button class="icon-btn" id="editCurrentDocBtn" type="button" aria-label="Edit this document"
+              title="Edit this document">
+              <i class="ph ph-pencil-simple" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn viewer-action-btn" id="softDeleteDocBtn" type="button"
-              aria-label="Move current markdown to recycle bin" title="Move to recycle bin">
-              <i class="fa-solid fa-trash-can"></i>
+            <button class="icon-btn" id="softDeleteDocBtn" type="button" aria-label="Move this document to recycle bin"
+              title="Move to recycle bin">
+              <i class="ph ph-trash" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn danger viewer-action-btn" id="hardDeleteDocBtn" type="button"
-              aria-label="Archive current markdown" title="Archive">
-              <i class="fa-solid fa-box-archive"></i>
+            <button class="icon-btn danger" id="hardDeleteDocBtn" type="button" aria-label="Archive this document"
+              title="Archive">
+              <i class="ph ph-archive-box" aria-hidden="true"></i>
             </button>
 
-            <button class="icon-btn viewer-action-btn" id="restoreDocBtn" type="button" aria-label="Restore deleted markdown"
-              title="Restore from recycle bin" hidden>
-              <i class="fa-solid fa-trash-arrow-up"></i>
+            <button class="icon-btn" id="restoreDocBtn" type="button" aria-label="Restore this document"
+              title="Restore" hidden>
+              <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
             </button>
           </div>
         </div>
 
-        <p class="status-msg" id="statusMsg" role="status" aria-live="polite"></p>
-
         <section id="emptyState" class="empty-state">
-          <i class="fa-solid fa-file-circle-question"></i>
-          <h3>Select a markdown document</h3>
-          <p>Use the list on the left, or search by title/content.</p>
+          <i class="ph ph-file-dashed" aria-hidden="true"></i>
+          <h3>No file selected</h3>
+          <p>Pick a file from the explorer, or search across every document.</p>
         </section>
 
         <article id="docContent" class="markdown-body" aria-live="polite"></article>
@@ -220,160 +225,150 @@
   </div>
 
   <nav class="mobile-dock" aria-label="Mobile actions">
-    <button class="dock-btn dock-redundant" id="dockSearch" type="button" aria-label="Search markdowns">
-      <i class="fa-solid fa-magnifying-glass"></i>
+    <button class="dock-btn" id="dockSearch" type="button" aria-label="Search documents">
+      <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
       <span>Search</span>
     </button>
 
-    <button class="dock-btn" id="dockOpenDocs" type="button" aria-label="Open document list">
-      <i class="fa-solid fa-list"></i>
-      <span>Docs</span>
+    <button class="dock-btn" id="dockOpenDocs" type="button" aria-label="Open file list">
+      <i class="ph ph-list-bullets" aria-hidden="true"></i>
+      <span>Files</span>
     </button>
 
     <button class="dock-btn" id="dockUpload" type="button" aria-label="Upload document">
-      <i class="fa-solid fa-file-arrow-up"></i>
+      <i class="ph ph-upload-simple" aria-hidden="true"></i>
       <span>Upload</span>
     </button>
 
-    <button class="dock-btn" id="dockNew" type="button" aria-label="Create markdown">
-      <i class="fa-solid fa-file-circle-plus"></i>
+    <button class="dock-btn" id="dockNew" type="button" aria-label="Create document">
+      <i class="ph ph-file-plus" aria-hidden="true"></i>
       <span>New</span>
     </button>
 
-    <button class="dock-btn dock-redundant" id="dockEdit" type="button" aria-label="Edit current markdown">
-      <i class="fa-solid fa-pen-to-square"></i>
+    <button class="dock-btn" id="dockEdit" type="button" aria-label="Edit current document">
+      <i class="ph ph-pencil-simple" aria-hidden="true"></i>
       <span>Edit</span>
     </button>
   </nav>
 
-  <div class="editor-modal" id="editorModal" aria-hidden="true">
-    <button class="editor-backdrop" id="editorBackdrop" aria-label="Close editor"></button>
+  <!-- Toasts announce every completed action. Errors interrupt (assertive);
+       everything else is polite so it does not cut off a screen reader. -->
+  <div class="toast-region" id="toastRegion" role="region" aria-label="Notifications">
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-relevant="additions"></div>
+    <div class="toast-stack toast-stack-urgent" id="toastStackUrgent" aria-live="assertive"
+      aria-relevant="additions"></div>
+  </div>
+
+  <div class="modal" id="editorModal" aria-hidden="true">
+    <button class="modal-backdrop" id="editorBackdrop" aria-label="Close editor"></button>
 
     <section class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
       <div class="editor-toolbar">
-        <h2 id="editorTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> Live Markdown Editor</h2>
+        <h2 id="editorTitle">Editor</h2>
 
-        <label class="editor-filename" for="editorFileName">
-          File Name
-          <input id="editorFileName" type="text" placeholder="example-notes.md" />
+        <label class="field field-inline" for="editorFileName">
+          <span>File name</span>
+          <input id="editorFileName" type="text" placeholder="example-notes.md" spellcheck="false" />
         </label>
 
-        <label class="editor-filename" for="editorFolderSelect" id="editorFolderField">
-          Folder
+        <label class="field field-inline" for="editorFolderSelect" id="editorFolderField">
+          <span>Folder</span>
           <select id="editorFolderSelect"></select>
         </label>
 
         <div class="editor-actions">
           <button class="btn btn-primary" id="saveDocBtn" type="button">
-            <i class="fa-solid fa-floppy-disk"></i> Save
+            <i class="ph ph-floppy-disk" aria-hidden="true"></i>
+            <span>Save</span>
           </button>
 
-          <button class="icon-btn" id="closeEditorBtn" aria-label="Close editor" type="button">
-            <i class="fa-solid fa-xmark"></i>
+          <button class="icon-btn" id="closeEditorBtn" aria-label="Close editor" title="Close editor" type="button">
+            <i class="ph ph-x" aria-hidden="true"></i>
           </button>
         </div>
       </div>
 
       <div class="editor-grid">
         <section class="editor-pane">
-          <p class="editor-label"><i class="fa-solid fa-keyboard"></i> Markdown Input</p>
-          <textarea id="editorInput" spellcheck="false" placeholder="# Start writing markdown..."></textarea>
+          <p class="editor-label">Markdown</p>
+          <textarea id="editorInput" spellcheck="false" placeholder="# Start writing"
+            aria-label="Markdown source"></textarea>
         </section>
 
         <section class="editor-pane">
-          <p class="editor-label"><i class="fa-solid fa-eye"></i> Live Preview</p>
+          <p class="editor-label">Preview</p>
           <article id="editorPreview" class="markdown-body editor-preview visible"></article>
         </section>
       </div>
     </section>
   </div>
 
-  <div class="confirm-modal" id="confirmModal" aria-hidden="true">
-    <button class="confirm-backdrop" id="confirmBackdrop" aria-label="Cancel confirmation"></button>
+  <div class="modal" id="confirmModal" aria-hidden="true">
+    <button class="modal-backdrop" id="confirmBackdrop" aria-label="Cancel"></button>
 
-    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle"
+    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle"
       aria-describedby="confirmMessage">
-      <p class="confirm-eyebrow">Confirm Action</p>
       <h2 id="confirmTitle">Please confirm this action</h2>
       <p id="confirmMessage">Are you sure you want to continue?</p>
 
-      <div class="confirm-actions">
-        <button class="btn" id="confirmCancelBtn" type="button">
-          <i class="fa-solid fa-ban"></i> Cancel
-        </button>
-
-        <button class="btn btn-danger" id="confirmProceedBtn" type="button">
-          <i class="fa-solid fa-check"></i> Continue
-        </button>
+      <div class="dialog-actions">
+        <button class="btn" id="confirmCancelBtn" type="button">Cancel</button>
+        <button class="btn btn-danger" id="confirmProceedBtn" type="button">Continue</button>
       </div>
     </section>
   </div>
 
-  <div class="confirm-modal" id="unlockModal" aria-hidden="true">
-    <button class="confirm-backdrop" id="unlockBackdrop" aria-label="Cancel unlock"></button>
+  <div class="modal" id="unlockModal" aria-hidden="true">
+    <button class="modal-backdrop" id="unlockBackdrop" aria-label="Cancel unlock"></button>
 
-    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="unlockTitle"
+    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="unlockTitle"
       aria-describedby="unlockMessage">
-      <p class="confirm-eyebrow">Editor Access</p>
       <h2 id="unlockTitle">Unlock editing</h2>
       <p id="unlockMessage">Reading is open to everyone. Creating, editing and deleting documents needs the editor
         token from the server log (or your <code>MDVIEWER_TOKEN</code>).</p>
 
-      <label class="folder-name-field" for="unlockTokenInput">
+      <label class="field" for="unlockTokenInput">
         <span>Editor token</span>
         <input id="unlockTokenInput" type="password" placeholder="Paste token" autocomplete="current-password" />
       </label>
 
-      <div class="confirm-actions">
-        <button class="btn" id="unlockCancelBtn" type="button">
-          <i class="fa-solid fa-ban"></i> Cancel
-        </button>
-
-        <button class="btn btn-primary" id="unlockConfirmBtn" type="button">
-          <i class="fa-solid fa-lock-open"></i> Unlock
-        </button>
+      <div class="dialog-actions">
+        <button class="btn" id="unlockCancelBtn" type="button">Cancel</button>
+        <button class="btn btn-primary" id="unlockConfirmBtn" type="button">Unlock</button>
       </div>
     </section>
   </div>
 
-  <div class="folder-modal" id="folderModal" aria-hidden="true">
-    <button class="folder-backdrop" id="folderBackdrop" aria-label="Close folder manager"></button>
+  <div class="modal" id="folderModal" aria-hidden="true">
+    <button class="modal-backdrop" id="folderBackdrop" aria-label="Close folder manager"></button>
 
-    <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle"
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle"
       aria-describedby="folderDescription">
-      <div class="folder-dialog-head">
-        <div class="folder-dialog-copy">
-          <p class="folder-eyebrow">Folders</p>
+      <div class="dialog-head">
+        <div>
           <h2 id="folderTitle">Manage folders</h2>
-          <p id="folderDescription">Create, rename, delete, or move documents without changing the physical file layout.
-          </p>
+          <p id="folderDescription">Create, rename, delete, or move documents without changing the physical file
+            layout.</p>
         </div>
 
-        <button class="icon-btn" id="closeFolderModalBtn" aria-label="Close folder manager" type="button">
-          <i class="fa-solid fa-xmark"></i>
+        <button class="icon-btn" id="closeFolderModalBtn" aria-label="Close folder manager" title="Close"
+          type="button">
+          <i class="ph ph-x" aria-hidden="true"></i>
         </button>
       </div>
 
-      <label class="folder-name-field" for="folderNameInput">
+      <label class="field" for="folderNameInput">
         <span>Folder name</span>
-        <div class="folder-create-row">
+        <div class="field-row">
           <input id="folderNameInput" type="text" placeholder="Project Alpha" autocomplete="off" />
-          <button class="btn btn-primary" id="createFolderConfirmBtn" type="button">
-            <i class="fa-solid fa-folder-plus"></i> Create Folder
-          </button>
+          <button class="btn btn-primary" id="createFolderConfirmBtn" type="button">Create folder</button>
         </div>
       </label>
 
       <div class="folder-picker" id="folderPicker">
-        <div class="folder-picker-head">
-          <span>Existing folders</span>
-        </div>
-
+        <p class="folder-picker-head">Existing folders</p>
         <div class="folder-picker-list" id="folderPickerList"></div>
-
-        <button class="btn folder-root-btn" id="moveToRootBtn" type="button">
-          <i class="fa-solid fa-layer-group"></i> Move To Ungrouped
-        </button>
+        <button class="btn folder-root-btn" id="moveToRootBtn" type="button">Move to Ungrouped</button>
       </div>
     </section>
   </div>
