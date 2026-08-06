@@ -860,33 +860,79 @@ kbd {
   min-width: 0;
 }
 
-.viewer-title {
-  margin: 0;
+/* Breadcrumbs: ancestors are buttons back into the tree, the file itself is
+   plain text. Ancestors shrink before the file name does, so the thing you are
+   actually looking at is the last thing to be truncated. */
+.breadcrumbs {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg);
+  gap: 2px;
   min-width: 0;
-}
-
-.viewer-title i {
-  color: var(--fg-muted);
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.viewer-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
   font-size: 13px;
 }
 
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 22ch;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crumb>span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb i {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+button.crumb:hover,
+button.crumb:focus-visible {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.crumb-overflow {
+  padding: 2px 4px;
+  max-width: none;
+}
+
+/* The open file: not a link, and the last to give up space. */
+.crumb-current {
+  flex: 0 1 auto;
+  max-width: none;
+  padding-left: 2px;
+  color: var(--fg);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: default;
+}
+
+.crumb-current i {
+  color: var(--fg-muted);
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
 .viewer-meta {
-  margin: 1px 0 0 24px;
+  margin: 1px 0 0 28px;
   font-size: 11px;
   color: var(--fg-subtle);
   white-space: nowrap;

@@ -17,7 +17,7 @@ const elements = {
   softDeleteDocBtn: document.getElementById("softDeleteDocBtn"),
   hardDeleteDocBtn: document.getElementById("hardDeleteDocBtn"),
   restoreDocBtn: document.getElementById("restoreDocBtn"),
-  activeDocLabel: document.getElementById("activeDocLabel"),
+  breadcrumbs: document.getElementById("breadcrumbs"),
   activeDocMeta: document.getElementById("activeDocMeta"),
   matchNav: document.getElementById("matchNav"),
   matchNavLabel: document.getElementById("matchNavLabel"),
@@ -1402,11 +1402,153 @@ function setMeta(message) {
   elements.searchMeta.textContent = message;
 }
 
+// --- Breadcrumbs ----------------------------------------------------------
+// With folders nesting arbitrarily, "which folder am I in" stops being obvious
+// from the tree alone once a branch is scrolled or collapsed. The trail answers
+// it, and each ancestor is a way back to that folder in the tree.
+
+// Beyond this many crumbs the middle ancestors collapse behind an overflow
+// button, so a deep path cannot push the file name out of view.
+const BREADCRUMB_MAX_CRUMBS = 4;
+
+function scrollTreeRowIntoView(row) {
+  // Scrolling is the least important half of "reveal this folder", so it must
+  // not be able to take the expand-and-focus half down with it.
+  if (!row || typeof row.scrollIntoView !== "function") {
+    return;
+  }
+
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  row.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
+}
+
+function revealFolderInTree(folderId) {
+  // Expanding the whole ancestor chain, not just the folder, so revealing a
+  // deep folder cannot leave it hidden inside a collapsed parent.
+  for (const id of folderPathIds(folderId)) {
+    state.collapsedFolderIds.delete(id);
+  }
+
+  renderDocList();
+
+  const row = findFolderRow(folderId);
+  scrollTreeRowIntoView(row);
+  row?.querySelector(".tree-row-btn")?.focus();
+
+  if (window.innerWidth <= MOBILE_BREAKPOINT) {
+    setNavOpen(true);
+  }
+}
+
+function buildCrumbButton(label, { title = "", icon = "", onClick }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "crumb";
+  button.title = title || label;
+  button.innerHTML = icon ? `<i class="ph ${icon}" aria-hidden="true"></i><span></span>` : "<span></span>";
+  button.querySelector("span").textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function appendCrumbSeparator(container) {
+  const sep = document.createElement("i");
+  sep.className = "ph ph-caret-right crumb-sep";
+  sep.setAttribute("aria-hidden", "true");
+  container.appendChild(sep);
+}
+
+function renderBreadcrumbs({ iconClass, label, folderId, rootLabel }) {
+  const nav = elements.breadcrumbs;
+  if (!nav) {
+    return;
+  }
+
+  nav.innerHTML = "";
+
+  // Root crumb: the scope being browsed, not a folder.
+  const rootIcon = state.viewMode === "archive"
+    ? "ph-archive-box"
+    : state.viewMode === "recycle" ? "ph-trash" : "ph-house";
+
+  const crumbs = [
+    buildCrumbButton(rootLabel, {
+      icon: rootIcon,
+      title: `Back to the top of ${rootLabel}`,
+      onClick: () => {
+        elements.docList.scrollTo({ top: 0 });
+        if (window.innerWidth <= MOBILE_BREAKPOINT) {
+          setNavOpen(true);
+        }
+      }
+    })
+  ];
+
+  const ancestors = folderId ? folderPathIds(folderId) : [];
+  for (const id of ancestors) {
+    const folder = getFolderRecord(id);
+    if (!folder) {
+      continue;
+    }
+
+    crumbs.push(buildCrumbButton(folder.name, {
+      title: `Show ${folder.path} in the file tree`,
+      onClick: () => revealFolderInTree(id)
+    }));
+  }
+
+  // Everything except the root and the last folder can fold away; the file name
+  // is rendered separately and always survives.
+  const overflowCount = crumbs.length - (BREADCRUMB_MAX_CRUMBS - 1);
+  if (overflowCount > 1) {
+    const hidden = crumbs.splice(1, overflowCount);
+    const hiddenIds = ancestors.slice(0, overflowCount);
+
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "crumb crumb-overflow";
+    more.title = "Show the folders in between";
+    more.setAttribute("aria-label", `${hidden.length} more folders`);
+    more.setAttribute("aria-haspopup", "menu");
+    more.innerHTML = '<i class="ph ph-dots-three" aria-hidden="true"></i>';
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const rect = more.getBoundingClientRect();
+      openContextMenu(rect.left, rect.bottom + 4, hiddenIds.map((id) => ({
+        label: getFolderRecord(id)?.name || id,
+        icon: "ph-folder",
+        action: () => revealFolderInTree(id)
+      })));
+    });
+
+    crumbs.splice(1, 0, more);
+  }
+
+  crumbs.forEach((crumb, index) => {
+    if (index > 0) {
+      appendCrumbSeparator(nav);
+    }
+    nav.appendChild(crumb);
+  });
+
+  appendCrumbSeparator(nav);
+
+  const current = document.createElement("span");
+  current.className = "crumb crumb-current";
+  current.setAttribute("aria-current", "page");
+  current.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i><span></span>`;
+  current.querySelector("span").textContent = label;
+  nav.appendChild(current);
+}
+
 // The tree rows are one line each, so the size/date/folder facts they used to
 // carry as chips live here instead, next to the file they describe.
-function setViewerHeading(iconClass, label, metaParts) {
-  elements.activeDocLabel.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i><span></span>`;
-  elements.activeDocLabel.querySelector("span").textContent = label;
+function setViewerHeading(iconClass, label, metaParts, folderId = null) {
+  const rootLabel = state.viewMode === "archive"
+    ? "Archive"
+    : state.viewMode === "recycle" ? "Recycle bin" : "Files";
+
+  renderBreadcrumbs({ iconClass, label, folderId, rootLabel });
 
   if (elements.activeDocMeta) {
     elements.activeDocMeta.textContent = (metaParts || []).filter(Boolean).join("  ·  ");
@@ -1433,7 +1575,7 @@ function updateActiveDocUI(fileName) {
       inArchive ? "Archived" : "In recycle bin",
       deletedDoc ? formatBytes(deletedDoc.size) : "",
       deletedDoc?.deletedAt ? `deleted ${formatDate(deletedDoc.deletedAt)}` : ""
-    ]);
+    ], deletedDoc?.folderId || null);
     elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
@@ -1445,11 +1587,11 @@ function updateActiveDocUI(fileName) {
 
   const notebookFile = isNotebookFile(fileName);
   const doc = getDocByFile(fileName);
+  // The folder is in the breadcrumb trail now, so it is not repeated here.
   setViewerHeading(notebookFile ? "ph-file-code" : "ph-file-text", fileName, [
-    doc ? getFolderLabel(doc.folderId) : "",
     doc ? formatBytes(doc.size) : "",
     doc?.updatedAt ? `updated ${formatDate(doc.updatedAt)}` : ""
-  ]);
+  ], doc?.folderId || null);
   elements.editDocBtn.disabled = notebookFile;
   elements.editCurrentDocBtn.disabled = notebookFile;
   elements.dockEdit.disabled = notebookFile;
