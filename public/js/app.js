@@ -10,6 +10,7 @@ const elements = {
   uploadInput: document.getElementById("uploadInput"),
   createFolderBtn: document.getElementById("createFolderBtn"),
   collapseAllBtn: document.getElementById("collapseAllBtn"),
+  closeSidebarBtn: document.getElementById("closeSidebarBtn"),
   newDocBtn: document.getElementById("newDocBtn"),
   editDocBtn: document.getElementById("editDocBtn"),
   editCurrentDocBtn: document.getElementById("editCurrentDocBtn"),
@@ -1975,7 +1976,7 @@ function renderMathBlocks(root) {
         window.katex.render(tex, node, {
           displayMode: true,
           throwOnError: false,
-          errorColor: "#d2635c"
+          errorColor: "#eb9b96"
         });
       } catch (error) {
         console.error("Math block rendering failed", error);
@@ -1999,7 +2000,7 @@ function renderMathBlocks(root) {
       ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
       processEscapes: true,
       throwOnError: false,
-      errorColor: "#d2635c"
+      errorColor: "#eb9b96"
     });
   } catch (error) {
     console.error("Math rendering failed", error);
@@ -2267,11 +2268,11 @@ function ensureMermaidInitialized() {
     darkMode: true,
     fontFamily: '"Inter", sans-serif',
     themeVariables: {
-      primaryColor: "#121820",
-      primaryTextColor: "#e3ebf2",
-      primaryBorderColor: "#26313c",
-      lineColor: "#7f909f",
-      textColor: "#e3ebf2"
+      primaryColor: "#0c1214",
+      primaryTextColor: "#dce7e5",
+      primaryBorderColor: "#1c262a",
+      lineColor: "#86a09d",
+      textColor: "#dce7e5"
     },
     er: {
       useMaxWidth: true
@@ -2280,24 +2281,24 @@ function ensureMermaidInitialized() {
       /* Mermaid's base theme still paints light shapes, so pin every fill to
          the surface colour rather than fighting it case by case. */
       rect, polygon, path, circle {
-        fill: #121820 !important;
-        stroke: #26313c !important;
+        fill: #0c1214 !important;
+        stroke: #1c262a !important;
       }
 
       .er.entityBox, .entityBox {
-        fill: #1b232c !important;
-        stroke: #3a4a58 !important;
+        fill: #131b1e !important;
+        stroke: #2e3d42 !important;
         stroke-width: 1px !important;
       }
 
       text, tspan {
-        fill: #e3ebf2 !important;
+        fill: #dce7e5 !important;
         font-family: "JetBrains Mono", monospace !important;
         font-size: 11px !important;
       }
 
       line, .relationshipLine {
-        stroke: #7f909f !important;
+        stroke: #86a09d !important;
         stroke-width: 1px !important;
       }
 
@@ -2308,7 +2309,7 @@ function ensureMermaidInitialized() {
       [fill="#ECECFF"],
       [fill="#fff5ad"],
       [fill="white"] {
-        fill: #121820 !important;
+        fill: #0c1214 !important;
       }
     `
   });
@@ -3284,6 +3285,26 @@ function buildTreeAction(label, iconClass, handler, { danger = false, disabled =
   return button;
 }
 
+// On a phone there is no hover, so the per-row buttons would have to be shown
+// permanently — three to five 44px targets, which leaves a ~280px drawer almost
+// no room for the filename. One overflow button opens the same actions instead.
+function buildOverflowAction(getItems) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tree-action tree-action-more";
+  button.title = "More actions";
+  button.setAttribute("aria-label", "More actions");
+  button.setAttribute("aria-haspopup", "menu");
+  button.innerHTML = '<i class="ph ph-dots-three-vertical" aria-hidden="true"></i>';
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = button.getBoundingClientRect();
+    openContextMenu(rect.left, rect.bottom + 4, getItems());
+  });
+  return button;
+}
+
 function enableDocDrag(row, doc) {
   row.draggable = true;
 
@@ -3473,7 +3494,9 @@ function buildFolderActions(node) {
 
     buildTreeAction(`Delete ${folder.name}`, "ph-trash", () => {
       void deleteFolderById(folder.id);
-    }, { danger: true })
+    }, { danger: true }),
+
+    buildOverflowAction(() => buildFolderContextItems(folder))
   );
 
   return actions;
@@ -3567,7 +3590,8 @@ function buildDocRow(doc, depth) {
           }
         },
         { danger: true }
-      )
+      ),
+      buildOverflowAction(() => buildDocContextItems(doc))
     );
   } else {
     actions.append(
@@ -3577,7 +3601,8 @@ function buildDocRow(doc, depth) {
       buildTreeAction("Rename", "ph-cursor-text", () => beginInlineRename(doc.file)),
       buildTreeAction("Move to recycle bin", "ph-trash", () => {
         void deleteFiles(resolveTargetFiles(doc.file), "soft");
-      }, { danger: true })
+      }, { danger: true }),
+      buildOverflowAction(() => buildDocContextItems(doc))
     );
 
     enableDocDrag(row, doc);
@@ -5099,6 +5124,11 @@ window.addEventListener("mousedown", (event) => {
 window.addEventListener("blur", closeContextMenu);
 window.addEventListener("resize", closeContextMenu);
 document.addEventListener("scroll", closeContextMenu, true);
+
+// The mobile drawer covers the header, so it needs its own way out.
+elements.closeSidebarBtn?.addEventListener("click", () => {
+  setNavOpen(false);
+});
 
 elements.collapseAllBtn?.addEventListener("click", () => {
   const groups = [...elements.docList.querySelectorAll(".tree-group")];

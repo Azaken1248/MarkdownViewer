@@ -1,53 +1,53 @@
 /* ==========================================================================
    Markdown Docs Viewer
-   Palette: deep slate with a muted teal accent. Flat opaque surfaces, 1px
-   hairline borders, no blur, no gradients. Borders do the separating work
-   that shadows used to.
+   Palette: near-black surfaces with pastel accents led by teal. Flat opaque
+   surfaces, 1px hairline borders, no blur, no gradients. Borders do the
+   separating work that shadows used to.
    ========================================================================== */
 
 :root {
   /* Surfaces, darkest to lightest */
-  --canvas-inset: #06090b;
-  --canvas: #0b0f12;
-  --surface: #121820;
-  --raised: #1b232c;
-  --raised-hover: #26313c;
+  --canvas-inset: #030506;
+  --canvas: #06090a;
+  --surface: #0c1214;
+  --raised: #131b1e;
+  --raised-hover: #1c262a;
 
   /* Borders */
-  --border: #26313c;
-  --border-muted: #1b232c;
-  --border-strong: #3a4a58;
+  --border: #1c262a;
+  --border-muted: #131b1e;
+  --border-strong: #2e3d42;
 
   /* Text */
-  --fg: #e3ebf2;
-  --fg-muted: #7f909f;
-  --fg-subtle: #5f707e;
+  --fg: #dce7e5;
+  --fg-muted: #86a09d;
+  --fg-subtle: #5f7573;
   --fg-on-emphasis: #ffffff;
 
   /* Accents */
-  --accent: #4fa8a0;
-  --accent-emphasis: #2f7f79;
-  --accent-subtle: rgba(79, 168, 160, 0.15);
-  --accent-muted: rgba(79, 168, 160, 0.4);
+  --accent: #8ed9cf;
+  --accent-emphasis: #3f8d84;
+  --accent-subtle: rgba(142, 217, 207, 0.12);
+  --accent-muted: rgba(142, 217, 207, 0.32);
   /* Opaque equivalent of accent-subtle, for rows that need a solid backdrop
      (selected rows sit under an opaque action plate that must match). */
-  --selected: #12262a;
-  --selected-hover: #173236;
+  --selected: #0e2221;
+  --selected-hover: #14302d;
 
-  --success: #4f9e6a;
-  --success-emphasis: #2f7048;
-  --success-subtle: rgba(79, 158, 106, 0.15);
+  --success: #93d3a5;
+  --success-emphasis: #2f6b46;
+  --success-subtle: rgba(147, 211, 165, 0.12);
 
-  --danger: #d2635c;
-  --danger-emphasis: #a8443e;
-  --danger-subtle: rgba(210, 99, 92, 0.15);
+  --danger: #eb9b96;
+  --danger-emphasis: #9c463f;
+  --danger-subtle: rgba(235, 155, 150, 0.12);
 
-  --attention: #c79a3c;
-  --attention-emphasis: #8a6a26;
-  --attention-subtle: rgba(199, 154, 60, 0.18);
+  --attention: #e0c48a;
+  --attention-emphasis: #7d6631;
+  --attention-subtle: rgba(224, 196, 138, 0.14);
 
-  --done: #9b7fd4;
-  --done-subtle: rgba(155, 127, 212, 0.15);
+  --done: #bcaae8;
+  --done-subtle: rgba(188, 170, 232, 0.12);
 
   /* Geometry */
   --radius-lg: 12px;
@@ -55,8 +55,8 @@
   --radius-sm: 4px;
 
   /* The only shadows left are for things that genuinely float above the page. */
-  --shadow-overlay: 0 8px 24px rgba(3, 6, 8, 0.78);
-  --shadow-dialog: 0 16px 32px rgba(3, 6, 8, 0.88);
+  --shadow-overlay: 0 8px 24px rgba(0, 2, 2, 0.8);
+  --shadow-dialog: 0 16px 32px rgba(0, 2, 2, 0.9);
 
   --tree-row-height: 26px;
   --tree-indent: 14px;
@@ -680,7 +680,7 @@ kbd {
 }
 
 .tree-row.is-active .tree-actions {
-  background: #12262a;
+  background: #0e2221;
 }
 
 .tree-row:focus-within .tree-actions,
@@ -728,6 +728,11 @@ kbd {
 .tree-action:disabled:hover {
   background: transparent;
   color: var(--fg-muted);
+}
+
+/* The overflow button only exists for touch, where hover actions cannot work. */
+.tree-action-more {
+  display: none;
 }
 
 /* Indent guides: one hairline per nesting level, drawn on the child list. */
@@ -1354,7 +1359,7 @@ kbd {
 .hljs-doctag,
 .hljs-name,
 .hljs-strong {
-  color: #e6797a;
+  color: #e8a0a1;
 }
 
 .hljs-title,
@@ -1362,7 +1367,7 @@ kbd {
 .hljs-title.function_,
 .hljs-built_in,
 .hljs-type {
-  color: #b79df0;
+  color: #c9b8f2;
 }
 
 .hljs-string,
@@ -1370,7 +1375,7 @@ kbd {
 .hljs-bullet,
 .hljs-addition,
 .hljs-regexp {
-  color: #8fd0c8;
+  color: #a9ded7;
 }
 
 .hljs-number,
@@ -1378,13 +1383,13 @@ kbd {
 .hljs-attribute,
 .hljs-variable,
 .hljs-template-variable {
-  color: #7fb3d5;
+  color: #a3c8de;
 }
 
 .hljs-meta,
 .hljs-subst,
 .hljs-template-tag {
-  color: #e0a066;
+  color: #e5bd94;
 }
 
 .hljs-deletion {
@@ -1479,7 +1484,7 @@ kbd {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #3a8a58;
+  background: #3a8155;
   border-color: rgba(240, 246, 252, 0.1);
 }
 
@@ -1490,7 +1495,7 @@ kbd {
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #b8514a;
+  background: #ad5049;
   border-color: rgba(240, 246, 252, 0.1);
 }
 
@@ -1855,7 +1860,7 @@ kbd {
   inset: 0;
   border: none;
   padding: 0;
-  background: rgba(3, 6, 8, 0.82);
+  background: rgba(0, 2, 2, 0.85);
   cursor: default;
 }
 
@@ -2240,7 +2245,7 @@ kbd {
     z-index: 55;
     border: none;
     padding: 0;
-    background: rgba(3, 6, 8, 0.72);
+    background: rgba(0, 2, 2, 0.75);
     opacity: 0;
     pointer-events: none;
     transition: opacity 200ms ease;
@@ -2251,18 +2256,23 @@ kbd {
     pointer-events: auto;
   }
 
-  /* Touch has no hover, so row actions are always visible there — and they are
-     the delete controls, so they get real 44px targets rather than the 22px
-     hover affordance that works fine with a mouse. */
+  /* Touch has no hover, so row actions have to be permanently visible. Showing
+     three to five of them ate the whole row, so on touch they collapse into one
+     44px overflow button that opens the same list as a right-click. */
   .tree-actions {
     opacity: 1;
     pointer-events: auto;
-    padding-left: 8px;
+    padding-left: 4px;
   }
 
-  .tree-action {
-    width: 44px;
-    height: 44px;
+  .tree-actions .tree-action {
+    display: none;
+  }
+
+  .tree-actions .tree-action-more {
+    display: grid;
+    width: 40px;
+    height: 40px;
     font-size: 18px;
   }
 
@@ -2273,11 +2283,35 @@ kbd {
   .tree-row-btn {
     height: 44px;
     font-size: 14px;
+    /* Reserve the overflow button's width so long names ellipsize instead of
+       sliding underneath it. */
+    padding-right: 46px;
   }
 
   .icon-btn.icon-btn-sm {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
+  }
+
+  /* Five actions plus a title do not fit a ~280px drawer on a small phone. */
+  .sidebar-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 8px 8px 12px;
+  }
+
+  .sidebar-head h2 {
+    flex: 1 1 auto;
+  }
+
+  .sidebar-actions {
+    flex: 0 0 auto;
+    gap: 0;
+  }
+
+  /* The drawer sits above the header, so its own close button is the way out. */
+  #closeSidebarBtn {
+    order: -1;
   }
 
   .tree {
