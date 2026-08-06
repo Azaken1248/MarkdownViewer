@@ -19,7 +19,17 @@ const DELETED_SOFT_DIR = path.join(DELETED_MARKDOWN_DIR, "soft");
 const DELETED_HARD_DIR = path.join(DELETED_MARKDOWN_DIR, "hard");
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
 const ALLOWED_DOC_EXTENSIONS = new Set([".md", ".markdown", ".mmd", ".mermaid", ".ipynb"]);
+// Characters that are unsafe in a path segment on the platforms this can run on,
+// plus C0/C1 control characters. Everything else — accents, CJK, parentheses,
+// ampersands, plus signs — is a perfectly ordinary thing to call a document.
+const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]/;
+// Reserved device names on Windows, which are illegal with or without an extension.
+const RESERVED_DEVICE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const MAX_FILENAME_LENGTH = 180;
 const ROOT_FOLDER_LABEL = "Ungrouped";
+// Unfiled documents are a catch-all, not a priority group, so they sort after
+// every folder the user actually created rather than being pinned to the top.
+const UNFILED_FOLDER_ORDER = Number.MAX_SAFE_INTEGER;
 const SEARCH_RESULT_LIMIT = 200;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SITE_NAME = "Markdown Docs Viewer";
@@ -68,7 +78,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "2mb" }));
+// The envelope limit has to sit above MAX_DOC_BYTES, not equal it: JSON escaping
+// inflates the payload, so a legal 2MB document arrives as a larger body. When the
+// two were equal, express rejected the request before the app's own size check ran
+// and the client saw a 500 instead of a 413. The doubled headroom covers escaping
+// while still bounding how much a single request can buffer.
+const JSON_BODY_LIMIT = MAX_DOC_BYTES * 2 + 64 * 1024;
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 let indexTemplateCache = null;
 let indexTemplateCacheMtimeMs = 0;
@@ -150,17 +166,28 @@ function createDefaultOrganizerState() {
   };
 }
 
-function normalizeFolderName(rawName) {
-  const value = String(rawName || "").trim().replace(/\s+/g, " ");
+// `allowRootLabel` exists so loading state off disk never silently discards a
+// folder (and every file mapped into it) that an older build let through.
+// New names coming from a request are always validated strictly.
+function normalizeFolderName(rawName, { allowRootLabel = false } = {}) {
+  const value = String(rawName || "").normalize("NFC").trim().replace(/\s+/g, " ");
   if (!value || value.length > 80) {
     return null;
   }
 
-  if (!/^[A-Za-z0-9 _.-]+$/i.test(value)) {
+  // Folder names are never used as path segments, so the only hard limits are
+  // control characters and the dot names.
+  if (UNSAFE_FILENAME_CHARS.test(value)) {
     return null;
   }
 
   if (value === "." || value === "..") {
+    return null;
+  }
+
+  // "Ungrouped" is the virtual group unfiled documents are shown under. A real
+  // folder by that name renders as a second, identical-looking heading.
+  if (!allowRootLabel && value.toLowerCase() === ROOT_FOLDER_LABEL.toLowerCase()) {
     return null;
   }
 
@@ -192,7 +219,7 @@ function normalizeOrganizerState(rawState) {
   const folders = Array.isArray(rawState?.folders)
     ? rawState.folders.map((folder, index) => {
       const id = normalizeFolderId(folder?.id);
-      const name = normalizeFolderName(folder?.name);
+      const name = normalizeFolderName(folder?.name, { allowRootLabel: true });
       if (!id || !name) {
         return null;
       }
@@ -382,7 +409,7 @@ function resolveFolderInfo(organizerState, fileName) {
     return {
       folderId: null,
       folderName: null,
-      folderOrder: -1
+      folderOrder: UNFILED_FOLDER_ORDER
     };
   }
 
@@ -391,7 +418,7 @@ function resolveFolderInfo(organizerState, fileName) {
     return {
       folderId: null,
       folderName: null,
-      folderOrder: -1
+      folderOrder: UNFILED_FOLDER_ORDER
     };
   }
 
@@ -566,31 +593,58 @@ async function readCachedTextFile(fullPath) {
 }
 
 function sanitizeFilename(rawName) {
-  const baseName = path.basename(String(rawName || "").trim());
-  if (!baseName) {
+  // NFC keeps "café.md" a single spelling, so the organizer and the filesystem agree.
+  const candidate = String(rawName || "").normalize("NFC").trim();
+
+  // Reject anything with a path separator rather than quietly taking the basename.
+  // Both are safe, but "../../etc/passwd.md" silently becoming "passwd.md" is a
+  // surprising success; a 400 tells the caller what actually happened.
+  if (candidate.includes("/") || candidate.includes("\\")) {
     return null;
   }
 
-  let candidate = baseName;
-  const hasKnownExtension = /\.(md|markdown|mmd|mermaid|ipynb)$/i.test(candidate);
-  if (!hasKnownExtension) {
-    candidate = `${candidate}.md`;
-  }
-
-  if (candidate.includes("..")) {
+  const baseName = path.basename(candidate);
+  if (!baseName || baseName.length > MAX_FILENAME_LENGTH) {
     return null;
   }
 
-  const ext = path.extname(candidate).toLowerCase();
+  if (baseName === "." || baseName === ".." || baseName.includes("..")) {
+    return null;
+  }
+
+  if (UNSAFE_FILENAME_CHARS.test(baseName)) {
+    return null;
+  }
+
+  // A leading dot hides the file; a trailing dot or space is silently trimmed by
+  // some filesystems, which would make the stored name differ from the requested one.
+  if (baseName.startsWith(".") || /[. ]$/.test(baseName)) {
+    return null;
+  }
+
+  const ext = path.extname(baseName).toLowerCase();
   if (!ALLOWED_DOC_EXTENSIONS.has(ext)) {
     return null;
   }
 
-  if (!/^[A-Za-z0-9 _.-]+$/i.test(candidate)) {
+  if (RESERVED_DEVICE_NAMES.test(path.basename(baseName, path.extname(baseName)))) {
     return null;
   }
 
-  return candidate;
+  return baseName;
+}
+
+// Creation and upload accept a bare name and default it to markdown. Lookups do not:
+// letting "/api/docs/foo" resolve to "foo.md" gives one file two URLs and makes
+// .mmd and .ipynb files unaddressable by their real names.
+function sanitizeNewFilename(rawName) {
+  const trimmed = String(rawName || "").normalize("NFC").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const hasKnownExtension = /\.(md|markdown|mmd|mermaid|ipynb)$/i.test(trimmed);
+  return sanitizeFilename(hasKnownExtension ? trimmed : `${trimmed}.md`);
 }
 
 function toDocTitle(fileName) {
@@ -779,103 +833,6 @@ async function getDocs(organizerState = null) {
     return a.file.localeCompare(b.file);
   });
   return docs;
-}
-
-async function setDocumentFolder(fileName, folderId) {
-  const organizer = await readOrganizerState();
-  const sanitizedFileName = sanitizeFilename(fileName);
-
-  if (!sanitizedFileName) {
-    return null;
-  }
-
-  const normalizedFolderId = normalizeFolderId(folderId);
-  if (normalizedFolderId) {
-    const folder = getFolderRecordById(organizer, normalizedFolderId);
-    if (!folder) {
-      return null;
-    }
-
-    organizer.fileFolders[sanitizedFileName] = folder.id;
-  } else {
-    delete organizer.fileFolders[sanitizedFileName];
-  }
-
-  return writeOrganizerState(organizer);
-}
-
-async function createFolder(name) {
-  const folderName = normalizeFolderName(name);
-  if (!folderName) {
-    return null;
-  }
-
-  const organizer = await readOrganizerState();
-  const existing = organizer.folders.find((folder) => folder.name.toLowerCase() === folderName.toLowerCase());
-  if (existing) {
-    return null;
-  }
-
-  const now = new Date().toISOString();
-  const folder = {
-    id: createFolderId(),
-    name: folderName,
-    order: organizer.folders.length,
-    createdAt: now,
-    updatedAt: now
-  };
-
-  organizer.folders.push(folder);
-  await writeOrganizerState(organizer);
-  return folder;
-}
-
-async function renameFolder(folderId, name) {
-  const normalizedFolderId = normalizeFolderId(folderId);
-  const folderName = normalizeFolderName(name);
-
-  if (!normalizedFolderId || !folderName) {
-    return null;
-  }
-
-  const organizer = await readOrganizerState();
-  const folder = organizer.folders.find((entry) => entry.id === normalizedFolderId);
-  if (!folder) {
-    return null;
-  }
-
-  const existing = organizer.folders.find((entry) => entry.id !== normalizedFolderId && entry.name.toLowerCase() === folderName.toLowerCase());
-  if (existing) {
-    return null;
-  }
-
-  folder.name = folderName;
-  folder.updatedAt = new Date().toISOString();
-  await writeOrganizerState(organizer);
-  return folder;
-}
-
-async function deleteFolder(folderId) {
-  const normalizedFolderId = normalizeFolderId(folderId);
-  if (!normalizedFolderId) {
-    return null;
-  }
-
-  const organizer = await readOrganizerState();
-  const folderIndex = organizer.folders.findIndex((entry) => entry.id === normalizedFolderId);
-  if (folderIndex < 0) {
-    return null;
-  }
-
-  organizer.folders.splice(folderIndex, 1);
-  for (const [fileName, assignedFolderId] of Object.entries(organizer.fileFolders)) {
-    if (assignedFolderId === normalizedFolderId) {
-      delete organizer.fileFolders[fileName];
-    }
-  }
-
-  await writeOrganizerState(organizer);
-  return true;
 }
 
 async function searchDocuments(query, scope = "docs") {
@@ -1247,6 +1204,60 @@ app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
   }
 });
 
+// Folder order was previously write-once at creation time. This lets the caller
+// hand back the ids in the order it wants; any folder omitted keeps its relative
+// position after the listed ones, so a partial list can never drop a folder.
+app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
+  try {
+    const requestedIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : null;
+    if (!requestedIds) {
+      res.status(400).json({ error: "folderIds must be an array of folder ids" });
+      return;
+    }
+
+    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
+      const byId = new Map(organizer.folders.map((folder) => [folder.id, folder]));
+      const seen = new Set();
+      const ordered = [];
+
+      for (const rawId of requestedIds) {
+        const folderId = normalizeFolderId(rawId);
+        if (!folderId || seen.has(folderId)) {
+          continue;
+        }
+
+        const folder = byId.get(folderId);
+        if (!folder) {
+          throw new HttpError(404, `Folder not found: ${folderId}`);
+        }
+
+        seen.add(folderId);
+        ordered.push(folder);
+      }
+
+      for (const folder of organizer.folders) {
+        if (!seen.has(folder.id)) {
+          ordered.push(folder);
+        }
+      }
+
+      const now = new Date().toISOString();
+      ordered.forEach((folder, index) => {
+        if (folder.order !== index) {
+          folder.order = index;
+          folder.updatedAt = now;
+        }
+      });
+
+      organizer.folders = ordered;
+    });
+
+    res.json({ folders: serializeFolders(savedOrganizer.folders) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
@@ -1601,9 +1612,31 @@ app.delete("/api/archive/:entry", requireWriteAuth, async (req, res, next) => {
   }
 });
 
+// Both creation paths accept an optional folderId so a new document can land
+// where it belongs instead of always appearing in Ungrouped and needing a
+// second Move action. Returns the resolved folder info for the response.
+async function fileNewDocumentIntoFolder(fileName, rawFolderId) {
+  const folderId = normalizeFolderId(rawFolderId);
+  if (!folderId) {
+    return { folderId: null, folderName: null };
+  }
+
+  const { result } = await mutateOrganizerState((organizer) => {
+    const folder = organizer.folders.find((entry) => entry.id === folderId);
+    if (!folder) {
+      throw new HttpError(404, "Folder not found");
+    }
+
+    organizer.fileFolders[fileName] = folder.id;
+    return { folderId: folder.id, folderName: folder.name };
+  });
+
+  return result;
+}
+
 app.post("/api/docs", requireWriteAuth, async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.body.fileName);
+    const fileName = sanitizeNewFilename(req.body.fileName);
     const content = String(req.body.content || "");
     const overwrite = Boolean(req.body.overwrite);
 
@@ -1626,12 +1659,15 @@ app.post("/api/docs", requireWriteAuth, async (req, res, next) => {
     await fsp.writeFile(fullPath, content, "utf8");
     invalidateCachedContent(fullPath);
     const stat = await fsp.stat(fullPath);
+    const folderInfo = await fileNewDocumentIntoFolder(fileName, req.body.folderId);
 
     res.status(201).json({
       file: fileName,
       title: toDocTitle(fileName),
       size: stat.size,
-      updatedAt: stat.mtime.toISOString()
+      updatedAt: stat.mtime.toISOString(),
+      folderId: folderInfo.folderId,
+      folderName: folderInfo.folderName
     });
   } catch (error) {
     next(error);
@@ -1674,6 +1710,77 @@ app.put("/api/docs/:file", requireWriteAuth, async (req, res, next) => {
   }
 });
 
+app.post("/api/docs/:file/rename", requireWriteAuth, async (req, res, next) => {
+  try {
+    const fileName = sanitizeFilename(req.params.file);
+    const targetName = sanitizeNewFilename(req.body?.fileName);
+
+    if (!fileName || !targetName) {
+      res.status(400).json({ error: "Invalid document file name" });
+      return;
+    }
+
+    const sourcePath = path.join(MARKDOWN_DIR, fileName);
+    if (!(await fileExists(sourcePath))) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+
+    if (targetName === fileName) {
+      const unchanged = await fsp.stat(sourcePath);
+      const folderInfo = resolveFolderInfo(await readOrganizerState(), fileName);
+      res.json({
+        file: fileName,
+        previousFile: fileName,
+        title: toDocTitle(fileName),
+        size: unchanged.size,
+        updatedAt: unchanged.mtime.toISOString(),
+        folderId: folderInfo.folderId,
+        folderName: folderInfo.folderName
+      });
+      return;
+    }
+
+    const targetPath = path.join(MARKDOWN_DIR, targetName);
+    if (await fileExists(targetPath)) {
+      res.status(409).json({ error: "A document with that name already exists" });
+      return;
+    }
+
+    await moveFile(sourcePath, targetPath);
+    invalidateCachedContent(sourcePath);
+    invalidateCachedContent(targetPath);
+
+    // The organizer is keyed by filename, so the folder assignment has to follow
+    // the rename or the document silently falls back into Ungrouped.
+    const { result: folderInfo } = await mutateOrganizerState((organizer) => {
+      const folderId = organizer.fileFolders[fileName] || null;
+      delete organizer.fileFolders[fileName];
+
+      if (!folderId) {
+        return { folderId: null, folderName: null };
+      }
+
+      organizer.fileFolders[targetName] = folderId;
+      const folder = organizer.folders.find((entry) => entry.id === folderId);
+      return { folderId, folderName: folder?.name || null };
+    });
+
+    const stat = await fsp.stat(targetPath);
+    res.json({
+      file: targetName,
+      previousFile: fileName,
+      title: toDocTitle(targetName),
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+      folderId: folderInfo.folderId,
+      folderName: folderInfo.folderName
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), async (req, res, next) => {
   try {
     if (!req.file) {
@@ -1682,7 +1789,7 @@ app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), as
     }
 
     const requestedName = req.body.fileName || req.file.originalname;
-    const sanitizedName = sanitizeFilename(requestedName);
+    const sanitizedName = sanitizeNewFilename(requestedName);
     if (!sanitizedName) {
       res.status(400).json({ error: "Invalid document file name" });
       return;
@@ -1694,12 +1801,15 @@ app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), as
     invalidateCachedContent(fullPath);
 
     const stat = await fsp.stat(fullPath);
+    const folderInfo = await fileNewDocumentIntoFolder(finalName, req.body.folderId);
 
     res.status(201).json({
       file: finalName,
       title: toDocTitle(finalName),
       size: stat.size,
-      updatedAt: stat.mtime.toISOString()
+      updatedAt: stat.mtime.toISOString(),
+      folderId: folderInfo.folderId,
+      folderName: folderInfo.folderName
     });
   } catch (error) {
     next(error);

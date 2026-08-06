@@ -1722,7 +1722,8 @@ body.lock-scroll {
   color: var(--subtext);
 }
 
-.editor-filename input {
+.editor-filename input,
+.editor-filename select {
   width: min(100%, 420px);
   border: 1px solid var(--surface0);
   background: rgba(49, 50, 68, 0.9);
@@ -1733,11 +1734,13 @@ body.lock-scroll {
   outline: none;
 }
 
-.editor-filename input:focus-visible {
+.editor-filename input:focus-visible,
+.editor-filename select:focus-visible {
   border-color: var(--blue);
 }
 
-.editor-filename input:disabled {
+.editor-filename input:disabled,
+.editor-filename select:disabled {
   opacity: 0.7;
 }
 

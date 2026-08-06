@@ -21,7 +21,7 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🔴 Broken — confirmed by testing
 
-- [ ] **1. Server-side search is 100% broken — every query returns HTTP 500.**
+- [x] **1. Server-side search is 100% broken — every query returns HTTP 500.**
   `server.js:721` sorts the match array *before* filtering out nulls, so the comparator dereferences `null.score`.
   ```
   TypeError: Cannot read properties of null (reading 'score')
@@ -29,16 +29,16 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
   ```
   Any query where at least one doc doesn't match crashes. With 93 docs, that's every query.
 
-- [ ] **2. The failure is invisible because the client silently degrades.**
+- [x] **2. The failure is invisible because the client silently degrades.**
   `applySearch` (`app.js:2426`) catches the 500 and falls back to `buildSuperSearchMatches`, which scores against `state.contentCache` — a cache that is **never populated**, because `hydrateSearchContent()` and `hydrateDeletedSearchContent()` (`app.js:1474`, `1486`) are defined and never called. Net effect: **advertised "full-text search" only ever matches filenames, titles, and folder names.**
 
-- [ ] **3. The "next match" and "exit search" buttons do nothing.**
+- [x] **3. The "next match" and "exit search" buttons do nothing.**
   `matchNextBtn` and `matchCloseBtn` are looked up (`app.js:21-22`) and their `disabled` state is managed, but **no click listener is ever registered** — only `matchPrevBtn` has one (`app.js:3278`). You can go backwards through matches but not forwards, and you can't dismiss the widget.
 
-- [ ] **4. Swipe-to-navigate throws a ReferenceError.**
+- [x] **4. Swipe-to-navigate throws a ReferenceError.**
   `docSwipeStart` is read at `app.js:3283` but is **never declared and there is no `touchstart` handler** that sets it. Every touch on the document body throws `ReferenceError: docSwipeStart is not defined`. The feature has never worked.
 
-- [ ] **5. The match-nav widget becomes an undismissable floating turd.**
+- [x] **5. The match-nav widget becomes an undismissable floating turd.**
   `updateJumpNavigationUI` (`app.js:744`) shows it whenever a query exists, even with zero matches. So you get a fixed-position "0 / 0" box with both arrows disabled and a close button that isn't wired (#3). On mobile it's pinned `top: 0.78rem; right: 0.75rem` (`app.css:2045`) — directly on top of the sticky header.
 
 ---
@@ -81,33 +81,47 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🟠 Behavior bugs
 
-- [ ] **17. Common filenames are rejected outright.** `sanitizeFilename` requires `^[A-Za-z0-9 _.-]+$` (`server.js:396`). Confirmed rejected with 400: `café-notes.md`, `My Doc (v2).md`. No unicode, no parentheses, no `&`, no `+`. Same restriction on folder names (`Café` → 400). For a tool whose entire job is ingesting arbitrary user documents, this is crippling.
+- [x] **17. Common filenames are rejected outright.** `sanitizeFilename` requires `^[A-Za-z0-9 _.-]+$` (`server.js:396`). Confirmed rejected with 400: `café-notes.md`, `My Doc (v2).md`. No unicode, no parentheses, no `&`, no `+`. Same restriction on folder names (`Café` → 400). For a tool whose entire job is ingesting arbitrary user documents, this is crippling.
+  - Fixed: names are now validated by what is actually unsafe — path separators, control characters, the dot names, Windows reserved device names, and a 180-char cap — instead of an allowlist. `café-notes.md`, `My Doc (v2).md`, `R&D + notes.md` and `日本語.md` all create with 201; `../../etc/passwd.md`, `a\b.md`, `.hidden.md`, `CON.md` and `evil.exe` are still refused. Names are NFC-normalized so the organizer and the filesystem agree on one spelling. All 93 existing filenames still validate.
 
-- [ ] **18. You can create a folder literally named "Ungrouped."** Confirmed created with 201. It collides with `ROOT_FOLDER_LABEL`, producing two visually identical "Ungrouped" groups in the sidebar.
+- [x] **18. You can create a folder literally named "Ungrouped."** Confirmed created with 201. It collides with `ROOT_FOLDER_LABEL`, producing two visually identical "Ungrouped" groups in the sidebar.
+  - Fixed: `normalizeFolderName` rejects the root label case-insensitively (400). Loading existing state passes `allowRootLabel`, so a folder created by an older build is never silently dropped along with its file mappings.
 
-- [ ] **19. Saving a document larger than the body limit returns 500, not 413.** `express.json({limit:"2mb"})` (`server.js:33`) equals `MAX_DOC_BYTES`, so the JSON envelope always exceeds the limit before the app's own 413 check at `server.js:1274` can fire. Express's PayloadTooLarge error isn't a `MulterError`, so the error handler falls through to `res.status(500).json({error:"Internal server error"})`.
+- [x] **19. Saving a document larger than the body limit returns 500, not 413.** `express.json({limit:"2mb"})` (`server.js:33`) equals `MAX_DOC_BYTES`, so the JSON envelope always exceeds the limit before the app's own 413 check at `server.js:1274` can fire. Express's PayloadTooLarge error isn't a `MulterError`, so the error handler falls through to `res.status(500).json({error:"Internal server error"})`.
+  - Fixed: the JSON envelope limit is now `MAX_DOC_BYTES * 2 + 64KB`, so JSON escaping can't push a legal document past the parser before the app's own check runs. A 3MB document returns 413 with the real message; a just-under-2MB document still saves.
 
-- [ ] **20. `state.activeFile` is set *after* awaiting Mermaid rendering** (`app.js:2542-2547`). On a doc with big diagrams there's a multi-second window where Edit/Delete operate on the *previously* open document.
+- [x] **20. `state.activeFile` is set *after* awaiting Mermaid rendering** (`app.js:2542-2547`). On a doc with big diagrams there's a multi-second window where Edit/Delete operate on the *previously* open document.
+  - Fixed: the document is claimed the moment its HTML is in the DOM, before the awaited Mermaid pass. Same fix applied to the recycle-bin/archive viewer.
 
-- [ ] **21. `/api/docs/foo` and `/api/docs/foo.md` are the same resource.** `sanitizeFilename` appends `.md` to anything without a known extension (`server.js:382-385`), so the URL space is ambiguous — and a `.mmd` or `.ipynb` file can never be addressed without its extension.
+- [x] **21. `/api/docs/foo` and `/api/docs/foo.md` are the same resource.** `sanitizeFilename` appends `.md` to anything without a known extension (`server.js:382-385`), so the URL space is ambiguous — and a `.mmd` or `.ipynb` file can never be addressed without its extension.
+  - Fixed: lookups use a strict `sanitizeFilename` that requires a real extension, so `/api/docs/alpha` is now 400 and `/api/docs/alpha.md` is 200. Creation and upload keep the convenience via `sanitizeNewFilename`, which defaults a bare name to `.md`.
 
-- [ ] **22. Acronyms get mangled.** `toDocTitle` (`server.js:409`) and `filenameToTitle` (`app.js:138`) title-case every word: `API_Specification.md` → "Api Specification", `IPL EDA.md` → "Ipl Eda", `BRD.md` → "Brd". Visible across the entire current doc list.
+- [x] **22. Acronyms get mangled.** `toDocTitle` (`server.js:409`) and `filenameToTitle` (`app.js:138`) title-case every word: `API_Specification.md` → "Api Specification", `IPL EDA.md` → "Ipl Eda", `BRD.md` → "Brd". Visible across the entire current doc list.
+  - **Not a bug — this audit entry was wrong.** `\b\w` only ever uppercases, so nothing is lowercased: `API_Specification.md` renders as "API Specification", `BRD.md` as "BRD", `IPL EDA.md` as "IPL EDA". Verified against all 93 live documents; no acronym is mangled. No change made.
 
-- [ ] **23. There is no rename feature anywhere.** The editor's filename field is `disabled` in edit mode (`app.js:2858`) with no explanation, and no rename endpoint exists.
+- [x] **23. There is no rename feature anywhere.** The editor's filename field is `disabled` in edit mode (`app.js:2858`) with no explanation, and no rename endpoint exists.
+  - Fixed: `POST /api/docs/:file/rename` renames on disk and carries the folder assignment to the new key, refusing collisions with 409. The editor's filename field is editable in edit mode; saving renames first, then writes the content.
 
-- [ ] **24. New and uploaded documents can't be placed in a folder.** `POST /api/docs` and `/api/docs/upload` accept no `folderId`, so everything lands in Ungrouped and needs a second Move action.
+- [x] **24. New and uploaded documents can't be placed in a folder.** `POST /api/docs` and `/api/docs/upload` accept no `folderId`, so everything lands in Ungrouped and needs a second Move action.
+  - Fixed: both endpoints accept `folderId` (404 on an unknown folder). The editor shows a folder picker when creating, and uploading opens the folder chooser first, with "Upload To Ungrouped" and "Create And Upload" as the other two paths.
 
-- [ ] **25. Ungrouped is permanently pinned above every real folder** — `resolveFolderInfo` returns `folderOrder: -1` for unfiled docs (`server.js:192`). There is also no UI to reorder folders at all; `order` is only ever set at creation.
+- [x] **25. Ungrouped is permanently pinned above every real folder** — `resolveFolderInfo` returns `folderOrder: -1` for unfiled docs (`server.js:192`). There is also no UI to reorder folders at all; `order` is only ever set at creation.
+  - Fixed: unfiled documents now sort *after* every real folder on both sides (`UNFILED_FOLDER_ORDER`), and `PUT /api/folders/reorder` persists an explicit ordering — folders omitted from the list keep their relative position, so a partial list can never drop one. Up/down buttons on each folder header drive it.
 
-- [ ] **26. Escape key handling has a fall-through bug.** `app.js:3420` closes the nav without `return`, so a single Escape can close the sidebar *and* the folder modal *and* the search panel simultaneously. Handler order is arbitrary.
+- [x] **26. Escape key handling has a fall-through bug.** `app.js:3420` closes the nav without `return`, so a single Escape can close the sidebar *and* the folder modal *and* the search panel simultaneously. Handler order is arbitrary.
+  - Fixed: one early return for non-Escape keys, then a single ordered chain — confirm, unlock, folder modal, editor, search panel, nav — each with its own `return`. Verified across all layer combinations.
 
-- [ ] **27. The search input fires three redundant handlers** — `input`, `search`, and `change` all bound to `handleSearchEvent` (`app.js:3230-3232`) — plus an undebounced `applySearch` on every `focus` (`3234`).
+- [x] **27. The search input fires three redundant handlers** — `input`, `search`, and `change` all bound to `handleSearchEvent` (`app.js:3230-3232`) — plus an undebounced `applySearch` on every `focus` (`3234`).
+  - Fixed: only the debounced `input` handler remains. `input` already covers typing, pasting and the native clear button.
 
-- [ ] **28. Four dead functions in server.js:** `setDocumentFolder`, `createFolder`, `renameFolder`, `deleteFolder` (`server.js:591-686`) are never called; every route reimplements the logic inline. Two divergent copies of the same rules.
+- [x] **28. Four dead functions in server.js:** `setDocumentFolder`, `createFolder`, `renameFolder`, `deleteFolder` (`server.js:591-686`) are never called; every route reimplements the logic inline. Two divergent copies of the same rules.
+  - Fixed: all four removed (97 lines). The routes were already the only implementation.
 
-- [ ] **29. Vestigial `markdowns/` directory and `manifest.json`.** The server reads `public/docs`; `markdowns/` is dead. Status messages still say "Uploaded X to **markdowns folder**" and "No markdown files in **markdowns folder** yet" (`app.js:2933`, `2899`).
+- [x] **29. Vestigial `markdowns/` directory and `manifest.json`.** The server reads `public/docs`; `markdowns/` is dead. Status messages still say "Uploaded X to **markdowns folder**" and "No markdown files in **markdowns folder** yet" (`app.js:2933`, `2899`).
+  - Fixed: `markdowns/` and its `manifest.json` are deleted — both `.md` files in it were byte-identical duplicates of documents already live in `public/docs/`, verified by sha256 before removal. The three "markdowns folder" status strings now describe what actually happened.
 
-- [ ] **30. `TREE_MENU_HOLD_DELAY` (`app.js:103`) is dead.** There's no long-press handler.
+- [x] **30. `TREE_MENU_HOLD_DELAY` (`app.js:103`) is dead.** There's no long-press handler.
+  - Fixed: removed.
 
 ---
 

@@ -42,6 +42,8 @@ const elements = {
   closeEditorBtn: document.getElementById("closeEditorBtn"),
   saveDocBtn: document.getElementById("saveDocBtn"),
   editorFileName: document.getElementById("editorFileName"),
+  editorFolderField: document.getElementById("editorFolderField"),
+  editorFolderSelect: document.getElementById("editorFolderSelect"),
   editorInput: document.getElementById("editorInput"),
   editorPreview: document.getElementById("editorPreview"),
   confirmModal: document.getElementById("confirmModal"),
@@ -115,6 +117,7 @@ const state = {
   folderModalOpen: false,
   folderModalMode: "create",
   folderModalTargetFile: null,
+  pendingUploadFile: null,
   folderModalTargetFolderId: null,
   collapsedFolderIds: new Set(),
   confirmOpen: false,
@@ -148,7 +151,6 @@ function persistWriteToken(token) {
 }
 
 const MOBILE_BREAKPOINT = 920;
-const TREE_MENU_HOLD_DELAY = 420;
 const SUPERSEARCH_LIMIT = 8;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
@@ -568,8 +570,10 @@ function getFolderLabel(folderId) {
 }
 
 function getFolderOrder(folderId) {
+  // Unfiled documents are a catch-all, so they sort below every real folder
+  // instead of being pinned above them. Mirrors UNFILED_FOLDER_ORDER on the server.
   if (!folderId) {
-    return -1;
+    return Number.MAX_SAFE_INTEGER;
   }
 
   const folder = getFolderRecord(folderId);
@@ -622,7 +626,15 @@ function syncFolderModalUI() {
   const targetFile = state.folderModalTargetFile ? getDocByFile(state.folderModalTargetFile, true) : null;
   const targetFolder = state.folderModalTargetFolderId ? getFolderRecord(state.folderModalTargetFolderId) : null;
 
-  if (mode === "move") {
+  if (mode === "upload") {
+    const pendingName = state.pendingUploadFile?.name || "this file";
+    elements.folderTitle.textContent = `Upload ${pendingName}`;
+    elements.folderDescription.textContent = "Pick the folder it should land in, or create a new one.";
+    elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create And Upload';
+    elements.moveToRootBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> Upload To Ungrouped';
+    elements.moveToRootBtn.hidden = false;
+    elements.folderPicker.hidden = false;
+  } else if (mode === "move") {
     elements.folderTitle.textContent = targetFile
       ? `Move ${targetFile.title || targetFile.file} to a folder`
       : "Move document to a folder";
@@ -630,6 +642,7 @@ function syncFolderModalUI() {
       ? `Choose an existing folder or create a new one for ${targetFile.file}.`
       : "Choose an existing folder or create a new one.";
     elements.createFolderConfirmBtn.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Create And Move';
+    elements.moveToRootBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> Move To Ungrouped';
     elements.moveToRootBtn.hidden = false;
     elements.folderPicker.hidden = false;
   } else if (mode === "rename") {
@@ -657,7 +670,7 @@ function renderFolderPickerList() {
     return;
   }
 
-  const moveMode = state.folderModalMode === "move";
+  const moveMode = state.folderModalMode === "move" || state.folderModalMode === "upload";
   const docsCollection = state.isRecycleBinMode ? state.deletedDocs : state.docs;
   const counts = new Map();
 
@@ -693,6 +706,14 @@ function renderFolderPickerList() {
 
     button.addEventListener("click", async () => {
       const folderId = button.getAttribute("data-folder-id");
+
+      if (state.folderModalMode === "upload") {
+        const pending = state.pendingUploadFile;
+        closeFolderModal();
+        await uploadMarkdown(pending, folderId);
+        return;
+      }
+
       if (state.folderModalTargetFile) {
         try {
           await moveDocumentToFolder(state.folderModalTargetFile, folderId);
@@ -703,6 +724,36 @@ function renderFolderPickerList() {
       }
     });
   });
+}
+
+// Swaps a folder with its neighbour and persists the whole ordering, so the
+// server never has to infer intent from a single index.
+async function moveFolderBy(folderId, offset) {
+  const ordered = [...state.folders].sort((left, right) => left.order - right.order);
+  const index = ordered.findIndex((folder) => folder.id === folderId);
+  const target = index + offset;
+
+  if (index < 0 || target < 0 || target >= ordered.length) {
+    return;
+  }
+
+  [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+
+  try {
+    await requestJson("/api/folders/reorder", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ folderIds: ordered.map((folder) => folder.id) })
+    });
+
+    await refreshDocs({ preserveSearch: true });
+    // After the swap the moved folder sits at `target`.
+    setStatus(`Moved ${ordered[target].name} ${offset < 0 ? "up" : "down"}.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
 }
 
 function openFolderModal({ mode = "create", file = null, folderId = null } = {}) {
@@ -725,6 +776,11 @@ function openFolderModal({ mode = "create", file = null, folderId = null } = {})
 }
 
 function closeFolderModal() {
+  if (state.folderModalMode === "upload" && state.pendingUploadFile) {
+    state.pendingUploadFile = null;
+    elements.uploadInput.value = "";
+  }
+
   state.folderModalOpen = false;
   state.folderModalMode = "create";
   state.folderModalTargetFile = null;
@@ -2451,7 +2507,39 @@ function renderDocList() {
         }
       });
 
-      groupActions.append(renameBtn, deleteBtn);
+      // Folder order used to be fixed at creation time with no way to change it.
+      const orderedFolderIds = [...state.folders]
+        .sort((left, right) => left.order - right.order)
+        .map((folder) => folder.id);
+      const folderPosition = orderedFolderIds.indexOf(group.folderId);
+
+      const moveUpBtn = document.createElement("button");
+      moveUpBtn.type = "button";
+      moveUpBtn.className = "icon-btn";
+      moveUpBtn.title = "Move folder up";
+      moveUpBtn.setAttribute("aria-label", `Move ${group.folderName} up`);
+      moveUpBtn.innerHTML = '<i class="fa-solid fa-arrow-up"></i>';
+      moveUpBtn.disabled = folderPosition <= 0;
+      moveUpBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void moveFolderBy(group.folderId, -1);
+      });
+
+      const moveDownBtn = document.createElement("button");
+      moveDownBtn.type = "button";
+      moveDownBtn.className = "icon-btn";
+      moveDownBtn.title = "Move folder down";
+      moveDownBtn.setAttribute("aria-label", `Move ${group.folderName} down`);
+      moveDownBtn.innerHTML = '<i class="fa-solid fa-arrow-down"></i>';
+      moveDownBtn.disabled = folderPosition < 0 || folderPosition >= orderedFolderIds.length - 1;
+      moveDownBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void moveFolderBy(group.folderId, 1);
+      });
+
+      groupActions.append(moveUpBtn, moveDownBtn, renameBtn, deleteBtn);
       groupHead.appendChild(groupActions);
     }
 
@@ -2744,6 +2832,18 @@ async function openDocument(file, pushHash, options = {}) {
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
     elements.emptyState.style.display = "none";
+
+    // Claim the document the moment its content is on screen. Waiting until after
+    // Mermaid finishes left a multi-second window on diagram-heavy files where the
+    // Edit and Delete buttons still pointed at the previously open document.
+    state.activeFile = file;
+    renderDocList();
+    updateActiveDocUI(file);
+    document.title = `${doc.title} | Cart Docs Viewer`;
+    if (pushHash) {
+      window.location.hash = encodeURIComponent(file);
+    }
+
     await waitForNextFrame();
 
     if (requestId !== state.openDocumentRequestId) {
@@ -2768,15 +2868,6 @@ async function openDocument(file, pushHash, options = {}) {
     await renderMermaidBlocks(elements.docContent);
     if (requestId !== state.openDocumentRequestId) {
       return;
-    }
-
-    state.activeFile = file;
-    renderDocList();
-    updateActiveDocUI(file);
-
-    document.title = `${doc.title} | Cart Docs Viewer`;
-    if (pushHash) {
-      window.location.hash = encodeURIComponent(file);
     }
 
     if (hasJumpQuery) {
@@ -2815,15 +2906,21 @@ async function openRecycleBinDocument(file, options = {}) {
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
     elements.emptyState.style.display = "none";
-    await waitForNextFrame();
-    await renderMermaidBlocks(elements.docContent);
 
+    // Same reason as openDocument: claim it before the async Mermaid pass.
     state.activeFile = file;
     renderDocList();
     updateActiveDocUI(file);
 
-    document.title = `${doc.title} | Recycle Bin | Markdown Docs Viewer`;
-    setStatus(`Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
+    await waitForNextFrame();
+    await renderMermaidBlocks(elements.docContent);
+
+    document.title = state.viewMode === "archive"
+      ? `${doc.title} | Archive | Markdown Docs Viewer`
+      : `${doc.title} | Recycle Bin | Markdown Docs Viewer`;
+    setStatus(state.viewMode === "archive"
+      ? `Viewing archived doc ${doc.originalFile || doc.file}`
+      : `Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
   } catch (error) {
     showEmptyState("Could not load deleted document", error.message, "fa-triangle-exclamation");
     setStatus(error.message, "error");
@@ -3030,6 +3127,13 @@ async function handleFolderModalAction() {
 
     const created = await createFolderOnServer(folderName);
 
+    if (state.folderModalMode === "upload") {
+      const pending = state.pendingUploadFile;
+      closeFolderModal();
+      await uploadMarkdown(pending, created.folder.id);
+      return;
+    }
+
     if (state.folderModalMode === "move" && state.folderModalTargetFile) {
       await moveDocumentToFolder(state.folderModalTargetFile, created.folder.id);
       closeFolderModal();
@@ -3082,13 +3186,50 @@ function syncEditorPaneScroll(sourceElement, targetElement) {
   });
 }
 
+// The folder picker only appears when creating: an existing document is moved
+// with the dedicated Move action, which already handles reassignment.
+function syncEditorFolderPicker(mode) {
+  const select = elements.editorFolderSelect;
+  if (!select || !elements.editorFolderField) {
+    return;
+  }
+
+  elements.editorFolderField.hidden = mode !== "create";
+  if (mode !== "create") {
+    return;
+  }
+
+  select.innerHTML = "";
+
+  const rootOption = document.createElement("option");
+  rootOption.value = "";
+  rootOption.textContent = state.rootFolderLabel || "Ungrouped";
+  select.appendChild(rootOption);
+
+  for (const folder of [...state.folders].sort((left, right) => left.order - right.order)) {
+    const option = document.createElement("option");
+    option.value = folder.id;
+    option.textContent = folder.name;
+    select.appendChild(option);
+  }
+
+  select.value = "";
+}
+
 function openEditor({ mode, fileName, content }) {
   state.editorMode = mode;
   state.editorFile = mode === "edit" ? fileName : null;
   state.editorOpen = true;
+  syncEditorFolderPicker(mode);
 
   elements.editorFileName.value = fileName || "";
-  elements.editorFileName.disabled = mode === "edit";
+  // Editing the name is how you rename: saving renames the file first, then writes
+  // the content. It used to be disabled here with no explanation and no other way
+  // to rename a document anywhere in the app.
+  elements.editorFileName.disabled = false;
+  elements.editorFileName.title = mode === "edit"
+    ? "Change this to rename the document"
+    : "Name for the new document";
   elements.editorInput.value = content || "";
   state.editorInitialContent = elements.editorInput.value;
   state.editorInitialFileName = elements.editorFileName.value;
@@ -3165,7 +3306,7 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
     state.activeFile = null;
     updateActiveDocUI(null);
     showEmptyState("No markdowns yet", "Upload a markdown or create one in the live editor.", "fa-file-circle-plus");
-    setStatus("No markdown files in markdowns folder yet.", "neutral");
+    setStatus("No documents yet. Create or upload one to get started.", "neutral");
     return;
   }
 
@@ -3184,13 +3325,16 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
   await openDocument(target, false, { forceReload: true });
 }
 
-async function uploadMarkdown(file) {
+async function uploadMarkdown(file, folderId = null) {
   if (!file) {
     return;
   }
 
   const formData = new FormData();
   formData.append("markdownFile", file);
+  if (folderId) {
+    formData.append("folderId", folderId);
+  }
 
   try {
     const payload = await requestJson("/api/docs/upload", {
@@ -3199,10 +3343,13 @@ async function uploadMarkdown(file) {
     });
 
     await refreshDocs({ openFile: payload.file, preserveSearch: false });
-    setStatus(`Uploaded ${payload.file} to markdowns folder.`, "success");
+    setStatus(payload.folderName
+      ? `Uploaded ${payload.file} to ${payload.folderName}.`
+      : `Uploaded ${payload.file}.`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
+    state.pendingUploadFile = null;
     elements.uploadInput.value = "";
   }
 }
@@ -3220,7 +3367,24 @@ async function saveEditorDocument() {
   try {
     let payload;
     if (state.editorMode === "edit" && state.editorFile) {
-      payload = await requestJson(`/api/docs/${encodeURIComponent(state.editorFile)}`, {
+      // A changed name is a rename. Do it before the content write so the PUT
+      // targets the new path and the folder assignment moves with the file.
+      let targetFile = state.editorFile;
+      if (fileName !== state.editorFile) {
+        const renamed = await requestJson(`/api/docs/${encodeURIComponent(state.editorFile)}/rename`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ fileName })
+        });
+
+        targetFile = renamed.file;
+        state.contentCache.delete(state.editorFile);
+        state.editorFile = targetFile;
+      }
+
+      payload = await requestJson(`/api/docs/${encodeURIComponent(targetFile)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
@@ -3237,7 +3401,8 @@ async function saveEditorDocument() {
           body: JSON.stringify({
             fileName,
             content,
-            overwrite: false
+            overwrite: false,
+            folderId: elements.editorFolderSelect?.value || null
           })
         });
       } catch (error) {
@@ -3271,7 +3436,7 @@ async function saveEditorDocument() {
 
     closeEditor();
     await refreshDocs({ openFile: payload.file, preserveSearch: true });
-    setStatus(`Saved ${payload.file} to markdowns folder.`, "success");
+    setStatus(`Saved ${payload.file}.`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -3565,15 +3730,10 @@ async function navigateMatches(direction, queryLabel = state.jumpQuery) {
   return result;
 }
 
+// "input" already covers typing, pasting, and the clear button on a search field.
+// "search" and "change" only re-fired the same debounced query, and the focus
+// handler ran an undebounced full search every time the field was clicked.
 elements.searchInput.addEventListener("input", handleSearchEvent);
-elements.searchInput.addEventListener("search", handleSearchEvent);
-elements.searchInput.addEventListener("change", handleSearchEvent);
-
-elements.searchInput.addEventListener("focus", () => {
-  if (elements.searchInput.value.trim()) {
-    applySearch(elements.searchInput.value);
-  }
-});
 
 elements.searchInput.addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") {
@@ -3699,6 +3859,13 @@ elements.folderBackdrop.addEventListener("click", () => {
 });
 
 elements.moveToRootBtn.addEventListener("click", async () => {
+  if (state.folderModalMode === "upload") {
+    const pending = state.pendingUploadFile;
+    closeFolderModal();
+    await uploadMarkdown(pending, null);
+    return;
+  }
+
   if (!state.folderModalTargetFile) {
     return;
   }
@@ -3802,38 +3969,47 @@ elements.sidebarOverlay.addEventListener("click", () => {
   setNavOpen(false);
 });
 
+// Escape dismisses exactly one layer, topmost first. The nav used to be checked
+// without a `return`, so a single press could close the sidebar and a modal and
+// the search panel at once.
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.confirmOpen) {
+  if (event.key !== "Escape") {
+    return;
+  }
+
+  if (state.confirmOpen) {
     event.preventDefault();
     resolveConfirmDialog(false);
     return;
   }
 
-  if (event.key === "Escape" && state.unlockOpen) {
+  if (state.unlockOpen) {
     event.preventDefault();
     closeUnlockModal();
     return;
   }
 
-
-
-  if (event.key === "Escape" && elements.appShell.classList.contains("nav-open")) {
-    setNavOpen(false);
-  }
-
-  if (event.key === "Escape" && state.folderModalOpen) {
+  if (state.folderModalOpen) {
     event.preventDefault();
     closeFolderModal();
     return;
   }
 
-  if (event.key === "Escape" && state.editorOpen) {
+  if (state.editorOpen) {
+    event.preventDefault();
     void requestEditorClose();
     return;
   }
 
-  if (event.key === "Escape" && state.searchPanelOpen) {
+  if (state.searchPanelOpen) {
+    event.preventDefault();
     setSuperSearchOpen(false);
+    return;
+  }
+
+  if (elements.appShell.classList.contains("nav-open")) {
+    event.preventDefault();
+    setNavOpen(false);
   }
 });
 
@@ -3859,7 +4035,18 @@ elements.uploadTrigger.addEventListener("click", () => {
 
 elements.uploadInput.addEventListener("change", () => {
   const [file] = elements.uploadInput.files;
-  uploadMarkdown(file);
+  if (!file) {
+    return;
+  }
+
+  // With no folders there is nothing to choose, so skip straight to the upload.
+  if (state.folders.length === 0) {
+    void uploadMarkdown(file);
+    return;
+  }
+
+  state.pendingUploadFile = file;
+  openFolderModal({ mode: "upload" });
 });
 
 elements.newDocBtn.addEventListener("click", () => {
