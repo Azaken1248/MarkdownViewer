@@ -31,6 +31,12 @@ const ROOT_FOLDER_LABEL = "Ungrouped";
 // every folder the user actually created rather than being pinned to the top.
 const UNFILED_FOLDER_ORDER = Number.MAX_SAFE_INTEGER;
 const SEARCH_RESULT_LIMIT = 200;
+// Both caches are bounded so a large corpus cannot pin the whole thing in RSS
+// forever. Entries are re-derived from disk on a miss, so a small budget costs
+// time, never correctness.
+const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
+const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SITE_NAME = "Markdown Docs Viewer";
 const EMBED_TITLE = "Markdown Docs Viewer | Cart Knowledge Hub";
@@ -450,13 +456,14 @@ function tokenizeSearchQuery(query) {
     .filter(Boolean);
 }
 
-function buildSearchSnippet(content, query, tokens) {
-  const raw = String(content || "").replace(/\s+/g, " ").trim();
+// `raw` is the whitespace-collapsed document and `normalizedContent` its
+// lowercased form; both come from the snippet cache so this no longer rescans
+// the source text on every request.
+function buildSearchSnippet(raw, normalizedContent, query, tokens) {
   if (!raw) {
     return "No preview available.";
   }
 
-  const normalizedContent = normalizeSearchText(raw);
   const searchTerms = [...new Set([normalizeSearchText(query).trim(), ...(tokens || [])]
     .map((token) => normalizeSearchText(token).trim())
     .filter(Boolean))];
@@ -484,11 +491,12 @@ function buildSearchSnippet(content, query, tokens) {
   return `${prefix}${raw.slice(start, end)}${suffix}`;
 }
 
-function scoreSearchDoc(doc, normalizedQuery, tokens, content) {
+// `normalizedContent` arrives already lowercased from the search index; this
+// used to lowercase the entire document on every request.
+function scoreSearchDoc(doc, normalizedQuery, tokens, normalizedContent) {
   const title = normalizeSearchText(doc.title);
   const file = normalizeSearchText(doc.originalFile || doc.file);
   const folderName = normalizeSearchText(doc.folderName || "");
-  const normalizedContent = normalizeSearchText(content);
 
   let score = 0;
   let matched = false;
@@ -560,10 +568,80 @@ function scoreSearchDoc(doc, normalizedQuery, tokens, content) {
   return matched ? score : null;
 }
 
-const docContentCache = new Map();
+// A plain Map grew to the size of the entire corpus and never gave any of it
+// back. This is a byte-budgeted LRU: Map preserves insertion order, so the
+// oldest key is always the first one iteration yields, and re-reading a key
+// moves it to the back.
+function createLruCache(maxBytes) {
+  const entries = new Map();
+  let usedBytes = 0;
+
+  function evictUntilUnder(limit) {
+    for (const key of entries.keys()) {
+      if (usedBytes <= limit) {
+        return;
+      }
+
+      usedBytes -= entries.get(key).bytes;
+      entries.delete(key);
+    }
+  }
+
+  return {
+    get(key) {
+      const entry = entries.get(key);
+      if (!entry) {
+        return null;
+      }
+
+      entries.delete(key);
+      entries.set(key, entry);
+      return entry;
+    },
+    set(key, value, bytes) {
+      const existing = entries.get(key);
+      if (existing) {
+        usedBytes -= existing.bytes;
+        entries.delete(key);
+      }
+
+      // A single file larger than the whole budget is simply not cached,
+      // rather than evicting everything else to make room for it.
+      if (bytes > maxBytes) {
+        evictUntilUnder(maxBytes);
+        return;
+      }
+
+      entries.set(key, { ...value, bytes });
+      usedBytes += bytes;
+      evictUntilUnder(maxBytes);
+    },
+    delete(key) {
+      const entry = entries.get(key);
+      if (!entry) {
+        return;
+      }
+
+      usedBytes -= entry.bytes;
+      entries.delete(key);
+    },
+    stats() {
+      return { count: entries.size, usedBytes, maxBytes };
+    }
+  };
+}
+
+const docContentCache = createLruCache(CONTENT_CACHE_MAX_BYTES);
+// Search reads the lowercased form of every document on every keystroke.
+// Keeping that derived form next to the raw text turns the per-request cost
+// from "lowercase the whole corpus" into "walk strings already in memory".
+const docSearchIndex = createLruCache(SEARCH_INDEX_MAX_BYTES);
+const docSnippetCache = createLruCache(SNIPPET_CACHE_MAX_BYTES);
 
 function invalidateCachedContent(fullPath) {
   docContentCache.delete(fullPath);
+  docSearchIndex.delete(fullPath);
+  docSnippetCache.delete(fullPath);
 }
 
 async function readCachedTextFile(fullPath) {
@@ -583,13 +661,62 @@ async function readCachedTextFile(fullPath) {
     content,
     mtimeMs: stat.mtimeMs,
     size: stat.size
-  });
+  }, Buffer.byteLength(content, "utf8"));
 
   return {
     content,
     stat,
     cached: false
   };
+}
+
+// Only the lowercased full text is indexed, because scoring needs it for every
+// document on every request. The whitespace-collapsed form a snippet is cut from
+// is derived on demand instead: snippets are built for at most a page of results,
+// so caching that too would roughly triple the index for no gain.
+async function readSearchIndexEntry(fullPath) {
+  const { content, stat } = await readCachedTextFile(fullPath);
+  const cached = docSearchIndex.get(fullPath);
+
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { ...cached, content, stat };
+  }
+
+  const normalizedContent = normalizeSearchText(content);
+  const entry = {
+    normalizedContent,
+    mtimeMs: stat.mtimeMs,
+    size: stat.size
+  };
+
+  docSearchIndex.set(fullPath, entry, Buffer.byteLength(normalizedContent, "utf8"));
+
+  return { ...entry, content, stat };
+}
+
+// Snippet inputs are needed only for results that survive the limit, so they get
+// their own much smaller budget rather than riding along in the main index.
+async function readSnippetSource(fullPath, content, stat) {
+  const cached = docSnippetCache.get(fullPath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached;
+  }
+
+  const collapsed = String(content || "").replace(/\s+/g, " ").trim();
+  const entry = {
+    collapsed,
+    normalizedCollapsed: normalizeSearchText(collapsed),
+    mtimeMs: stat.mtimeMs,
+    size: stat.size
+  };
+
+  docSnippetCache.set(
+    fullPath,
+    entry,
+    Buffer.byteLength(collapsed, "utf8") + Buffer.byteLength(entry.normalizedCollapsed, "utf8")
+  );
+
+  return entry;
 }
 
 function sanitizeFilename(rawName) {
@@ -859,17 +986,13 @@ async function searchDocuments(query, scope = "docs") {
 
   const matches = await Promise.all(docs.map(async (doc) => {
     const fullPath = path.join(scopeDir, doc.file);
-    const { content } = await readCachedTextFile(fullPath);
-    const score = scoreSearchDoc(doc, normalizedQuery, tokens, content);
+    const indexEntry = await readSearchIndexEntry(fullPath);
+    const score = scoreSearchDoc(doc, normalizedQuery, tokens, indexEntry.normalizedContent);
     if (score === null) {
       return null;
     }
 
-    return {
-      ...doc,
-      score,
-      snippet: buildSearchSnippet(content, normalizedQuery, searchTerms)
-    };
+    return { ...doc, score, indexEntry };
   }));
 
   // Drop non-matching docs before sorting; the comparator dereferences .score.
@@ -889,8 +1012,30 @@ async function searchDocuments(query, scope = "docs") {
     return left.file.localeCompare(right.file);
   });
 
+  // Snippets are cut only for the results that survive the limit, instead of for
+  // every document that happened to match.
+  const limited = await Promise.all(
+    scoredMatches.slice(0, SEARCH_RESULT_LIMIT).map(async ({ indexEntry, ...match }) => {
+      const snippetSource = await readSnippetSource(
+        path.join(scopeDir, match.file),
+        indexEntry.content,
+        indexEntry.stat
+      );
+
+      return {
+        ...match,
+        snippet: buildSearchSnippet(
+          snippetSource.collapsed,
+          snippetSource.normalizedCollapsed,
+          normalizedQuery,
+          searchTerms
+        )
+      };
+    })
+  );
+
   return {
-    matches: scoredMatches.slice(0, SEARCH_RESULT_LIMIT),
+    matches: limited,
     searchTerms
   };
 }

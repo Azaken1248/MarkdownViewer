@@ -579,6 +579,34 @@ body.lock-scroll {
   min-width: 0;
 }
 
+/* The "show more" affordance for folders with more documents than one page. */
+.doc-reveal-row::before {
+  display: none;
+}
+
+.doc-reveal-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--surface0);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.doc-reveal-btn:hover,
+.doc-reveal-btn:focus-visible {
+  border-color: var(--blue);
+  color: var(--text);
+}
+
 .doc-row::before {
   content: "";
   position: absolute;

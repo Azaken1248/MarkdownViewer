@@ -127,17 +127,23 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🟠 Performance
 
-- [ ] **31. Every keystroke re-reads and lowercases every document on the server.** `searchDocuments` (`server.js:704`) reads all 93 files and calls `normalizeSearchText(content)` on each, per request, debounced at only 160ms. No index. The `SEARCH_RESULT_LIMIT` is applied *after* the full scan.
+- [x] **31. Every keystroke re-reads and lowercases every document on the server.** `searchDocuments` (`server.js:704`) reads all 93 files and calls `normalizeSearchText(content)` on each, per request, debounced at only 160ms. No index. The `SEARCH_RESULT_LIMIT` is applied *after* the full scan.
+  - Fixed: a `docSearchIndex` caches each document's lowercased text keyed by mtime+size, so a keystroke walks strings already in memory instead of re-reading and re-lowercasing 93 files. Snippets are now cut only for results that survive the limit, from a separate small cache. Measured against a copy of the real corpus: **mean 110ms -> 19ms, p95 145ms -> 26ms** (50 requests simulating typing "application"), with output byte-identical to the old implementation across 10 queries and 424 matches.
 
-- [ ] **32. `docContentCache` is unbounded** (`server.js:343`) — never evicted, grows to the size of the entire corpus in RSS, permanently.
+- [x] **32. `docContentCache` is unbounded** (`server.js:343`) — never evicted, grows to the size of the entire corpus in RSS, permanently.
+  - Fixed: all three caches (content, search index, snippet sources) are byte-budgeted LRUs — 32MB / 48MB / 16MB. Eviction is unit-tested for recency ordering, overwrite accounting, oversized items, and 5000-insert churn. RSS now plateaus instead of growing without limit; on this corpus it settles ~40MB above the old figure, which is the deliberate cost of the index that makes search 5.7x faster — and unlike before, it is bounded.
 
-- [ ] **33. The editor preview re-parses the full markdown *and* re-runs Mermaid on every keystroke** — `input` → `renderEditorPreview` (`app.js:3470`) with no debounce. On any document with diagrams, typing freezes the browser. Concurrent async renders also race each other.
+- [x] **33. The editor preview re-parses the full markdown *and* re-runs Mermaid on every keystroke** — `input` → `renderEditorPreview` (`app.js:3470`) with no debounce. On any document with diagrams, typing freezes the browser. Concurrent async renders also race each other.
+  - Fixed: typing schedules a cheap markdown-only repaint at 120ms and defers Mermaid/KaTeX to 420ms, so a burst of 40 keystrokes produces one of each instead of 40. Every render takes a generation number and abandons its work if a newer render started, so a slow diagram pass can no longer overwrite newer text. Queued renders are cancelled when the editor closes.
 
-- [ ] **34. svg-pan-zoom instances are never destroyed.** `applyPanZoom` (`app.js:2065`) creates a new instance per SVG per render and never calls `.destroy()`. `state.panZoomCounter` grows monotonically. Switching documents leaks handlers indefinitely.
+- [x] **34. svg-pan-zoom instances are never destroyed.** `applyPanZoom` (`app.js:2065`) creates a new instance per SVG per render and never calls `.destroy()`. `state.panZoomCounter` grows monotonically. Switching documents leaks handlers indefinitely.
+  - Fixed: live instances are tracked in a Map and `.destroy()`d before re-rendering a container, before any `innerHTML` replacement that would detach their SVGs, and whenever a tracked node has left the document. Verified that 200 simulated re-renders leave zero instances live and never hold more than one at a time.
 
-- [ ] **35. The full sidebar list is torn down and rebuilt on every document open.** `renderDocList()` does `innerHTML = ""` then recreates 93 rows × ~5 buttons with fresh listeners (`app.js:2147`). **Side effect: the sidebar scroll position jumps back to the top every time you click a doc.**
+- [x] **35. The full sidebar list is torn down and rebuilt on every document open.** `renderDocList()` does `innerHTML = ""` then recreates 93 rows × ~5 buttons with fresh listeners (`app.js:2147`). **Side effect: the sidebar scroll position jumps back to the top every time you click a doc.**
+  - Fixed: opening a document now calls `updateActiveRowHighlight()`, which toggles two classes on existing rows instead of rebuilding them. Rows carry `data-file` so they can be found without a re-render. Genuine rebuilds (search, folder collapse) additionally save and restore both the sidebar's own scroll offset and the window's.
 
-- [ ] **36. No pagination or virtualization** for the document list.
+- [x] **36. No pagination or virtualization** for the document list.
+  - Fixed: each folder group renders at most `DOC_LIST_PAGE_SIZE` (50) rows with a "Show N more" control for the rest, so row count stays bounded no matter how large the corpus grows. The open document is always rendered even when it falls past the cut, and reveal offsets reset when the result set changes.
 
 ---
 

@@ -35,6 +35,7 @@ const elements = {
   searchMeta: document.getElementById("searchMeta"),
   statusMsg: document.getElementById("statusMsg"),
   docList: document.getElementById("docList"),
+  sidebar: document.getElementById("sidebar"),
   emptyState: document.getElementById("emptyState"),
   docContent: document.getElementById("docContent"),
   editorModal: document.getElementById("editorModal"),
@@ -118,8 +119,11 @@ const state = {
   folderModalMode: "create",
   folderModalTargetFile: null,
   pendingUploadFile: null,
+  editorPreviewTextTimer: null,
+  editorPreviewDiagramTimer: null,
   folderModalTargetFolderId: null,
   collapsedFolderIds: new Set(),
+  groupRevealCounts: new Map(),
   confirmOpen: false,
   confirmResolver: null,
   writeToken: "",
@@ -152,6 +156,8 @@ function persistWriteToken(token) {
 
 const MOBILE_BREAKPOINT = 920;
 const SUPERSEARCH_LIMIT = 8;
+// How many document rows each folder group renders before offering "show more".
+const DOC_LIST_PAGE_SIZE = 50;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
 const SANITIZE_ALLOWED_URI_PATTERN = /^(?:(?:(?:f|ht)tps?|mailto|tel):|data:image\/(?:bmp|gif|jpe?g|png|svg\+xml|webp|avif)(?:;charset=[^;,]+)?(?:;base64)?,|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
@@ -1753,6 +1759,7 @@ function showEmptyState(title, message, icon = "fa-file-circle-question") {
   elements.emptyState.style.display = "block";
   elements.docContent.classList.remove("visible");
   elements.docContent.classList.remove("notebook-viewer");
+  destroyPanZoomInstances(elements.docContent);
   elements.docContent.innerHTML = "";
   elements.emptyState.innerHTML = `
     <i class="fa-solid ${icon}"></i>
@@ -2320,10 +2327,37 @@ async function renderSingleMermaidNode(node) {
   return false;
 }
 
+// svg-pan-zoom binds window resize and wheel handlers per instance. They were
+// never released, so every re-render and every document switch leaked another
+// set that kept firing against detached SVGs for the life of the page.
+const livePanZoomInstances = new Map();
+
+function destroyPanZoomInstances(root = null) {
+  for (const [svg, instance] of [...livePanZoomInstances.entries()]) {
+    // A null root means "everything"; otherwise only what lives under it, plus
+    // any node that has since been detached from the document.
+    if (root && root.contains(svg) === false && svg.isConnected) {
+      continue;
+    }
+
+    try {
+      instance.destroy();
+    } catch (error) {
+      console.error("Pan/zoom destroy failed", error);
+    }
+
+    delete svg.dataset.panzoomInit;
+    livePanZoomInstances.delete(svg);
+  }
+}
+
 function applyPanZoom(root) {
   if (!window.svgPanZoom) {
     return;
   }
+
+  // Anything previously initialized inside this root is about to be replaced.
+  destroyPanZoomInstances(root);
 
   const svgNodes = root.querySelectorAll(".mermaid-block svg");
   svgNodes.forEach((svg) => {
@@ -2345,6 +2379,7 @@ function applyPanZoom(root) {
         zoomScaleSensitivity: 0.3
       });
       svg.dataset.panzoomInit = "1";
+      livePanZoomInstances.set(svg, panZoomInstance);
       window.requestAnimationFrame(() => {
         try {
           panZoomInstance.resize();
@@ -2400,8 +2435,30 @@ function closeSidebarOnMobile() {
   }
 }
 
+// Opening a document only changes which row is highlighted. Rebuilding all ~93
+// rows and their listeners for that was both wasteful and visible: emptying the
+// list collapsed the page height and threw the scroll position back to the top.
+function updateActiveRowHighlight() {
+  for (const row of elements.docList.querySelectorAll(".doc-row")) {
+    const isActive = row.dataset.file === state.activeFile;
+    row.classList.toggle("active-row", isActive);
+
+    const button = row.querySelector(".doc-item");
+    if (button) {
+      button.classList.toggle("active", isActive);
+    }
+  }
+}
+
 function renderDocList() {
   const docs = state.filteredDocs;
+
+  // A genuine rebuild still shortens the list mid-flight, so hold the scroll
+  // offsets across it. The sidebar scrolls itself on mobile; the window scrolls
+  // on desktop.
+  const sidebarScrollTop = elements.sidebar?.scrollTop || 0;
+  const windowScrollY = window.scrollY;
+
   elements.docList.innerHTML = "";
 
   if (docs.length === 0) {
@@ -2409,6 +2466,11 @@ function renderDocList() {
     item.className = "doc-item is-empty";
     item.innerHTML = "<span class=\"doc-title\"><i class=\"fa-solid fa-face-frown\"></i>No matching markdowns</span>";
     elements.docList.appendChild(item);
+
+    if (elements.sidebar) {
+      elements.sidebar.scrollTop = sidebarScrollTop;
+    }
+
     return;
   }
 
@@ -2548,10 +2610,21 @@ function renderDocList() {
     const groupList = document.createElement("ul");
     groupList.className = "folder-group-list";
 
-    for (const doc of group.docs) {
+    // Rendering every row of every folder up front is unbounded work: each row
+    // carries a button plus ~3 action buttons with their own listeners. Reveal a
+    // page at a time instead, always including whichever document is open.
+    const revealed = state.groupRevealCounts.get(groupKey) || DOC_LIST_PAGE_SIZE;
+    const activeIndex = group.docs.findIndex((doc) => doc.file === state.activeFile);
+    const visibleCount = Math.max(revealed, activeIndex + 1);
+    const visibleDocs = group.docs.slice(0, visibleCount);
+    const hiddenCount = group.docs.length - visibleDocs.length;
+
+    for (const doc of visibleDocs) {
       const isActive = state.activeFile === doc.file;
       const row = document.createElement("li");
       row.className = `doc-row ${isActive ? "active-row" : ""}`;
+      // Lets updateActiveRowHighlight find rows without re-rendering them.
+      row.dataset.file = doc.file;
 
       const button = document.createElement("button");
       button.type = "button";
@@ -2672,8 +2745,35 @@ function renderDocList() {
       groupList.appendChild(row);
     }
 
+    if (hiddenCount > 0) {
+      const revealRow = document.createElement("li");
+      revealRow.className = "doc-row doc-reveal-row";
+
+      const revealBtn = document.createElement("button");
+      revealBtn.type = "button";
+      revealBtn.className = "doc-reveal-btn";
+      revealBtn.innerHTML = `<i class="fa-solid fa-chevron-down"></i> Show ${Math.min(hiddenCount, DOC_LIST_PAGE_SIZE)} more of ${escapeHtml(String(group.docs.length))}`;
+      revealBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.groupRevealCounts.set(groupKey, visibleCount + DOC_LIST_PAGE_SIZE);
+        renderDocList();
+      });
+
+      revealRow.appendChild(revealBtn);
+      groupList.appendChild(revealRow);
+    }
+
     groupItem.appendChild(groupList);
     elements.docList.appendChild(groupItem);
+  }
+
+  if (elements.sidebar) {
+    elements.sidebar.scrollTop = sidebarScrollTop;
+  }
+
+  if (window.scrollY !== windowScrollY) {
+    window.scrollTo({ top: windowScrollY });
   }
 }
 
@@ -2688,6 +2788,7 @@ async function applySearch(query) {
 
   if (!q) {
     state.searchRequestId += 1;
+    state.groupRevealCounts.clear();
     state.filteredDocs = [...currentDocs];
     setMeta(state.viewMode === "archive"
       ? `${state.filteredDocs.length} archived document(s)`
@@ -2733,6 +2834,7 @@ async function applySearch(query) {
     }));
 
     const searchTerms = buildJumpSearchTerms(rawQuery, payload.searchTerms || []);
+    state.groupRevealCounts.clear();
     state.filteredDocs = matches;
     renderSuperSearchPanel(rawQuery, matches, searchTerms);
     setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
@@ -2758,6 +2860,7 @@ async function applySearch(query) {
       snippet: match.snippet || "No preview available."
     }));
 
+    state.groupRevealCounts.clear();
     state.filteredDocs = matches;
     renderSuperSearchPanel(rawQuery, matches, fallback.searchTerms);
     setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
@@ -2829,6 +2932,7 @@ async function openDocument(file, pushHash, options = {}) {
 
     elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
 
+    destroyPanZoomInstances(elements.docContent);
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
     elements.emptyState.style.display = "none";
@@ -2837,7 +2941,8 @@ async function openDocument(file, pushHash, options = {}) {
     // Mermaid finishes left a multi-second window on diagram-heavy files where the
     // Edit and Delete buttons still pointed at the previously open document.
     state.activeFile = file;
-    renderDocList();
+    // Selection-only change: repaint the highlight, don't rebuild the list.
+    updateActiveRowHighlight();
     updateActiveDocUI(file);
     document.title = `${doc.title} | Cart Docs Viewer`;
     if (pushHash) {
@@ -2903,13 +3008,15 @@ async function openRecycleBinDocument(file, options = {}) {
 
     elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(originalFile));
 
+    destroyPanZoomInstances(elements.docContent);
     elements.docContent.innerHTML = safeHtml;
     elements.docContent.classList.add("visible");
     elements.emptyState.style.display = "none";
 
     // Same reason as openDocument: claim it before the async Mermaid pass.
     state.activeFile = file;
-    renderDocList();
+    // Selection-only change: repaint the highlight, don't rebuild the list.
+    updateActiveRowHighlight();
     updateActiveDocUI(file);
 
     await waitForNextFrame();
@@ -3148,7 +3255,13 @@ async function handleFolderModalAction() {
   }
 }
 
+// Every render bumps the generation. An async pass that finds the generation has
+// moved on abandons its work instead of writing stale HTML over a newer render.
+let editorPreviewGeneration = 0;
+
 async function renderEditorPreview() {
+  const generation = ++editorPreviewGeneration;
+
   const inputScrollMax = Math.max(0, elements.editorInput.scrollHeight - elements.editorInput.clientHeight);
   const inputScrollRatio = inputScrollMax > 0
     ? elements.editorInput.scrollTop / inputScrollMax
@@ -3158,12 +3271,63 @@ async function renderEditorPreview() {
     ? toMermaidMarkdown(elements.editorInput.value)
     : elements.editorInput.value;
 
+  // Markdown alone is cheap and synchronous, so the text updates immediately.
+  destroyPanZoomInstances(elements.editorPreview);
   elements.editorPreview.innerHTML = renderMarkdown(source);
-  await renderMermaidBlocks(elements.editorPreview);
   highlightCodeBlocks(elements.editorPreview);
 
   const previewScrollMax = Math.max(0, elements.editorPreview.scrollHeight - elements.editorPreview.clientHeight);
   elements.editorPreview.scrollTop = previewScrollMax * inputScrollRatio;
+
+  // Mermaid and KaTeX are the expensive half, so they run once typing settles.
+  await renderMermaidBlocks(elements.editorPreview);
+  if (generation !== editorPreviewGeneration) {
+    return;
+  }
+
+  highlightCodeBlocks(elements.editorPreview);
+  const settledScrollMax = Math.max(0, elements.editorPreview.scrollHeight - elements.editorPreview.clientHeight);
+  elements.editorPreview.scrollTop = settledScrollMax * inputScrollRatio;
+}
+
+// Typing repaints the markdown at most once a frame-ish, and only redraws
+// diagrams after a pause. Without this, every keystroke re-parsed the whole
+// document and re-ran Mermaid, which locks the browser on diagram-heavy files.
+const EDITOR_PREVIEW_TEXT_DELAY = 120;
+const EDITOR_PREVIEW_DIAGRAM_DELAY = 420;
+
+function scheduleEditorPreview() {
+  if (state.editorPreviewTextTimer) {
+    window.clearTimeout(state.editorPreviewTextTimer);
+  }
+
+  if (state.editorPreviewDiagramTimer) {
+    window.clearTimeout(state.editorPreviewDiagramTimer);
+  }
+
+  state.editorPreviewTextTimer = window.setTimeout(() => {
+    state.editorPreviewTextTimer = null;
+    renderEditorPreviewText();
+  }, EDITOR_PREVIEW_TEXT_DELAY);
+
+  state.editorPreviewDiagramTimer = window.setTimeout(() => {
+    state.editorPreviewDiagramTimer = null;
+    void renderEditorPreview();
+  }, EDITOR_PREVIEW_DIAGRAM_DELAY);
+}
+
+// The fast path: markdown and syntax highlighting only, no diagram work.
+function renderEditorPreviewText() {
+  const generation = ++editorPreviewGeneration;
+
+  const source = state.editorMode === "edit" && isDiagramFile(state.editorFile)
+    ? toMermaidMarkdown(elements.editorInput.value)
+    : elements.editorInput.value;
+
+  destroyPanZoomInstances(elements.editorPreview);
+  elements.editorPreview.innerHTML = renderMarkdown(source);
+  highlightCodeBlocks(elements.editorPreview);
+  return generation;
 }
 
 function syncEditorPaneScroll(sourceElement, targetElement) {
@@ -3250,6 +3414,19 @@ function openEditor({ mode, fileName, content }) {
 }
 
 function closeEditor() {
+  // A queued preview must not fire into a closed editor.
+  if (state.editorPreviewTextTimer) {
+    window.clearTimeout(state.editorPreviewTextTimer);
+    state.editorPreviewTextTimer = null;
+  }
+
+  if (state.editorPreviewDiagramTimer) {
+    window.clearTimeout(state.editorPreviewDiagramTimer);
+    state.editorPreviewDiagramTimer = null;
+  }
+
+  editorPreviewGeneration += 1;
+
   state.editorOpen = false;
   state.editorInitialContent = "";
   state.editorInitialFileName = "";
@@ -4066,7 +4243,7 @@ elements.editCurrentDocBtn.addEventListener("click", () => {
 });
 
 elements.editorInput.addEventListener("input", () => {
-  void renderEditorPreview();
+  scheduleEditorPreview();
 });
 
 elements.editorInput.addEventListener("scroll", () => {
