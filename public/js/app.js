@@ -2267,49 +2267,97 @@ function ensureMermaidInitialized() {
     theme: "base",
     darkMode: true,
     fontFamily: '"Inter", sans-serif',
+    // Colours belong in themeVariables, not in blanket !important overrides.
+    // The previous set filled every node with the surface colour — the same
+    // colour as the block behind it — and stroked them in --border-muted, which
+    // is barely a shade off it. Nodes have to sit a step above the background
+    // with a border that can actually be seen.
     themeVariables: {
-      primaryColor: "#0c1214",
+      background: "#0c1214",
+      mainBkg: "#1c262a",
+      primaryColor: "#1c262a",
       primaryTextColor: "#dce7e5",
-      primaryBorderColor: "#1c262a",
+      primaryBorderColor: "#3f8d84",
+      secondaryColor: "#253238",
+      secondaryTextColor: "#dce7e5",
+      secondaryBorderColor: "#2e3d42",
+      tertiaryColor: "#0a1013",
+      tertiaryTextColor: "#dce7e5",
+      tertiaryBorderColor: "#2e3d42",
       lineColor: "#86a09d",
-      textColor: "#dce7e5"
+      textColor: "#dce7e5",
+      nodeBorder: "#3f8d84",
+      nodeTextColor: "#dce7e5",
+      clusterBkg: "#0a1013",
+      clusterBorder: "#2e3d42",
+      edgeLabelBackground: "#0c1214",
+      labelBoxBkgColor: "#1c262a",
+      labelBoxBorderColor: "#2e3d42",
+      labelTextColor: "#dce7e5",
+      titleColor: "#dce7e5",
+      // Sequence diagrams
+      actorBkg: "#1c262a",
+      actorBorder: "#3f8d84",
+      actorTextColor: "#dce7e5",
+      actorLineColor: "#86a09d",
+      signalColor: "#86a09d",
+      signalTextColor: "#dce7e5",
+      loopTextColor: "#dce7e5",
+      noteBkgColor: "#253238",
+      noteTextColor: "#dce7e5",
+      noteBorderColor: "#2e3d42",
+      // Entity relationship diagrams
+      attributeBackgroundColorOdd: "#0c1214",
+      attributeBackgroundColorEven: "#1c262a",
+      altBackground: "#0a1013"
     },
     er: {
       useMaxWidth: true
     },
     themeCSS: `
-      /* Mermaid's base theme still paints light shapes, so pin every fill to
-         the surface colour rather than fighting it case by case. */
-      rect, polygon, path, circle {
+      /* Only the gaps the base theme leaves on a dark background. Crucially not
+         a blanket rule on <path>: that fills edge lines and turns every
+         connector into a solid blob. */
+      text,
+      tspan {
+        fill: #dce7e5;
+      }
+
+      .nodeLabel,
+      .edgeLabel,
+      .label,
+      foreignObject div,
+      foreignObject span {
+        color: #dce7e5 !important;
+      }
+
+      /* Edge labels ship with a light plate behind them. */
+      .edgeLabel rect,
+      .labelBkg,
+      rect.background {
         fill: #0c1214 !important;
-        stroke: #1c262a !important;
+        opacity: 1 !important;
       }
 
-      .er.entityBox, .entityBox {
-        fill: #131b1e !important;
-        stroke: #2e3d42 !important;
-        stroke-width: 1px !important;
+      .er.entityBox,
+      .entityBox {
+        fill: #1c262a;
+        stroke: #3f8d84;
       }
 
-      text, tspan {
-        fill: #dce7e5 !important;
-        font-family: "JetBrains Mono", monospace !important;
-        font-size: 11px !important;
+      .relationshipLine,
+      .messageLine0,
+      .messageLine1 {
+        stroke: #86a09d;
+        fill: none;
       }
 
-      line, .relationshipLine {
-        stroke: #86a09d !important;
-        stroke-width: 1px !important;
-      }
-
-      /* Anything still light after the above gets flattened to the surface. */
-      [fill="#ffffff"],
-      [fill="#f0f0f0"],
-      [fill="#e8e8e8"],
-      [fill="#ECECFF"],
-      [fill="#fff5ad"],
-      [fill="white"] {
-        fill: #0c1214 !important;
+      /* Any light fill the base theme still emits, without touching edges. */
+      rect[fill="#ffffff"], rect[fill="white"], rect[fill="#ECECFF"],
+      polygon[fill="#ffffff"], polygon[fill="white"], polygon[fill="#ECECFF"],
+      circle[fill="#ffffff"], circle[fill="white"], circle[fill="#ECECFF"],
+      ellipse[fill="#ffffff"], ellipse[fill="white"], ellipse[fill="#ECECFF"] {
+        fill: #1c262a !important;
       }
     `
   });
@@ -2529,6 +2577,57 @@ function destroyPanZoomInstances(root = null) {
   }
 }
 
+// svg-pan-zoom sets the SVG to width:100%/height:100%, so the block has to have
+// a height of its own or the whole thing collapses to nothing — which is what a
+// plain `height: auto` container did. Take the shape from the diagram's own
+// viewBox so each one is sized to its content instead of a blanket 65vh, and let
+// CSS clamp the extremes.
+const DIAGRAM_FALLBACK_RATIO = "16 / 9";
+const DIAGRAM_FALLBACK_WIDTH = 720;
+// Small diagrams are still scaled up to at least this, or a three-node flowchart
+// renders postage-stamp sized on a wide monitor.
+const DIAGRAM_MIN_WIDTH = 360;
+// The block's own padding and border, both sides, since aspect-ratio applies to
+// the border box.
+const DIAGRAM_BLOCK_CHROME = 26;
+
+function sizeDiagramContainer(svg) {
+  const block = svg.closest(".mermaid-block");
+  if (!block) {
+    return;
+  }
+
+  let width = 0;
+  let height = 0;
+
+  const viewBox = svg.viewBox?.baseVal;
+  if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+    width = viewBox.width;
+    height = viewBox.height;
+  } else {
+    // No usable viewBox (some diagram types), so measure what was drawn.
+    try {
+      const box = svg.getBBox();
+      width = box.width;
+      height = box.height;
+    } catch {
+      // getBBox throws on a detached or not-yet-laid-out SVG; fall through.
+    }
+  }
+
+  if (width > 0 && height > 0) {
+    block.style.aspectRatio = `${width} / ${height}`;
+    // Capping the width at the diagram's natural size is what keeps a small
+    // diagram small. Without it, width:100% stretches a 160px flowchart across
+    // the whole pane and the aspect ratio then makes it enormously tall.
+    block.style.maxWidth = `${Math.max(width, DIAGRAM_MIN_WIDTH) + DIAGRAM_BLOCK_CHROME}px`;
+    return;
+  }
+
+  block.style.aspectRatio = DIAGRAM_FALLBACK_RATIO;
+  block.style.maxWidth = `${DIAGRAM_FALLBACK_WIDTH}px`;
+}
+
 function applyPanZoom(root) {
   if (!window.svgPanZoom) {
     return;
@@ -2542,6 +2641,9 @@ function applyPanZoom(root) {
     if (svg.dataset.panzoomInit === "1") {
       return;
     }
+
+    // Must happen before svg-pan-zoom takes over the SVG's own dimensions.
+    sizeDiagramContainer(svg);
 
     state.panZoomCounter += 1;
     const id = svg.id || `mermaid-svg-${state.panZoomCounter}`;

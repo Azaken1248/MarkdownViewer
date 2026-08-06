@@ -1308,6 +1308,10 @@ kbd {
 
 /* --- Mermaid ------------------------------------------------------------ */
 
+/* aspect-ratio comes from the diagram's viewBox (set in app.js), so a wide
+   three-node flowchart stays short and a tall sequence diagram gets room. The
+   clamps stop either extreme from being unusable: too short to read, or taller
+   than the window. */
 .markdown-body .mermaid-block {
   margin: 0 0 16px;
   padding: 12px;
@@ -1315,17 +1319,35 @@ kbd {
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-md);
   overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  /* Low enough not to distort a genuinely small diagram; max-width (set inline
+     from the viewBox) is what stops small ones being blown up. */
+  min-height: 120px;
+  max-height: 78vh;
 }
 
+/* svg-pan-zoom writes width/height inline; these match so the SVG fills the
+   box the block just established rather than fighting it. */
 .markdown-body .mermaid-block svg {
-  max-width: 100%;
-  height: auto;
+  width: 100%;
+  height: 100%;
   display: block;
-  margin: 0 auto;
+}
+
+/* A fallback replaces the SVG with source text, which must not be squeezed
+   into the diagram's aspect box. */
+.markdown-body .mermaid-block:has(.mermaid-fallback-code) {
+  aspect-ratio: auto;
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
 }
 
 .editor-preview .mermaid-block {
   padding: 8px;
+  min-height: 160px;
+  max-height: 52vh;
 }
 
 .mermaid-fallback-code {
