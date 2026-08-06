@@ -40,7 +40,7 @@
     referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
     integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
-  <link rel="stylesheet" href="css/app.css?v=25" />
+  <link rel="stylesheet" href="css/app.css?v=26" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -62,7 +62,7 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/app.js?v=25" defer></script>
+  <script src="js/app.js?v=26" defer></script>
 </head>
 
 <body>
@@ -139,6 +139,10 @@
               <i class="fa-solid fa-trash-can"></i>
             </button>
 
+            <button class="icon-btn" id="toggleArchiveBtn" aria-label="Open archive" title="Open archive">
+              <i class="fa-solid fa-box-archive"></i>
+            </button>
+
             <button class="icon-btn" id="refreshDocs" aria-label="Refresh document list" title="Refresh list">
               <i class="fa-solid fa-rotate"></i>
             </button>
@@ -190,8 +194,8 @@
             </button>
 
             <button class="icon-btn danger viewer-action-btn" id="hardDeleteDocBtn" type="button"
-              aria-label="Hard delete current markdown" title="Permanently delete">
-              <i class="fa-solid fa-trash"></i>
+              aria-label="Archive current markdown" title="Archive">
+              <i class="fa-solid fa-box-archive"></i>
             </button>
 
             <button class="icon-btn viewer-action-btn" id="restoreDocBtn" type="button" aria-label="Restore deleted markdown"

@@ -62,15 +62,20 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🟠 Data integrity / data loss
 
-- [ ] **12. A corrupted organizer file silently wipes all folder structure.** `readOrganizerState` (`server.js:161-168`) does `catch { return createDefaultOrganizerState() }`. A partial write or malformed JSON silently discards all 17 folders and 77 file→folder mappings with no error, and the next write persists the empty state.
+- [x] **12. A corrupted organizer file silently wipes all folder structure.** `readOrganizerState` (`server.js:161-168`) does `catch { return createDefaultOrganizerState() }`. A partial write or malformed JSON silently discards all 17 folders and 77 file→folder mappings with no error, and the next write persists the empty state.
+  - Fixed: a parse failure quarantines the file to `document-organizer.json.corrupt-<stamp>`, leaves the original untouched, degrades reads to an empty structure, and refuses writes with 503 rather than overwriting.
 
-- [ ] **13. Organizer writes are non-atomic and unlocked.** `writeOrganizerState` (`server.js:170`) does a plain `writeFile` with no temp-file+rename. Every mutation is a full read-modify-write with no locking, so concurrent requests lose updates. A crash mid-write triggers #12.
+- [x] **13. Organizer writes are non-atomic and unlocked.** `writeOrganizerState` (`server.js:170`) does a plain `writeFile` with no temp-file+rename. Every mutation is a full read-modify-write with no locking, so concurrent requests lose updates. A crash mid-write triggers #12.
+  - Fixed: writes go to a temp file, `fsync`, then `rename(2)`; every mutation runs through `mutateOrganizerState` behind a promise-chain lock. Verified with 20 parallel folder creates — all 20 persisted with contiguous ordering.
 
-- [ ] **14. The editor discards unsaved work with no warning.** Escape (`app.js:3430`), the backdrop click (`3490`), and the X button (`3486`) all call `closeEditor()` immediately. No dirty check, no confirmation, no `beforeunload` guard.
+- [x] **14. The editor discards unsaved work with no warning.** Escape (`app.js:3430`), the backdrop click (`3490`), and the X button (`3486`) all call `closeEditor()` immediately. No dirty check, no confirmation, no `beforeunload` guard.
+  - Fixed: `isEditorDirty()` + `requestEditorClose()` confirm before discarding, and a `beforeunload` handler guards tab close.
 
-- [ ] **15. "Permanently delete" never deletes anything.** Hard delete just moves files to `deleted_markdowns/hard` (`server.js:1230`), which has no purge UI and no expiry. The tooltip on `hardDeleteDocBtn` says "Permanently delete" — it's a lie, and the files accumulate forever.
+- [x] **15. "Permanently delete" never deletes anything.** Hard delete just moves files to `deleted_markdowns/hard` (`server.js:1230`), which has no purge UI and no expiry. The tooltip on `hardDeleteDocBtn` says "Permanently delete" — it's a lie, and the files accumulate forever.
+  - Fixed: the action is now called **Archive** everywhere (viewer button, recycle-bin rows, confirmation copy). A new **Archive** view (sidebar toggle → `GET /api/archive`) lists the hard-archived files, and only there can a file actually be erased — `DELETE /api/archive/:entry`, the app's single `unlink` call, gated behind the write token plus a `confirmFile` echo of the original name.
 
-- [ ] **16. `deleted_markdowns/`, `data/`, and `public/docs/` are not gitignored.** Deleted documents, app state, and 93 personal documents are all staged for commit. `data/document-organizer.json` is already tracked, so every single folder move dirties the repo.
+- [x] **16. `deleted_markdowns/`, `data/`, and `public/docs/` are not gitignored.** Deleted documents, app state, and 93 personal documents are all staged for commit. `data/document-organizer.json` is already tracked, so every single folder move dirties the repo.
+  - Fixed: `data/`, `deleted_markdowns/`, and `public/docs/` are in `.gitignore` and untracked.
 
 ---
 

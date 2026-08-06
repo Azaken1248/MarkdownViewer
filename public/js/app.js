@@ -5,6 +5,7 @@ const elements = {
   sidebarTitle: document.getElementById("sidebarTitle"),
   refreshDocs: document.getElementById("refreshDocs"),
   toggleRecycleBinBtn: document.getElementById("toggleRecycleBinBtn"),
+  toggleArchiveBtn: document.getElementById("toggleArchiveBtn"),
   uploadTrigger: document.getElementById("uploadTrigger"),
   uploadInput: document.getElementById("uploadInput"),
   createFolderBtn: document.getElementById("createFolderBtn"),
@@ -73,7 +74,20 @@ const state = {
   folders: [],
   foldersById: new Map(),
   rootFolderLabel: "Ungrouped",
-  isRecycleBinMode: false,
+
+  // "docs" | "recycle" | "archive". Most code only cares whether we are
+  // browsing deleted documents (read-only), which both non-docs modes are, so
+  // isRecycleBinMode stays available as a derived accessor.
+  viewMode: "docs",
+
+  get isRecycleBinMode() {
+    return this.viewMode !== "docs";
+  },
+
+  set isRecycleBinMode(value) {
+    this.viewMode = value ? "recycle" : "docs";
+  },
+
   filteredDocs: [],
   contentCache: new Map(),
   activeFile: null,
@@ -1297,7 +1311,8 @@ function updateActiveDocUI(fileName) {
   if (state.isRecycleBinMode) {
     const deletedDoc = state.deletedDocs.find((doc) => doc.file === fileName);
     const label = deletedDoc?.originalFile || fileName;
-    elements.activeDocLabel.innerHTML = `<i class="fa-solid fa-trash-can"></i>${escapeHtml(label)}`;
+    const modeIcon = state.viewMode === "archive" ? "fa-box-archive" : "fa-trash-can";
+    elements.activeDocLabel.innerHTML = `<i class="fa-solid ${modeIcon}"></i>${escapeHtml(label)}`;
     elements.editDocBtn.disabled = true;
     elements.editCurrentDocBtn.disabled = true;
     elements.dockEdit.disabled = true;
@@ -1548,7 +1563,8 @@ async function fetchDocs() {
 }
 
 async function fetchDeletedDocs() {
-  const payload = await requestJson("/api/recycle-bin", { cache: "no-store" });
+  const endpoint = state.viewMode === "archive" ? "/api/archive" : "/api/recycle-bin";
+  const payload = await requestJson(endpoint, { cache: "no-store" });
 
   state.deletedDocs = (payload.docs || []).map((doc) => ({
     file: doc.file,
@@ -1599,7 +1615,8 @@ async function loadDeletedDocContent(entryFile, { forceReload = false } = {}) {
     return cached.content;
   }
 
-  const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(entryFile)}/content`, { cache: "no-store" });
+  const contentBase = state.viewMode === "archive" ? "/api/archive" : "/api/recycle-bin";
+  const payload = await requestJson(`${contentBase}/${encodeURIComponent(entryFile)}/content`, { cache: "no-store" });
   const content = String(payload.content || "");
   const version = String(doc?.deletedAt || doc?.updatedAt || "");
   state.contentCache.set(entryFile, {
@@ -1611,29 +1628,44 @@ async function loadDeletedDocContent(entryFile, { forceReload = false } = {}) {
 }
 
 function syncModeUI() {
-  const inRecycleBin = state.isRecycleBinMode;
-  elements.sidebarTitle.innerHTML = inRecycleBin
-    ? '<i class="fa-solid fa-trash-can"></i> Recycle Bin'
-    : '<i class="fa-solid fa-folder-tree"></i> Markdowns';
+  const inRecycleBin = state.viewMode === "recycle";
+  const inArchive = state.viewMode === "archive";
+  const inTrashView = inRecycleBin || inArchive;
+
+  elements.sidebarTitle.innerHTML = inArchive
+    ? '<i class="fa-solid fa-box-archive"></i> Archive'
+    : inRecycleBin
+      ? '<i class="fa-solid fa-trash-can"></i> Recycle Bin'
+      : '<i class="fa-solid fa-folder-tree"></i> Markdowns';
 
   elements.toggleRecycleBinBtn.classList.toggle("active", inRecycleBin);
   elements.toggleRecycleBinBtn.setAttribute("aria-label", inRecycleBin ? "Exit recycle bin" : "Open recycle bin");
   elements.toggleRecycleBinBtn.title = inRecycleBin ? "Exit recycle bin" : "Open recycle bin";
 
-  elements.softDeleteDocBtn.hidden = inRecycleBin;
-  elements.hardDeleteDocBtn.hidden = false;
-  elements.restoreDocBtn.hidden = !inRecycleBin;
-  elements.createFolderBtn.hidden = inRecycleBin;
+  elements.toggleArchiveBtn.classList.toggle("active", inArchive);
+  elements.toggleArchiveBtn.setAttribute("aria-label", inArchive ? "Exit archive" : "Open archive");
+  elements.toggleArchiveBtn.title = inArchive ? "Exit archive" : "Open archive";
 
+  elements.softDeleteDocBtn.hidden = inTrashView;
+  elements.hardDeleteDocBtn.hidden = false;
+  elements.restoreDocBtn.hidden = !inTrashView;
+  elements.createFolderBtn.hidden = inTrashView;
+
+  // The button keeps its slot in all three modes but means something different in each:
+  // archive from the viewer, archive from the recycle bin, erase from the archive.
   const hardDeleteIcon = elements.hardDeleteDocBtn.querySelector("i");
-  if (inRecycleBin) {
-    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
-    elements.hardDeleteDocBtn.setAttribute("aria-label", "Move recycle bin markdown to hard archive");
-    elements.hardDeleteDocBtn.title = "Move to deleted_markdowns/hard";
-  } else {
+  if (inArchive) {
     if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-trash";
-    elements.hardDeleteDocBtn.setAttribute("aria-label", "Hard delete current markdown");
-    elements.hardDeleteDocBtn.title = "Hard delete to deleted_markdowns";
+    elements.hardDeleteDocBtn.setAttribute("aria-label", "Permanently delete archived markdown");
+    elements.hardDeleteDocBtn.title = "Delete forever";
+  } else if (inRecycleBin) {
+    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
+    elements.hardDeleteDocBtn.setAttribute("aria-label", "Move recycle bin markdown to archive");
+    elements.hardDeleteDocBtn.title = "Archive";
+  } else {
+    if (hardDeleteIcon) hardDeleteIcon.className = "fa-solid fa-box-archive";
+    elements.hardDeleteDocBtn.setAttribute("aria-label", "Archive current markdown");
+    elements.hardDeleteDocBtn.title = "Archive";
   }
 }
 
@@ -2476,29 +2508,42 @@ function renderDocList() {
       actions.className = "row-quick-actions doc-row-actions";
 
       if (state.isRecycleBinMode) {
+        const inArchive = state.viewMode === "archive";
+
         const restoreBtn = document.createElement("button");
         restoreBtn.type = "button";
         restoreBtn.className = "icon-btn";
         restoreBtn.title = "Restore";
-        restoreBtn.innerHTML = '<i class="fa-solid fa-box-archive"></i>';
+        restoreBtn.innerHTML = '<i class="fa-solid fa-trash-arrow-up"></i>';
         restoreBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          await restoreDeletedDocumentByFile(doc.file);
+          if (inArchive) {
+            await restoreArchivedDocumentByFile(doc.file);
+          } else {
+            await restoreDeletedDocumentByFile(doc.file);
+          }
         });
 
-        const hardDeleteBtn = document.createElement("button");
-        hardDeleteBtn.type = "button";
-        hardDeleteBtn.className = "icon-btn danger";
-        hardDeleteBtn.title = "Hard Delete";
-        hardDeleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
-        hardDeleteBtn.addEventListener("click", async (event) => {
+        // Recycle bin rows archive the file; archive rows are the only place it can be erased.
+        const purgeBtn = document.createElement("button");
+        purgeBtn.type = "button";
+        purgeBtn.className = "icon-btn danger";
+        purgeBtn.title = inArchive ? "Delete forever" : "Archive";
+        purgeBtn.innerHTML = inArchive
+          ? '<i class="fa-solid fa-trash"></i>'
+          : '<i class="fa-solid fa-box-archive"></i>';
+        purgeBtn.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          await hardDeleteDeletedDocumentByFile(doc.file);
+          if (inArchive) {
+            await permanentlyDeleteArchivedDocument(doc.file);
+          } else {
+            await hardDeleteDeletedDocumentByFile(doc.file);
+          }
         });
 
-        actions.append(restoreBtn, hardDeleteBtn);
+        actions.append(restoreBtn, purgeBtn);
       } else {
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -2556,20 +2601,31 @@ async function applySearch(query) {
   if (!q) {
     state.searchRequestId += 1;
     state.filteredDocs = [...currentDocs];
-    setMeta(state.isRecycleBinMode
-      ? `${state.filteredDocs.length} deleted document(s)`
-      : `${state.filteredDocs.length} document(s)`);
+    setMeta(state.viewMode === "archive"
+      ? `${state.filteredDocs.length} archived document(s)`
+      : state.viewMode === "recycle"
+        ? `${state.filteredDocs.length} deleted document(s)`
+        : `${state.filteredDocs.length} document(s)`);
     renderSuperSearchPanel(rawQuery, [], []);
     renderDocList();
     return;
   }
 
   const requestId = ++state.searchRequestId;
-  const contextLabel = state.isRecycleBinMode ? "recycle bin" : "documents";
+  const searchScope = state.viewMode === "archive"
+    ? "archive"
+    : state.viewMode === "recycle"
+      ? "recycle-bin"
+      : "docs";
+  const contextLabel = searchScope === "archive"
+    ? "archive"
+    : searchScope === "recycle-bin"
+      ? "recycle bin"
+      : "documents";
   setMeta(`Searching ${contextLabel}...`);
 
   try {
-    const payload = await requestJson(`/api/docs/search?scope=${encodeURIComponent(state.isRecycleBinMode ? "recycle-bin" : "docs")}&q=${encodeURIComponent(rawQuery)}`, { cache: "no-store" });
+    const payload = await requestJson(`/api/docs/search?scope=${encodeURIComponent(searchScope)}&q=${encodeURIComponent(rawQuery)}`, { cache: "no-store" });
     if (requestId !== state.searchRequestId) {
       return;
     }
@@ -2775,7 +2831,8 @@ async function openRecycleBinDocument(file, options = {}) {
 }
 
 async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {}) {
-  setMeta("Loading recycle bin...");
+  const inArchive = state.viewMode === "archive";
+  setMeta(inArchive ? "Loading archive..." : "Loading recycle bin...");
 
   await fetchDeletedDocs();
   void hydrateDeletedSearchContent();
@@ -2790,8 +2847,13 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
   if (state.deletedDocs.length === 0) {
     state.activeFile = null;
     updateActiveDocUI(null);
-    showEmptyState("Recycle bin is empty", "Soft-deleted markdowns will appear here.", "fa-trash-can");
-    setStatus("Recycle bin is empty.", "neutral");
+    if (inArchive) {
+      showEmptyState("Archive is empty", "Archived markdowns will appear here.", "fa-box-archive");
+      setStatus("Archive is empty.", "neutral");
+    } else {
+      showEmptyState("Recycle bin is empty", "Soft-deleted markdowns will appear here.", "fa-trash-can");
+      setStatus("Recycle bin is empty.", "neutral");
+    }
     return;
   }
 
@@ -2818,12 +2880,12 @@ async function deleteCurrentDocument(mode) {
 
   const targetFile = state.activeFile;
   const shouldProceed = await requestConfirmation({
-    title: mode === "hard" ? "Hard delete this markdown?" : "Move markdown to recycle bin?",
+    title: mode === "hard" ? "Archive this markdown?" : "Move markdown to recycle bin?",
     message: mode === "hard"
-      ? `${targetFile} will be moved into deleted_markdowns/hard.`
+      ? `${targetFile} will be moved straight to the archive, skipping the recycle bin. It can still be restored from there.`
       : `${targetFile} will be moved into the recycle bin and can be restored later.`,
-    confirmLabel: mode === "hard" ? "Hard Delete" : "Move To Bin",
-    confirmIcon: mode === "hard" ? "fa-trash" : "fa-trash-can",
+    confirmLabel: mode === "hard" ? "Archive" : "Move To Bin",
+    confirmIcon: mode === "hard" ? "fa-box-archive" : "fa-trash-can",
     tone: mode === "hard" ? "danger" : "primary"
   });
 
@@ -2878,21 +2940,21 @@ async function restoreCurrentDeletedDocument() {
 
 async function hardDeleteCurrentDeletedDocument() {
   if (!state.isRecycleBinMode || !state.activeFile) {
-    setStatus("Select a recycle bin markdown to hard delete.", "error");
+    setStatus("Select a recycle bin markdown to archive.", "error");
     return;
   }
 
   const entryFile = state.activeFile;
   const shouldProceed = await requestConfirmation({
-    title: "Move recycle-bin markdown to hard archive?",
-    message: "This keeps the file in storage but moves it to deleted_markdowns/hard and removes it from recycle bin view.",
-    confirmLabel: "Move To Hard Archive",
+    title: "Archive this markdown?",
+    message: "The file stays on disk. It moves out of the recycle bin and into the archive, where it can still be restored or erased for good.",
+    confirmLabel: "Archive",
     confirmIcon: "fa-box-archive",
     tone: "danger"
   });
 
   if (!shouldProceed) {
-    setStatus("Hard delete cancelled.", "neutral");
+    setStatus("Archive cancelled.", "neutral");
     return;
   }
 
@@ -2903,7 +2965,7 @@ async function hardDeleteCurrentDeletedDocument() {
 
     state.contentCache.delete(entryFile);
     await refreshDeletedDocs({ preserveSearch: true });
-    setStatus("Document moved to hard-deleted archive.", "success");
+    setStatus("Document moved to the archive.", "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -3270,12 +3332,12 @@ async function deleteDocumentByFile(file, mode) {
   }
 
   const shouldProceed = await requestConfirmation({
-    title: mode === "hard" ? "Hard delete this markdown?" : "Move markdown to recycle bin?",
+    title: mode === "hard" ? "Archive this markdown?" : "Move markdown to recycle bin?",
     message: mode === "hard"
-      ? `${file} will be moved into deleted_markdowns/hard.`
+      ? `${file} will be moved straight to the archive, skipping the recycle bin. It can still be restored from there.`
       : `${file} will be moved into the recycle bin and can be restored later.`,
-    confirmLabel: mode === "hard" ? "Hard Delete" : "Move To Bin",
-    confirmIcon: mode === "hard" ? "fa-trash" : "fa-trash-can",
+    confirmLabel: mode === "hard" ? "Archive" : "Move To Bin",
+    confirmIcon: mode === "hard" ? "fa-box-archive" : "fa-trash-can",
     tone: mode === "hard" ? "danger" : "primary"
   });
 
@@ -3328,22 +3390,89 @@ async function restoreDeletedDocumentByFile(file) {
   }
 }
 
+async function restoreArchivedDocumentByFile(file) {
+  if (state.viewMode !== "archive" || !file) {
+    setStatus("Select an archived document to restore.", "error");
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/archive/${encodeURIComponent(file)}/restore`, {
+      method: "POST"
+    });
+
+    state.contentCache.delete(file);
+    state.viewMode = "docs";
+    syncModeUI();
+    resetJumpNavigation();
+    await refreshDocs({ openFile: payload.file, preserveSearch: false });
+    setStatus(`Restored ${payload.file} from the archive.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function permanentlyDeleteArchivedDocument(file) {
+  if (state.viewMode !== "archive" || !file) {
+    setStatus("Select an archived document to delete.", "error");
+    return;
+  }
+
+  const doc = state.deletedDocs.find((candidate) => candidate.file === file);
+  const originalFile = doc?.originalFile || file;
+
+  const shouldProceed = await requestConfirmation({
+    title: `Permanently delete ${originalFile}?`,
+    message: "This erases the file from disk. It is the only action in this app that destroys data, and it cannot be undone.",
+    confirmLabel: "Delete Forever",
+    confirmIcon: "fa-triangle-exclamation",
+    tone: "danger"
+  });
+
+  if (!shouldProceed) {
+    setStatus("Permanent delete cancelled.", "neutral");
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/archive/${encodeURIComponent(file)}`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      // The server requires the original name back before it will unlink.
+      body: JSON.stringify({ confirmFile: originalFile })
+    });
+
+    state.contentCache.delete(file);
+
+    if (state.activeFile === file) {
+      state.activeFile = null;
+    }
+
+    await refreshDeletedDocs({ preserveSearch: true });
+    setStatus(payload.message || `${originalFile} was permanently deleted.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 async function hardDeleteDeletedDocumentByFile(file) {
   if (!state.isRecycleBinMode || !file) {
-    setStatus("Select a recycle bin markdown to hard delete.", "error");
+    setStatus("Select a recycle bin markdown to archive.", "error");
     return;
   }
 
   const shouldProceed = await requestConfirmation({
-    title: "Move recycle-bin markdown to hard archive?",
-    message: "This keeps the file in storage but moves it to deleted_markdowns/hard and removes it from recycle bin view.",
-    confirmLabel: "Move To Hard Archive",
+    title: "Archive this markdown?",
+    message: "The file stays on disk. It moves out of the recycle bin and into the archive, where it can still be restored or erased for good.",
+    confirmLabel: "Archive",
     confirmIcon: "fa-box-archive",
     tone: "danger"
   });
 
   if (!shouldProceed) {
-    setStatus("Hard delete cancelled.", "neutral");
+    setStatus("Archive cancelled.", "neutral");
     return;
   }
 
@@ -3354,7 +3483,7 @@ async function hardDeleteDeletedDocumentByFile(file) {
 
     state.contentCache.delete(file);
     await refreshDeletedDocs({ preserveSearch: true });
-    setStatus(payload.message || `${payload.originalFile} moved to hard archive.`, "success");
+    setStatus(payload.message || `${payload.originalFile} moved to the archive.`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -3595,7 +3724,7 @@ elements.refreshDocs.addEventListener("click", async () => {
   try {
     if (state.isRecycleBinMode) {
       await refreshDeletedDocs({ preserveSearch: true });
-      setStatus("Recycle bin refreshed.", "success");
+      setStatus(state.viewMode === "archive" ? "Archive refreshed." : "Recycle bin refreshed.", "success");
     } else {
       await refreshDocs({ preserveSearch: true });
       setStatus("Document list refreshed.", "success");
@@ -3605,24 +3734,37 @@ elements.refreshDocs.addEventListener("click", async () => {
   }
 });
 
-elements.toggleRecycleBinBtn.addEventListener("click", async () => {
+// Both trash-view toggles flip between their own mode and "docs", so they share one handler.
+async function switchViewMode(targetMode) {
+  const previousMode = state.viewMode;
+  const nextMode = previousMode === targetMode ? "docs" : targetMode;
+
   try {
-    state.isRecycleBinMode = !state.isRecycleBinMode;
+    state.viewMode = nextMode;
     syncModeUI();
     resetJumpNavigation();
 
-    if (state.isRecycleBinMode) {
-      await refreshDeletedDocs({ preserveSearch: false });
-      setStatus("Recycle bin opened.", "success");
-    } else {
+    if (nextMode === "docs") {
       await refreshDocs({ preserveSearch: false });
       setStatus("Returned to markdowns.", "neutral");
+      return;
     }
+
+    await refreshDeletedDocs({ preserveSearch: false });
+    setStatus(nextMode === "archive" ? "Archive opened." : "Recycle bin opened.", "success");
   } catch (error) {
-    state.isRecycleBinMode = !state.isRecycleBinMode;
+    state.viewMode = previousMode;
     syncModeUI();
     setStatus(error.message, "error");
   }
+}
+
+elements.toggleRecycleBinBtn.addEventListener("click", () => {
+  void switchViewMode("recycle");
+});
+
+elements.toggleArchiveBtn.addEventListener("click", () => {
+  void switchViewMode("archive");
 });
 
 elements.softDeleteDocBtn.addEventListener("click", () => {
@@ -3630,6 +3772,11 @@ elements.softDeleteDocBtn.addEventListener("click", () => {
 });
 
 elements.hardDeleteDocBtn.addEventListener("click", () => {
+  if (state.viewMode === "archive") {
+    void permanentlyDeleteArchivedDocument(state.activeFile);
+    return;
+  }
+
   if (state.isRecycleBinMode) {
     hardDeleteCurrentDeletedDocument();
     return;
@@ -3639,6 +3786,11 @@ elements.hardDeleteDocBtn.addEventListener("click", () => {
 });
 
 elements.restoreDocBtn.addEventListener("click", () => {
+  if (state.viewMode === "archive") {
+    void restoreArchivedDocumentByFile(state.activeFile);
+    return;
+  }
+
   restoreCurrentDeletedDocument();
 });
 
@@ -3683,6 +3835,16 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.searchPanelOpen) {
     setSuperSearchOpen(false);
   }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (!isEditorDirty()) {
+    return;
+  }
+
+  // Browsers show their own generic wording; returnValue just opts in.
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 window.addEventListener("resize", () => {

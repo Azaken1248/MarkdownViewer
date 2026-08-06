@@ -245,20 +245,126 @@ function normalizeOrganizerState(rawState) {
   };
 }
 
-async function readOrganizerState() {
+// The organizer file is the only record of which document lives in which
+// folder. Losing it is unrecoverable, so a file we cannot parse is treated as
+// "damaged, hands off" rather than "start fresh": we keep a copy, keep serving
+// reads without folder info, and refuse every write until a human intervenes.
+let organizerDamage = null;
+
+class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+async function quarantineOrganizerFile(reason) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `${ORGANIZER_FILE_PATH}.corrupt-${stamp}`;
+
   try {
-    const raw = await fsp.readFile(ORGANIZER_FILE_PATH, "utf8");
-    return normalizeOrganizerState(JSON.parse(raw));
-  } catch {
+    await fsp.copyFile(ORGANIZER_FILE_PATH, backupPath);
+  } catch (copyError) {
+    console.error("Could not preserve damaged organizer file", copyError);
+    return null;
+  }
+
+  console.error(
+    `Organizer file could not be parsed (${reason}). A copy was preserved at ${backupPath}. `
+    + "Folder writes are disabled until data/document-organizer.json is valid JSON again."
+  );
+
+  return backupPath;
+}
+
+async function readOrganizerState({ forWrite = false } = {}) {
+  let raw;
+
+  try {
+    raw = await fsp.readFile(ORGANIZER_FILE_PATH, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      // No file yet is a legitimate first run - not damage.
+      organizerDamage = null;
+      return createDefaultOrganizerState();
+    }
+
+    throw error;
+  }
+
+  try {
+    const parsed = normalizeOrganizerState(JSON.parse(raw));
+    organizerDamage = null;
+    return parsed;
+  } catch (parseError) {
+    if (!organizerDamage) {
+      const backupPath = await quarantineOrganizerFile(parseError.message);
+      organizerDamage = { backupPath, message: parseError.message };
+    }
+
+    if (forWrite) {
+      throw new HttpError(
+        503,
+        `Folder data on disk is damaged and was not overwritten${organizerDamage.backupPath ? ` (copy kept at ${path.basename(organizerDamage.backupPath)})` : ""}. Fix data/document-organizer.json, then retry.`
+      );
+    }
+
+    // Reads degrade to "no folder info" so documents stay browsable.
     return createDefaultOrganizerState();
   }
 }
 
-async function writeOrganizerState(organizerState) {
+async function writeOrganizerStateUnsafe(organizerState) {
   const normalized = normalizeOrganizerState(organizerState);
   await fsp.mkdir(DATA_DIR, { recursive: true });
-  await fsp.writeFile(ORGANIZER_FILE_PATH, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+
+  // Write to a sibling temp file, flush it, then rename. rename(2) is atomic
+  // within a filesystem, so a crash leaves either the old file or the new one
+  // intact - never a truncated one.
+  const tempPath = `${ORGANIZER_FILE_PATH}.tmp-${process.pid}-${Date.now()}`;
+  const payload = `${JSON.stringify(normalized, null, 2)}\n`;
+
+  let handle;
+  try {
+    handle = await fsp.open(tempPath, "w");
+    await handle.writeFile(payload, "utf8");
+    await handle.sync();
+  } finally {
+    await handle?.close();
+  }
+
+  try {
+    await fsp.rename(tempPath, ORGANIZER_FILE_PATH);
+  } catch (error) {
+    await fsp.unlink(tempPath).catch(() => {});
+    throw error;
+  }
+
   return normalized;
+}
+
+// Folder mutations are read-modify-write cycles. Without serialization two
+// concurrent requests both read the old state and the second write silently
+// discards the first one's change.
+let organizerMutationChain = Promise.resolve();
+
+function withOrganizerLock(task) {
+  const result = organizerMutationChain.then(task, task);
+  organizerMutationChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function mutateOrganizerState(mutator) {
+  return withOrganizerLock(async () => {
+    const organizer = await readOrganizerState({ forWrite: true });
+    const mutatorResult = await mutator(organizer);
+    const saved = await writeOrganizerStateUnsafe(organizer);
+    return { organizer: saved, result: mutatorResult };
+  });
+}
+
+async function writeOrganizerState(organizerState) {
+  return withOrganizerLock(() => writeOrganizerStateUnsafe(organizerState));
 }
 
 function getFolderRecordById(organizerState, folderId) {
@@ -594,9 +700,9 @@ async function moveDocToRecycle(fileName, mode) {
   };
 }
 
-async function getRecycleDocs(organizerState = null) {
+async function getRecycleDocs(organizerState = null, sourceDir = DELETED_SOFT_DIR) {
   const organizer = organizerState || await readOrganizerState();
-  const dirEntries = await fsp.readdir(DELETED_SOFT_DIR, { withFileTypes: true });
+  const dirEntries = await fsp.readdir(sourceDir, { withFileTypes: true });
   const recycleEntries = dirEntries.filter((entry) => {
     if (!entry.isFile()) {
       return false;
@@ -608,7 +714,7 @@ async function getRecycleDocs(organizerState = null) {
 
   const docs = await Promise.all(
     recycleEntries.map(async (entry) => {
-      const fullPath = path.join(DELETED_SOFT_DIR, entry.name);
+      const fullPath = path.join(sourceDir, entry.name);
       const stat = await fsp.stat(fullPath);
       const originalFile = parseOriginalFilenameFromRecycleEntry(entry.name);
       const folderInfo = resolveFolderInfo(organizer, originalFile);
@@ -784,14 +890,18 @@ async function searchDocuments(query, scope = "docs") {
   const tokens = tokenizeSearchQuery(normalizedQuery);
   const searchTerms = [...new Set([normalizedQuery, ...tokens].filter(Boolean))];
   const organizer = await readOrganizerState();
-  const docs = scope === "recycle-bin"
-    ? await getRecycleDocs(organizer)
-    : await getDocs(organizer);
+  // Each scope reads a different directory, so resolve it once and reuse it below.
+  const scopeDir = scope === "recycle-bin"
+    ? DELETED_SOFT_DIR
+    : scope === "archive"
+      ? DELETED_HARD_DIR
+      : MARKDOWN_DIR;
+  const docs = scope === "docs"
+    ? await getDocs(organizer)
+    : await getRecycleDocs(organizer, scopeDir);
 
   const matches = await Promise.all(docs.map(async (doc) => {
-    const fullPath = scope === "recycle-bin"
-      ? path.join(DELETED_SOFT_DIR, doc.file)
-      : path.join(MARKDOWN_DIR, doc.file);
+    const fullPath = path.join(scopeDir, doc.file);
     const { content } = await readCachedTextFile(fullPath);
     const score = scoreSearchDoc(doc, normalizedQuery, tokens, content);
     if (score === null) {
@@ -1013,8 +1123,9 @@ app.get("/api/docs", async (req, res, next) => {
 app.get("/api/docs/search", async (req, res, next) => {
   try {
     const query = String(req.query.q || req.query.query || "");
-    const scope = String(req.query.scope || "docs").trim().toLowerCase() === "recycle-bin"
-      ? "recycle-bin"
+    const requestedScope = String(req.query.scope || "docs").trim().toLowerCase();
+    const scope = requestedScope === "recycle-bin" || requestedScope === "archive"
+      ? requestedScope
       : "docs";
     const payload = await searchDocuments(query, scope);
     res.json(payload);
@@ -1069,7 +1180,6 @@ app.put("/api/docs/:file/folder", requireWriteAuth, async (req, res, next) => {
     }
 
     const folderId = req.body?.folderId === undefined ? null : req.body.folderId;
-    const organizer = await readOrganizerState();
     const normalizedFolderId = normalizeFolderId(folderId);
 
     if (folderId && !normalizedFolderId) {
@@ -1077,18 +1187,18 @@ app.put("/api/docs/:file/folder", requireWriteAuth, async (req, res, next) => {
       return;
     }
 
-    if (normalizedFolderId && !getFolderRecordById(organizer, normalizedFolderId)) {
-      res.status(404).json({ error: "Folder not found" });
-      return;
-    }
+    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
+      if (normalizedFolderId && !getFolderRecordById(organizer, normalizedFolderId)) {
+        throw new HttpError(404, "Folder not found");
+      }
 
-    if (normalizedFolderId) {
-      organizer.fileFolders[fileName] = normalizedFolderId;
-    } else {
-      delete organizer.fileFolders[fileName];
-    }
+      if (normalizedFolderId) {
+        organizer.fileFolders[fileName] = normalizedFolderId;
+      } else {
+        delete organizer.fileFolders[fileName];
+      }
+    });
 
-    const savedOrganizer = await writeOrganizerState(organizer);
     const folderInfo = resolveFolderInfo(savedOrganizer, fileName);
 
     res.json({
@@ -1109,24 +1219,24 @@ app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
       return;
     }
 
-    const organizer = await readOrganizerState();
-    const existing = organizer.folders.find((folder) => folder.name.toLowerCase() === folderName.toLowerCase());
-    if (existing) {
-      res.status(409).json({ error: "A folder with that name already exists" });
-      return;
-    }
+    const { organizer: savedOrganizer, result: folder } = await mutateOrganizerState((organizer) => {
+      const existing = organizer.folders.find((entry) => entry.name.toLowerCase() === folderName.toLowerCase());
+      if (existing) {
+        throw new HttpError(409, "A folder with that name already exists");
+      }
 
-    const now = new Date().toISOString();
-    const folder = {
-      id: createFolderId(),
-      name: folderName,
-      order: organizer.folders.length,
-      createdAt: now,
-      updatedAt: now
-    };
+      const now = new Date().toISOString();
+      const created = {
+        id: createFolderId(),
+        name: folderName,
+        order: organizer.folders.length,
+        createdAt: now,
+        updatedAt: now
+      };
 
-    organizer.folders.push(folder);
-    const savedOrganizer = await writeOrganizerState(organizer);
+      organizer.folders.push(created);
+      return created;
+    });
 
     res.status(201).json({
       folder: serializeFolders([folder])[0],
@@ -1152,22 +1262,21 @@ app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
       return;
     }
 
-    const organizer = await readOrganizerState();
-    const folder = organizer.folders.find((entry) => entry.id === normalizedFolderId);
-    if (!folder) {
-      res.status(404).json({ error: "Folder not found" });
-      return;
-    }
+    const { organizer: savedOrganizer, result: folder } = await mutateOrganizerState((organizer) => {
+      const target = organizer.folders.find((entry) => entry.id === normalizedFolderId);
+      if (!target) {
+        throw new HttpError(404, "Folder not found");
+      }
 
-    const duplicate = organizer.folders.find((entry) => entry.id !== normalizedFolderId && entry.name.toLowerCase() === folderName.toLowerCase());
-    if (duplicate) {
-      res.status(409).json({ error: "A folder with that name already exists" });
-      return;
-    }
+      const duplicate = organizer.folders.find((entry) => entry.id !== normalizedFolderId && entry.name.toLowerCase() === folderName.toLowerCase());
+      if (duplicate) {
+        throw new HttpError(409, "A folder with that name already exists");
+      }
 
-    folder.name = folderName;
-    folder.updatedAt = new Date().toISOString();
-    const savedOrganizer = await writeOrganizerState(organizer);
+      target.name = folderName;
+      target.updatedAt = new Date().toISOString();
+      return target;
+    });
 
     res.json({
       folder: serializeFolders([folder])[0],
@@ -1186,21 +1295,20 @@ app.delete("/api/folders/:folderId", requireWriteAuth, async (req, res, next) =>
       return;
     }
 
-    const organizer = await readOrganizerState();
-    const folderIndex = organizer.folders.findIndex((entry) => entry.id === normalizedFolderId);
-    if (folderIndex < 0) {
-      res.status(404).json({ error: "Folder not found" });
-      return;
-    }
-
-    organizer.folders.splice(folderIndex, 1);
-    for (const [fileName, assignedFolderId] of Object.entries(organizer.fileFolders)) {
-      if (assignedFolderId === normalizedFolderId) {
-        delete organizer.fileFolders[fileName];
+    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
+      const folderIndex = organizer.folders.findIndex((entry) => entry.id === normalizedFolderId);
+      if (folderIndex < 0) {
+        throw new HttpError(404, "Folder not found");
       }
-    }
 
-    const savedOrganizer = await writeOrganizerState(organizer);
+      organizer.folders.splice(folderIndex, 1);
+      for (const [fileName, assignedFolderId] of Object.entries(organizer.fileFolders)) {
+        if (assignedFolderId === normalizedFolderId) {
+          delete organizer.fileFolders[fileName];
+        }
+      }
+    });
+
     res.json({
       message: "Folder deleted",
       folders: serializeFolders(savedOrganizer.folders)
@@ -1235,7 +1343,7 @@ app.post("/api/docs/:file/delete", requireWriteAuth, async (req, res, next) => {
       ...deletedDoc,
       message: mode === "soft"
         ? `${fileName} moved to recycle bin`
-        : `${fileName} moved to deleted archive`
+        : `${fileName} moved to the archive`
     });
   } catch (error) {
     next(error);
@@ -1292,20 +1400,22 @@ app.post("/api/recycle-bin/:entry/restore", requireWriteAuth, async (req, res, n
     const restoreFileName = await ensureUniqueFilename(originalFile);
     const targetPath = path.join(MARKDOWN_DIR, restoreFileName);
 
-    const organizer = await readOrganizerState();
-    const folderInfo = resolveFolderInfo(organizer, originalFile);
+    const folderInfo = resolveFolderInfo(await readOrganizerState(), originalFile);
 
     await moveFile(sourcePath, targetPath);
     invalidateCachedContent(sourcePath);
     invalidateCachedContent(targetPath);
 
     if (restoreFileName !== originalFile) {
-      if (folderInfo.folderId) {
-        organizer.fileFolders[restoreFileName] = folderInfo.folderId;
-      }
+      // Re-read inside the lock so a concurrent folder edit is not clobbered.
+      await mutateOrganizerState((organizer) => {
+        const currentFolderId = organizer.fileFolders[originalFile] || null;
+        if (currentFolderId) {
+          organizer.fileFolders[restoreFileName] = currentFolderId;
+        }
 
-      delete organizer.fileFolders[originalFile];
-      await writeOrganizerState(organizer);
+        delete organizer.fileFolders[originalFile];
+      });
     }
 
     const stat = await fsp.stat(targetPath);
@@ -1350,7 +1460,141 @@ app.post("/api/recycle-bin/:entry/hard-delete", requireWriteAuth, async (req, re
       originalFile: parseOriginalFilenameFromRecycleEntry(targetName),
       size: stat.size,
       deletedAt: stat.mtime.toISOString(),
-      mode: "hard"
+      mode: "hard",
+      message: `${parseOriginalFilenameFromRecycleEntry(targetName)} moved to the archive`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Archive (deleted_markdowns/hard) --------------------------------------
+// Nothing reaches this directory except via an explicit archive action, and
+// DELETE below is the only place in the app that actually removes a file.
+
+app.get("/api/archive", async (req, res, next) => {
+  try {
+    const organizer = await readOrganizerState();
+    const docs = await getRecycleDocs(organizer, DELETED_HARD_DIR);
+    res.json({ docs });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/archive/:entry/content", async (req, res, next) => {
+  try {
+    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    if (!entryName) {
+      res.status(400).json({ error: "Invalid archive entry" });
+      return;
+    }
+
+    const fullPath = path.join(DELETED_HARD_DIR, entryName);
+    if (!(await fileExists(fullPath))) {
+      res.status(404).json({ error: "Archived document not found" });
+      return;
+    }
+
+    const { content } = await readCachedTextFile(fullPath);
+    const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
+    res.json({ file: entryName, originalFile, content });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/:entry/restore", requireWriteAuth, async (req, res, next) => {
+  try {
+    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    if (!entryName) {
+      res.status(400).json({ error: "Invalid archive entry" });
+      return;
+    }
+
+    const sourcePath = path.join(DELETED_HARD_DIR, entryName);
+    if (!(await fileExists(sourcePath))) {
+      res.status(404).json({ error: "Archived document not found" });
+      return;
+    }
+
+    const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
+    const restoreFileName = await ensureUniqueFilename(originalFile);
+    const targetPath = path.join(MARKDOWN_DIR, restoreFileName);
+
+    await moveFile(sourcePath, targetPath);
+    invalidateCachedContent(sourcePath);
+    invalidateCachedContent(targetPath);
+
+    if (restoreFileName !== originalFile) {
+      await mutateOrganizerState((organizer) => {
+        const currentFolderId = organizer.fileFolders[originalFile] || null;
+        if (currentFolderId) {
+          organizer.fileFolders[restoreFileName] = currentFolderId;
+        }
+
+        delete organizer.fileFolders[originalFile];
+      });
+    }
+
+    const organizer = await readOrganizerState();
+    const folderInfo = resolveFolderInfo(organizer, restoreFileName);
+    const stat = await fsp.stat(targetPath);
+
+    res.json({
+      file: restoreFileName,
+      title: toDocTitle(restoreFileName),
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+      restoredFrom: entryName,
+      folderId: folderInfo.folderId,
+      folderName: folderInfo.folderName
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/archive/:entry", requireWriteAuth, async (req, res, next) => {
+  try {
+    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    if (!entryName) {
+      res.status(400).json({ error: "Invalid archive entry" });
+      return;
+    }
+
+    const fullPath = path.join(DELETED_HARD_DIR, entryName);
+    if (!(await fileExists(fullPath))) {
+      res.status(404).json({ error: "Archived document not found" });
+      return;
+    }
+
+    const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
+
+    // The caller must echo back the original filename, so a stray DELETE
+    // cannot destroy a document by accident.
+    const confirmation = String(req.body?.confirmFile || "").trim();
+    if (confirmation !== originalFile) {
+      res.status(400).json({
+        error: `To delete this permanently, confirm with the file name "${originalFile}".`
+      });
+      return;
+    }
+
+    await fsp.unlink(fullPath);
+    invalidateCachedContent(fullPath);
+
+    // Drop the folder mapping too; nothing will ever restore this file again.
+    await mutateOrganizerState((organizer) => {
+      delete organizer.fileFolders[originalFile];
+    });
+
+    console.log(`Permanently deleted archived document: ${entryName}`);
+
+    res.json({
+      file: entryName,
+      originalFile,
+      message: `${originalFile} was permanently deleted`
     });
   } catch (error) {
     next(error);
@@ -1465,6 +1709,17 @@ app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), as
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
 app.use((error, req, res, next) => {
+  if (error instanceof HttpError) {
+    res.status(error.statusCode).json({ error: error.message });
+    return;
+  }
+
+  // express.json() rejects oversized bodies before our own size check runs.
+  if (error?.type === "entity.too.large") {
+    res.status(413).json({ error: "File content exceeds the 2MB limit" });
+    return;
+  }
+
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
       res.status(413).json({ error: "Uploaded file exceeds 2MB limit" });
