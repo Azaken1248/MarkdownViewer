@@ -666,6 +666,18 @@ kbd {
   padding-right: 2px;
 }
 
+/* The action plate is an overlay, so on a folder row it would land straight on
+   top of the document count. Yield the slot to the actions while they are up —
+   the count is ambient information and the buttons are the thing being aimed
+   at. Same trade an editor's file tree makes. */
+@media (hover: hover) {
+
+  .tree-row:hover .tree-count,
+  .tree-row:focus-within .tree-count {
+    visibility: hidden;
+  }
+}
+
 /* Hover actions sit on an opaque plate so long filenames slide under them
    instead of showing through. */
 .tree-actions {
@@ -682,8 +694,9 @@ kbd {
   pointer-events: none;
 }
 
+/* The plate is opaque, so on the open row it has to match that row's fill. */
 .tree-row.is-active .tree-actions {
-  background: #0e2221;
+  background: var(--selected);
 }
 
 .tree-row:focus-within .tree-actions,
@@ -2275,11 +2288,24 @@ kbd {
 
   /* Touch has no hover, so row actions have to be permanently visible. Showing
      three to five of them ate the whole row, so on touch they collapse into one
-     44px overflow button that opens the same list as a right-click. */
+     overflow button that opens the same list as a right-click.
+
+     Because that button is permanent, it must not be an overlay: absolutely
+     positioned it sat on top of the folder's document count and clipped long
+     names. In flow it takes its own column, so the label ellipsizes against it
+     and the count keeps its slot. */
   .tree-actions {
+    position: static;
     opacity: 1;
     pointer-events: auto;
-    padding-left: 4px;
+    flex-shrink: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0 4px 0 0;
+  }
+
+  .tree-row.is-active .tree-actions {
+    background: transparent;
   }
 
   .tree-actions .tree-action {
@@ -2300,9 +2326,12 @@ kbd {
   .tree-row-btn {
     height: 44px;
     font-size: 14px;
-    /* Reserve the overflow button's width so long names ellipsize instead of
-       sliding underneath it. */
-    padding-right: 46px;
+  }
+
+  /* The count is always visible on touch, since nothing overlays it. */
+  .tree-row:hover .tree-count,
+  .tree-row:focus-within .tree-count {
+    visibility: visible;
   }
 
   .icon-btn.icon-btn-sm {
