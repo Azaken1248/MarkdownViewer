@@ -55,6 +55,12 @@ const elements = {
   folderDescription: document.getElementById("folderDescription"),
   folderNameInput: document.getElementById("folderNameInput"),
   createFolderConfirmBtn: document.getElementById("createFolderConfirmBtn"),
+  lockToggleBtn: document.getElementById("lockToggleBtn"),
+  unlockModal: document.getElementById("unlockModal"),
+  unlockBackdrop: document.getElementById("unlockBackdrop"),
+  unlockTokenInput: document.getElementById("unlockTokenInput"),
+  unlockCancelBtn: document.getElementById("unlockCancelBtn"),
+  unlockConfirmBtn: document.getElementById("unlockConfirmBtn"),
   folderPicker: document.getElementById("folderPicker"),
   folderPickerList: document.getElementById("folderPickerList"),
   moveToRootBtn: document.getElementById("moveToRootBtn"),
@@ -98,8 +104,34 @@ const state = {
   folderModalTargetFolderId: null,
   collapsedFolderIds: new Set(),
   confirmOpen: false,
-  confirmResolver: null
+  confirmResolver: null,
+  writeToken: "",
+  canWrite: false,
+  unlockOpen: false
 };
+
+const WRITE_TOKEN_STORAGE_KEY = "mdviewer.writeToken";
+
+function readStoredWriteToken() {
+  try {
+    return window.localStorage.getItem(WRITE_TOKEN_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function persistWriteToken(token) {
+  try {
+    if (token) {
+      window.localStorage.setItem(WRITE_TOKEN_STORAGE_KEY, token);
+    } else {
+      window.localStorage.removeItem(WRITE_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Storage can be unavailable in private mode; the token still works for
+    // this page session via state.writeToken.
+  }
+}
 
 const MOBILE_BREAKPOINT = 920;
 const TREE_MENU_HOLD_DELAY = 420;
@@ -1161,7 +1193,7 @@ function setNavOpen(isOpen) {
 }
 
 function syncBodyLock() {
-  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen;
+  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen || state.unlockOpen;
   document.body.classList.toggle("lock-scroll", shouldLock);
 }
 
@@ -1342,7 +1374,16 @@ function requestConfirmation({
 }
 
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const requestOptions = { ...options };
+
+  if (state.writeToken) {
+    requestOptions.headers = {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${state.writeToken}`
+    };
+  }
+
+  const response = await fetch(url, requestOptions);
   let payload = null;
 
   try {
@@ -1351,11 +1392,134 @@ async function requestJson(url, options = {}) {
     payload = null;
   }
 
+  if (response.status === 401) {
+    // The stored token is missing or no longer valid (the server generates a
+    // fresh one on restart unless MDVIEWER_TOKEN is set).
+    setWriteAccess(false);
+    throw new Error(payload?.error || "Editing is locked. Unlock editing to continue.");
+  }
+
   if (!response.ok) {
     throw new Error(payload?.error || `Request failed (${response.status})`);
   }
 
   return payload;
+}
+
+function syncLockUI() {
+  if (!elements.lockToggleBtn) {
+    return;
+  }
+
+  const icon = elements.lockToggleBtn.querySelector("i");
+  if (icon) {
+    icon.className = state.canWrite ? "fa-solid fa-lock-open" : "fa-solid fa-lock";
+  }
+
+  elements.lockToggleBtn.classList.toggle("active", state.canWrite);
+  const label = state.canWrite ? "Lock editing" : "Unlock editing";
+  elements.lockToggleBtn.setAttribute("aria-label", label);
+  elements.lockToggleBtn.title = state.canWrite ? "Editing unlocked - click to lock" : "Unlock editing";
+}
+
+function setWriteAccess(canWrite, { token = null } = {}) {
+  state.canWrite = Boolean(canWrite);
+
+  if (!state.canWrite) {
+    state.writeToken = "";
+    persistWriteToken("");
+  } else if (token) {
+    state.writeToken = token;
+    persistWriteToken(token);
+  }
+
+  syncLockUI();
+}
+
+async function verifyWriteToken(token) {
+  const response = await fetch("/api/session", {
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = await response.json().catch(() => null);
+  return Boolean(payload?.canWrite);
+}
+
+async function restoreWriteSession() {
+  const storedToken = readStoredWriteToken();
+  if (!storedToken) {
+    setWriteAccess(false);
+    return;
+  }
+
+  try {
+    const isValid = await verifyWriteToken(storedToken);
+    if (isValid) {
+      state.writeToken = storedToken;
+      setWriteAccess(true, { token: storedToken });
+      return;
+    }
+  } catch {
+    // Network trouble - treat as locked rather than assuming access.
+  }
+
+  setWriteAccess(false);
+}
+
+function openUnlockModal() {
+  state.unlockOpen = true;
+  elements.unlockTokenInput.value = "";
+  elements.unlockModal.classList.add("open");
+  elements.unlockModal.setAttribute("aria-hidden", "false");
+  syncBodyLock();
+  window.requestAnimationFrame(() => elements.unlockTokenInput.focus());
+}
+
+function closeUnlockModal() {
+  state.unlockOpen = false;
+  elements.unlockTokenInput.value = "";
+  elements.unlockModal.classList.remove("open");
+  elements.unlockModal.setAttribute("aria-hidden", "true");
+  syncBodyLock();
+}
+
+async function submitUnlock() {
+  const token = String(elements.unlockTokenInput.value || "").trim();
+  if (!token) {
+    setStatus("Enter the editor token to unlock editing.", "error");
+    elements.unlockTokenInput.focus();
+    return;
+  }
+
+  try {
+    const isValid = await verifyWriteToken(token);
+    if (!isValid) {
+      setStatus("That token was not accepted.", "error");
+      elements.unlockTokenInput.select();
+      return;
+    }
+
+    setWriteAccess(true, { token });
+    closeUnlockModal();
+    setStatus("Editing unlocked.", "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function handleLockToggle() {
+  if (state.canWrite) {
+    setWriteAccess(false);
+    setStatus("Editing locked.", "neutral");
+    return;
+  }
+
+  openUnlockModal();
 }
 
 async function fetchDocs() {
@@ -1812,7 +1976,11 @@ function ensureMermaidInitialized() {
 
   window.mermaid.initialize({
     startOnLoad: false,
-    securityLevel: "loose",
+    // "antiscript" runs DOMPurify over diagram labels and blocks javascript:
+    // click directives, while still allowing the <br/> tags our docs rely on.
+    // Do not set this back to "loose": Mermaid renders after DOMPurify has run
+    // on the markdown, so "loose" lets an uploaded document execute script.
+    securityLevel: "antiscript",
     theme: "base",
     darkMode: true,
     fontFamily: '"Space Grotesk", sans-serif',
@@ -3195,6 +3363,8 @@ async function hardDeleteDeletedDocumentByFile(file) {
 async function initialize() {
   setMeta("Loading documents...");
   mountMatchNavToViewportLayer();
+  syncLockUI();
+  await restoreWriteSession();
   syncModeUI();
   updateActiveDocUI(null);
   updateJumpNavigationUI();
@@ -3358,6 +3528,31 @@ elements.clearSearchBtn.addEventListener("click", () => {
   elements.searchInput.focus();
 });
 
+elements.lockToggleBtn.addEventListener("click", () => {
+  handleLockToggle();
+});
+
+elements.unlockConfirmBtn.addEventListener("click", () => {
+  void submitUnlock();
+});
+
+elements.unlockCancelBtn.addEventListener("click", () => {
+  closeUnlockModal();
+});
+
+elements.unlockBackdrop.addEventListener("click", () => {
+  closeUnlockModal();
+});
+
+elements.unlockTokenInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  event.preventDefault();
+  void submitUnlock();
+});
+
 elements.createFolderBtn.addEventListener("click", () => {
   openFolderModal({ mode: "create" });
 });
@@ -3459,6 +3654,12 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.confirmOpen) {
     event.preventDefault();
     resolveConfirmDialog(false);
+    return;
+  }
+
+  if (event.key === "Escape" && state.unlockOpen) {
+    event.preventDefault();
+    closeUnlockModal();
     return;
   }
 

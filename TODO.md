@@ -9,11 +9,13 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## Quick wins — fix these five first
 
-- [ ] **`server.js:721`** — move `.filter(Boolean)` before `.sort()`. One line restores search entirely.
-- [ ] **Wire `matchNextBtn` and `matchCloseBtn`** — two missing `addEventListener` calls.
-- [ ] **Call `hydrateSearchContent()`**, or drop the "full-text search" claim from the README.
-- [ ] **Add a dirty check to `closeEditor()`** — silent unsaved-work loss is the worst bug class here.
-- [ ] **`.gitignore` `data/`, `deleted_markdowns/`, `public/docs/`** and `git rm --cached data/document-organizer.json`.
+*(all five done, commit `0999ee2`)*
+
+- [x] **`server.js:721`** — move `.filter(Boolean)` before `.sort()`. One line restores search entirely.
+- [x] **Wire `matchNextBtn` and `matchCloseBtn`** — two missing `addEventListener` calls.
+- [x] **Call `hydrateSearchContent()`**, or drop the "full-text search" claim from the README.
+- [x] **Add a dirty check to `closeEditor()`** — silent unsaved-work loss is the worst bug class here.
+- [x] **`.gitignore` `data/`, `deleted_markdowns/`, `public/docs/`** and `git rm --cached data/document-organizer.json`.
 
 ---
 
@@ -43,17 +45,18 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🔴 Security
 
-- [ ] **6. Zero authentication on every mutating endpoint.** Anyone who can reach the port can create, overwrite, delete, and hard-delete documents and folders. No auth, no CSRF token, no rate limiting.
+- [x] **6. Zero authentication on every mutating endpoint.** Anyone who can reach the port can create, overwrite, delete, and hard-delete documents and folders. No auth, no CSRF token, no rate limiting.
 
-- [ ] **7. Host-header injection into canonical/OG/oEmbed URLs.** `app.set("trust proxy", true)` is unconditional (`server.js:32`), and `getBaseUrlFromRequest` reads `x-forwarded-host` / `x-forwarded-proto` straight from the request (`server.js:773-776`). An attacker controls `og:image`, `canonical`, and the oEmbed URL by sending a header.
+- [x] **7. Host-header injection into canonical/OG/oEmbed URLs.** `app.set("trust proxy", true)` is unconditional (`server.js:32`), and `getBaseUrlFromRequest` reads `x-forwarded-host` / `x-forwarded-proto` straight from the request (`server.js:773-776`). An attacker controls `og:image`, `canonical`, and the oEmbed URL by sending a header.
 
-- [ ] **8. Stored XSS via Mermaid.** `securityLevel: "loose"` (`app.js:1813`) permits raw HTML in node labels and `click ... "javascript:..."` directives. Mermaid renders **after** DOMPurify runs, so it bypasses sanitization entirely. Combined with #6, any unauthenticated user can upload a `.md` that executes script for every viewer.
+- [x] **8. Stored XSS via Mermaid.** `securityLevel: "loose"` (`app.js:1813`) permits raw HTML in node labels and `click ... "javascript:..."` directives. Mermaid renders **after** DOMPurify runs, so it bypasses sanitization entirely. Combined with #6, any unauthenticated user can upload a `.md` that executes script for every viewer.
 
-- [ ] **9. GraphiQL is exposed in production** (`server.js:865`) on `app.all("/graphql")` — full schema introspection and query UI, no auth. Confirmed working.
+- [x] **9. ~~GraphiQL is exposed in production~~ → schema introspection is open** (`server.js`) on `app.all("/graphql")`, no auth.
+  *Correction: the original finding was partly wrong. `graphql-http` has no `graphiql` option, so `graphiql: true` was always a no-op and no UI was ever served. The real exposure was **introspection**, which was confirmed live. Fixed with `NoSchemaIntrospectionCustomRule`, opt-out via `ENABLE_GRAPHQL_INTROSPECTION=true`.*
 
-- [ ] **10. Seven CDN dependencies with no SRI hashes and no `crossorigin`** (`index.html:30-47`). A compromise of jsdelivr or cdnjs is full app takeover. There's also no CSP, no `helmet`.
+- [x] **10. Seven CDN dependencies with no SRI hashes and no `crossorigin`** (`index.html:30-47`). A compromise of jsdelivr or cdnjs is full app takeover. There's also no CSP, no `helmet`.
 
-- [ ] **11. `marked` is loaded completely unpinned** — `npm/marked/marked.min.js` resolves to *latest*. The app can break on any upstream release with zero code change. `mermaid@11` floats on minor versions too.
+- [x] **11. `marked` is loaded completely unpinned** — `npm/marked/marked.min.js` resolves to *latest*. The app can break on any upstream release with zero code change. `mermaid@11` floats on minor versions too.
 
 ---
 
@@ -202,3 +205,16 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 - [ ] **71. README troubleshooting is wrong** — it lists supported extensions without `.ipynb`, which the app does support.
 
 - [ ] **72. No request logging, no health check beyond the GraphQL `health` field, no graceful shutdown.**
+
+---
+
+## Configuration added by the security fixes
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `MDVIEWER_TOKEN` | random per boot | Bearer token required for all write endpoints. If unset, one is generated and printed to the log at startup, so the app never runs open — but it changes on every restart. |
+| `TRUST_PROXY` | `false` | Set to `true` (or an express trust-proxy value like `loopback`) only when behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured when building canonical/oEmbed URLs. |
+| `ENABLE_GRAPHQL_INTROSPECTION` | `false` | Re-enables GraphQL schema introspection for local schema work. |
+| `PUBLIC_BASE_URL` | unset | Pre-existing. Overrides the request host entirely when building embed URLs — the most robust defence against host-header spoofing. |
+
+Reads (`GET`) stay public so shared links, social cards and oEmbed unfurls keep working.

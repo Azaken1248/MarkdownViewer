@@ -5,7 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const crypto = require("crypto");
 const { createHandler } = require("graphql-http/lib/use/express");
-const { buildSchema } = require("graphql");
+const { buildSchema, NoSchemaIntrospectionCustomRule } = require("graphql");
 
 const app = express();
 const PORT = process.env.PORT || 4321;
@@ -29,7 +29,45 @@ const EMBED_THEME_COLOR = "#89b4fa";
 const EMBED_IMAGE_PATH = "/social-card.svg";
 const FAVICON_PATH = "/favicon.svg";
 
-app.set("trust proxy", true);
+// Only trust X-Forwarded-* when we are actually behind a reverse proxy.
+// Trusting them unconditionally lets any client spoof the host/protocol used
+// to build canonical, og:image and oEmbed URLs.
+const TRUST_PROXY = process.env.TRUST_PROXY || "";
+if (TRUST_PROXY) {
+  app.set("trust proxy", TRUST_PROXY === "true" ? true : TRUST_PROXY);
+} else {
+  app.set("trust proxy", false);
+}
+
+// Content Security Policy.
+//
+// script-src is the part that matters: it pins executable code to this origin
+// plus the two CDNs we load pinned, SRI-checked bundles from, so an injected
+// <script src> or inline payload cannot run.
+//
+// 'unsafe-inline' is required for style-src because KaTeX sets inline style
+// attributes and Mermaid injects <style> blocks into rendered SVG. Styles are
+// a far weaker vector than scripts, so this is a deliberate trade.
+const CSP_DIRECTIVES = [
+  "default-src 'self'",
+  "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com",
+  "font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'"
+].join("; ");
+
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", CSP_DIRECTIVES);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 app.use(express.json({ limit: "2mb" }));
 
 let indexTemplateCache = null;
@@ -46,6 +84,55 @@ const upload = multer({
     }
     cb(null, true);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Write authentication
+//
+// Reads stay public so shared links, social cards and oEmbed unfurls keep
+// working. Everything that mutates disk state requires a bearer token.
+// Set MDVIEWER_TOKEN to a stable secret; if it is unset a random one is
+// generated at boot and logged, so the app never starts in an open state.
+// ---------------------------------------------------------------------------
+const CONFIGURED_WRITE_TOKEN = String(process.env.MDVIEWER_TOKEN || "").trim();
+const WRITE_TOKEN = CONFIGURED_WRITE_TOKEN || crypto.randomBytes(24).toString("base64url");
+
+function extractRequestToken(req) {
+  const authHeader = String(req.get("authorization") || "");
+  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (bearerMatch) {
+    return bearerMatch[1].trim();
+  }
+
+  return String(req.get("x-mdviewer-token") || "").trim();
+}
+
+function isValidWriteToken(candidate) {
+  const expected = Buffer.from(WRITE_TOKEN, "utf8");
+  const provided = Buffer.from(String(candidate || ""), "utf8");
+
+  // timingSafeEqual throws on length mismatch, so compare lengths separately.
+  if (expected.length !== provided.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expected, provided);
+}
+
+function requireWriteAuth(req, res, next) {
+  if (isValidWriteToken(extractRequestToken(req))) {
+    next();
+    return;
+  }
+
+  res.status(401).json({ error: "This action requires the editor token. Unlock editing to continue." });
+}
+
+app.get("/api/session", (req, res) => {
+  res.json({
+    canWrite: isValidWriteToken(extractRequestToken(req)),
+    tokenConfigured: Boolean(CONFIGURED_WRITE_TOKEN)
+  });
 });
 
 async function ensureStorageDirs() {
@@ -773,10 +860,12 @@ function getBaseUrlFromRequest(req) {
     return `http://localhost:${PORT}`;
   }
 
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  const protocol = forwardedProto || req.protocol || "http";
-  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
-  const host = forwardedHost || req.get("host") || `localhost:${PORT}`;
+  // req.protocol/req.hostname already honour X-Forwarded-* only when the
+  // "trust proxy" setting says the hop is trusted, so read them instead of
+  // the raw headers. Untrusted clients can still send a Host header, so the
+  // result is only used when PUBLIC_BASE_URL is not configured.
+  const protocol = req.protocol || "http";
+  const host = req.get("host") || `localhost:${PORT}`;
 
   return `${protocol}://${host}`;
 }
@@ -860,12 +949,17 @@ const graphQLRootValue = {
   health: () => "ok"
 };
 
+// Schema introspection is on by default and lets anyone enumerate the API.
+// graphql-http serves no GraphiQL UI, so blocking introspection is the actual
+// control here; enable it explicitly when working on the schema locally.
+const ENABLE_GRAPHQL_INTROSPECTION = process.env.ENABLE_GRAPHQL_INTROSPECTION === "true";
+
 app.all(
   "/graphql",
   createHandler({
     schema: graphQLSchema,
     rootValue: graphQLRootValue,
-    graphiql: true,
+    validationRules: ENABLE_GRAPHQL_INTROSPECTION ? [] : [NoSchemaIntrospectionCustomRule],
     context: (request) => ({ request: request.raw || request })
   })
 );
@@ -960,7 +1054,7 @@ app.get("/api/docs/:file", async (req, res, next) => {
   }
 });
 
-app.put("/api/docs/:file/folder", async (req, res, next) => {
+app.put("/api/docs/:file/folder", requireWriteAuth, async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     if (!fileName) {
@@ -1007,7 +1101,7 @@ app.put("/api/docs/:file/folder", async (req, res, next) => {
   }
 });
 
-app.post("/api/folders", async (req, res, next) => {
+app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
   try {
     const folderName = normalizeFolderName(req.body?.name);
     if (!folderName) {
@@ -1043,7 +1137,7 @@ app.post("/api/folders", async (req, res, next) => {
   }
 });
 
-app.put("/api/folders/:folderId", async (req, res, next) => {
+app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
     const folderName = normalizeFolderName(req.body?.name);
@@ -1084,7 +1178,7 @@ app.put("/api/folders/:folderId", async (req, res, next) => {
   }
 });
 
-app.delete("/api/folders/:folderId", async (req, res, next) => {
+app.delete("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
     if (!normalizedFolderId) {
@@ -1116,7 +1210,7 @@ app.delete("/api/folders/:folderId", async (req, res, next) => {
   }
 });
 
-app.post("/api/docs/:file/delete", async (req, res, next) => {
+app.post("/api/docs/:file/delete", requireWriteAuth, async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     if (!fileName) {
@@ -1180,7 +1274,7 @@ app.get("/api/recycle-bin/:entry/content", async (req, res, next) => {
   }
 });
 
-app.post("/api/recycle-bin/:entry/restore", async (req, res, next) => {
+app.post("/api/recycle-bin/:entry/restore", requireWriteAuth, async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1230,7 +1324,7 @@ app.post("/api/recycle-bin/:entry/restore", async (req, res, next) => {
   }
 });
 
-app.post("/api/recycle-bin/:entry/hard-delete", async (req, res, next) => {
+app.post("/api/recycle-bin/:entry/hard-delete", requireWriteAuth, async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1263,7 +1357,7 @@ app.post("/api/recycle-bin/:entry/hard-delete", async (req, res, next) => {
   }
 });
 
-app.post("/api/docs", async (req, res, next) => {
+app.post("/api/docs", requireWriteAuth, async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.body.fileName);
     const content = String(req.body.content || "");
@@ -1300,7 +1394,7 @@ app.post("/api/docs", async (req, res, next) => {
   }
 });
 
-app.put("/api/docs/:file", async (req, res, next) => {
+app.put("/api/docs/:file", requireWriteAuth, async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     const content = String(req.body.content || "");
@@ -1336,7 +1430,7 @@ app.put("/api/docs/:file", async (req, res, next) => {
   }
 });
 
-app.post("/api/docs/upload", upload.single("markdownFile"), async (req, res, next) => {
+app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), async (req, res, next) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: "No document file uploaded" });
@@ -1394,6 +1488,20 @@ ensureStorageDirs()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Markdown viewer running on http://localhost:${PORT}`);
+
+      if (CONFIGURED_WRITE_TOKEN) {
+        console.log("Editing is locked behind MDVIEWER_TOKEN.");
+        return;
+      }
+
+      console.log("");
+      console.log("  MDVIEWER_TOKEN is not set, so a temporary editor token was generated:");
+      console.log("");
+      console.log(`      ${WRITE_TOKEN}`);
+      console.log("");
+      console.log("  Reads are public; creating, editing and deleting require this token.");
+      console.log("  It changes on every restart - set MDVIEWER_TOKEN to keep it stable.");
+      console.log("");
     });
   })
   .catch((error) => {

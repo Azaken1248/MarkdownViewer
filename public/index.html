@@ -32,19 +32,37 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
     rel="stylesheet" />
+  <!-- Third-party assets are pinned to exact versions and integrity-checked.
+       When bumping a version, recompute the hash:
+         curl -s <url> | openssl dgst -sha384 -binary | openssl base64 -A -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css"
+    integrity="sha384-h/hnnw1Bi4nbpD6kE7nYfCXzovi622sY5WBxww8ARKwpdLj5kUWjRuyiXaD1U2JT" crossorigin="anonymous"
     referrerpolicy="no-referrer" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/catppuccin-mocha.min.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="css/app.css?v=24" />
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" defer></script>
-  <script src="js/app.js?v=24" defer></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+    integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+  <link rel="stylesheet" href="css/app.css?v=25" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
+    integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"
+    integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js"
+    integrity="sha384-aBQXj4hK6Jm05i7aQAsUV3bLdSUrHX1BGYfMB0166TtWt/RRaw+h0Eelme9OCOvy" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"
+    integrity="sha384-yc/c2Lk1s2V2ir1rxvjo8YyVD9PlOlYTqpNr3Wm1WIuAA30GlDYNx6U5104OiavY" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+    integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+    integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"
+    defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
+    defer></script>
+  <script src="js/app.js?v=25" defer></script>
 </head>
 
 <body>
@@ -109,6 +127,10 @@
           <h2 id="sidebarTitle"><i class="fa-solid fa-folder-tree"></i> Markdowns</h2>
 
           <div class="sidebar-actions">
+            <button class="icon-btn" id="lockToggleBtn" aria-label="Unlock editing" title="Unlock editing">
+              <i class="fa-solid fa-lock"></i>
+            </button>
+
             <button class="icon-btn" id="createFolderBtn" aria-label="Create folder" title="Create folder">
               <i class="fa-solid fa-folder-plus"></i>
             </button>
@@ -273,6 +295,33 @@
 
         <button class="btn btn-danger" id="confirmProceedBtn" type="button">
           <i class="fa-solid fa-check"></i> Continue
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="confirm-modal" id="unlockModal" aria-hidden="true">
+    <button class="confirm-backdrop" id="unlockBackdrop" aria-label="Cancel unlock"></button>
+
+    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="unlockTitle"
+      aria-describedby="unlockMessage">
+      <p class="confirm-eyebrow">Editor Access</p>
+      <h2 id="unlockTitle">Unlock editing</h2>
+      <p id="unlockMessage">Reading is open to everyone. Creating, editing and deleting documents needs the editor
+        token from the server log (or your <code>MDVIEWER_TOKEN</code>).</p>
+
+      <label class="folder-name-field" for="unlockTokenInput">
+        <span>Editor token</span>
+        <input id="unlockTokenInput" type="password" placeholder="Paste token" autocomplete="current-password" />
+      </label>
+
+      <div class="confirm-actions">
+        <button class="btn" id="unlockCancelBtn" type="button">
+          <i class="fa-solid fa-ban"></i> Cancel
+        </button>
+
+        <button class="btn btn-primary" id="unlockConfirmBtn" type="button">
+          <i class="fa-solid fa-lock-open"></i> Unlock
         </button>
       </div>
     </section>
