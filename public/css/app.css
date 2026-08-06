@@ -1,48 +1,53 @@
 /* ==========================================================================
    Markdown Docs Viewer
-   Palette: GitHub Dark. Flat opaque surfaces, 1px hairline borders, no blur,
-   no gradients. Borders do the separating work that shadows used to.
+   Palette: deep slate with a muted teal accent. Flat opaque surfaces, 1px
+   hairline borders, no blur, no gradients. Borders do the separating work
+   that shadows used to.
    ========================================================================== */
 
 :root {
   /* Surfaces, darkest to lightest */
-  --canvas-inset: #010409;
-  --canvas: #0d1117;
-  --surface: #161b22;
-  --raised: #21262d;
-  --raised-hover: #30363d;
+  --canvas-inset: #06090b;
+  --canvas: #0b0f12;
+  --surface: #121820;
+  --raised: #1b232c;
+  --raised-hover: #26313c;
 
   /* Borders */
-  --border: #30363d;
-  --border-muted: #21262d;
-  --border-strong: #484f58;
+  --border: #26313c;
+  --border-muted: #1b232c;
+  --border-strong: #3a4a58;
 
   /* Text */
-  --fg: #e6edf3;
-  --fg-muted: #8b949e;
-  --fg-subtle: #6e7681;
+  --fg: #e3ebf2;
+  --fg-muted: #7f909f;
+  --fg-subtle: #5f707e;
   --fg-on-emphasis: #ffffff;
 
   /* Accents */
-  --accent: #58a6ff;
-  --accent-emphasis: #1f6feb;
-  --accent-subtle: rgba(56, 139, 253, 0.15);
-  --accent-muted: rgba(56, 139, 253, 0.4);
+  --accent: #4fa8a0;
+  --accent-emphasis: #2f7f79;
+  --accent-subtle: rgba(79, 168, 160, 0.15);
+  --accent-muted: rgba(79, 168, 160, 0.4);
+  /* Opaque equivalent of accent-subtle, for rows that need a solid backdrop
+     (selected rows sit under an opaque action plate that must match). */
+  --selected: #12262a;
+  --selected-hover: #173236;
 
-  --success: #3fb950;
-  --success-emphasis: #238636;
-  --success-subtle: rgba(63, 185, 80, 0.15);
+  --success: #4f9e6a;
+  --success-emphasis: #2f7048;
+  --success-subtle: rgba(79, 158, 106, 0.15);
 
-  --danger: #f85149;
-  --danger-emphasis: #da3633;
-  --danger-subtle: rgba(248, 81, 73, 0.15);
+  --danger: #d2635c;
+  --danger-emphasis: #a8443e;
+  --danger-subtle: rgba(210, 99, 92, 0.15);
 
-  --attention: #d29922;
-  --attention-emphasis: #9e6a03;
-  --attention-subtle: rgba(187, 128, 9, 0.18);
+  --attention: #c79a3c;
+  --attention-emphasis: #8a6a26;
+  --attention-subtle: rgba(199, 154, 60, 0.18);
 
-  --done: #a371f7;
-  --done-subtle: rgba(163, 113, 247, 0.15);
+  --done: #9b7fd4;
+  --done-subtle: rgba(155, 127, 212, 0.15);
 
   /* Geometry */
   --radius-lg: 12px;
@@ -50,8 +55,8 @@
   --radius-sm: 4px;
 
   /* The only shadows left are for things that genuinely float above the page. */
-  --shadow-overlay: 0 8px 24px rgba(1, 4, 9, 0.75);
-  --shadow-dialog: 0 16px 32px rgba(1, 4, 9, 0.85);
+  --shadow-overlay: 0 8px 24px rgba(3, 6, 8, 0.78);
+  --shadow-dialog: 0 16px 32px rgba(3, 6, 8, 0.88);
 
   --tree-row-height: 26px;
   --tree-indent: 14px;
@@ -477,6 +482,20 @@ kbd {
   border-bottom: 1px solid var(--border-muted);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.selection-meta {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.selection-meta[hidden] {
+  display: none;
 }
 
 /* Mode toggles light up so it is never a guess which list you are looking at. */
@@ -542,7 +561,16 @@ kbd {
   outline-offset: -2px;
 }
 
-/* Selection reads as a filled row with an accent rail, like an editor. */
+/* Two different states, deliberately distinguishable: `is-selected` is what a
+   file operation will act on, `is-active` is the document currently open. */
+.tree-row.is-selected .tree-row-btn {
+  background: var(--selected);
+}
+
+.tree-row.is-selected:hover .tree-row-btn {
+  background: var(--selected-hover);
+}
+
 .tree-row.is-active .tree-row-btn {
   background: var(--accent-subtle);
   color: var(--fg);
@@ -557,6 +585,30 @@ kbd {
   bottom: 0;
   width: 2px;
   background: var(--accent);
+}
+
+/* A cut file stays visible but reads as "in flight", the way Explorer ghosts it. */
+.tree-row.is-cut .tree-row-btn {
+  opacity: 0.5;
+}
+
+.tree-row.is-cut .tree-label {
+  font-style: italic;
+}
+
+/* Inline rename */
+.tree-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
 }
 
 .tree-caret {
@@ -628,7 +680,7 @@ kbd {
 }
 
 .tree-row.is-active .tree-actions {
-  background: #1a2434;
+  background: #12262a;
 }
 
 .tree-row:focus-within .tree-actions,
@@ -716,10 +768,19 @@ kbd {
 }
 
 .tree-empty {
+  padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--tree-indent));
+  font-size: 12px;
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+
+/* The whole-tree empty state is a message, not a row, so it centres. */
+.tree>.tree-empty {
   padding: 16px 12px;
+  text-align: center;
+  font-style: normal;
   font-size: 13px;
   color: var(--fg-muted);
-  text-align: center;
 }
 
 .tree-more {
@@ -1293,7 +1354,7 @@ kbd {
 .hljs-doctag,
 .hljs-name,
 .hljs-strong {
-  color: #ff7b72;
+  color: #e6797a;
 }
 
 .hljs-title,
@@ -1301,7 +1362,7 @@ kbd {
 .hljs-title.function_,
 .hljs-built_in,
 .hljs-type {
-  color: #d2a8ff;
+  color: #b79df0;
 }
 
 .hljs-string,
@@ -1309,7 +1370,7 @@ kbd {
 .hljs-bullet,
 .hljs-addition,
 .hljs-regexp {
-  color: #a5d6ff;
+  color: #8fd0c8;
 }
 
 .hljs-number,
@@ -1317,13 +1378,13 @@ kbd {
 .hljs-attribute,
 .hljs-variable,
 .hljs-template-variable {
-  color: #79c0ff;
+  color: #7fb3d5;
 }
 
 .hljs-meta,
 .hljs-subst,
 .hljs-template-tag {
-  color: #ffa657;
+  color: #e0a066;
 }
 
 .hljs-deletion {
@@ -1418,7 +1479,7 @@ kbd {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #2ea043;
+  background: #3a8a58;
   border-color: rgba(240, 246, 252, 0.1);
 }
 
@@ -1429,7 +1490,7 @@ kbd {
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #b62324;
+  background: #b8514a;
   border-color: rgba(240, 246, 252, 0.1);
 }
 
@@ -1504,6 +1565,93 @@ kbd {
 .field-row input {
   flex: 1;
   min-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Context menu
+   -------------------------------------------------------------------------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 150;
+  min-width: 210px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-item i {
+  font-size: 16px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.context-item span {
+  flex: 1;
+}
+
+.context-item kbd {
+  font-size: 10px;
+  padding: 2px 4px;
+  background: transparent;
+  border-color: var(--border-muted);
+  color: var(--fg-subtle);
+}
+
+.context-item:hover:not(:disabled),
+.context-item:focus-visible {
+  background: var(--raised-hover);
+}
+
+.context-item:hover:not(:disabled) i {
+  color: var(--fg);
+}
+
+.context-item.danger:hover:not(:disabled) {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.context-item.danger:hover:not(:disabled) i {
+  color: var(--danger);
+}
+
+.context-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.context-sep {
+  height: 1px;
+  margin: 3px 0;
+  border: none;
+  background: var(--border);
 }
 
 /* --------------------------------------------------------------------------
@@ -1707,7 +1855,7 @@ kbd {
   inset: 0;
   border: none;
   padding: 0;
-  background: rgba(1, 4, 9, 0.8);
+  background: rgba(3, 6, 8, 0.82);
   cursor: default;
 }
 
@@ -1802,7 +1950,8 @@ kbd {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 7px 10px;
+  /* Indented to its nesting level so the picker reads like the tree. */
+  padding: 7px 10px 7px calc(10px + var(--depth, 0) * 16px);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -2091,7 +2240,7 @@ kbd {
     z-index: 55;
     border: none;
     padding: 0;
-    background: rgba(1, 4, 9, 0.7);
+    background: rgba(3, 6, 8, 0.72);
     opacity: 0;
     pointer-events: none;
     transition: opacity 200ms ease;

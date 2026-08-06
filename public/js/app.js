@@ -35,6 +35,8 @@ const elements = {
   superSearchCount: document.getElementById("superSearchCount"),
   superSearchList: document.getElementById("superSearchList"),
   searchMeta: document.getElementById("searchMeta"),
+  selectionMeta: document.getElementById("selectionMeta"),
+  contextMenu: document.getElementById("contextMenu"),
   toastStack: document.getElementById("toastStack"),
   toastStackUrgent: document.getElementById("toastStackUrgent"),
   docList: document.getElementById("docList"),
@@ -125,9 +127,15 @@ const state = {
   editorPreviewTextTimer: null,
   editorPreviewDiagramTimer: null,
   folderModalTargetFolderId: null,
+  folderModalParentId: null,
   collapsedFolderIds: new Set(),
   groupRevealCounts: new Map(),
-  draggingFile: null,
+
+  // Explorer-style selection and clipboard.
+  selection: new Set(),
+  selectionAnchor: null,
+  clipboard: { files: [], mode: null },
+  dragPayload: null,
   confirmOpen: false,
   confirmResolver: null,
   writeToken: "",
@@ -664,8 +672,11 @@ function syncFolderModalUI() {
     elements.moveToRootBtn.hidden = true;
     elements.folderPicker.hidden = true;
   } else {
-    elements.folderTitle.textContent = "Create folder";
-    elements.folderDescription.textContent = "Create a logical folder to group documents without changing the physical layout.";
+    const parent = state.folderModalParentId ? getFolderRecord(state.folderModalParentId) : null;
+    elements.folderTitle.textContent = parent ? `New folder in ${parent.name}` : "Create folder";
+    elements.folderDescription.textContent = parent
+      ? `The new folder will be nested inside ${parent.path}. Files on disk are not moved.`
+      : "Create a logical folder to group documents without changing the physical layout.";
     elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create Folder';
     elements.moveToRootBtn.hidden = true;
     elements.folderPicker.hidden = true;
@@ -689,21 +700,37 @@ function renderFolderPickerList() {
     counts.set(key, (counts.get(key) || 0) + 1);
   }
 
-  const folders = [...state.folders].sort((left, right) => {
-    if (left.order !== right.order) {
-      return left.order - right.order;
+  // Depth-first so the picker reads like the tree, with each entry indented to
+  // its level and labelled by its full path.
+  const childrenOf = new Map();
+  for (const folder of state.folders) {
+    const key = folder.parentId || "__top__";
+    if (!childrenOf.has(key)) {
+      childrenOf.set(key, []);
     }
+    childrenOf.get(key).push(folder);
+  }
+  for (const list of childrenOf.values()) {
+    list.sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+  }
 
-    return left.name.localeCompare(right.name);
-  });
+  const folders = [];
+  const walk = (parentKey, depth) => {
+    for (const folder of childrenOf.get(parentKey) || []) {
+      folders.push({ folder, depth });
+      walk(folder.id, depth + 1);
+    }
+  };
+  walk("__top__", 0);
 
   if (folders.length === 0) {
     elements.folderPickerList.innerHTML = '<div class="folder-empty">No folders yet. Create one to organize documents.</div>';
     return;
   }
 
-  elements.folderPickerList.innerHTML = folders.map((folder) => `
-    <button class="folder-choice" type="button" data-folder-id="${escapeHtml(folder.id)}" ${moveMode ? "" : "disabled"}>
+  elements.folderPickerList.innerHTML = folders.map(({ folder, depth }) => `
+    <button class="folder-choice" type="button" data-folder-id="${escapeHtml(folder.id)}"
+      style="--depth: ${depth}" title="${escapeHtml(folder.path)}" ${moveMode ? "" : "disabled"}>
       <span class="folder-choice-title"><i class="ph ph-folder"></i>${escapeHtml(folder.name)}</span>
       <span class="folder-choice-meta">${escapeHtml(String(counts.get(folder.id) || 0))} doc(s)</span>
     </button>
@@ -738,16 +765,26 @@ function renderFolderPickerList() {
 
 // Swaps a folder with its neighbour and persists the whole ordering, so the
 // server never has to infer intent from a single index.
+// Order is scoped to a sibling group now, so only the folder's own siblings are
+// reordered — moving a child never disturbs folders at another level.
 async function moveFolderBy(folderId, offset) {
-  const ordered = [...state.folders].sort((left, right) => left.order - right.order);
-  const index = ordered.findIndex((folder) => folder.id === folderId);
-  const target = index + offset;
-
-  if (index < 0 || target < 0 || target >= ordered.length) {
+  const folder = getFolderRecord(folderId);
+  if (!folder) {
     return;
   }
 
-  [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+  const siblings = state.folders
+    .filter((entry) => (entry.parentId || null) === (folder.parentId || null))
+    .sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+
+  const index = siblings.findIndex((entry) => entry.id === folderId);
+  const target = index + offset;
+
+  if (index < 0 || target < 0 || target >= siblings.length) {
+    return;
+  }
+
+  [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
 
   try {
     await requestJson("/api/folders/reorder", {
@@ -755,22 +792,23 @@ async function moveFolderBy(folderId, offset) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ folderIds: ordered.map((folder) => folder.id) })
+      body: JSON.stringify({ folderIds: siblings.map((entry) => entry.id) })
     });
 
     await refreshDocs({ preserveSearch: true });
-    // After the swap the moved folder sits at `target`.
-    setStatus(`Moved ${ordered[target].name} ${offset < 0 ? "up" : "down"}.`, "success");
+    notify(`Moved "${folder.name}" ${offset < 0 ? "up" : "down"}.`, "success");
   } catch (error) {
-    setStatus(error.message, "error");
+    notify(error.message, "error");
   }
 }
 
-function openFolderModal({ mode = "create", file = null, folderId = null } = {}) {
+function openFolderModal({ mode = "create", file = null, folderId = null, parentId = null } = {}) {
   state.folderModalOpen = true;
   state.folderModalMode = mode;
   state.folderModalTargetFile = file;
   state.folderModalTargetFolderId = folderId;
+  // Only meaningful in "create" mode: which folder the new one nests under.
+  state.folderModalParentId = parentId;
   syncFolderModalUI();
   renderFolderPickerList();
 
@@ -795,6 +833,7 @@ function closeFolderModal() {
   state.folderModalMode = "create";
   state.folderModalTargetFile = null;
   state.folderModalTargetFolderId = null;
+  state.folderModalParentId = null;
   elements.folderNameInput.value = "";
   elements.folderModal.classList.remove("open");
   elements.folderModal.setAttribute("aria-hidden", "true");
@@ -1744,6 +1783,9 @@ async function fetchDocs() {
   state.folders = (payload.folders || []).map((folder, index) => ({
     id: folder.id,
     name: folder.name || folder.id,
+    parentId: folder.parentId || null,
+    depth: Number.isFinite(Number(folder.depth)) ? Number(folder.depth) : 0,
+    path: folder.path || folder.name || folder.id,
     order: Number.isFinite(Number(folder.order)) ? Number(folder.order) : index,
     createdAt: folder.createdAt || "",
     updatedAt: folder.updatedAt || ""
@@ -1757,9 +1799,14 @@ async function fetchDocs() {
     updatedAt: doc.updatedAt || "",
     folderId: doc.folderId || null,
     folderName: doc.folderName || null,
+    folderPath: doc.folderPath || null,
     folderOrder: Number.isFinite(Number(doc.folderOrder)) ? Number(doc.folderOrder) : getFolderOrder(doc.folderId),
     icon: inferIcon(doc.file)
   }));
+
+  // A stale selection would keep phantom rows highlighted and let a delete fire
+  // against a file that no longer exists.
+  pruneSelection();
 }
 
 async function fetchDeletedDocs() {
@@ -1928,7 +1975,7 @@ function renderMathBlocks(root) {
         window.katex.render(tex, node, {
           displayMode: true,
           throwOnError: false,
-          errorColor: "#f85149"
+          errorColor: "#d2635c"
         });
       } catch (error) {
         console.error("Math block rendering failed", error);
@@ -1952,7 +1999,7 @@ function renderMathBlocks(root) {
       ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
       processEscapes: true,
       throwOnError: false,
-      errorColor: "#f85149"
+      errorColor: "#d2635c"
     });
   } catch (error) {
     console.error("Math rendering failed", error);
@@ -2220,11 +2267,11 @@ function ensureMermaidInitialized() {
     darkMode: true,
     fontFamily: '"Inter", sans-serif',
     themeVariables: {
-      primaryColor: "#161b22",
-      primaryTextColor: "#e6edf3",
-      primaryBorderColor: "#30363d",
-      lineColor: "#8b949e",
-      textColor: "#e6edf3"
+      primaryColor: "#121820",
+      primaryTextColor: "#e3ebf2",
+      primaryBorderColor: "#26313c",
+      lineColor: "#7f909f",
+      textColor: "#e3ebf2"
     },
     er: {
       useMaxWidth: true
@@ -2233,24 +2280,24 @@ function ensureMermaidInitialized() {
       /* Mermaid's base theme still paints light shapes, so pin every fill to
          the surface colour rather than fighting it case by case. */
       rect, polygon, path, circle {
-        fill: #161b22 !important;
-        stroke: #30363d !important;
+        fill: #121820 !important;
+        stroke: #26313c !important;
       }
 
       .er.entityBox, .entityBox {
-        fill: #21262d !important;
-        stroke: #484f58 !important;
+        fill: #1b232c !important;
+        stroke: #3a4a58 !important;
         stroke-width: 1px !important;
       }
 
       text, tspan {
-        fill: #e6edf3 !important;
+        fill: #e3ebf2 !important;
         font-family: "JetBrains Mono", monospace !important;
         font-size: 11px !important;
       }
 
       line, .relationshipLine {
-        stroke: #8b949e !important;
+        stroke: #7f909f !important;
         stroke-width: 1px !important;
       }
 
@@ -2261,7 +2308,7 @@ function ensureMermaidInitialized() {
       [fill="#ECECFF"],
       [fill="#fff5ad"],
       [fill="white"] {
-        fill: #161b22 !important;
+        fill: #121820 !important;
       }
     `
   });
@@ -2576,83 +2623,650 @@ function updateActiveRowHighlight() {
   }
 }
 
-// --- File tree ------------------------------------------------------------
+// --- Selection ------------------------------------------------------------
+// Explorer semantics: plain click replaces the selection, Ctrl toggles one row,
+// Shift extends from the anchor. `visibleFileOrder` is rebuilt on every render
+// so a Shift-range always matches what is actually on screen.
 
-function getVisibleTreeButtons() {
-  // offsetParent is null for rows inside a collapsed folder, which is exactly
-  // the set arrow keys should skip.
-  return [...elements.docList.querySelectorAll(".tree-row-btn")]
-    .filter((button) => button.offsetParent !== null);
+let visibleFileOrder = [];
+
+function pruneSelection() {
+  const known = new Set([
+    ...state.docs.map((doc) => doc.file),
+    ...state.deletedDocs.map((doc) => doc.file)
+  ]);
+
+  for (const file of [...state.selection]) {
+    if (!known.has(file)) {
+      state.selection.delete(file);
+    }
+  }
+
+  if (state.selectionAnchor && !known.has(state.selectionAnchor)) {
+    state.selectionAnchor = null;
+  }
+
+  state.clipboard.files = state.clipboard.files.filter((file) => known.has(file));
 }
 
-function moveTreeFocus(from, offset) {
-  const buttons = getVisibleTreeButtons();
-  const index = buttons.indexOf(from);
-  if (index < 0) {
+function updateSelectionUI() {
+  for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+    const selected = state.selection.has(row.dataset.file);
+    row.classList.toggle("is-selected", selected);
+    row.setAttribute("aria-selected", String(selected));
+    row.classList.toggle("is-cut", state.clipboard.mode === "cut" && state.clipboard.files.includes(row.dataset.file));
+  }
+
+  updateSelectionMeta();
+}
+
+function updateSelectionMeta() {
+  if (!elements.selectionMeta) {
     return;
   }
 
-  const next = buttons[Math.min(Math.max(index + offset, 0), buttons.length - 1)];
-  if (next && next !== from) {
-    next.focus();
+  const count = state.selection.size;
+  elements.selectionMeta.hidden = count < 2;
+  if (count >= 2) {
+    elements.selectionMeta.textContent = `${count} selected`;
   }
 }
 
-function handleTreeKeydown(event) {
-  const button = event.target.closest(".tree-row-btn");
-  if (!button) {
+function setSelection(files, { anchor = null } = {}) {
+  state.selection = new Set(files);
+  if (anchor !== null) {
+    state.selectionAnchor = anchor;
+  }
+  updateSelectionUI();
+}
+
+function clearSelection() {
+  if (state.selection.size === 0) {
+    return;
+  }
+  state.selection.clear();
+  state.selectionAnchor = null;
+  updateSelectionUI();
+}
+
+function handleRowSelection(file, event) {
+  if (event.shiftKey && state.selectionAnchor) {
+    const from = visibleFileOrder.indexOf(state.selectionAnchor);
+    const to = visibleFileOrder.indexOf(file);
+
+    if (from >= 0 && to >= 0) {
+      const [lo, hi] = from <= to ? [from, to] : [to, from];
+      const range = visibleFileOrder.slice(lo, hi + 1);
+      // Ctrl+Shift adds the range to what is already selected, as Explorer does.
+      setSelection(event.ctrlKey || event.metaKey ? [...state.selection, ...range] : range);
+      return;
+    }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    if (state.selection.has(file)) {
+      state.selection.delete(file);
+    } else {
+      state.selection.add(file);
+    }
+    state.selectionAnchor = file;
+    updateSelectionUI();
     return;
   }
 
-  const group = button.closest(".tree-group");
-  const isFolderRow = button.closest(".tree-row-folder") !== null;
+  setSelection([file], { anchor: file });
+}
 
-  switch (event.key) {
-    case "ArrowDown":
-      event.preventDefault();
-      moveTreeFocus(button, 1);
-      break;
-    case "ArrowUp":
-      event.preventDefault();
-      moveTreeFocus(button, -1);
-      break;
-    case "Home": {
-      event.preventDefault();
-      const [first] = getVisibleTreeButtons();
-      if (first) first.focus();
-      break;
-    }
-    case "End": {
-      const buttons = getVisibleTreeButtons();
-      event.preventDefault();
-      if (buttons.length) buttons[buttons.length - 1].focus();
-      break;
-    }
-    case "ArrowRight":
-      // Right opens a closed folder, then steps into it; on a file it does nothing.
-      if (isFolderRow && group?.classList.contains("is-collapsed")) {
-        event.preventDefault();
-        toggleFolderCollapse(group.dataset.folderKey);
-      } else if (isFolderRow) {
-        event.preventDefault();
-        moveTreeFocus(button, 1);
-      }
-      break;
-    case "ArrowLeft":
-      // Left closes an open folder, or jumps a file back up to its folder row.
-      if (isFolderRow && !group?.classList.contains("is-collapsed")) {
-        event.preventDefault();
-        toggleFolderCollapse(group.dataset.folderKey);
-      } else if (!isFolderRow) {
-        event.preventDefault();
-        const folderButton = group?.querySelector(".tree-row-folder .tree-row-btn");
-        if (folderButton) folderButton.focus();
-      }
-      break;
-    default:
-      break;
+// What an operation should act on: the selection when the row is part of it,
+// otherwise just the row that was invoked.
+function resolveTargetFiles(file) {
+  if (file && state.selection.has(file) && state.selection.size > 1) {
+    return [...state.selection];
+  }
+  return file ? [file] : [...state.selection];
+}
+
+// --- Clipboard ------------------------------------------------------------
+
+function cutFiles(files) {
+  const list = files.filter(Boolean);
+  if (!list.length) {
+    return;
+  }
+
+  state.clipboard = { files: list, mode: "cut" };
+  updateSelectionUI();
+  notify(list.length === 1
+    ? `Cut ${list[0]}. Paste onto a folder to move it.`
+    : `Cut ${list.length} files. Paste onto a folder to move them.`, "info");
+}
+
+async function pasteIntoFolder(folderId) {
+  const files = state.clipboard.files.filter(Boolean);
+  if (!files.length) {
+    notify("Nothing to paste.", "warning");
+    return;
+  }
+
+  const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
+  const results = await moveFilesToFolder(files, folderId, { silent: true });
+
+  state.clipboard = { files: [], mode: null };
+
+  if (results.moved > 0) {
+    notify(results.moved === 1
+      ? `Moved 1 file to ${targetLabel}.`
+      : `Moved ${results.moved} files to ${targetLabel}.`, "success");
+  }
+
+  if (results.failed.length) {
+    notify(`${results.failed.length} could not be moved: ${results.failed[0]}`, "error");
   }
 }
+
+// One refresh for the whole batch rather than one per file, which is what made
+// a multi-file move feel like the UI was fighting itself.
+async function moveFilesToFolder(files, folderId, { silent = false } = {}) {
+  const failed = [];
+  let moved = 0;
+
+  for (const file of files) {
+    const doc = getDocByFile(file);
+    if (doc && (doc.folderId || null) === (folderId || null)) {
+      continue;
+    }
+
+    try {
+      await requestJson(`/api/docs/${encodeURIComponent(file)}/folder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId: folderId || null })
+      });
+      state.contentCache.delete(file);
+      moved += 1;
+    } catch (error) {
+      failed.push(error.message);
+    }
+  }
+
+  if (moved > 0) {
+    await refreshDocs({ preserveSearch: true });
+  }
+
+  if (!silent) {
+    const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
+    if (moved === 1) {
+      notify(`Moved 1 file to ${targetLabel}.`, "success");
+    } else if (moved > 1) {
+      notify(`Moved ${moved} files to ${targetLabel}.`, "success");
+    }
+    if (failed.length) {
+      notify(failed[0], "error");
+    }
+  }
+
+  return { moved, failed };
+}
+
+async function moveFolderToParent(folderId, parentId) {
+  try {
+    await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId: parentId || null })
+    });
+    await refreshDocs({ preserveSearch: true });
+    notify(`Moved "${getFolderLabel(folderId)}" into ${parentId ? getFolderLabel(parentId) : "the top level"}.`, "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+// --- Context menu ---------------------------------------------------------
+
+function closeContextMenu() {
+  if (!elements.contextMenu || elements.contextMenu.hidden) {
+    return;
+  }
+  elements.contextMenu.hidden = true;
+  elements.contextMenu.innerHTML = "";
+}
+
+function openContextMenu(x, y, items) {
+  if (!elements.contextMenu) {
+    return;
+  }
+
+  elements.contextMenu.innerHTML = "";
+
+  for (const item of items) {
+    if (item.separator) {
+      const hr = document.createElement("hr");
+      hr.className = "context-sep";
+      elements.contextMenu.appendChild(hr);
+      continue;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = item.danger ? "context-item danger" : "context-item";
+    button.disabled = Boolean(item.disabled);
+    button.innerHTML = `<i class="ph ${item.icon}" aria-hidden="true"></i><span></span>`;
+    button.querySelector("span").textContent = item.label;
+
+    if (item.shortcut) {
+      const hint = document.createElement("kbd");
+      hint.textContent = item.shortcut;
+      button.appendChild(hint);
+    }
+
+    button.addEventListener("click", () => {
+      closeContextMenu();
+      item.action();
+    });
+
+    elements.contextMenu.appendChild(button);
+  }
+
+  elements.contextMenu.hidden = false;
+
+  // Flip the menu back on screen if it would overflow the viewport.
+  const rect = elements.contextMenu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 8);
+  const top = Math.min(y, window.innerHeight - rect.height - 8);
+  elements.contextMenu.style.left = `${Math.max(8, left)}px`;
+  elements.contextMenu.style.top = `${Math.max(8, top)}px`;
+
+  elements.contextMenu.querySelector(".context-item:not(:disabled)")?.focus();
+}
+
+function buildDocContextItems(doc) {
+  const targets = resolveTargetFiles(doc.file);
+  const many = targets.length > 1;
+  const inArchive = state.viewMode === "archive";
+
+  if (state.isRecycleBinMode) {
+    return [
+      {
+        label: "Open", icon: "ph-file-text", action: () => void openRecycleBinDocument(doc.file)
+      },
+      { separator: true },
+      {
+        label: "Restore",
+        icon: "ph-arrow-counter-clockwise",
+        action: () => void (inArchive ? restoreArchivedDocumentByFile(doc.file) : restoreDeletedDocumentByFile(doc.file))
+      },
+      {
+        label: inArchive ? "Delete forever" : "Archive",
+        icon: inArchive ? "ph-trash" : "ph-archive-box",
+        danger: true,
+        action: () => void (inArchive ? permanentlyDeleteArchivedDocument(doc.file) : hardDeleteDeletedDocumentByFile(doc.file))
+      }
+    ];
+  }
+
+  return [
+    { label: "Open", icon: "ph-file-text", disabled: many, action: () => void openDocument(doc.file, true) },
+    { label: "Edit", icon: "ph-pencil-simple", disabled: many, action: () => void openEditorForDocument(doc.file) },
+    { separator: true },
+    {
+      label: many ? `Cut ${targets.length} files` : "Cut",
+      icon: "ph-scissors",
+      shortcut: "Ctrl+X",
+      action: () => cutFiles(targets)
+    },
+    {
+      label: "Move to folder...",
+      icon: "ph-folder",
+      disabled: many,
+      action: () => openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null })
+    },
+    {
+      label: "Rename",
+      icon: "ph-cursor-text",
+      shortcut: "F2",
+      disabled: many,
+      action: () => beginInlineRename(doc.file)
+    },
+    { separator: true },
+    {
+      label: many ? `Delete ${targets.length} files` : "Delete",
+      icon: "ph-trash",
+      shortcut: "Del",
+      danger: true,
+      action: () => void deleteFiles(targets, "soft")
+    },
+    {
+      label: many ? `Archive ${targets.length} files` : "Archive",
+      icon: "ph-archive-box",
+      shortcut: "Shift+Del",
+      danger: true,
+      action: () => void deleteFiles(targets, "hard")
+    }
+  ];
+}
+
+function buildFolderContextItems(folder) {
+  const canPaste = state.clipboard.files.length > 0;
+
+  return [
+    {
+      label: "New subfolder",
+      icon: "ph-folder-plus",
+      action: () => openFolderModal({ mode: "create", parentId: folder.id })
+    },
+    {
+      label: canPaste ? `Paste ${state.clipboard.files.length} file(s)` : "Paste",
+      icon: "ph-clipboard-text",
+      shortcut: "Ctrl+V",
+      disabled: !canPaste,
+      action: () => void pasteIntoFolder(folder.id)
+    },
+    { separator: true },
+    {
+      label: "Rename",
+      icon: "ph-cursor-text",
+      shortcut: "F2",
+      action: () => beginInlineFolderRename(folder.id)
+    },
+    {
+      label: "Move to top level",
+      icon: "ph-arrow-line-up",
+      disabled: !folder.parentId,
+      action: () => void moveFolderToParent(folder.id, null)
+    },
+    { separator: true },
+    {
+      label: "Delete folder",
+      icon: "ph-trash",
+      danger: true,
+      action: () => void deleteFolderById(folder.id)
+    }
+  ];
+}
+
+async function deleteFolderById(folderId) {
+  const folder = getFolderRecord(folderId);
+  if (!folder) {
+    return;
+  }
+
+  const descendants = state.folders.filter((entry) => folderPathIds(entry.id).includes(folderId) && entry.id !== folderId);
+  const affected = state.docs.filter((doc) => doc.folderId === folderId
+    || descendants.some((entry) => entry.id === doc.folderId)).length;
+
+  const shouldProceed = await requestConfirmation({
+    title: `Delete "${folder.name}"?`,
+    message: descendants.length
+      ? `This also deletes ${descendants.length} subfolder(s). ${affected} document(s) move back to Ungrouped. No file on disk is touched.`
+      : `${affected} document(s) move back to Ungrouped. No file on disk is touched.`,
+    confirmLabel: "Delete folder",
+    tone: "danger"
+  });
+
+  if (!shouldProceed) {
+    return;
+  }
+
+  try {
+    const payload = await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, { method: "DELETE" });
+    await refreshDocs({ preserveSearch: true });
+    notify(payload.removedFolders > 1
+      ? `Deleted "${folder.name}" and ${payload.removedFolders - 1} subfolder(s).`
+      : `Deleted folder "${folder.name}".`, "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+// --- Bulk delete ----------------------------------------------------------
+
+async function deleteFiles(files, mode) {
+  const list = files.filter(Boolean);
+  if (!list.length) {
+    return;
+  }
+
+  if (list.length === 1) {
+    await deleteDocumentByFile(list[0], mode);
+    return;
+  }
+
+  const shouldProceed = await requestConfirmation({
+    title: mode === "hard" ? `Archive ${list.length} files?` : `Delete ${list.length} files?`,
+    message: mode === "hard"
+      ? "They move to the archive, where they can still be restored."
+      : "They move to the recycle bin, where they can still be restored.",
+    confirmLabel: mode === "hard" ? "Archive" : "Delete",
+    tone: "danger"
+  });
+
+  if (!shouldProceed) {
+    notify("Nothing was deleted.", "info");
+    return;
+  }
+
+  const failed = [];
+  let done = 0;
+
+  for (const file of list) {
+    try {
+      await requestJson(`/api/docs/${encodeURIComponent(file)}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
+      state.contentCache.delete(file);
+      done += 1;
+    } catch (error) {
+      failed.push(error.message);
+    }
+  }
+
+  clearSelection();
+  await refreshDocs({ preserveSearch: true });
+
+  if (done) {
+    notify(`${done} file(s) ${mode === "hard" ? "archived" : "moved to the recycle bin"}.`, "success");
+  }
+  if (failed.length) {
+    notify(failed[0], "error");
+  }
+}
+
+// --- Inline rename --------------------------------------------------------
+// F2 edits the label in place rather than opening the editor, which is what
+// makes renaming feel like a filesystem instead of a document workflow.
+
+function beginInlineEdit(labelNode, currentValue, commit) {
+  if (!labelNode || labelNode.querySelector("input")) {
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "tree-rename-input";
+  input.value = currentValue;
+  input.setAttribute("aria-label", "New name");
+
+  labelNode.textContent = "";
+  labelNode.appendChild(input);
+  input.focus();
+
+  // Preselect the stem so the extension is not in the way of typing.
+  const dot = currentValue.lastIndexOf(".");
+  input.setSelectionRange(0, dot > 0 ? dot : currentValue.length);
+
+  let settled = false;
+
+  const finish = async (accept) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+
+    const next = input.value.trim();
+    if (!accept || !next || next === currentValue) {
+      renderDocList();
+      return;
+    }
+
+    await commit(next);
+  };
+
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      void finish(false);
+    }
+  });
+
+  input.addEventListener("blur", () => void finish(true));
+  input.addEventListener("click", (event) => event.stopPropagation());
+}
+
+// Filenames here legitimately contain spaces, quotes and brackets, so match on
+// the dataset directly rather than building an attribute selector out of them.
+function findDocRow(file) {
+  for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+    if (row.dataset.file === file) {
+      return row;
+    }
+  }
+  return null;
+}
+
+function findFolderRow(folderId) {
+  for (const row of elements.docList.querySelectorAll(".tree-row-folder")) {
+    if (row.dataset.folderId === folderId) {
+      return row;
+    }
+  }
+  return null;
+}
+
+function beginInlineRename(file) {
+  const row = findDocRow(file);
+  const label = row?.querySelector(".tree-label");
+  if (!label) {
+    return;
+  }
+
+  beginInlineEdit(label, file, async (nextName) => {
+    try {
+      const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      });
+      state.contentCache.delete(file);
+      const openedFile = state.activeFile === file ? payload.file : state.activeFile;
+      await refreshDocs({ openFile: openedFile, preserveSearch: true });
+      notify(`Renamed to ${payload.file}.`, "success");
+    } catch (error) {
+      notify(error.message, "error");
+      renderDocList();
+    }
+  });
+}
+
+function beginInlineFolderRename(folderId) {
+  const row = findFolderRow(folderId);
+  const label = row?.querySelector(".tree-label");
+  const folder = getFolderRecord(folderId);
+  if (!label || !folder) {
+    return;
+  }
+
+  beginInlineEdit(label, folder.name, async (nextName) => {
+    try {
+      await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      });
+      await refreshDocs({ preserveSearch: true });
+      notify(`Renamed folder to ${nextName}.`, "success");
+    } catch (error) {
+      notify(error.message, "error");
+      renderDocList();
+    }
+  });
+}
+
+// --- Tree model -----------------------------------------------------------
+
+function folderPathIds(folderId) {
+  const ids = [];
+  let current = getFolderRecord(folderId);
+  let guard = 0;
+
+  while (current && guard++ < 32) {
+    ids.unshift(current.id);
+    current = current.parentId ? getFolderRecord(current.parentId) : null;
+  }
+
+  return ids;
+}
+
+// Builds the nested structure the renderer walks: every folder node carries its
+// own documents plus its child folders, sorted the way the server ordered them.
+function buildFolderTree(docs) {
+  const docsByFolder = new Map();
+  for (const doc of docs) {
+    const key = doc.folderId || "__root__";
+    if (!docsByFolder.has(key)) {
+      docsByFolder.set(key, []);
+    }
+    docsByFolder.get(key).push(doc);
+  }
+
+  const childrenOf = new Map();
+  for (const folder of state.folders) {
+    const key = folder.parentId || "__top__";
+    if (!childrenOf.has(key)) {
+      childrenOf.set(key, []);
+    }
+    childrenOf.get(key).push(folder);
+  }
+
+  for (const list of childrenOf.values()) {
+    list.sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+  }
+
+  const isSearching = Boolean(elements.searchInput.value.trim());
+
+  const buildNode = (folder, depth) => {
+    const children = (childrenOf.get(folder.id) || [])
+      .map((child) => buildNode(child, depth + 1))
+      .filter(Boolean);
+    const ownDocs = docsByFolder.get(folder.id) || [];
+
+    // While searching, a branch with no matches anywhere inside it is noise.
+    if (isSearching && ownDocs.length === 0 && children.length === 0) {
+      return null;
+    }
+
+    return { folder, depth, docs: ownDocs, children };
+  };
+
+  const roots = (childrenOf.get("__top__") || [])
+    .map((folder) => buildNode(folder, 0))
+    .filter(Boolean);
+
+  const rootDocs = docsByFolder.get("__root__") || [];
+  if (rootDocs.length > 0 || !isSearching) {
+    roots.push({ folder: null, depth: 0, docs: rootDocs, children: [] });
+  }
+
+  return roots;
+}
+
+// --- Rendering ------------------------------------------------------------
 
 function buildTreeAction(label, iconClass, handler, { danger = false, disabled = false } = {}) {
   const button = document.createElement("button");
@@ -2670,43 +3284,86 @@ function buildTreeAction(label, iconClass, handler, { danger = false, disabled =
   return button;
 }
 
-// Dragging a file onto a folder is the shortest path between "this is filed
-// wrong" and "this is filed right". The modal still exists for keyboard users.
 function enableDocDrag(row, doc) {
   row.draggable = true;
 
   row.addEventListener("dragstart", (event) => {
-    state.draggingFile = doc.file;
+    // Dragging an unselected row selects it first, so what you drag is always
+    // what you can see highlighted.
+    if (!state.selection.has(doc.file)) {
+      setSelection([doc.file], { anchor: doc.file });
+    }
+
+    state.dragPayload = { type: "files", files: [...state.selection] };
     row.classList.add("is-dragging");
+
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", doc.file);
+      event.dataTransfer.setData("text/plain", [...state.selection].join("\n"));
     }
   });
 
   row.addEventListener("dragend", () => {
-    state.draggingFile = null;
+    state.dragPayload = null;
     row.classList.remove("is-dragging");
-    elements.docList.querySelectorAll(".is-drop-target").forEach((node) => {
-      node.classList.remove("is-drop-target");
-    });
+    elements.docList.querySelectorAll(".is-drop-target").forEach((node) => node.classList.remove("is-drop-target"));
+  });
+}
+
+function enableFolderDrag(row, folder) {
+  row.draggable = true;
+
+  row.addEventListener("dragstart", (event) => {
+    event.stopPropagation();
+    state.dragPayload = { type: "folder", folderId: folder.id };
+    row.classList.add("is-dragging");
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", folder.name);
+    }
+  });
+
+  row.addEventListener("dragend", () => {
+    state.dragPayload = null;
+    row.classList.remove("is-dragging");
+    elements.docList.querySelectorAll(".is-drop-target").forEach((node) => node.classList.remove("is-drop-target"));
+  });
+}
+
+function canDropOnFolder(targetFolderId) {
+  const payload = state.dragPayload;
+  if (!payload) {
+    return false;
+  }
+
+  if (payload.type === "folder") {
+    if (payload.folderId === targetFolderId) {
+      return false;
+    }
+    // Refuse the drop that would make a folder its own ancestor. The server
+    // rejects it too; this just avoids offering an action that cannot work.
+    if (targetFolderId && folderPathIds(targetFolderId).includes(payload.folderId)) {
+      return false;
+    }
+    const current = getFolderRecord(payload.folderId)?.parentId || null;
+    return current !== (targetFolderId || null);
+  }
+
+  return payload.files.some((file) => {
+    const doc = getDocByFile(file);
+    return !doc || (doc.folderId || null) !== (targetFolderId || null);
   });
 }
 
 function enableFolderDrop(zone, folderRow, folderId) {
   zone.addEventListener("dragover", (event) => {
-    if (!state.draggingFile) {
-      return;
-    }
-
-    // Dropping a file back into the folder it already lives in is a no-op, so
-    // do not advertise it as a target.
-    const dragged = getDocByFile(state.draggingFile);
-    if (dragged && (dragged.folderId || null) === (folderId || null)) {
+    if (!canDropOnFolder(folderId)) {
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
@@ -2714,7 +3371,6 @@ function enableFolderDrop(zone, folderRow, folderId) {
   });
 
   zone.addEventListener("dragleave", (event) => {
-    // dragleave also fires crossing into a child, so ignore those.
     if (event.relatedTarget && zone.contains(event.relatedTarget)) {
       return;
     }
@@ -2723,93 +3379,107 @@ function enableFolderDrop(zone, folderRow, folderId) {
 
   zone.addEventListener("drop", async (event) => {
     event.preventDefault();
+    event.stopPropagation();
     folderRow.classList.remove("is-drop-target");
 
-    const file = event.dataTransfer?.getData("text/plain") || state.draggingFile;
-    state.draggingFile = null;
-    if (!file) {
+    const payload = state.dragPayload;
+    state.dragPayload = null;
+    if (!payload) {
       return;
     }
 
-    try {
-      await moveDocumentToFolder(file, folderId);
-    } catch (error) {
-      notify(error.message, "error");
+    if (payload.type === "folder") {
+      await moveFolderToParent(payload.folderId, folderId);
+      return;
     }
+
+    await moveFilesToFolder(payload.files, folderId);
   });
 }
 
-function buildFolderRow(group, groupKey, isCollapsed) {
+function buildFolderRow(node, isCollapsed) {
+  const { folder, depth } = node;
   const row = document.createElement("div");
   row.className = "tree-row tree-row-folder";
+  if (folder) {
+    row.dataset.folderId = folder.id;
+  }
 
   const button = document.createElement("button");
   button.type = "button";
   button.className = "tree-row-btn";
-  button.style.setProperty("--depth", "0");
+  button.style.setProperty("--depth", String(depth));
   button.setAttribute("aria-expanded", String(!isCollapsed));
+
+  const totalDocs = countNodeDocs(node);
   button.innerHTML = `
     <i class="ph ph-caret-down tree-caret" aria-hidden="true"></i>
-    <i class="ph ${group.folderId ? "ph-folder" : "ph-stack"} tree-icon" aria-hidden="true"></i>
+    <i class="ph ${folder ? "ph-folder" : "ph-stack"} tree-icon" aria-hidden="true"></i>
     <span class="tree-label"></span>
     <span class="tree-count"></span>
   `;
-  button.querySelector(".tree-label").textContent = group.folderName || state.rootFolderLabel || "Ungrouped";
-  button.querySelector(".tree-count").textContent = String(group.docs.length);
-  button.addEventListener("click", () => toggleFolderCollapse(groupKey));
+  button.querySelector(".tree-label").textContent = folder ? folder.name : (state.rootFolderLabel || "Ungrouped");
+  button.querySelector(".tree-count").textContent = String(totalDocs);
+  if (folder) {
+    button.title = folder.path;
+  }
+
+  button.addEventListener("click", () => toggleFolderCollapse(folder ? folder.id : "__root__"));
 
   row.appendChild(button);
+
+  if (folder && !state.isRecycleBinMode) {
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openContextMenu(event.clientX, event.clientY, buildFolderContextItems(folder));
+    });
+    enableFolderDrag(row, folder);
+  }
+
   return row;
 }
 
-function buildFolderActions(group) {
+function countNodeDocs(node) {
+  return node.docs.length + node.children.reduce((total, child) => total + countNodeDocs(child), 0);
+}
+
+function buildFolderActions(node) {
+  const folder = node.folder;
   const actions = document.createElement("div");
   actions.className = "tree-actions";
 
-  const orderedFolderIds = [...state.folders]
-    .sort((left, right) => left.order - right.order)
-    .map((folder) => folder.id);
-  const position = orderedFolderIds.indexOf(group.folderId);
+  const siblings = state.folders
+    .filter((entry) => (entry.parentId || null) === (folder.parentId || null))
+    .sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+  const position = siblings.findIndex((entry) => entry.id === folder.id);
 
   actions.append(
-    buildTreeAction(`Move ${group.folderName} up`, "ph-arrow-up", () => {
-      void moveFolderBy(group.folderId, -1);
-    }, { disabled: position <= 0 }),
-
-    buildTreeAction(`Move ${group.folderName} down`, "ph-arrow-down", () => {
-      void moveFolderBy(group.folderId, 1);
-    }, { disabled: position < 0 || position >= orderedFolderIds.length - 1 }),
-
-    buildTreeAction(`Rename ${group.folderName}`, "ph-pencil-simple", () => {
-      openFolderModal({ mode: "rename", folderId: group.folderId });
+    buildTreeAction("New subfolder", "ph-folder-plus", () => {
+      openFolderModal({ mode: "create", parentId: folder.id });
     }),
 
-    buildTreeAction(`Delete ${group.folderName}`, "ph-trash", async () => {
-      const shouldProceed = await requestConfirmation({
-        title: `Delete ${group.folderName}?`,
-        message: "Documents in this folder move back to Ungrouped. The files themselves stay in place.",
-        confirmLabel: "Delete folder",
-        tone: "danger"
-      });
+    buildTreeAction(`Move ${folder.name} up`, "ph-arrow-up", () => {
+      void moveFolderBy(folder.id, -1);
+    }, { disabled: position <= 0 }),
 
-      if (!shouldProceed) {
-        return;
-      }
+    buildTreeAction(`Move ${folder.name} down`, "ph-arrow-down", () => {
+      void moveFolderBy(folder.id, 1);
+    }, { disabled: position < 0 || position >= siblings.length - 1 }),
 
-      try {
-        await requestJson(`/api/folders/${encodeURIComponent(group.folderId)}`, { method: "DELETE" });
-        await refreshDocs({ preserveSearch: true });
-        notify(`Deleted folder "${group.folderName}".`, "success");
-      } catch (error) {
-        notify(error.message, "error");
-      }
+    buildTreeAction(`Rename ${folder.name}`, "ph-pencil-simple", () => {
+      beginInlineFolderRename(folder.id);
+    }),
+
+    buildTreeAction(`Delete ${folder.name}`, "ph-trash", () => {
+      void deleteFolderById(folder.id);
     }, { danger: true })
   );
 
   return actions;
 }
 
-function buildDocRow(doc) {
+function buildDocRow(doc, depth) {
   const row = document.createElement("li");
   row.className = "tree-row tree-row-doc";
   row.dataset.file = doc.file;
@@ -2820,19 +3490,25 @@ function buildDocRow(doc) {
   }
   row.setAttribute("aria-current", isActive ? "true" : "false");
 
+  if (state.selection.has(doc.file)) {
+    row.classList.add("is-selected");
+  }
+  row.setAttribute("aria-selected", String(state.selection.has(doc.file)));
+
+  if (state.clipboard.mode === "cut" && state.clipboard.files.includes(doc.file)) {
+    row.classList.add("is-cut");
+  }
+
   const button = document.createElement("button");
   button.type = "button";
   button.className = "tree-row-btn";
-  button.style.setProperty("--depth", "1");
+  button.style.setProperty("--depth", String(depth));
 
   const displayName = state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file;
-  const sizeLabel = formatBytes(doc.size);
   const timeLabel = state.isRecycleBinMode
     ? `deleted ${formatDate(doc.deletedAt || doc.updatedAt)}`
     : `updated ${formatDate(doc.updatedAt)}`;
-  // The chips this row used to carry now live in the tooltip and the viewer
-  // header, which is what buys the row its single-line height.
-  button.title = `${displayName}\n${sizeLabel} · ${timeLabel}`;
+  button.title = `${displayName}\n${formatBytes(doc.size)} · ${timeLabel}`;
 
   button.innerHTML = `
     <i class="ph ${doc.icon} tree-icon" aria-hidden="true"></i>
@@ -2840,7 +3516,14 @@ function buildDocRow(doc) {
   `;
   button.querySelector(".tree-label").textContent = doc.title;
 
-  button.addEventListener("click", async () => {
+  button.addEventListener("click", async (event) => {
+    handleRowSelection(doc.file, event);
+
+    // Ctrl/Shift are selection gestures, not "open this" gestures.
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+
     if (state.isRecycleBinMode) {
       await openRecycleBinDocument(doc.file);
     } else {
@@ -2848,6 +3531,15 @@ function buildDocRow(doc) {
     }
 
     closeSidebarOnMobile();
+  });
+
+  row.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!state.selection.has(doc.file)) {
+      setSelection([doc.file], { anchor: doc.file });
+    }
+    openContextMenu(event.clientX, event.clientY, buildDocContextItems(doc));
   });
 
   const actions = document.createElement("div");
@@ -2864,9 +3556,6 @@ function buildDocRow(doc) {
           await restoreDeletedDocumentByFile(doc.file);
         }
       }),
-
-      // Recycle bin rows archive the file; archive rows are the only place it
-      // can actually be erased.
       buildTreeAction(
         inArchive ? "Delete forever" : "Archive",
         inArchive ? "ph-trash" : "ph-archive-box",
@@ -2885,13 +3574,9 @@ function buildDocRow(doc) {
       buildTreeAction("Edit", "ph-pencil-simple", async () => {
         await openEditorForDocument(doc.file);
       }),
-
-      buildTreeAction("Move to folder", "ph-folder", () => {
-        openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null });
-      }),
-
-      buildTreeAction("Move to recycle bin", "ph-trash", async () => {
-        await deleteDocumentByFile(doc.file, "soft");
+      buildTreeAction("Rename", "ph-cursor-text", () => beginInlineRename(doc.file)),
+      buildTreeAction("Move to recycle bin", "ph-trash", () => {
+        void deleteFiles(resolveTargetFiles(doc.file), "soft");
       }, { danger: true })
     );
 
@@ -2902,120 +3587,223 @@ function buildDocRow(doc) {
   return row;
 }
 
-function renderDocList() {
-  const docs = state.filteredDocs;
+function renderTreeNode(node, container) {
+  const folderKey = node.folder ? node.folder.id : "__root__";
+  const isCollapsed = state.collapsedFolderIds.has(folderKey);
 
-  // A genuine rebuild still shortens the list mid-flight, so hold the scroll
-  // offsets across it.
+  const groupItem = document.createElement("li");
+  groupItem.className = isCollapsed ? "tree-group is-collapsed" : "tree-group";
+  groupItem.dataset.folderKey = folderKey;
+
+  const folderRow = buildFolderRow(node, isCollapsed);
+
+  if (!state.isRecycleBinMode && node.folder) {
+    folderRow.appendChild(buildFolderActions(node));
+  }
+
+  groupItem.appendChild(folderRow);
+
+  if (!state.isRecycleBinMode) {
+    enableFolderDrop(groupItem, folderRow, node.folder ? node.folder.id : null);
+  }
+
+  const childList = document.createElement("ul");
+  childList.className = "tree-children";
+  childList.style.setProperty("--depth", String(node.depth));
+
+  for (const child of node.children) {
+    renderTreeNode(child, childList);
+  }
+
+  const revealed = state.groupRevealCounts.get(folderKey) || DOC_LIST_PAGE_SIZE;
+  const activeIndex = node.docs.findIndex((doc) => doc.file === state.activeFile);
+  const visibleCount = Math.max(revealed, activeIndex + 1);
+  const visibleDocs = node.docs.slice(0, visibleCount);
+  const hiddenCount = node.docs.length - visibleDocs.length;
+
+  for (const doc of visibleDocs) {
+    childList.appendChild(buildDocRow(doc, node.depth + 1));
+    visibleFileOrder.push(doc.file);
+  }
+
+  if (node.docs.length === 0 && node.children.length === 0) {
+    const emptyRow = document.createElement("li");
+    emptyRow.className = "tree-empty";
+    emptyRow.style.setProperty("--depth", String(node.depth + 1));
+    emptyRow.textContent = "Empty";
+    childList.appendChild(emptyRow);
+  }
+
+  if (hiddenCount > 0) {
+    const moreRow = document.createElement("li");
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "tree-more";
+    moreBtn.style.setProperty("--depth", String(node.depth + 1));
+    moreBtn.innerHTML = '<i class="ph ph-caret-down" aria-hidden="true"></i><span></span>';
+    moreBtn.querySelector("span").textContent =
+      `Show ${Math.min(hiddenCount, DOC_LIST_PAGE_SIZE)} more of ${node.docs.length}`;
+    moreBtn.addEventListener("click", () => {
+      state.groupRevealCounts.set(folderKey, visibleCount + DOC_LIST_PAGE_SIZE);
+      renderDocList();
+    });
+    moreRow.appendChild(moreBtn);
+    childList.appendChild(moreRow);
+  }
+
+  groupItem.appendChild(childList);
+  container.appendChild(groupItem);
+}
+
+function renderDocList() {
   const treeScrollTop = elements.docList.scrollTop || 0;
   const sidebarScrollTop = elements.sidebar?.scrollTop || 0;
 
   elements.docList.innerHTML = "";
+  visibleFileOrder = [];
 
-  const isSearching = Boolean(elements.searchInput.value.trim());
-  const groupedDocs = groupDocsByFolder(docs);
+  const nodes = buildFolderTree(state.filteredDocs);
 
-  // An empty folder used to be invisible, which made it impossible to tell a
-  // folder you had just created from one that had failed to save. Show them —
-  // but not while searching, where an empty folder is only noise.
-  if (!isSearching && !state.isRecycleBinMode) {
-    const seen = new Set(groupedDocs.map((group) => group.folderId));
-    for (const folder of state.folders) {
-      if (!seen.has(folder.id)) {
-        groupedDocs.push({
-          folderId: folder.id,
-          folderName: folder.name,
-          folderOrder: folder.order,
-          docs: []
-        });
-      }
-    }
-
-    groupedDocs.sort((left, right) => {
-      if (left.folderOrder !== right.folderOrder) {
-        return left.folderOrder - right.folderOrder;
-      }
-      return String(left.folderName).localeCompare(String(right.folderName));
-    });
-  }
-
-  if (groupedDocs.length === 0) {
+  if (nodes.length === 0) {
     const item = document.createElement("li");
     item.className = "tree-empty";
-    item.textContent = isSearching ? "No files match this search." : "No files yet.";
+    item.textContent = elements.searchInput.value.trim() ? "No files match this search." : "No files yet.";
     elements.docList.appendChild(item);
     elements.docList.scrollTop = treeScrollTop;
+    updateSelectionMeta();
     return;
   }
 
-  for (const group of groupedDocs) {
-    const groupKey = group.folderId || "__root__";
-    const isCollapsed = state.collapsedFolderIds.has(groupKey);
-
-    const groupItem = document.createElement("li");
-    groupItem.className = isCollapsed ? "tree-group is-collapsed" : "tree-group";
-    groupItem.dataset.folderKey = groupKey;
-
-    const folderRow = buildFolderRow(group, groupKey, isCollapsed);
-
-    if (!state.isRecycleBinMode && group.folderId) {
-      folderRow.appendChild(buildFolderActions(group));
-    }
-
-    groupItem.appendChild(folderRow);
-
-    if (!state.isRecycleBinMode) {
-      enableFolderDrop(groupItem, folderRow, group.folderId);
-    }
-
-    const childList = document.createElement("ul");
-    childList.className = "tree-children";
-
-    // Rendering every row of every folder up front is unbounded work, so reveal
-    // a page at a time — always including whichever document is open.
-    const revealed = state.groupRevealCounts.get(groupKey) || DOC_LIST_PAGE_SIZE;
-    const activeIndex = group.docs.findIndex((doc) => doc.file === state.activeFile);
-    const visibleCount = Math.max(revealed, activeIndex + 1);
-    const visibleDocs = group.docs.slice(0, visibleCount);
-    const hiddenCount = group.docs.length - visibleDocs.length;
-
-    for (const doc of visibleDocs) {
-      childList.appendChild(buildDocRow(doc));
-    }
-
-    if (group.docs.length === 0) {
-      const emptyRow = document.createElement("li");
-      emptyRow.className = "tree-empty";
-      emptyRow.textContent = "Empty";
-      childList.appendChild(emptyRow);
-    }
-
-    if (hiddenCount > 0) {
-      const moreRow = document.createElement("li");
-
-      const moreBtn = document.createElement("button");
-      moreBtn.type = "button";
-      moreBtn.className = "tree-more";
-      moreBtn.style.setProperty("--depth", "1");
-      moreBtn.innerHTML = '<i class="ph ph-caret-down" aria-hidden="true"></i><span></span>';
-      moreBtn.querySelector("span").textContent =
-        `Show ${Math.min(hiddenCount, DOC_LIST_PAGE_SIZE)} more of ${group.docs.length}`;
-      moreBtn.addEventListener("click", () => {
-        state.groupRevealCounts.set(groupKey, visibleCount + DOC_LIST_PAGE_SIZE);
-        renderDocList();
-      });
-
-      moreRow.appendChild(moreBtn);
-      childList.appendChild(moreRow);
-    }
-
-    groupItem.appendChild(childList);
-    elements.docList.appendChild(groupItem);
+  for (const node of nodes) {
+    renderTreeNode(node, elements.docList);
   }
 
   elements.docList.scrollTop = treeScrollTop;
   if (elements.sidebar) {
     elements.sidebar.scrollTop = sidebarScrollTop;
+  }
+
+  updateSelectionMeta();
+}
+
+// --- Keyboard -------------------------------------------------------------
+
+function getVisibleTreeButtons() {
+  return [...elements.docList.querySelectorAll(".tree-row-btn")]
+    .filter((button) => button.offsetParent !== null);
+}
+
+function moveTreeFocus(from, offset) {
+  const buttons = getVisibleTreeButtons();
+  const index = buttons.indexOf(from);
+  if (index < 0) {
+    return;
+  }
+
+  const next = buttons[Math.min(Math.max(index + offset, 0), buttons.length - 1)];
+  if (next && next !== from) {
+    next.focus();
+  }
+}
+
+function handleTreeKeydown(event) {
+  // An inline rename owns every key while it is open.
+  if (event.target.classList?.contains("tree-rename-input")) {
+    return;
+  }
+
+  const button = event.target.closest(".tree-row-btn");
+  const group = button?.closest(".tree-group");
+  const docRow = button?.closest(".tree-row-doc");
+  const folderRow = button?.closest(".tree-row-folder");
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+    event.preventDefault();
+    setSelection(visibleFileOrder);
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
+    event.preventDefault();
+    cutFiles([...state.selection]);
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+    event.preventDefault();
+    const targetFolderId = folderRow?.dataset.folderId
+      || (group?.dataset.folderKey !== "__root__" ? group?.dataset.folderKey : null)
+      || null;
+    void pasteIntoFolder(targetFolderId);
+    return;
+  }
+
+  if (event.key === "F2") {
+    event.preventDefault();
+    if (docRow) {
+      beginInlineRename(docRow.dataset.file);
+    } else if (folderRow?.dataset.folderId) {
+      beginInlineFolderRename(folderRow.dataset.folderId);
+    }
+    return;
+  }
+
+  if (event.key === "Delete" && !state.isRecycleBinMode) {
+    event.preventDefault();
+    const targets = docRow ? resolveTargetFiles(docRow.dataset.file) : [...state.selection];
+    if (targets.length) {
+      void deleteFiles(targets, event.shiftKey ? "hard" : "soft");
+    }
+    return;
+  }
+
+  if (!button) {
+    return;
+  }
+
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      moveTreeFocus(button, 1);
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      moveTreeFocus(button, -1);
+      break;
+    case "Home": {
+      event.preventDefault();
+      const [first] = getVisibleTreeButtons();
+      if (first) first.focus();
+      break;
+    }
+    case "End": {
+      event.preventDefault();
+      const buttons = getVisibleTreeButtons();
+      if (buttons.length) buttons[buttons.length - 1].focus();
+      break;
+    }
+    case "ArrowRight":
+      if (folderRow && group?.classList.contains("is-collapsed")) {
+        event.preventDefault();
+        toggleFolderCollapse(group.dataset.folderKey);
+      } else if (folderRow) {
+        event.preventDefault();
+        moveTreeFocus(button, 1);
+      }
+      break;
+    case "ArrowLeft":
+      if (folderRow && !group?.classList.contains("is-collapsed")) {
+        event.preventDefault();
+        toggleFolderCollapse(group.dataset.folderKey);
+      } else {
+        event.preventDefault();
+        const parentGroup = group?.parentElement?.closest(".tree-group");
+        const targetGroup = folderRow ? parentGroup : group;
+        targetGroup?.querySelector(".tree-row-folder .tree-row-btn")?.focus();
+      }
+      break;
+    default:
+      break;
   }
 }
 
@@ -3416,13 +4204,13 @@ async function hardDeleteCurrentDeletedDocument() {
   }
 }
 
-async function createFolderOnServer(folderName) {
+async function createFolderOnServer(folderName, parentId = null) {
   return requestJson("/api/folders", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ name: folderName })
+    body: JSON.stringify({ name: folderName, parentId: parentId || null })
   });
 }
 
@@ -3473,7 +4261,7 @@ async function handleFolderModalAction() {
       return;
     }
 
-    const created = await createFolderOnServer(folderName);
+    const created = await createFolderOnServer(folderName, state.folderModalParentId);
 
     if (state.folderModalMode === "upload") {
       const pending = state.pendingUploadFile;
@@ -3490,9 +4278,11 @@ async function handleFolderModalAction() {
 
     closeFolderModal();
     await refreshDocs({ preserveSearch: true });
-    setStatus(`Created folder ${created.folder.name}.`, "success");
+    notify(created.folder.parentId
+      ? `Created "${created.folder.name}" in ${created.folder.path.replace(/ \/ [^/]+$/, "")}.`
+      : `Created folder "${created.folder.name}".`, "success");
   } catch (error) {
-    setStatus(error.message, "error");
+    notify(error.message, "error");
   }
 }
 
@@ -4258,8 +5048,57 @@ elements.createFolderBtn.addEventListener("click", () => {
   openFolderModal({ mode: "create" });
 });
 
-// Arrow-key navigation over the tree, delegated so it survives every rebuild.
+// Delegated so they survive every rebuild of the tree.
 elements.docList.addEventListener("keydown", handleTreeKeydown);
+
+// Clicking the empty space below the rows clears the selection, as it does in
+// Explorer. Clicks that landed on a row are handled by the row itself.
+elements.docList.addEventListener("mousedown", (event) => {
+  if (event.target === elements.docList) {
+    clearSelection();
+  }
+});
+
+// Right-clicking the empty area offers the paste target for the top level.
+elements.docList.addEventListener("contextmenu", (event) => {
+  if (event.target !== elements.docList) {
+    return;
+  }
+
+  event.preventDefault();
+  openContextMenu(event.clientX, event.clientY, [
+    {
+      label: "New folder",
+      icon: "ph-folder-plus",
+      action: () => openFolderModal({ mode: "create" })
+    },
+    {
+      label: state.clipboard.files.length
+        ? `Paste ${state.clipboard.files.length} file(s) into Ungrouped`
+        : "Paste",
+      icon: "ph-clipboard-text",
+      disabled: state.clipboard.files.length === 0,
+      action: () => void pasteIntoFolder(null)
+    },
+    { separator: true },
+    {
+      label: "Select all",
+      icon: "ph-check-square",
+      action: () => setSelection(visibleFileOrder)
+    }
+  ]);
+});
+
+// A context menu must not survive the next interaction anywhere on the page.
+window.addEventListener("mousedown", (event) => {
+  if (elements.contextMenu && !elements.contextMenu.contains(event.target)) {
+    closeContextMenu();
+  }
+});
+
+window.addEventListener("blur", closeContextMenu);
+window.addEventListener("resize", closeContextMenu);
+document.addEventListener("scroll", closeContextMenu, true);
 
 elements.collapseAllBtn?.addEventListener("click", () => {
   const groups = [...elements.docList.querySelectorAll(".tree-group")];
@@ -4429,6 +5268,13 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  // The context menu floats above everything, so it closes first.
+  if (elements.contextMenu && !elements.contextMenu.hidden) {
+    event.preventDefault();
+    closeContextMenu();
+    return;
+  }
+
   if (state.confirmOpen) {
     event.preventDefault();
     resolveConfirmDialog(false);
@@ -4462,6 +5308,15 @@ window.addEventListener("keydown", (event) => {
   if (elements.appShell.classList.contains("nav-open")) {
     event.preventDefault();
     setNavOpen(false);
+    return;
+  }
+
+  // Last layer: drop the file selection and any pending cut.
+  if (state.selection.size > 0 || state.clipboard.files.length > 0) {
+    event.preventDefault();
+    state.clipboard = { files: [], mode: null };
+    clearSelection();
+    updateSelectionUI();
   }
 });
 

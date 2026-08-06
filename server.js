@@ -164,9 +164,16 @@ async function ensureStorageDirs() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
 }
 
+// v1 folders were a flat list. v2 adds `parentId`, and a v1 file loads cleanly
+// because a missing parentId normalizes to null, which is exactly "top level".
+const ORGANIZER_VERSION = 2;
+// Depth is bounded so a pathological hierarchy cannot make rendering or path
+// computation quadratic, and so the tree stays navigable in a 280px sidebar.
+const MAX_FOLDER_DEPTH = 8;
+
 function createDefaultOrganizerState() {
   return {
-    version: 1,
+    version: ORGANIZER_VERSION,
     folders: [],
     fileFolders: {}
   };
@@ -240,12 +247,16 @@ function normalizeOrganizerState(rawState) {
       return {
         id,
         name,
+        // Absent on v1 state, which is correct: those folders were all top level.
+        parentId: normalizeFolderId(folder?.parentId),
         order: Number.isFinite(Number(folder?.order)) ? Number(folder.order) : index,
         createdAt,
         updatedAt
       };
     }).filter(Boolean)
     : [];
+
+  sanitizeFolderHierarchy(folders);
 
   folders.sort((left, right) => {
     if (left.order !== right.order) {
@@ -272,10 +283,128 @@ function normalizeOrganizerState(rawState) {
   }
 
   return {
-    version: 1,
+    version: ORGANIZER_VERSION,
     folders,
     fileFolders
   };
+}
+
+// --- Folder hierarchy -----------------------------------------------------
+// A parent reference is only ever dropped, never the folder itself: a folder
+// whose parent vanished becomes top level rather than disappearing along with
+// every document filed inside it.
+function sanitizeFolderHierarchy(folders) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+
+  for (const folder of folders) {
+    if (folder.parentId && (folder.parentId === folder.id || !byId.has(folder.parentId))) {
+      folder.parentId = null;
+    }
+  }
+
+  // Break cycles by detaching whichever folder closes the loop. Hand-edited
+  // state is the realistic source of these, and a cycle would hang the walk.
+  for (const folder of folders) {
+    const seen = new Set([folder.id]);
+    let current = folder.parentId ? byId.get(folder.parentId) : null;
+
+    while (current) {
+      if (seen.has(current.id)) {
+        current.parentId = null;
+        break;
+      }
+
+      seen.add(current.id);
+      current = current.parentId ? byId.get(current.parentId) : null;
+    }
+  }
+
+  // Anything nested past the cap is lifted to the top rather than rejected.
+  for (const folder of folders) {
+    let depth = 0;
+    let current = folder.parentId ? byId.get(folder.parentId) : null;
+
+    while (current && depth <= MAX_FOLDER_DEPTH) {
+      depth += 1;
+      current = current.parentId ? byId.get(current.parentId) : null;
+    }
+
+    if (depth > MAX_FOLDER_DEPTH) {
+      folder.parentId = null;
+    }
+  }
+
+  return folders;
+}
+
+function getFolderAncestry(folders, folderId) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const chain = [];
+  let current = byId.get(folderId) || null;
+
+  while (current && chain.length <= MAX_FOLDER_DEPTH + 1) {
+    chain.unshift(current);
+    current = current.parentId ? byId.get(current.parentId) : null;
+  }
+
+  return chain;
+}
+
+function getFolderDepth(folders, folderId) {
+  return Math.max(getFolderAncestry(folders, folderId).length - 1, 0);
+}
+
+function getFolderPath(folders, folderId) {
+  return getFolderAncestry(folders, folderId).map((folder) => folder.name).join(" / ");
+}
+
+// True when `candidateId` is `ancestorId` or sits anywhere beneath it. This is
+// what stops a folder being dragged into its own subtree.
+function isFolderWithinSubtree(folders, candidateId, ancestorId) {
+  if (!candidateId || !ancestorId) {
+    return false;
+  }
+
+  return getFolderAncestry(folders, candidateId).some((folder) => folder.id === ancestorId);
+}
+
+function collectFolderSubtreeIds(folders, rootId) {
+  const childrenByParent = new Map();
+  for (const folder of folders) {
+    const key = folder.parentId || "__root__";
+    if (!childrenByParent.has(key)) {
+      childrenByParent.set(key, []);
+    }
+    childrenByParent.get(key).push(folder);
+  }
+
+  const ids = [];
+  const queue = [rootId];
+
+  while (queue.length) {
+    const current = queue.shift();
+    ids.push(current);
+    for (const child of childrenByParent.get(current) || []) {
+      queue.push(child.id);
+    }
+  }
+
+  return ids;
+}
+
+// Documents are sorted by their folder's position in a depth-first walk, so a
+// flat list still comes back in the order the tree displays.
+function buildFolderSortKeys(folders) {
+  const keys = new Map();
+
+  for (const folder of folders) {
+    const key = getFolderAncestry(folders, folder.id)
+      .map((entry) => String(entry.order ?? 0).padStart(6, "0"))
+      .join(".");
+    keys.set(folder.id, key);
+  }
+
+  return keys;
 }
 
 // The organizer file is the only record of which document lives in which
@@ -415,6 +544,7 @@ function resolveFolderInfo(organizerState, fileName) {
     return {
       folderId: null,
       folderName: null,
+      folderPath: null,
       folderOrder: UNFILED_FOLDER_ORDER
     };
   }
@@ -424,6 +554,7 @@ function resolveFolderInfo(organizerState, fileName) {
     return {
       folderId: null,
       folderName: null,
+      folderPath: null,
       folderOrder: UNFILED_FOLDER_ORDER
     };
   }
@@ -431,14 +562,18 @@ function resolveFolderInfo(organizerState, fileName) {
   return {
     folderId: folder.id,
     folderName: folder.name,
+    folderPath: getFolderPath(organizerState.folders, folder.id),
     folderOrder: Number.isFinite(Number(folder.order)) ? Number(folder.order) : Number.MAX_SAFE_INTEGER
   };
 }
 
-function serializeFolders(folders) {
+function serializeFolders(folders, allFolders = folders) {
   return folders.map((folder) => ({
     id: folder.id,
     name: folder.name,
+    parentId: folder.parentId || null,
+    depth: getFolderDepth(allFolders, folder.id),
+    path: getFolderPath(allFolders, folder.id),
     order: Number.isFinite(Number(folder.order)) ? Number(folder.order) : 0,
     createdAt: folder.createdAt,
     updatedAt: folder.updatedAt
@@ -929,6 +1064,10 @@ async function getDocs(organizerState = null) {
     return ALLOWED_DOC_EXTENSIONS.has(ext);
   });
 
+  // Sorting on a folder's depth-first position keeps the flat list in the same
+  // order the nested tree draws it; a bare `order` would interleave levels.
+  const folderSortKeys = buildFolderSortKeys(organizer.folders);
+
   const docs = await Promise.all(
     markdownEntries.map(async (entry) => {
       const fullPath = path.join(MARKDOWN_DIR, entry.name);
@@ -941,14 +1080,17 @@ async function getDocs(organizerState = null) {
         updatedAt: stat.mtime.toISOString(),
         folderId: folderInfo.folderId,
         folderName: folderInfo.folderName,
-        folderOrder: folderInfo.folderOrder
+        folderPath: folderInfo.folderPath,
+        folderOrder: folderInfo.folderOrder,
+        // Unfiled documents sort last, which is where Ungrouped renders.
+        folderSortKey: folderInfo.folderId ? (folderSortKeys.get(folderInfo.folderId) || "") : "~"
       };
     })
   );
 
   docs.sort((a, b) => {
-    if (a.folderOrder !== b.folderOrder) {
-      return a.folderOrder - b.folderOrder;
+    if (a.folderSortKey !== b.folderSortKey) {
+      return a.folderSortKey < b.folderSortKey ? -1 : 1;
     }
 
     const rightTime = Date.parse(b.updatedAt) || 0;
@@ -1321,17 +1463,41 @@ app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
       return;
     }
 
+    // An absent parentId means top level, which keeps the old request shape working.
+    const parentId = req.body?.parentId === undefined || req.body?.parentId === null
+      ? null
+      : normalizeFolderId(req.body.parentId);
+
+    if (req.body?.parentId && !parentId) {
+      res.status(400).json({ error: "Invalid parent folder id" });
+      return;
+    }
+
     const { organizer: savedOrganizer, result: folder } = await mutateOrganizerState((organizer) => {
-      const existing = organizer.folders.find((entry) => entry.name.toLowerCase() === folderName.toLowerCase());
-      if (existing) {
-        throw new HttpError(409, "A folder with that name already exists");
+      if (parentId && !organizer.folders.some((entry) => entry.id === parentId)) {
+        throw new HttpError(404, "Parent folder not found");
       }
 
+      if (parentId && getFolderDepth(organizer.folders, parentId) + 1 > MAX_FOLDER_DEPTH) {
+        throw new HttpError(400, `Folders cannot nest deeper than ${MAX_FOLDER_DEPTH} levels`);
+      }
+
+      // Names only have to be unique among siblings now, the way a filesystem
+      // works — two different projects can each have a "Design" folder.
+      const existing = organizer.folders.find((entry) =>
+        (entry.parentId || null) === parentId
+        && entry.name.toLowerCase() === folderName.toLowerCase());
+      if (existing) {
+        throw new HttpError(409, "A folder with that name already exists here");
+      }
+
+      const siblingCount = organizer.folders.filter((entry) => (entry.parentId || null) === parentId).length;
       const now = new Date().toISOString();
       const created = {
         id: createFolderId(),
         name: folderName,
-        order: organizer.folders.length,
+        parentId,
+        order: siblingCount,
         createdAt: now,
         updatedAt: now
       };
@@ -1341,7 +1507,7 @@ app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
     });
 
     res.status(201).json({
-      folder: serializeFolders([folder])[0],
+      folder: serializeFolders([folder], savedOrganizer.folders)[0],
       folders: serializeFolders(savedOrganizer.folders)
     });
   } catch (error) {
@@ -1380,8 +1546,19 @@ app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
         ordered.push(folder);
       }
 
+      // Order is per sibling group now, so a reorder request has to describe one
+      // group. Mixing levels would make the resulting indices meaningless.
+      const parents = new Set(ordered.map((folder) => folder.parentId || null));
+      if (parents.size > 1) {
+        throw new HttpError(400, "All folders in a reorder must share the same parent");
+      }
+
+      const targetParent = ordered.length ? (ordered[0].parentId || null) : null;
+
+      // Siblings the caller left out keep their relative order after the listed
+      // ones, so a partial list can never drop or shuffle an unmentioned folder.
       for (const folder of organizer.folders) {
-        if (!seen.has(folder.id)) {
+        if (!seen.has(folder.id) && (folder.parentId || null) === targetParent) {
           ordered.push(folder);
         }
       }
@@ -1393,8 +1570,6 @@ app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
           folder.updatedAt = now;
         }
       });
-
-      organizer.folders = ordered;
     });
 
     res.json({ folders: serializeFolders(savedOrganizer.folders) });
@@ -1403,18 +1578,36 @@ app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
   }
 });
 
+// Renames a folder, moves it under a new parent, or both. `parentId` is only
+// touched when the key is present, so a rename never silently reparents.
 app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
-    const folderName = normalizeFolderName(req.body?.name);
-
     if (!normalizedFolderId) {
       res.status(400).json({ error: "Invalid folder id" });
       return;
     }
 
-    if (!folderName) {
+    const wantsRename = req.body?.name !== undefined;
+    const wantsReparent = Object.prototype.hasOwnProperty.call(req.body || {}, "parentId");
+
+    if (!wantsRename && !wantsReparent) {
+      res.status(400).json({ error: "Provide a name, a parentId, or both" });
+      return;
+    }
+
+    const folderName = wantsRename ? normalizeFolderName(req.body.name) : null;
+    if (wantsRename && !folderName) {
       res.status(400).json({ error: "Invalid folder name" });
+      return;
+    }
+
+    const nextParentId = wantsReparent && req.body.parentId
+      ? normalizeFolderId(req.body.parentId)
+      : null;
+
+    if (wantsReparent && req.body.parentId && !nextParentId) {
+      res.status(400).json({ error: "Invalid parent folder id" });
       return;
     }
 
@@ -1424,18 +1617,50 @@ app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
         throw new HttpError(404, "Folder not found");
       }
 
-      const duplicate = organizer.folders.find((entry) => entry.id !== normalizedFolderId && entry.name.toLowerCase() === folderName.toLowerCase());
-      if (duplicate) {
-        throw new HttpError(409, "A folder with that name already exists");
+      const parentId = wantsReparent ? nextParentId : (target.parentId || null);
+
+      if (wantsReparent && parentId) {
+        if (!organizer.folders.some((entry) => entry.id === parentId)) {
+          throw new HttpError(404, "Parent folder not found");
+        }
+
+        // The whole point of the guard: a folder cannot become its own descendant.
+        if (isFolderWithinSubtree(organizer.folders, parentId, normalizedFolderId)) {
+          throw new HttpError(400, "A folder cannot be moved inside itself");
+        }
+
+        const subtreeDepth = Math.max(
+          ...collectFolderSubtreeIds(organizer.folders, normalizedFolderId)
+            .map((id) => getFolderDepth(organizer.folders, id))
+        ) - getFolderDepth(organizer.folders, normalizedFolderId);
+
+        if (getFolderDepth(organizer.folders, parentId) + 1 + subtreeDepth > MAX_FOLDER_DEPTH) {
+          throw new HttpError(400, `Folders cannot nest deeper than ${MAX_FOLDER_DEPTH} levels`);
+        }
       }
 
-      target.name = folderName;
+      const name = wantsRename ? folderName : target.name;
+      const duplicate = organizer.folders.find((entry) =>
+        entry.id !== normalizedFolderId
+        && (entry.parentId || null) === parentId
+        && entry.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) {
+        throw new HttpError(409, "A folder with that name already exists here");
+      }
+
+      if (wantsReparent && parentId !== (target.parentId || null)) {
+        target.parentId = parentId;
+        target.order = organizer.folders.filter((entry) =>
+          entry.id !== normalizedFolderId && (entry.parentId || null) === parentId).length;
+      }
+
+      target.name = name;
       target.updatedAt = new Date().toISOString();
       return target;
     });
 
     res.json({
-      folder: serializeFolders([folder])[0],
+      folder: serializeFolders([folder], savedOrganizer.folders)[0],
       folders: serializeFolders(savedOrganizer.folders)
     });
   } catch (error) {
@@ -1451,22 +1676,32 @@ app.delete("/api/folders/:folderId", requireWriteAuth, async (req, res, next) =>
       return;
     }
 
-    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
-      const folderIndex = organizer.folders.findIndex((entry) => entry.id === normalizedFolderId);
-      if (folderIndex < 0) {
+    // Deleting a folder deletes its subfolders too, the way a filesystem does.
+    // Documents are never deleted — they fall back to Ungrouped, and the files
+    // on disk are not touched at all.
+    const { organizer: savedOrganizer, result: summary } = await mutateOrganizerState((organizer) => {
+      if (!organizer.folders.some((entry) => entry.id === normalizedFolderId)) {
         throw new HttpError(404, "Folder not found");
       }
 
-      organizer.folders.splice(folderIndex, 1);
+      const removedIds = new Set(collectFolderSubtreeIds(organizer.folders, normalizedFolderId));
+      organizer.folders = organizer.folders.filter((entry) => !removedIds.has(entry.id));
+
+      let unfiledCount = 0;
       for (const [fileName, assignedFolderId] of Object.entries(organizer.fileFolders)) {
-        if (assignedFolderId === normalizedFolderId) {
+        if (removedIds.has(assignedFolderId)) {
           delete organizer.fileFolders[fileName];
+          unfiledCount += 1;
         }
       }
+
+      return { removedFolders: removedIds.size, unfiledDocuments: unfiledCount };
     });
 
     res.json({
       message: "Folder deleted",
+      removedFolders: summary.removedFolders,
+      unfiledDocuments: summary.unfiledDocuments,
       folders: serializeFolders(savedOrganizer.folders)
     });
   } catch (error) {
