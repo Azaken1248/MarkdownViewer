@@ -86,7 +86,8 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--fg);
-  background: var(--canvas-inset);
+  background: var(--canvas);
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -161,20 +162,23 @@ kbd {
    Shell
    -------------------------------------------------------------------------- */
 
+/* The shell fills the viewport and never scrolls itself; the sidebar and the
+   viewer each scroll their own contents. That removes the hardcoded header
+   height the sticky positioning used to depend on — the header can wrap to any
+   number of rows and nothing below it needs to know. */
 .app-shell {
-  max-width: 1600px;
-  min-height: 100vh;
-  margin: 0 auto;
+  width: 100%;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--canvas);
-  border-left: 1px solid var(--border-muted);
-  border-right: 1px solid var(--border-muted);
 }
 
 /* Flex, not grid: the sidebar toggle is display:none on desktop, and a hidden
    grid item shifts every later item into the wrong track. Flex just closes up. */
 .app-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -182,8 +186,6 @@ kbd {
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
   z-index: 30;
 }
 
@@ -310,6 +312,7 @@ kbd {
 .supersearch-panel {
   position: relative;
   z-index: 25;
+  flex-shrink: 0;
   margin: 0 16px;
   border: 1px solid var(--border);
   border-top: none;
@@ -427,6 +430,7 @@ kbd {
   grid-template-columns: 280px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-overlay {
@@ -441,11 +445,10 @@ kbd {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--surface);
   border-right: 1px solid var(--border);
-  position: sticky;
-  top: 53px;
-  height: calc(100vh - 53px);
 }
 
 .sidebar-head {
@@ -814,16 +817,21 @@ kbd {
    Viewer
    -------------------------------------------------------------------------- */
 
+/* The viewer is the scroll container, so the toolbar can stick to its top
+   without needing to know how tall the app header is. */
 .viewer {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--canvas);
 }
 
 .viewer-toolbar {
   position: sticky;
-  top: 53px;
+  top: 0;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -942,10 +950,11 @@ kbd {
    Markdown body
    -------------------------------------------------------------------------- */
 
+/* No measure cap: the viewer pane is already the constraint, and capping it
+   again left a wide empty gutter on the right at desktop widths. */
 .markdown-body {
   display: none;
   padding: 24px 32px 80px;
-  max-width: 1012px;
   width: 100%;
   font-size: 15px;
   line-height: 1.6;
@@ -2178,13 +2187,15 @@ kbd {
 }
 
 @media (max-width: 920px) {
-  .app-shell {
-    border: none;
-  }
-
   .app-header {
     gap: 10px;
     padding: 8px 12px;
+  }
+
+  /* Search wraps to its own row, so the actions need to be pushed right
+     explicitly — without this they clump against the brand. */
+  .header-actions {
+    margin-left: auto;
   }
 
   .brand-text {
@@ -2217,17 +2228,23 @@ kbd {
     display: grid;
   }
 
+  /* Positioning context for the drawer and its overlay. */
   .layout {
     grid-template-columns: 1fr;
+    position: relative;
   }
 
+  /* The drawer is absolute inside .layout rather than fixed to the viewport, so
+     it spans exactly the content area and leaves the header — and its toggle
+     button — visible and tappable. No header-height constant involved. */
   .sidebar {
-    position: fixed;
+    position: absolute;
     top: 0;
+    bottom: 0;
     left: 0;
     z-index: 60;
     width: min(85vw, 340px);
-    height: 100dvh;
+    height: auto;
     border-right: 1px solid var(--border);
     transform: translateX(-101%);
     transition: transform 200ms ease;
@@ -2240,7 +2257,7 @@ kbd {
 
   .sidebar-overlay {
     display: block;
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 55;
     border: none;
@@ -2309,17 +2326,18 @@ kbd {
     gap: 0;
   }
 
-  /* The drawer sits above the header, so its own close button is the way out. */
+  /* A second way out beside the header toggle, sitting first in the row. */
   #closeSidebarBtn {
     order: -1;
   }
 
+  /* The dock hides itself while the drawer is open, so the tree only needs
+     enough clearance to not end flush against the bottom edge. */
   .tree {
-    padding-bottom: 80px;
+    padding-bottom: 24px;
   }
 
   .viewer-toolbar {
-    top: 0;
     flex-wrap: wrap;
     row-gap: 8px;
   }
