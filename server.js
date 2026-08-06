@@ -718,7 +718,10 @@ async function searchDocuments(query, scope = "docs") {
     };
   }));
 
-  matches.sort((left, right) => {
+  // Drop non-matching docs before sorting; the comparator dereferences .score.
+  const scoredMatches = matches.filter(Boolean);
+
+  scoredMatches.sort((left, right) => {
     if (right.score !== left.score) {
       return right.score - left.score;
     }
@@ -733,7 +736,7 @@ async function searchDocuments(query, scope = "docs") {
   });
 
   return {
-    matches: matches.filter(Boolean).slice(0, SEARCH_RESULT_LIMIT),
+    matches: scoredMatches.slice(0, SEARCH_RESULT_LIMIT),
     searchTerms
   };
 }

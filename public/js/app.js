@@ -74,6 +74,8 @@ const state = {
   editorMode: "create",
   editorFile: null,
   editorOpen: false,
+  editorInitialContent: "",
+  editorInitialFileName: "",
   mermaidReady: false,
   panZoomCounter: 0,
   searchResults: [],
@@ -2608,6 +2610,7 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
   setMeta("Loading recycle bin...");
 
   await fetchDeletedDocs();
+  void hydrateDeletedSearchContent();
 
   const query = preserveSearch ? elements.searchInput.value : "";
   if (!preserveSearch) {
@@ -2857,6 +2860,8 @@ function openEditor({ mode, fileName, content }) {
   elements.editorFileName.value = fileName || "";
   elements.editorFileName.disabled = mode === "edit";
   elements.editorInput.value = content || "";
+  state.editorInitialContent = elements.editorInput.value;
+  state.editorInitialFileName = elements.editorFileName.value;
   elements.editorInput.scrollTop = 0;
   elements.editorPreview.scrollTop = 0;
   state.editorScrollSyncLock = false;
@@ -2875,15 +2880,49 @@ function openEditor({ mode, fileName, content }) {
 
 function closeEditor() {
   state.editorOpen = false;
+  state.editorInitialContent = "";
+  state.editorInitialFileName = "";
   elements.editorModal.classList.remove("open");
   elements.editorModal.setAttribute("aria-hidden", "true");
   syncBodyLock();
+}
+
+function isEditorDirty() {
+  if (!state.editorOpen) {
+    return false;
+  }
+
+  return elements.editorInput.value !== state.editorInitialContent
+    || elements.editorFileName.value !== state.editorInitialFileName;
+}
+
+async function requestEditorClose() {
+  if (!isEditorDirty()) {
+    closeEditor();
+    return;
+  }
+
+  const shouldDiscard = await requestConfirmation({
+    title: "Discard unsaved changes?",
+    message: "This document has edits that have not been saved. Closing the editor will lose them.",
+    confirmLabel: "Discard Changes",
+    confirmIcon: "fa-trash-can",
+    tone: "danger"
+  });
+
+  if (shouldDiscard) {
+    closeEditor();
+  }
 }
 
 async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
   setMeta("Loading documents...");
 
   await fetchDocs();
+
+  // Warm the content cache in the background so the offline fallback in
+  // applySearch() can match on document text, not just titles and filenames.
+  void hydrateSearchContent();
 
   const query = preserveSearch ? elements.searchInput.value : "";
   if (!preserveSearch) {
@@ -3279,6 +3318,14 @@ elements.matchPrevBtn.addEventListener("click", async () => {
   await navigateMatches(-1, state.jumpQuery);
 });
 
+elements.matchNextBtn.addEventListener("click", async () => {
+  await navigateMatches(1, state.jumpQuery);
+});
+
+elements.matchCloseBtn.addEventListener("click", () => {
+  exitSearchMode();
+});
+
 elements.docContent.addEventListener("touchend", (event) => {
   if (!docSwipeStart || event.changedTouches.length === 0 || !state.jumpQuery.trim()) {
     docSwipeStart = null;
@@ -3428,7 +3475,8 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "Escape" && state.editorOpen) {
-    closeEditor();
+    void requestEditorClose();
+    return;
   }
 
   if (event.key === "Escape" && state.searchPanelOpen) {
@@ -3484,11 +3532,11 @@ elements.saveDocBtn.addEventListener("click", () => {
 });
 
 elements.closeEditorBtn.addEventListener("click", () => {
-  closeEditor();
+  void requestEditorClose();
 });
 
 elements.editorBackdrop.addEventListener("click", () => {
-  closeEditor();
+  void requestEditorClose();
 });
 
 elements.confirmBackdrop.addEventListener("click", () => {

@@ -28,5 +28,7 @@ npm-debug.log*
 dist/
 build/
 
-# Documents (optional - comment out if you want to version control)
-# public/docs/*.md
+# App data and user documents (runtime state, recreated by the server on boot)
+data/
+deleted_markdowns/
+public/docs/
