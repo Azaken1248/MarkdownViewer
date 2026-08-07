@@ -10,6 +10,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { startTestServer } = require("./helpers/server");
 const passwords = require("../lib/passwords");
+const excerpt = require("../lib/excerpt");
 
 let failures = 0;
 
@@ -460,6 +461,126 @@ async function run(server) {
 
     await admin.del("/api/docs/beta.md/share");
     check("revoking kills the link", (await stranger.get(`/api/share/${newToken}`)).status, 404);
+  }
+
+  console.log("=== the preview describes the document, not the app ===");
+  {
+    const body = [
+      "---",
+      "title: front matter must not leak",
+      "---",
+      "",
+      "# Quarterly Planning",
+      "",
+      "We agreed to **ship** the [cart rewrite](https://example.com) in October.",
+      "",
+      "```js",
+      "// # this is not a heading",
+      "const secret = 1;",
+      "```",
+      ""
+    ].join("\n");
+
+    await admin.post("/api/docs", { fileName: "preview-fixture.md", content: body });
+    const share = await admin.post("/api/docs/preview-fixture.md/share");
+    const token = share.body.url.split("/s/")[1];
+    const stranger = makeClient(server.origin);
+    const page = (await stranger.get(`/s/${token}`)).raw;
+
+    const meta = (property) => {
+      const match = page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`));
+      return match ? match[1] : null;
+    };
+
+    // The document's own H1 beats the filename: "Quarterly Planning", not
+    // "Preview Fixture".
+    check("og:title comes from the document's heading", meta("og:title"), "Quarterly Planning");
+    check("...and the tab title adds the site name",
+      /<title>Quarterly Planning \| AzaDocs<\/title>/.test(page), true);
+
+    const description = meta("og:description");
+    console.log(`  (description: ${description})`);
+    check("og:description is prose from the document", description.includes("cart rewrite"), true);
+    check("...with the markdown syntax removed", /[*[\]`#]/.test(description), false);
+    check("...and the front matter left out", description.includes("front matter"), false);
+    check("...and nothing from inside a code fence", description.includes("secret"), false);
+    check("...and it does not just repeat the title",
+      description.toLowerCase().startsWith("quarterly planning"), false);
+
+    check("og:type says article", meta("og:type"), "article");
+    check("og:url is the share link itself", meta("og:url").endsWith(`/s/${token}`), true);
+    check("...and canonical agrees", page.includes(`<link rel="canonical" href="${meta("og:url")}"`), true);
+    check("og:site_name is the app", meta("og:site_name"), "AzaDocs");
+    check("the modified time is real", Number.isFinite(Date.parse(meta("article:modified_time"))), true);
+    check("twitter mirrors it", meta("twitter:title"), "Quarterly Planning");
+    check("no placeholder survived", /__SHARE_[A-Z_]+__/.test(page), false);
+
+    console.log("=== the card image carries the document's title ===");
+    const card = await stranger.get(`/s/${token}/card.svg`);
+    check("the card renders", card.status, 200);
+    check("...as an SVG", /image\/svg\+xml/.test(card.headers["content-type"]), true);
+    check("...with the title in it", card.raw.includes("Quarterly Planning"), true);
+    check("...and the filename underneath", card.raw.includes("preview-fixture.md"), true);
+    check("og:image points at it", meta("og:image").endsWith(`/s/${token}/card.svg`), true);
+    check("the card is not indexed either",
+      /noindex/.test(card.headers["x-robots-tag"] || ""), true);
+    check("a bogus token gets no card",
+      (await stranger.get("/s/not-a-token/card.svg")).status, 404);
+
+    console.log("=== a revoked link stops describing what was behind it ===");
+    await admin.del("/api/docs/preview-fixture.md/share");
+    const gone = await stranger.get(`/s/${token}`);
+    check("the page 404s", gone.status, 404);
+    check("...and leaks neither the title", gone.raw.includes("Quarterly Planning"), false);
+    check("...nor the content", gone.raw.includes("cart rewrite"), false);
+    check("...and the card goes with it",
+      (await stranger.get(`/s/${token}/card.svg`)).status, 404);
+  }
+
+  console.log("=== summarising odd documents ===");
+  {
+    // These are the shapes that produce a nonsense preview if the stripper is
+    // naive: a notebook is JSON, a diagram is graph syntax, and a document may
+    // have no heading or no prose at all.
+    const notebook = JSON.stringify({
+      cells: [
+        { cell_type: "code", source: ["print('hello')"] },
+        { cell_type: "markdown", source: ["# Sales Analysis\n", "\n", "Exploring the **2026** dataset.\n"] }
+      ]
+    });
+    check("a notebook's title comes from its first markdown cell",
+      excerpt.extractTitle("nb.ipynb", notebook, "Nb"), "Sales Analysis");
+    check("...and its summary from the same cell",
+      excerpt.extractDescription("nb.ipynb", notebook, { title: "Sales Analysis" }),
+      "Exploring the 2026 dataset.");
+    check("a malformed notebook falls back rather than throwing",
+      excerpt.extractDescription("nb.ipynb", "{ not json", { siteName: "AzaDocs" }),
+      "A document shared from AzaDocs.");
+
+    check("a diagram is described as one",
+      excerpt.extractDescription("flow.mmd", "%% comment\ngraph TD\n  A-->B\n", {}),
+      "Mermaid diagram — graph TD");
+
+    check("a document with no heading keeps its filename title",
+      excerpt.extractTitle("no-heading.md", "Just a paragraph.\n", "No Heading"), "No Heading");
+    check("an empty document gets a sensible line",
+      excerpt.extractDescription("empty.md", "   \n\n", { siteName: "AzaDocs" }),
+      "A document shared from AzaDocs.");
+
+    check("a setext heading works too",
+      excerpt.extractTitle("s.md", "Underlined\n==========\n\nBody.\n", "S"), "Underlined");
+    check("...and its underline is not prose",
+      excerpt.extractDescription("s.md", "Underlined\n==========\n\nBody.\n", { title: "Underlined" }), "Body.");
+
+    const long = "word ".repeat(200);
+    const truncated = excerpt.extractDescription("long.md", long, {});
+    check("a long document is truncated", truncated.length <= excerpt.MAX_DESCRIPTION_LENGTH, true);
+    check("...on a word boundary, with an ellipsis", truncated.endsWith("…"), true);
+    check("...and not mid-word", /\s\w+…$/.test(truncated) || /\w…$/.test(truncated) === false, true);
+
+    // Anything derived from a document ends up in an HTML attribute.
+    check("markup in a heading cannot escape the attribute",
+      excerpt.extractTitle("x.md", '# Title with "quotes" & <b>tags</b>\n', "X").includes("<b>"), false);
   }
 
   console.log("=== a share follows its document, and dies with it ===");

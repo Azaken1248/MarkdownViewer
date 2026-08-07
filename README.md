@@ -98,6 +98,7 @@ proxy hop rather than the client's scheme.
 │   └── docs/                 # Your documents (gitignored)
 ├── lib/
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
+│   ├── excerpt.js            # Title and summary for link previews
 │   ├── passwords.js          # scrypt hashing and the password policy
 │   └── shares.js             # Per-document share links
 ├── data/                     # All gitignored
@@ -200,6 +201,22 @@ the full URL exactly once. Losing it means creating a new link, which revokes
 the old one. Renaming a document carries its share across; deleting one revokes
 it.
 
+The link preview describes **the document**, not the app: `og:title` is the
+document's own H1 (falling back to its filename), `og:description` is the
+opening prose with the markdown stripped out, and `og:image` is a card
+generated per document at `/s/<token>/card.svg` carrying its title. Front
+matter, code fences and tables are excluded from the summary, since a preview
+reading `## Overview` is worse than none. Notebooks are summarised from their
+first markdown cell and diagram sources are labelled by type.
+
+The card is an SVG, because this app has no image toolchain and adding one for
+a preview would be a poor trade. Some unfurlers (Slack, Discord, X) will not
+render an SVG `og:image` and show no picture — the title, description and site
+name still come through.
+
+Revoking a link takes the preview with it: a dead token renders a generic
+"not found" page that names neither the document nor its contents.
+
 ## API
 
 Reads require a session unless `PUBLIC_READS=true`. Writes require a session
@@ -261,6 +278,7 @@ with the right role, plus the `X-CSRF-Token` header.
 | `DELETE` | `/api/docs/:file/share` | Revoke a share link (editor) |
 | `GET` | `/api/share/:token` | **Public.** The shared document |
 | `GET` | `/s/:token` | **Public.** The standalone share page |
+| `GET` | `/s/:token/card.svg` | **Public.** The `og:image` for that document |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |
 | `ALL` | `/graphql` | `embedMeta`, `docsCount`, `health`. Introspection is off by default |
 | `GET` | `/oembed?url=` | oEmbed metadata for link-preview consumers |
