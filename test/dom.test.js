@@ -199,7 +199,8 @@ async function run(server) {
         applySession, refreshSession, can, openLoginModal, closeLoginModal,
         openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
-        buildDocContextItems, buildFolderContextItems, canDropOnFolder
+        buildDocContextItems, buildFolderContextItems, canDropOnFolder,
+        deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs
       };
     `);
     check("no exception on load", true, true);
@@ -629,6 +630,71 @@ async function run(server) {
 
     await window.__t.applyThemePreference("dark");
     check("and back to dark", doc.documentElement.dataset.theme, "dark");
+  }
+
+  console.log("=== the recycle bin shows only deleted things ===");
+  {
+    const folderCount = window.eval("window.__t.state.folders.length");
+    const liveRows = doc.querySelectorAll(".tree-row-doc").length;
+    console.log(`  (library: ${folderCount} folders, ${liveRows} rows on screen)`);
+
+    // Delete exactly one document, from a folder several levels deep. The
+    // delete asks for confirmation, so answer it the way a click would —
+    // awaiting it without that hangs forever.
+    const deleting = window.eval('window.__t.deleteFiles(["paged-000.md"], "soft")');
+    await new Promise((r) => setTimeout(r, 150));
+    window.eval("window.__t.resolveConfirmDialog(true)");
+    await deleting;
+    await new Promise((r) => setTimeout(r, 700));
+
+    await window.eval('window.__t.switchViewMode("recycle")');
+    await new Promise((r) => setTimeout(r, 900));
+
+    check("the view actually switched", window.eval("window.__t.state.viewMode"), "recycle");
+    const binRows = [...doc.querySelectorAll(".tree-row-doc")];
+    check("it lists the one deleted document", binRows.length, 1);
+    check("...and nothing that is still live",
+      binRows.some((r) => r.dataset.file.includes("delta")), false);
+
+    // The whole folder tree used to render here, empty, which made the bin look
+    // like it still held the entire library.
+    const binFolders = [...doc.querySelectorAll(".tree-row-folder")];
+    console.log(`  (folder rows in the bin: ${binFolders.length} of ${folderCount})`);
+    check("only folders that contain something are shown", binFolders.length < folderCount, true);
+    check("no folder in the bin is empty",
+      [...doc.querySelectorAll(".tree-group")].every((g) => g.querySelectorAll(".tree-row-doc").length > 0), true);
+
+    console.log("=== and the archive likewise ===");
+    await window.eval('window.__t.switchViewMode("archive")');
+    await new Promise((r) => setTimeout(r, 900));
+    check("the archive is empty, so it shows no folders at all",
+      doc.querySelectorAll(".tree-row-folder").length, 0);
+    check("...and no documents", doc.querySelectorAll(".tree-row-doc").length, 0);
+
+    console.log("=== back in the library, empty folders are still welcome ===");
+    await window.eval('window.__t.switchViewMode("docs")');
+    await new Promise((r) => setTimeout(r, 900));
+
+    // Count real folders only: the Ungrouped bucket also renders as a folder
+    // row but is not in state.folders.
+    const realFolderRows = () => [...doc.querySelectorAll(".tree-row-folder")]
+      .filter((row) => row.dataset.folderId).length;
+    check("every folder is rendered again", realFolderRows(), folderCount);
+
+    // An empty folder is somewhere to put things, so the library view keeps it
+    // even though the bin does not. Make one, since the cut/paste checks above
+    // filled the fixture's only empty folder.
+    await window.eval(`window.__t.requestJson("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Deliberately Empty" })
+    })`);
+    await window.eval("window.__t.refreshDocs({ preserveSearch: false })");
+    await new Promise((r) => setTimeout(r, 700));
+
+    check("a folder with nothing in it still renders", realFolderRows(), folderCount + 1);
+    check("...and says it is empty rather than vanishing",
+      doc.querySelectorAll(".tree-children .tree-empty").length > 0, true);
   }
 
   console.log("=== a viewer sees no write controls ===");

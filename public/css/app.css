@@ -400,9 +400,6 @@ kbd {
   overflow: hidden;
 }
 
-.supersearch-panel[hidden] {
-  display: none;
-}
 
 .supersearch-head {
   display: flex;
@@ -608,9 +605,6 @@ kbd {
   cursor: pointer;
 }
 
-.filter-clear[hidden] {
-  display: none;
-}
 
 .filter-clear:hover,
 .filter-clear:focus-visible {
@@ -638,9 +632,6 @@ kbd {
   white-space: nowrap;
 }
 
-.selection-meta[hidden] {
-  display: none;
-}
 
 /* Mode toggles light up so it is never a guess which list you are looking at. */
 #toggleRecycleBinBtn.active {
@@ -1107,9 +1098,6 @@ button.crumb:focus-visible {
   flex-shrink: 0;
 }
 
-.match-nav[hidden] {
-  display: none;
-}
 
 .match-nav-label {
   padding: 0 8px;
@@ -1823,9 +1811,6 @@ button.crumb:focus-visible {
   gap: 1px;
 }
 
-.context-menu[hidden] {
-  display: none;
-}
 
 .context-item {
   display: flex;
@@ -1916,9 +1901,6 @@ button.crumb:focus-visible {
   animation: tooltip-in 90ms ease-out;
 }
 
-.tooltip[hidden] {
-  display: none;
-}
 
 @keyframes tooltip-in {
   from { opacity: 0; transform: translateY(-2px); }
@@ -2881,9 +2863,6 @@ button.crumb:focus-visible {
   font-size: 13px;
 }
 
-.field-error[hidden] {
-  display: none;
-}
 
 .field-hint {
   margin: 0;
@@ -2916,9 +2895,6 @@ button.crumb:focus-visible {
   box-shadow: var(--shadow-overlay);
 }
 
-.account-menu[hidden] {
-  display: none;
-}
 
 .account-identity {
   margin: 0;
@@ -2947,9 +2923,6 @@ button.crumb:focus-visible {
   cursor: pointer;
 }
 
-.account-item[hidden] {
-  display: none;
-}
 
 .account-item:hover,
 .account-item:focus-visible {
@@ -3117,8 +3090,14 @@ button.crumb:focus-visible {
    looks exactly like it does inside the app.
    -------------------------------------------------------------------------- */
 
+/* The share page owns its own scroll. `body { overflow: hidden }` exists so the
+   app shell can give the sidebar and the viewer separate scrollers — but this
+   page has no shell, so without a scroller of its own a document longer than
+   the viewport simply could not be scrolled. */
 .share-page {
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   background: var(--canvas);
@@ -3184,9 +3163,6 @@ button.crumb:focus-visible {
   color: var(--fg-muted);
 }
 
-.share-error[hidden] {
-  display: none;
-}
 
 .share-loading i,
 .share-error i {
@@ -3219,9 +3195,6 @@ button.crumb:focus-visible {
   border-top: 1px solid var(--border-muted);
 }
 
-.share-footer[hidden] {
-  display: none;
-}
 
 .share-footer p {
   margin: 0;
@@ -3253,4 +3226,22 @@ button.crumb:focus-visible {
     max-width: none !important;
     padding: 0 !important;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Last word: the hidden attribute
+
+   `hidden` only hides via the user-agent rule `[hidden] { display: none }`,
+   which *any* author `display:` declaration beats — and most things here set
+   one (.icon-btn is grid, .btn is inline-flex, .dock-btn is grid). So
+   `element.hidden = true` silently did nothing on exactly the controls that
+   most needed it: the role-gated buttons, and the share page's spinner.
+
+   Deliberately the last rule in the file, and !important, so it wins on both
+   order and importance. Anything that must stay laid out while invisible needs
+   a different mechanism than `hidden`.
+   -------------------------------------------------------------------------- */
+
+[hidden] {
+  display: none !important;
 }

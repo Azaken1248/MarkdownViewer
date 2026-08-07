@@ -99,5 +99,54 @@ check("tooltips are the topmost layer", Math.max(...unique), 250);
 check("toasts sit just below them", unique[unique.length - 2], 200);
 check("no duplicate-purpose collisions below 100", unique.filter((n) => n < 100).length, new Set(unique.filter((n) => n < 100)).size);
 
+console.log("=== the hidden attribute actually hides ===");
+{
+  // `hidden` only works through the UA rule `[hidden] { display: none }`, which
+  // any author `display:` declaration beats — and nearly every control here
+  // sets one. That silently broke the role-gated buttons and the share page's
+  // spinner: the property was true, the element was still on screen.
+  const { JSDOM } = require("jsdom");
+  const probe = new JSDOM(`<style>${css}</style>
+    <button class="icon-btn" id="a"></button>
+    <button class="btn" id="b"></button>
+    <button class="dock-btn" id="c"></button>
+    <div class="share-loading" id="d"></div>
+    <div class="field" id="e"></div>
+    <div class="account-menu" id="f"></div>`);
+
+  for (const id of ["a", "b", "c", "d", "e", "f"]) {
+    const el = probe.window.document.getElementById(id);
+    const shown = probe.window.getComputedStyle(el).display;
+    el.hidden = true;
+    const hidden = probe.window.getComputedStyle(el).display;
+    const ok = shown !== "none" && hidden === "none";
+    if (!ok) failures++;
+    console.log(`  ${ok ? "PASS" : "FAIL"}  .${el.className}: ${shown} -> ${hidden}`);
+  }
+
+  check("the rule is !important so specificity cannot beat it",
+    /\[hidden\] \{\s*display: none !important;/.test(css), true);
+  // It is also the last rule in the file, so it wins on order too. jsdom does
+  // not honour !important across rules; browsers do. Being last satisfies both.
+  check("...and last in the file, so order cannot beat it either",
+    css.trimEnd().endsWith("[hidden] {\n  display: none !important;\n}"), true);
+}
+
+console.log("=== the share page can scroll ===");
+{
+  // body is overflow:hidden so the app shell can own its scrollers. The share
+  // page has no shell, so it needs one of its own or a long document is stuck.
+  // There are two `body {` blocks (reset, then theme), so match across all of
+  // them rather than whichever one the helper finds first.
+  const bodyBlocks = [...css.matchAll(/(?:^|\n)body \{([^}]*)\}/g)].map((m) => m[1]).join("\n");
+  check("body still does not scroll (the app shell owns that)",
+    /overflow:\s*hidden/.test(bodyBlocks), true);
+
+  const sharePage = rule(".share-page");
+  check("the share page has a bounded height", /height:\s*100dvh/.test(sharePage), true);
+  check("...and scrolls its own content", /overflow-y:\s*auto/.test(sharePage), true);
+  check("no horizontal scroll", /overflow-x:\s*hidden/.test(sharePage), true);
+}
+
 console.log(failures === 0 ? "\nALL LAYOUT CHECKS PASSED" : `\n${failures} LAYOUT CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

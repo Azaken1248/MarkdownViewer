@@ -3611,14 +3611,19 @@ function buildFolderTree(docs) {
 
   const isSearching = Boolean(elements.searchInput.value.trim());
 
+  // An empty folder is worth showing in the normal view — it is somewhere to
+  // put things. It is not worth showing in a search result, and it is not worth
+  // showing in the recycle bin or the archive, where the whole folder tree
+  // rendering empty made those views look like they still held everything.
+  const hideEmptyBranches = isSearching || state.isRecycleBinMode;
+
   const buildNode = (folder, depth) => {
     const children = (childrenOf.get(folder.id) || [])
       .map((child) => buildNode(child, depth + 1))
       .filter(Boolean);
     const ownDocs = docsByFolder.get(folder.id) || [];
 
-    // While searching, a branch with no matches anywhere inside it is noise.
-    if (isSearching && ownDocs.length === 0 && children.length === 0) {
+    if (hideEmptyBranches && ownDocs.length === 0 && children.length === 0) {
       return null;
     }
 
@@ -3630,7 +3635,7 @@ function buildFolderTree(docs) {
     .filter(Boolean);
 
   const rootDocs = docsByFolder.get("__root__") || [];
-  if (rootDocs.length > 0 || !isSearching) {
+  if (rootDocs.length > 0 || !hideEmptyBranches) {
     roots.push({ folder: null, depth: 0, docs: rootDocs, children: [] });
   }
 
