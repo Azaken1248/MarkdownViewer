@@ -5077,6 +5077,14 @@ async function uploadFolder(picked, folderId = null) {
       parts.push(`${renamed.length} renamed to avoid a clash`);
     }
 
+    const adjustedFolders = payload.renamedFolders || [];
+    if (adjustedFolders.length > 0) {
+      // Say which, so a folder appearing under a different name is explained.
+      parts.push(`${adjustedFolders.length} folder name(s) adjusted (${
+        adjustedFolders.slice(0, 2).map((r) => `"${r.to}"`).join(", ")
+      })`);
+    }
+
     notify(`${parts.join(", ")}.`, "success");
 
     // Open the uploaded tree rather than leaving it collapsed out of sight.

@@ -202,6 +202,17 @@ Folders are matched by name, so uploading into a tree that already contains
 already exists is uploaded under a new name rather than overwriting anything,
 and the response says which files that happened to.
 
+A folder name this app will not take verbatim is repaired rather than costing
+the document: over-long names are truncated, control characters stripped, `.`
+and empty segments skipped (the file goes to the parent), and a folder called
+`Ungrouped` becomes `Ungrouped (uploaded)` so it cannot masquerade as the
+virtual group unfiled documents live under. Every adjustment is reported. Only
+`..` is refused outright — that is not an awkward name.
+
+**Empty directories are not uploaded.** The browser's directory picker only
+reports files, so a folder with nothing in it has nothing to send. Folders are
+created for the paths documents actually have.
+
 `POST /api/upload/folder` takes the files as `files` and their relative paths as
 a `paths` field — a JSON array, index-aligned with the files. The paths are not
 carried as multipart filenames, since whether a filename survives with its

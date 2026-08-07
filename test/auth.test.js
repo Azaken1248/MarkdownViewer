@@ -745,6 +745,37 @@ async function run(server) {
     check("nothing was written to the state root",
       (await fsp.readdir(server.stateDir)).sort().join(","), "data,deleted_markdowns,docs");
 
+    console.log("=== an awkward folder name costs the name, never the document ===");
+    for (const [label, badPath, expectedFolder] of [
+      ["a folder named like the unfiled bucket", "Ungrouped/keep-a.md", "Ungrouped (uploaded)"],
+      ["a name past the 80-character limit", `${"L".repeat(100)}/keep-b.md`, "L".repeat(80)],
+      ["a whitespace-only segment", "Keep/   /keep-c.md", "Keep"],
+      ["a segment that is just a dot", "Keep/./keep-d.md", "Keep"],
+      ["a control character in the name", `Keep/we${String.fromCharCode(7)}ird/keep-e.md`, "Keep / weird"]
+    ]) {
+      const attempt = await upload([{ path: badPath }]);
+      const placed = attempt.body?.uploaded?.[0];
+      const ok = attempt.status === 201 && placed && placed.folderPath === expectedFolder;
+      if (!ok) {
+        failures++;
+      }
+      console.log(`  ${ok ? "PASS" : "FAIL"}  ${label} -> ${placed ? `"${placed.folderPath}"` : `dropped (${attempt.status})`}`);
+    }
+
+    // ".." is not an awkward name, it is an attempt at something.
+    const traversal = await upload([{ path: "Keep/../../escape.md" }]);
+    check("but '..' is still refused outright",
+      (traversal.body?.uploaded || []).length, 0);
+
+    const adjusted = await upload([{ path: "Ungrouped/keep-f.md" }]);
+    check("the adjustment is reported, not silent",
+      adjusted.body.renamedFolders.some((r) => r.to === "Ungrouped (uploaded)"), true);
+
+    console.log("=== depth ===");
+    const atLimit = await upload([{ path: "n1/n2/n3/n4/n5/n6/n7/n8/at-limit.md" }]);
+    check("exactly at the 8-level limit is allowed", atLimit.status, 201);
+    check("...and nests all eight", atLimit.body.uploaded[0].folderPath.split(" / ").length, 8);
+
     console.log("=== the guards ===");
     const tooDeep = await upload([
       { path: "a/b/c/d/e/f/g/h/i/j/deep.md" }

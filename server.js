@@ -52,6 +52,9 @@ const ALLOWED_DOC_EXTENSIONS = new Set([".md", ".markdown", ".mmd", ".mermaid", 
 // Matching control characters is the entire point of this guard.
 // eslint-disable-next-line no-control-regex
 const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]/;
+// The same class with /g, for stripping rather than detecting.
+// eslint-disable-next-line no-control-regex
+const UNSAFE_FILENAME_CHARS_GLOBAL = /[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]/g;
 // Reserved device names on Windows, which are illegal with or without an extension.
 const RESERVED_DEVICE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MAX_FILENAME_LENGTH = 180;
@@ -3126,20 +3129,57 @@ app.post("/api/docs/upload", requirePermission("doc:write"), upload.single("mark
    the principle that the second lock is the one that matters.
    --------------------------------------------------------------------------- */
 
-// One path segment of an uploaded folder. Returns null for anything that is not
-// a plain, safe name.
-function safePathSegment(segment) {
-  const value = String(segment || "").normalize("NFC").trim();
+const MAX_FOLDER_NAME_LENGTH = 80;
 
-  if (!value || value === "." || value === "..") {
-    return null;
+// One path segment of an uploaded folder.
+//
+// The document is the thing worth keeping; the folder name is decoration. So a
+// name this app will not accept verbatim gets repaired rather than costing the
+// file — an over-long directory or one called "Ungrouped" is an ordinary thing
+// to find on disk, and dropping someone's document over it would be absurd.
+//
+// Only ".." is refused outright, because that is not an awkward name, it is an
+// attempt at something.
+//
+// Returns { name } to use it, { drop: true } to skip the level and file into
+// the parent, or { unsafe: true } to reject the path.
+function repairPathSegment(segment) {
+  const raw = String(segment || "").normalize("NFC");
+
+  if (raw.trim() === "..") {
+    return { unsafe: true };
   }
 
-  if (UNSAFE_FILENAME_CHARS.test(value)) {
-    return null;
+  // Control characters and path punctuation come out; they are never part of
+  // what the folder is called.
+  let value = raw
+    .replace(UNSAFE_FILENAME_CHARS_GLOBAL, "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  // "." and an empty segment both mean "this directory", so there is no level
+  // here to create.
+  if (!value || value === ".") {
+    return { drop: true };
   }
 
-  return normalizeFolderName(value);
+  if (value.length > MAX_FOLDER_NAME_LENGTH) {
+    value = value.slice(0, MAX_FOLDER_NAME_LENGTH).trim();
+  }
+
+  // A real folder called "Ungrouped" would render as a second heading identical
+  // to the virtual one unfiled documents live under.
+  if (value.toLowerCase() === ROOT_FOLDER_LABEL.toLowerCase()) {
+    value = `${value} (uploaded)`;
+  }
+
+  const normalized = normalizeFolderName(value);
+  if (!normalized) {
+    // Nothing recognisable survived; file into the parent rather than lose it.
+    return { drop: true };
+  }
+
+  return { name: normalized, changed: normalized !== raw.trim() };
 }
 
 // Splits "Notes/2026/q3.md" into the folder names above it and the file itself.
@@ -3159,16 +3199,27 @@ function parseUploadPath(rawPath) {
   }
 
   const folderNames = [];
+  const adjusted = [];
+
   for (const part of parts) {
-    const safe = safePathSegment(part);
-    if (!safe) {
+    const repaired = repairPathSegment(part);
+
+    if (repaired.unsafe) {
       return { error: `unsafe folder name "${part}"` };
     }
 
-    folderNames.push(safe);
+    if (repaired.drop) {
+      continue;
+    }
+
+    if (repaired.changed) {
+      adjusted.push({ from: part, to: repaired.name });
+    }
+
+    folderNames.push(repaired.name);
   }
 
-  return { fileName, folderNames };
+  return { fileName, folderNames, adjusted };
 }
 
 app.post(
@@ -3207,6 +3258,9 @@ app.post(
       }
 
       const planned = [];
+      // Folder names this app had to adjust to accept — reported so the change
+      // is visible rather than mysterious.
+      const renamedFolders = [];
       for (const [index, file] of files.entries()) {
         // Fall back to the part's own filename when the path entry is unusable,
         // so one bad entry costs its folder placement rather than the file.
@@ -3214,6 +3268,10 @@ app.post(
         if (parsed.error) {
           skipped.push({ name: String(paths[index] || file.originalname || "(unnamed)"), reason: parsed.error });
           continue;
+        }
+
+        for (const change of parsed.adjusted || []) {
+          renamedFolders.push(change);
         }
 
         planned.push({ file, fileName: parsed.fileName, folderNames: parsed.folderNames });
@@ -3311,6 +3369,8 @@ app.post(
         })),
         foldersCreated: createdFolderPaths,
         skipped,
+        // De-duplicated: the same awkward directory shows up once per file in it.
+        renamedFolders: [...new Map(renamedFolders.map((r) => [`${r.from}->${r.to}`, r])).values()],
         counts: {
           uploaded: written.length,
           foldersCreated: createdFolderPaths.length,
