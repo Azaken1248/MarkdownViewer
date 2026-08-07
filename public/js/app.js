@@ -7,6 +7,10 @@ const elements = {
   toggleRecycleBinBtn: document.getElementById("toggleRecycleBinBtn"),
   toggleArchiveBtn: document.getElementById("toggleArchiveBtn"),
   uploadTrigger: document.getElementById("uploadTrigger"),
+  uploadMenu: document.getElementById("uploadMenu"),
+  uploadFilesItem: document.getElementById("uploadFilesItem"),
+  uploadFolderItem: document.getElementById("uploadFolderItem"),
+  uploadFolderInput: document.getElementById("uploadFolderInput"),
   uploadInput: document.getElementById("uploadInput"),
   createFolderBtn: document.getElementById("createFolderBtn"),
   collapseAllBtn: document.getElementById("collapseAllBtn"),
@@ -1837,6 +1841,11 @@ function applyPermissionGating() {
 
   if (elements.manageUsersItem) {
     elements.manageUsersItem.hidden = !can("user:manage");
+  }
+
+  // A menu left open over a control that has just been hidden.
+  if (!writable && elements.uploadMenu && !elements.uploadMenu.hidden) {
+    setUploadMenuOpen(false);
   }
 
   updateShareButton();
@@ -4982,6 +4991,106 @@ async function uploadMarkdown(file, folderId = null) {
   }
 }
 
+/* --------------------------------------------------------------------------
+   Folder upload
+
+   The picker hands back a flat list of File objects, each carrying its path
+   within the chosen folder in webkitRelativePath. The tree is rebuilt from
+   those paths server-side.
+
+   Unsupported files are dropped here rather than sent and rejected: a real
+   folder is full of images, .DS_Store and lock files, and there is no reason
+   to spend upload bandwidth on them. The server still checks — this is
+   convenience, not the security boundary.
+   -------------------------------------------------------------------------- */
+
+const UPLOADABLE_EXTENSIONS = [".md", ".markdown", ".mmd", ".mermaid", ".ipynb"];
+// Mirrors MAX_FOLDER_UPLOAD_FILES on the server; checked here so a huge folder
+// fails immediately instead of after uploading everything.
+const MAX_FOLDER_UPLOAD_FILES = 200;
+
+function isUploadableFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  return UPLOADABLE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+function relativePathFor(file) {
+  // webkitRelativePath is empty for a plain multi-file selection, which is a
+  // perfectly good upload of loose files into the destination folder.
+  return file.webkitRelativePath || file.name;
+}
+
+async function uploadFolder(picked, folderId = null) {
+  const documents = picked.filter(isUploadableFile);
+  const ignored = picked.length - documents.length;
+
+  if (documents.length === 0) {
+    notify(
+      `Nothing to upload — none of those ${picked.length} file(s) are markdown, Mermaid or notebook files.`,
+      "warning"
+    );
+    return;
+  }
+
+  if (documents.length > MAX_FOLDER_UPLOAD_FILES) {
+    notify(
+      `That folder has ${documents.length} documents; the limit is ${MAX_FOLDER_UPLOAD_FILES}. Upload a subfolder instead.`,
+      "error"
+    );
+    return;
+  }
+
+  const rootName = relativePathFor(documents[0]).split("/")[0] || "folder";
+  notify(`Uploading ${documents.length} document(s) from "${rootName}"…`, "info");
+
+  const formData = new FormData();
+  for (const file of documents) {
+    formData.append("files", file);
+  }
+  // Index-aligned with the files above, in the same order.
+  formData.append("paths", JSON.stringify(documents.map(relativePathFor)));
+  if (folderId) {
+    formData.append("parentId", folderId);
+  }
+
+  try {
+    const payload = await requestJson("/api/upload/folder", {
+      method: "POST",
+      body: formData
+    });
+
+    await refreshDocs({ preserveSearch: false });
+
+    const parts = [`Uploaded ${payload.counts.uploaded} document(s)`];
+    if (payload.counts.foldersCreated > 0) {
+      parts.push(`created ${payload.counts.foldersCreated} folder(s)`);
+    }
+    if (ignored > 0) {
+      parts.push(`skipped ${ignored} unsupported file(s)`);
+    }
+    if (payload.counts.skipped > 0) {
+      parts.push(`${payload.counts.skipped} rejected`);
+    }
+
+    const renamed = payload.uploaded.filter((entry) => entry.renamedFrom);
+    if (renamed.length > 0) {
+      parts.push(`${renamed.length} renamed to avoid a clash`);
+    }
+
+    notify(`${parts.join(", ")}.`, "success");
+
+    // Open the uploaded tree rather than leaving it collapsed out of sight.
+    for (const folder of state.folders) {
+      if (folder.name === rootName && !folder.parentId) {
+        revealFolderInTree(folder.id);
+        break;
+      }
+    }
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
 async function saveEditorDocument() {
   const fileName = ensureDocFilename(elements.editorFileName.value.trim());
   const content = elements.editorInput.value;
@@ -5923,8 +6032,49 @@ window.addEventListener("resize", () => {
   }
 });
 
-elements.uploadTrigger.addEventListener("click", () => {
+function setUploadMenuOpen(open) {
+  elements.uploadMenu.hidden = !open;
+  elements.uploadTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+
+  if (open) {
+    elements.uploadMenu.querySelector(".account-item")?.focus();
+  }
+}
+
+elements.uploadTrigger.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setUploadMenuOpen(elements.uploadMenu.hidden);
+});
+
+document.addEventListener("click", (event) => {
+  if (elements.uploadMenu.hidden) {
+    return;
+  }
+
+  if (!elements.uploadMenu.contains(event.target) && !elements.uploadTrigger.contains(event.target)) {
+    setUploadMenuOpen(false);
+  }
+});
+
+elements.uploadFilesItem.addEventListener("click", () => {
+  setUploadMenuOpen(false);
   elements.uploadInput.click();
+});
+
+elements.uploadFolderItem.addEventListener("click", () => {
+  setUploadMenuOpen(false);
+  elements.uploadFolderInput.click();
+});
+
+elements.uploadFolderInput.addEventListener("change", () => {
+  const picked = [...elements.uploadFolderInput.files];
+  // Clearing lets the same folder be picked twice in a row; without it the
+  // change event never fires the second time.
+  elements.uploadFolderInput.value = "";
+
+  if (picked.length > 0) {
+    void uploadFolder(picked);
+  }
 });
 
 elements.uploadInput.addEventListener("change", () => {

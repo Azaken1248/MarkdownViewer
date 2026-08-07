@@ -46,8 +46,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=40"></script>
-  <link rel="stylesheet" href="css/app.css?v=40" />
+  <script src="js/theme-boot.js?v=41"></script>
+  <link rel="stylesheet" href="css/app.css?v=41" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -69,8 +69,8 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=40" defer></script>
-  <script src="js/app.js?v=40" defer></script>
+  <script src="js/markdown-core.js?v=41" defer></script>
+  <script src="js/app.js?v=41" defer></script>
 </head>
 
 <body>
@@ -98,6 +98,11 @@
       <div class="header-actions" aria-label="Document actions">
         <input id="uploadInput" type="file" accept=".md,.markdown,.mmd,.mermaid,.ipynb,text/markdown,text/plain"
           hidden />
+
+        <!-- webkitdirectory is the only way to pick a folder. Non-standard in
+             name, but implemented by every current browser; the attribute is
+             simply ignored where it is not, leaving a normal file picker. -->
+        <input id="uploadFolderInput" type="file" webkitdirectory directory multiple hidden />
 
         <!-- Cycles dark -> light -> auto. Label and icon are set from script,
              since the starting state comes from storage. -->
@@ -131,9 +136,24 @@
           </div>
         </div>
 
-        <button class="icon-btn" id="uploadTrigger" aria-label="Upload document file" title="Upload document">
-          <i class="ph ph-upload-simple" aria-hidden="true"></i>
-        </button>
+        <div class="account-wrap">
+          <button class="icon-btn" id="uploadTrigger" aria-label="Upload" title="Upload" aria-haspopup="menu"
+            aria-expanded="false">
+            <i class="ph ph-upload-simple" aria-hidden="true"></i>
+          </button>
+
+          <div class="account-menu" id="uploadMenu" role="menu" hidden>
+            <button class="account-item" id="uploadFilesItem" type="button" role="menuitem">
+              <i class="ph ph-file-arrow-up" aria-hidden="true"></i>
+              <span>Upload a file</span>
+            </button>
+
+            <button class="account-item" id="uploadFolderItem" type="button" role="menuitem">
+              <i class="ph ph-folder-simple-plus" aria-hidden="true"></i>
+              <span>Upload a folder</span>
+            </button>
+          </div>
+        </div>
 
         <button class="icon-btn" id="editDocBtn" aria-label="Edit current document" title="Edit current document">
           <i class="ph ph-pencil-simple" aria-hidden="true"></i>

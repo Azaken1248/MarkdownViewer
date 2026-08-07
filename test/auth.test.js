@@ -87,7 +87,68 @@ function makeClient(origin) {
     });
   }
 
+  // Folder upload is the only multipart endpoint, so the client needs to be
+  // able to build one.
+  async function postMultipart(pathname, files, fields = {}) {
+    const boundary = `----azadocs${Math.random().toString(16).slice(2)}`;
+    const chunks = [];
+
+    for (const [name, value] of Object.entries(fields)) {
+      chunks.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
+      ));
+    }
+
+    for (const file of files) {
+      chunks.push(Buffer.from(
+        `--${boundary}\r\n`
+        + `Content-Disposition: form-data; name="files"; filename="${file.name}"\r\n`
+        + "Content-Type: text/markdown\r\n\r\n"
+      ));
+      chunks.push(Buffer.from(file.content));
+      chunks.push(Buffer.from("\r\n"));
+    }
+
+    chunks.push(Buffer.from(`--${boundary}--\r\n`));
+    const body = Buffer.concat(chunks);
+
+    const url = new URL(pathname, origin);
+    const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        host: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": body.length,
+          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {})
+        }
+      }, (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          let parsed = null;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            parsed = null;
+          }
+          resolve({ status: res.statusCode, body: parsed, raw: data });
+        });
+      });
+
+      req.on("error", reject);
+      req.write(body);
+      req.end();
+    });
+  }
+
   return {
+    postMultipart,
     get: (p, h) => request("GET", p, undefined, h),
     post: (p, b, h) => request("POST", p, b === undefined ? {} : b, h),
     patch: (p, b) => request("PATCH", p, b),
@@ -260,10 +321,12 @@ async function run(server) {
     check("a write with no CSRF token is refused", noToken.status, 403);
     check("...and says why", noToken.body.code, "csrf");
 
+    // eslint-disable-next-line require-atomic-updates
     admin.csrf = "a-token-of-the-right-shape-but-wrong";
     check("a write with the wrong token is refused",
       (await admin.post("/api/docs", { fileName: "csrf-test.md", content: "x" })).status, 403);
 
+    // eslint-disable-next-line require-atomic-updates
     admin.csrf = saved;
     check("a write with the right token succeeds",
       (await admin.post("/api/docs", { fileName: "csrf-test.md", content: "x" })).status, 201);
@@ -609,6 +672,115 @@ async function run(server) {
     check("a bearer token is no longer an authentication path",
       (await makeClient(server.origin).get("/api/docs",
         { Authorization: "Bearer any-token-at-all" })).status, 401);
+  }
+
+  console.log("=== folder upload ===");
+  {
+    const upload = (entries, fields = {}) => admin.postMultipart(
+      "/api/upload/folder",
+      entries.map((e) => ({ name: e.path.split("/").pop(), content: e.content || `# ${e.path}\n` })),
+      { paths: JSON.stringify(entries.map((e) => e.path)), ...fields }
+    );
+
+    const res = await upload([
+      { path: "Handbook/readme.md" },
+      { path: "Handbook/2026/q1/goals.md" },
+      { path: "Handbook/2026/retro.md" }
+    ]);
+
+    check("the upload succeeds", res.status, 201);
+    check("every document lands", res.body.counts.uploaded, 3);
+    check("the nesting is rebuilt", res.body.counts.foldersCreated, 3);
+
+    const placed = Object.fromEntries(res.body.uploaded.map((u) => [u.file, u.folderPath]));
+    check("a top-level file goes in the root folder", placed["readme.md"], "Handbook");
+    check("a nested one goes three deep", placed["goals.md"], "Handbook / 2026 / q1");
+    check("...and a sibling shares the middle folder", placed["retro.md"], "Handbook / 2026");
+
+    // Uploading into an existing tree must join it, not duplicate it.
+    const second = await upload([{ path: "Handbook/2026/q1/notes.md" }]);
+    check("a second upload reuses the folders it finds", second.body.counts.foldersCreated, 0);
+    check("...and files into the existing one",
+      second.body.uploaded[0].folderPath, "Handbook / 2026 / q1");
+
+    const folders = (await admin.get("/api/docs")).body.folders;
+    check("no duplicate folder was created",
+      folders.filter((f) => f.path === "Handbook / 2026 / q1").length, 1);
+
+    console.log("=== a name clash is resolved, not overwritten ===");
+    const clash = await upload([{ path: "Other/readme.md", content: "# Different\n" }]);
+    check("the second readme is renamed", clash.body.uploaded[0].renamedFrom, "readme.md");
+    check("...to something else", clash.body.uploaded[0].file === "readme.md", false);
+    const original = await admin.get("/api/docs/readme.md");
+    check("the first one is untouched", original.body.content.includes("Handbook/readme.md"), true);
+
+    console.log("=== paths from the client are not trusted ===");
+    for (const [label, badPath] of [
+      ["parent traversal", "../../../etc/passwd.md"],
+      ["traversal in the middle", "Notes/../../escape.md"],
+      ["an absolute path", "/etc/shadow.md"],
+      ["a Windows path", "..\\..\\windows\\system32\\evil.md"],
+      ["a dot folder", "../evil.md"]
+    ]) {
+      const attempt = await upload([{ path: badPath }]);
+      // Either refused outright, or accepted with the traversal stripped —
+      // never written outside the documents directory.
+      const uploaded = attempt.body?.uploaded?.[0];
+      const escaped = uploaded && String(uploaded.folderPath || "").includes("..");
+      const ok = !escaped;
+      if (!ok) {
+        failures++;
+      }
+      console.log(`  ${ok ? "PASS" : "FAIL"}  ${label} cannot escape (${attempt.status})`);
+    }
+
+    // Whatever the paths claimed, nothing may exist outside the documents dir.
+    const docsDir = path.join(server.stateDir, "docs");
+    const onDisk = await fsp.readdir(docsDir);
+    check("every uploaded file is flat in the documents directory",
+      onDisk.every((name) => !name.includes("/") && !name.includes("..")), true);
+    check("no stray directory was created",
+      (await Promise.all(onDisk.map(async (n) => (await fsp.stat(path.join(docsDir, n))).isDirectory())))
+        .every((isDir) => isDir === false), true);
+    check("nothing was written to the state root",
+      (await fsp.readdir(server.stateDir)).sort().join(","), "data,deleted_markdowns,docs");
+
+    console.log("=== the guards ===");
+    const tooDeep = await upload([
+      { path: "a/b/c/d/e/f/g/h/i/j/deep.md" }
+    ]);
+    check("a folder deeper than the limit is refused", tooDeep.status, 400);
+    check("...with a message that says what to do",
+      /nests deeper|subfolder/i.test(tooDeep.body.error), true);
+
+    const mismatched = await admin.postMultipart("/api/upload/folder",
+      [{ name: "a.md", content: "# A\n" }, { name: "b.md", content: "# B\n" }],
+      { paths: JSON.stringify(["only/one.md"]) });
+    check("a paths array that does not line up is refused", mismatched.status, 400);
+
+    const noPaths = await admin.postMultipart("/api/upload/folder",
+      [{ name: "a.md", content: "# A\n" }], {});
+    check("a missing paths array is refused", noPaths.status, 400);
+
+    const empty = await admin.postMultipart("/api/upload/folder", [], { paths: "[]" });
+    check("an empty upload is refused", empty.status, 400);
+
+    const binary = await admin.postMultipart("/api/upload/folder",
+      [{ name: "logo.png", content: "not really a png" }],
+      { paths: JSON.stringify(["Assets/logo.png"]) });
+    check("an unsupported file type is refused", binary.status, 400);
+
+    console.log("=== and it is a write, so the role applies ===");
+    const reader = makeClient(server.origin);
+    await admin.post("/api/users", { username: "upload-viewer", password: "kettle-drum-twentyone", role: "viewer" });
+    await reader.post("/api/auth/login", { username: "upload-viewer", password: "kettle-drum-twentyone" });
+    await reader.post("/api/auth/password", {
+      currentPassword: "kettle-drum-twentyone",
+      newPassword: "reader-own-password-1"
+    });
+    const refused = await reader.postMultipart("/api/upload/folder",
+      [{ name: "x.md", content: "# X\n" }], { paths: JSON.stringify(["Sneaky/x.md"]) });
+    check("a viewer cannot upload a folder", refused.status, 403);
   }
 
   console.log("=== error pages ===");

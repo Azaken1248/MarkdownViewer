@@ -172,6 +172,29 @@ app.use(requireCsrf);
 let indexTemplateCache = null;
 let indexTemplateCacheMtimeMs = 0;
 
+// A folder upload is capped by count as well as by per-file size: 200 files at
+// 2MB each is already 400MB of request body in the worst case.
+const MAX_FOLDER_UPLOAD_FILES = 200;
+
+const uploadFolder = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_DOC_BYTES, files: MAX_FOLDER_UPLOAD_FILES },
+  // Same strict filter as the single-file upload. The client drops the images
+  // and .DS_Store entries out of a picked folder before sending, so anything
+  // unsupported arriving here means a broken or hand-rolled request, and a
+  // clear rejection beats silently skipping it — a skipped file would also
+  // misalign the path array below.
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (!ALLOWED_DOC_EXTENSIONS.has(ext)) {
+      cb(new Error("Only .md, .markdown, .mmd, .mermaid, or .ipynb files are supported"));
+      return;
+    }
+
+    cb(null, true);
+  }
+});
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_DOC_BYTES },
@@ -3086,6 +3109,219 @@ app.post("/api/docs/upload", requirePermission("doc:write"), upload.single("mark
     next(error);
   }
 });
+
+/* ---------------------------------------------------------------------------
+   Folder upload
+
+   The browser knows each picked file's path within the chosen folder
+   (webkitRelativePath). Those paths are sent as an explicit `paths` field —
+   a JSON array, index-aligned with the files — rather than smuggled in as the
+   multipart filename, because whether a filename survives with its slashes
+   intact varies by client and is not worth depending on.
+
+   Every segment is attacker-controlled. This rebuilds the tree from sanitised
+   names only and never joins a client string onto a filesystem path. Documents
+   stay flat on disk — the folder tree lives in the organizer — so a traversal
+   attempt has nowhere to go even if it got through. It is rejected anyway, on
+   the principle that the second lock is the one that matters.
+   --------------------------------------------------------------------------- */
+
+// One path segment of an uploaded folder. Returns null for anything that is not
+// a plain, safe name.
+function safePathSegment(segment) {
+  const value = String(segment || "").normalize("NFC").trim();
+
+  if (!value || value === "." || value === "..") {
+    return null;
+  }
+
+  if (UNSAFE_FILENAME_CHARS.test(value)) {
+    return null;
+  }
+
+  return normalizeFolderName(value);
+}
+
+// Splits "Notes/2026/q3.md" into the folder names above it and the file itself.
+function parseUploadPath(rawPath) {
+  // Both separators: a Windows browser can report backslashes.
+  const parts = String(rawPath || "")
+    .split(/[\\/]+/)
+    .filter((part) => part.length > 0);
+
+  if (parts.length === 0) {
+    return { error: "empty path" };
+  }
+
+  const fileName = sanitizeNewFilename(parts.pop());
+  if (!fileName) {
+    return { error: "invalid file name" };
+  }
+
+  const folderNames = [];
+  for (const part of parts) {
+    const safe = safePathSegment(part);
+    if (!safe) {
+      return { error: `unsafe folder name "${part}"` };
+    }
+
+    folderNames.push(safe);
+  }
+
+  return { fileName, folderNames };
+}
+
+app.post(
+  "/api/upload/folder",
+  requirePermission("doc:write"),
+  uploadFolder.array("files", MAX_FOLDER_UPLOAD_FILES),
+  async (req, res, next) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      const skipped = [];
+
+      if (files.length === 0) {
+        res.status(400).json({ error: "No files were uploaded." });
+        return;
+      }
+
+      let paths = null;
+      try {
+        paths = JSON.parse(String(req.body?.paths || "[]"));
+      } catch {
+        paths = null;
+      }
+
+      if (!Array.isArray(paths) || paths.length !== files.length) {
+        res.status(400).json({
+          error: "Each uploaded file needs a matching entry in `paths`."
+        });
+        return;
+      }
+
+      // Where the picked folder is dropped: null means top level.
+      const parentId = req.body?.parentId ? normalizeFolderId(req.body.parentId) : null;
+      if (req.body?.parentId && !parentId) {
+        res.status(400).json({ error: "Invalid destination folder id" });
+        return;
+      }
+
+      const planned = [];
+      for (const [index, file] of files.entries()) {
+        // Fall back to the part's own filename when the path entry is unusable,
+        // so one bad entry costs its folder placement rather than the file.
+        const parsed = parseUploadPath(paths[index] || file.originalname);
+        if (parsed.error) {
+          skipped.push({ name: String(paths[index] || file.originalname || "(unnamed)"), reason: parsed.error });
+          continue;
+        }
+
+        planned.push({ file, fileName: parsed.fileName, folderNames: parsed.folderNames });
+      }
+
+      if (planned.length === 0) {
+        res.status(400).json({ error: "Nothing in that folder could be uploaded.", skipped });
+        return;
+      }
+
+      // Depth is checked before anything is written, so an upload cannot leave
+      // half its files on disk with nowhere to file them.
+      const organizerBefore = await readOrganizerState();
+      const baseDepth = parentId ? getFolderDepth(organizerBefore.folders, parentId) + 1 : 0;
+      const deepest = planned.reduce((max, entry) => Math.max(max, entry.folderNames.length), 0);
+
+      if (baseDepth + deepest > MAX_FOLDER_DEPTH) {
+        res.status(400).json({
+          error: `That folder nests deeper than ${MAX_FOLDER_DEPTH} levels. Upload a subfolder instead.`,
+          skipped
+        });
+        return;
+      }
+
+      // Write first, so a name collision is resolved against the real directory,
+      // then record every mapping in a single organizer mutation.
+      const written = [];
+      for (const entry of planned) {
+        const finalName = await ensureUniqueFilename(entry.fileName);
+        const fullPath = path.join(MARKDOWN_DIR, finalName);
+        await fsp.writeFile(fullPath, entry.file.buffer);
+        invalidateCachedContent(fullPath);
+
+        written.push({
+          file: finalName,
+          renamedFrom: finalName === entry.fileName ? null : entry.fileName,
+          folderNames: entry.folderNames
+        });
+      }
+
+      const createdFolderPaths = [];
+
+      const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
+        // Find-or-create, so uploading into a tree that already has a "Notes"
+        // folder adds to it rather than making a second one.
+        const resolveFolder = (names) => {
+          let currentParent = parentId;
+
+          for (const name of names) {
+            const existing = organizer.folders.find((folder) =>
+              (folder.parentId || null) === currentParent
+              && folder.name.toLowerCase() === name.toLowerCase());
+
+            if (existing) {
+              currentParent = existing.id;
+              continue;
+            }
+
+            const siblingCount = organizer.folders
+              .filter((folder) => (folder.parentId || null) === currentParent).length;
+            const now = new Date().toISOString();
+            const created = {
+              id: createFolderId(),
+              name,
+              parentId: currentParent,
+              order: siblingCount,
+              createdAt: now,
+              updatedAt: now
+            };
+
+            organizer.folders.push(created);
+            createdFolderPaths.push(getFolderPath(organizer.folders, created.id));
+            currentParent = created.id;
+          }
+
+          return currentParent;
+        };
+
+        for (const entry of written) {
+          const folderId = resolveFolder(entry.folderNames);
+          if (folderId) {
+            organizer.fileFolders[entry.file] = folderId;
+          }
+          entry.folderId = folderId;
+        }
+
+        return null;
+      });
+
+      res.status(201).json({
+        uploaded: written.map((entry) => ({
+          file: entry.file,
+          renamedFrom: entry.renamedFrom,
+          folderPath: entry.folderId ? getFolderPath(savedOrganizer.folders, entry.folderId) : null
+        })),
+        foldersCreated: createdFolderPaths,
+        skipped,
+        counts: {
+          uploaded: written.length,
+          foldersCreated: createdFolderPaths.length,
+          skipped: skipped.length
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // public/docs sits inside the static root, so express.static would happily
 // serve every document as a plain file — straight past requireRead and past the

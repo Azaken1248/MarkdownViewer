@@ -187,6 +187,30 @@ minutes. The per-address limit is much higher (40), because everyone behind one
 NAT or reverse proxy shares an address and an 8-strike rule there would let any
 passer-by lock out the household.
 
+## Uploading a folder
+
+The upload button offers **Upload a file** and **Upload a folder**. Picking a
+folder walks it recursively and rebuilds its structure as nested folders, up to
+the 8-level limit.
+
+Only document files are sent — a real folder is full of images, `.DS_Store` and
+lock files, and there is no reason to spend bandwidth uploading things the app
+cannot render. The count of what was skipped comes back in the confirmation.
+
+Folders are matched by name, so uploading into a tree that already contains
+`Handbook/2026` adds to it rather than creating a second one. A filename that
+already exists is uploaded under a new name rather than overwriting anything,
+and the response says which files that happened to.
+
+`POST /api/upload/folder` takes the files as `files` and their relative paths as
+a `paths` field — a JSON array, index-aligned with the files. The paths are not
+carried as multipart filenames, since whether a filename survives with its
+slashes intact varies by client. Every path segment is treated as hostile and
+rebuilt from sanitised names; documents are stored flat on disk regardless, with
+the tree living in the organizer, so a traversal attempt has nowhere to go.
+
+Limits: 200 files per upload, 2MB per file.
+
 ## Sharing a single document
 
 With the library private, a share link is the deliberate exception. From the
@@ -233,7 +257,8 @@ with the right role, plus the `X-CSRF-Token` header.
 | `POST` | `/api/docs` | Create. Accepts `fileName`, `content`, `folderId` |
 | `PUT` | `/api/docs/:file` | Update content |
 | `POST` | `/api/docs/:file/rename` | Rename on disk, carrying the folder assignment |
-| `POST` | `/api/docs/upload` | Multipart upload. Accepts `folderId` |
+| `POST` | `/api/docs/upload` | Multipart upload of one file. Accepts `folderId` |
+| `POST` | `/api/upload/folder` | Multipart upload of a whole folder. See below |
 | `PUT` | `/api/docs/:file/folder` | Move to a folder |
 | `POST` | `/api/docs/:file/delete` | `mode: "soft" \| "hard"` |
 

@@ -200,7 +200,8 @@ async function run(server) {
         openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
-        deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs
+        deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
+        uploadFolder, isUploadableFile
       };
     `);
     check("no exception on load", true, true);
@@ -695,6 +696,75 @@ async function run(server) {
     check("a folder with nothing in it still renders", realFolderRows(), folderCount + 1);
     check("...and says it is empty rather than vanishing",
       doc.querySelectorAll(".tree-children .tree-empty").length > 0, true);
+  }
+
+  console.log("=== uploading a folder ===");
+  {
+    check("the upload button opens a menu", doc.getElementById("uploadMenu") !== null, true);
+    check("...offering a file", doc.getElementById("uploadFilesItem").textContent.includes("file"), true);
+    check("...and a folder", doc.getElementById("uploadFolderItem").textContent.includes("folder"), true);
+
+    const picker = doc.getElementById("uploadFolderInput");
+    check("a directory picker exists", Boolean(picker), true);
+    // webkitdirectory is what makes the OS dialog select folders; without it
+    // this is just another file input.
+    check("...that actually picks directories", picker.hasAttribute("webkitdirectory"), true);
+    check("...and accepts more than one file", picker.hasAttribute("multiple"), true);
+
+    // A folder from disk is full of things this app cannot render. Dropping
+    // them here rather than at the server saves uploading them at all.
+    const makeFile = (relativePath) => {
+      const file = new window.File(["# doc\n"], relativePath.split("/").pop(), { type: "text/markdown" });
+      Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+      return file;
+    };
+
+    const picked = [
+      makeFile("Trip/notes.md"),
+      makeFile("Trip/photos/beach.png"),
+      makeFile("Trip/.DS_Store"),
+      makeFile("Trip/2026/plan.markdown"),
+      makeFile("Trip/data.ipynb")
+    ];
+
+    let sent = null;
+    const realFetch = window.fetch;
+    window.fetch = async (url, options = {}) => {
+      if (String(url).includes("/api/upload/folder")) {
+        sent = options.body;
+        return {
+          status: 201,
+          ok: true,
+          async json() {
+            return {
+              uploaded: [], foldersCreated: [], skipped: [],
+              counts: { uploaded: 3, foldersCreated: 2, skipped: 0 }
+            };
+          }
+        };
+      }
+      return realFetch(url, options);
+    };
+
+    window.__pickedFiles = picked;
+    await window.eval("window.__t.uploadFolder(window.__pickedFiles)");
+    await new Promise((r) => setTimeout(r, 400));
+    // Test scaffolding restoring its own stub; single-threaded here.
+    // eslint-disable-next-line require-atomic-updates
+    window.fetch = realFetch;
+
+    check("the request was sent", sent !== null, true);
+    const files = sent ? sent.getAll("files") : [];
+    check("only the documents were uploaded", files.length, 3);
+    check("the image was left behind",
+      files.some((f) => f.name.endsWith(".png")), false);
+    check("...and so was .DS_Store",
+      files.some((f) => f.name === ".DS_Store"), false);
+
+    const paths = sent ? JSON.parse(sent.get("paths")) : [];
+    check("a path accompanies every file", paths.length, files.length);
+    check("...carrying the folder structure", paths.includes("Trip/2026/plan.markdown"), true);
+    check("...and only for files that were sent", paths.some((p) => p.endsWith(".png")), false);
   }
 
   console.log("=== a viewer sees no write controls ===");
