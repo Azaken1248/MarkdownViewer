@@ -104,6 +104,10 @@ const elements = {
   newUserError: document.getElementById("newUserError"),
   newUserDetails: document.getElementById("newUserDetails"),
 
+  kernelBar: document.getElementById("kernelBar"),
+  kernelStatus: document.getElementById("kernelStatus"),
+  restartKernelBtn: document.getElementById("restartKernelBtn"),
+
   shareDocBtn: document.getElementById("shareDocBtn"),
   shareModal: document.getElementById("shareModal"),
   shareBackdrop: document.getElementById("shareBackdrop"),
@@ -2722,6 +2726,133 @@ function updateShareButton() {
   elements.shareDocBtn.setAttribute("aria-label", label);
   elements.shareDocBtn.title = label;
   delete elements.shareDocBtn.dataset.tip;
+}
+
+/* --------------------------------------------------------------------------
+   Running notebook cells
+
+   The Python lives in a worker (see notebook-runtime.js). This is the glue
+   between a Run button and the output area under the cell.
+
+   Nothing runs on its own. Opening a notebook renders it and stops; a cell
+   executes because someone pressed Run on it, which is the only reason a
+   document in a library should ever execute anything.
+   -------------------------------------------------------------------------- */
+
+function notebookOutputFor(cellNumber) {
+  return elements.docContent.querySelector(`.notebook-live-output[data-cell="${cellNumber}"]`);
+}
+
+function renderRunOutput(target, result) {
+  target.innerHTML = "";
+  target.hidden = false;
+
+  const append = (className, text) => {
+    if (!text || !String(text).trim()) {
+      return;
+    }
+
+    const block = document.createElement("pre");
+    block.className = className;
+    block.textContent = String(text);
+    target.appendChild(block);
+  };
+
+  append("notebook-run-stream", (result.stdout || []).join("\n"));
+  append("notebook-run-stream is-stderr", (result.stderr || []).join("\n"));
+
+  if (result.ok) {
+    append("notebook-run-value", result.result);
+  } else {
+    append("notebook-run-error", result.error);
+  }
+
+  if (!target.childElementCount) {
+    const empty = document.createElement("p");
+    empty.className = "notebook-run-empty";
+    empty.textContent = result.ok ? "Ran with no output." : "Failed with no output.";
+    target.appendChild(empty);
+  }
+}
+
+function setKernelStatus(label, { busy = false } = {}) {
+  if (!elements.kernelStatus) {
+    return;
+  }
+
+  elements.kernelStatus.hidden = !label;
+  elements.kernelStatus.textContent = label || "";
+  elements.kernelStatus.classList.toggle("is-busy", busy);
+  if (elements.kernelBar) {
+    elements.kernelBar.hidden = !NotebookRuntime.started;
+  }
+}
+
+async function runNotebookCell(button) {
+  const cellNumber = Number(button.dataset.cell);
+  const code = MarkdownCore.notebookSourceFor(cellNumber);
+  const target = notebookOutputFor(cellNumber);
+
+  if (!code || !target) {
+    return;
+  }
+
+  button.disabled = true;
+  button.classList.add("is-running");
+  target.hidden = false;
+  target.innerHTML = '<p class="notebook-run-empty">Working…</p>';
+
+  try {
+    // The notebook's filename keys the kernel namespace, so cells in one
+    // document share variables and two notebooks do not collide.
+    const result = await NotebookRuntime.runCell(state.activeFile || "notebook", code);
+    renderRunOutput(target, result);
+
+    if (!result.ok) {
+      notify(`Cell ${cellNumber} failed.`, "error");
+    }
+  } catch (error) {
+    renderRunOutput(target, { ok: false, error: error.message });
+  } finally {
+    // Re-enabling the button that started this run; nothing else holds it.
+    // eslint-disable-next-line require-atomic-updates
+    button.disabled = false;
+    button.classList.remove("is-running");
+    setKernelStatus(NotebookRuntime.isBusy() ? "Running…" : "Python ready", { busy: NotebookRuntime.isBusy() });
+  }
+}
+
+function bindNotebookExecution() {
+  // If the runtime script failed to load, the app still has to work — running
+  // Python is an extra, not a dependency. Cells simply keep their rendered
+  // output and lose the Run button.
+  if (typeof NotebookRuntime === "undefined") {
+    MarkdownCore.configure({ executableNotebooks: false });
+    return;
+  }
+
+  // Delegated, because the notebook markup is replaced wholesale every time a
+  // document opens.
+  elements.docContent.addEventListener("click", (event) => {
+    const button = event.target.closest(".notebook-run");
+    if (button) {
+      void runNotebookCell(button);
+    }
+  });
+
+  NotebookRuntime.onStatus((status) => {
+    setKernelStatus(status.label, { busy: status.stage !== "ready" && status.stage !== "idle" });
+  });
+
+  elements.restartKernelBtn?.addEventListener("click", () => {
+    NotebookRuntime.restart();
+    for (const output of elements.docContent.querySelectorAll(".notebook-live-output")) {
+      output.hidden = true;
+      output.innerHTML = "";
+    }
+    notify("Python kernel stopped. The next Run starts a fresh one.", "neutral");
+    setKernelStatus("");
+  });
 }
 
 async function fetchDocs() {
@@ -5400,7 +5531,15 @@ async function initialize() {
   mountMatchNavToViewportLayer();
   bindWheelZoomModifier();
   bindThemeToggle();
-  MarkdownCore.configure({ onWarning: (message) => notify(message, "error") });
+  MarkdownCore.configure({
+    onWarning: (message) => notify(message, "error"),
+    // Notebook cells get a Run button here but never on the share page: a
+    // visitor following a link should not be offered one for code they did
+    // not write.
+    executableNotebooks: true
+  });
+
+  bindNotebookExecution();
 
   // Who we are decides what renders, so this has to settle before anything
   // tries to load a document.

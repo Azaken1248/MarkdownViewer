@@ -814,6 +814,31 @@ async function run(server) {
     check("a viewer cannot upload a folder", refused.status, 403);
   }
 
+  console.log("=== the CSP allows WASM without opening the door wider ===");
+  {
+    const stranger = makeClient(server.origin);
+    const csp = (await stranger.get("/")).headers["content-security-policy"];
+    const directive = (name) => (csp.split(";").find((d) => d.trim().startsWith(name)) || "").trim();
+
+    // Compiling WebAssembly needs its own allowance. It is not eval().
+    check("wasm compilation is permitted", directive("script-src").includes("'wasm-unsafe-eval'"), true);
+    check("but eval() is still refused", csp.includes("'unsafe-eval'"), false);
+    check("...and so is inline script", directive("script-src").includes("'unsafe-inline'"), false);
+
+    // Pyodide fetches its runtime and packages over fetch(), which script-src
+    // does not cover.
+    check("the runtime CDN is reachable", directive("connect-src").includes("https://cdn.jsdelivr.net"), true);
+    check("...and nothing else is", directive("connect-src"), "connect-src 'self' https://cdn.jsdelivr.net");
+
+    check("workers may only come from this origin", directive("worker-src"), "worker-src 'self'");
+    check("object-src is still none", directive("object-src"), "object-src 'none'");
+
+    const worker = await stranger.get("/js/pyodide-worker.js");
+    check("the worker is served", worker.status, 200);
+    check("...from this origin, so worker-src 'self' covers it",
+      worker.headers["content-type"].includes("javascript"), true);
+  }
+
   console.log("=== error pages ===");
   {
     const asBrowser = { Accept: "text/html,application/xhtml+xml" };

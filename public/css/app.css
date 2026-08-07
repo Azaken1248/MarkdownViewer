@@ -3325,6 +3325,128 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Running notebook cells
+   -------------------------------------------------------------------------- */
+
+.notebook-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notebook-run:hover:not(:disabled),
+.notebook-run:focus-visible {
+  border-color: var(--accent-muted);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.notebook-run:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.notebook-run.is-running i {
+  animation: share-spin 1.1s linear infinite;
+}
+
+.notebook-live-output {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-emphasis);
+  border-radius: var(--radius-md);
+  background: var(--canvas);
+}
+
+.notebook-run-stream,
+.notebook-run-value,
+.notebook-run-error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notebook-run-stream + .notebook-run-stream,
+.notebook-run-stream + .notebook-run-value,
+.notebook-run-stream + .notebook-run-error {
+  margin-top: 8px;
+}
+
+.notebook-run-stream {
+  color: var(--fg);
+}
+
+.notebook-run-stream.is-stderr {
+  color: var(--attention);
+}
+
+/* The value the last expression evaluated to, the way a REPL echoes it. */
+.notebook-run-value {
+  color: var(--accent);
+}
+
+.notebook-run-error {
+  color: var(--danger);
+}
+
+.notebook-run-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
+/* Only present once a kernel has actually been started. */
+.kernel-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 32px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.kernel-status {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+
+.kernel-status.is-busy {
+  color: var(--accent);
+}
+
+@media (max-width: 920px) {
+  .kernel-bar {
+    padding: 8px 16px;
+  }
+}
+
+@media print {
+  .notebook-run,
+  .kernel-bar {
+    display: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
    Last word: the hidden attribute
 
    `hidden` only hides via the user-agent rule `[hidden] { display: none }`,

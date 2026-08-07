@@ -46,8 +46,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=41"></script>
-  <link rel="stylesheet" href="css/app.css?v=41" />
+  <script src="js/theme-boot.js?v=42"></script>
+  <link rel="stylesheet" href="css/app.css?v=42" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -69,8 +69,11 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=41" defer></script>
-  <script src="js/app.js?v=41" defer></script>
+  <script src="js/markdown-core.js?v=42" defer></script>
+  <!-- The Python runtime controller. Pyodide itself is not downloaded until a
+       Run button is pressed. -->
+  <script src="js/notebook-runtime.js?v=42" defer></script>
+  <script src="js/app.js?v=42" defer></script>
 </head>
 
 <body>
@@ -297,6 +300,16 @@
              the entire document on every load. The breadcrumb trail and the
              toast region carry the "which file is open" news instead. -->
         <article id="docContent" class="markdown-body"></article>
+
+        <!-- Appears only once a Python kernel has been started, which only
+             happens when someone presses Run on a cell. -->
+        <div class="kernel-bar" id="kernelBar" hidden>
+          <span class="kernel-status" id="kernelStatus" aria-live="polite" hidden></span>
+          <button class="btn btn-sm" id="restartKernelBtn" type="button">
+            <i class="ph ph-stop-circle" aria-hidden="true"></i>
+            <span>Restart Python</span>
+          </button>
+        </div>
       </main>
     </div>
 

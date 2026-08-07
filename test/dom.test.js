@@ -184,6 +184,11 @@ async function run(server) {
   // in scope before app.js runs, exactly as the two <script> tags arrange.
   window.eval(coreSource);
 
+  // The notebook Python controller, loaded before app.js the same way the page
+  // loads it. jsdom has no Worker, but nothing here constructs one until a Run
+  // button is pressed.
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "notebook-runtime.js"), "utf8"));
+
   console.log("=== app.js evaluates against the real DOM ===");
   try {
     window.eval(appSource + `
@@ -696,6 +701,93 @@ async function run(server) {
     check("a folder with nothing in it still renders", realFolderRows(), folderCount + 1);
     check("...and says it is empty rather than vanishing",
       doc.querySelectorAll(".tree-children .tree-empty").length > 0, true);
+  }
+
+  console.log("=== notebooks can run Python, but only when asked ===");
+  {
+    const notebook = JSON.stringify({
+      metadata: { kernelspec: { language: "python", name: "python3" } },
+      cells: [
+        { cell_type: "markdown", source: ["# Runnable\n"] },
+        { cell_type: "code", source: ["print('hello')\n"], outputs: [] },
+        { cell_type: "code", source: ["   \n"], outputs: [] }
+      ]
+    });
+
+    const html = window.eval(`MarkdownCore.renderDocumentContent("demo.ipynb", ${JSON.stringify(notebook)}, "Demo")`);
+    check("a python cell gets a Run button", html.includes("notebook-run"), true);
+    check("...and somewhere to put the output", html.includes("notebook-live-output"), true);
+    check("an empty cell gets neither",
+      (html.match(/notebook-run"/g) || []).length, 1);
+    check("a markdown cell is not runnable",
+      /notebook-cell-markdown[\s\S]*?notebook-run/.test(html.split("notebook-cell-code")[0]), false);
+
+    // The original source has to survive to the Run handler; reading it back
+    // out of the highlighted DOM would return markup, not code.
+    check("the cell source is kept verbatim",
+      window.eval("MarkdownCore.notebookSourceFor(2)"), "print('hello')\n");
+
+    const rNotebook = JSON.stringify({
+      metadata: { kernelspec: { language: "r" } },
+      cells: [{ cell_type: "code", source: ["print(1)\n"] }]
+    });
+    const rHtml = window.eval(`MarkdownCore.renderDocumentContent("stats.ipynb", ${JSON.stringify(rNotebook)}, "R")`);
+    check("a non-python kernel gets no Run button", rHtml.includes("notebook-run"), false);
+
+    console.log("=== nothing runs on its own ===");
+    check("opening a notebook starts no worker", window.eval("NotebookRuntime.started"), false);
+    check("...and nothing is queued", window.eval("NotebookRuntime.isBusy()"), false);
+  }
+
+  console.log("=== the Python runtime is contained ===");
+  {
+    // Comments stripped: these checks are about what the code does, and the
+    // file explains at length what it deliberately does not touch.
+    const withoutComments = (text) => text
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/^\s*\/\/.*$/gm, " ");
+
+    const worker = withoutComments(fs.readFileSync(path.join(ROOT, "js", "pyodide-worker.js"), "utf8"));
+    const runtime = withoutComments(fs.readFileSync(path.join(ROOT, "js", "notebook-runtime.js"), "utf8"));
+
+    // Pyodide hands Python the host's JS scope through `import js`. On the main
+    // thread that is `window`; in a worker it is the worker scope, with no DOM
+    // and nothing the app holds.
+    check("Python runs in a worker, not on the page", runtime.includes("new global.Worker("), true);
+    check("the worker never touches document", /\bdocument\./.test(worker), false);
+    check("...or window", /\bwindow\./.test(worker), false);
+    check("...or localStorage", worker.includes("localStorage"), false);
+
+    // Every write endpoint needs the CSRF token, which lives on the main
+    // thread. If it were ever posted in, Python could mutate the library.
+    check("the CSRF token is never sent to the worker", worker.includes("csrf"), false);
+    check("...not by the controller either", /csrf/i.test(runtime), false);
+
+    check("the runtime version is pinned", /PYODIDE_VERSION = "\d+\.\d+\.\d+"/.test(worker), true);
+    check("a runaway cell can be escaped by terminating", runtime.includes("worker.terminate()"), true);
+    check("...which also fails any cell still waiting",
+      /terminate\(\)[\s\S]{0,400}pending\.clear\(\)/.test(runtime), true);
+
+    // ~10MB before a single package. Opening a markdown file must not pay it.
+    check("the runtime loads lazily, on the first run",
+      runtime.includes("function ensureWorker()"), true);
+    check("...and index.html does not preload pyodide",
+      fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes("pyodide"), false);
+  }
+
+  console.log("=== the share page cannot run anything ===");
+  {
+    const shareHtml = fs.readFileSync(path.join(ROOT, "share.html"), "utf8");
+    const shareJs = fs.readFileSync(path.join(ROOT, "js", "share.js"), "utf8");
+
+    check("it does not load the runtime", shareHtml.includes("notebook-runtime"), false);
+    check("...nor the worker", shareHtml.includes("pyodide"), false);
+    check("...and never enables executable cells",
+      shareJs.includes("executableNotebooks"), false);
+
+    // The core defaults to off, so forgetting to configure it fails safe.
+    const core = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
+    check("the default is off", /executableNotebooks: false/.test(core), true);
   }
 
   console.log("=== uploading a folder ===");

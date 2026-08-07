@@ -56,7 +56,10 @@ const BROWSER_GLOBALS = {
   svgPanZoom: "readonly",
 
   // Our own shared render engine, loaded as a plain script before app.js.
-  MarkdownCore: "readonly"
+  MarkdownCore: "readonly",
+  // The notebook Python controller, loaded before app.js.
+  NotebookRuntime: "readonly",
+  Worker: "readonly"
 };
 
 const NODE_GLOBALS = {
@@ -128,8 +131,31 @@ module.exports = [
     rules: SHARED_RULES
   },
   {
+    // Web Workers have no window and no document, which is the entire point of
+    // running Python in one. Linting them as browser scripts would let a
+    // reference to either slip through.
+    files: ["public/js/pyodide-worker.js"],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: "script",
+      globals: {
+        self: "readonly",
+        importScripts: "readonly",
+        loadPyodide: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        postMessage: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly"
+      }
+    },
+    rules: SHARED_RULES
+  },
+  {
     // Browser code. No bundler, no modules — these are plain scripts.
     files: ["public/js/**/*.js"],
+    ignores: ["public/js/pyodide-worker.js"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",

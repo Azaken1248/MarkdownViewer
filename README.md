@@ -7,6 +7,7 @@ Jupyter notebooks rendered inline.
 Live at **<https://md.azaken.com>**.
 
 - Vanilla JavaScript on the client. No framework, no bundler, no build step.
+- Notebook code cells run Python in the browser via Pyodide, on request.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -92,6 +93,8 @@ proxy hop rather than the client's scheme.
 │   ├── js/
 │   │   ├── app.js            # The client
 │   │   ├── markdown-core.js  # Render engine shared by both pages
+│   │   ├── notebook-runtime.js   # Talks to the Python worker
+│   │   ├── pyodide-worker.js     # Python (Pyodide/WASM), isolated from the DOM
 │   │   ├── share.js          # The share page
 │   │   └── theme-boot.js     # Applies the stored theme before first paint
 │   ├── favicon.svg
@@ -221,6 +224,55 @@ rebuilt from sanitised names; documents are stored flat on disk regardless, with
 the tree living in the organizer, so a traversal attempt has nowhere to go.
 
 Limits: 200 files per upload, 2MB per file.
+
+## Running Python in notebooks
+
+Code cells in a `.ipynb` with a Python kernel get a **Run** button. Python runs
+in the browser through [Pyodide](https://pyodide.org) — CPython compiled to
+WebAssembly — so there is no Python on the server and nothing is executed there.
+
+Cells in one notebook share a namespace, so a variable set in one is visible in
+the next, like a real kernel. `stdout`, `stderr` and the value of the last
+expression are shown below the cell. Importing `numpy`, `pandas` and the rest of
+the Pyodide package set installs them on demand, on first use.
+
+**Nothing runs on its own.** Opening a notebook renders it and stops. A cell
+executes because you pressed Run on it — a document in a library must never
+execute code just because you looked at it.
+
+**Python runs in a Web Worker, and that is the security boundary.** Pyodide
+exposes the host JavaScript scope to Python via `import js`. On the main thread
+that is `window`, which would give a notebook the DOM, the session and
+everything the app holds in memory. In a worker it is the worker's own scope:
+no document, no window, no storage. What Python can still do is issue
+same-origin `fetch` calls, but it cannot change anything through them — every
+write endpoint requires the CSRF token, which lives on the main thread and is
+never passed in — and `connect-src` pins outbound requests to this origin and
+the Pyodide CDN.
+
+**The share page cannot run anything.** Executable cells are opt-in per page and
+the share page leaves them off, so someone following a link is never handed a
+Run button for code they did not write. The default in the render engine is off,
+so forgetting to configure it fails safe.
+
+Practical limits:
+
+- The runtime is about 10MB and is not downloaded until the first Run.
+- Output is text: `stdout`, `stderr`, and the last expression's `repr`. Rich
+  display — matplotlib figures, `_repr_html_` — is not wired up. Outputs already
+  saved in the `.ipynb` still render as before.
+- Running never writes back to the file. The notebook on disk is unchanged.
+- A runaway loop cannot be interrupted; WebAssembly needs `SharedArrayBuffer`
+  for that, which needs COOP/COEP headers this app does not set. **Restart
+  Python** terminates the worker, which is the way out.
+
+This costs three CSP allowances, all narrow: `'wasm-unsafe-eval'` in
+`script-src` (WebAssembly compilation only — `'unsafe-eval'` is still refused),
+the Pyodide CDN in `connect-src`, and `worker-src 'self'`. The Pyodide loader is
+pinned to an exact version but cannot carry an SRI hash, because `importScripts`
+has no integrity attribute; the WASM payload it fetches is not integrity-checked
+either, which is inherent to how Pyodide ships rather than something given up
+here.
 
 ## Sharing a single document
 

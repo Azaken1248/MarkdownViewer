@@ -107,13 +107,24 @@ if (TRUST_PROXY) {
 // 'unsafe-inline' is required for style-src because KaTeX sets inline style
 // attributes and Mermaid injects <style> blocks into rendered SVG. Styles are
 // a far weaker vector than scripts, so this is a deliberate trade.
+//
+// Running Python in notebooks costs three more allowances, all of them narrow:
+//
+//   'wasm-unsafe-eval'  lets WebAssembly be compiled. It does NOT enable
+//                       eval() or new Function() — that would be
+//                       'unsafe-eval', which is still refused.
+//   connect-src cdn     Pyodide fetches its ~10MB runtime and any packages a
+//                       cell imports at run time, over fetch() rather than
+//                       <script>, so script-src does not cover it.
+//   worker-src 'self'   the Python worker is our own file.
 const CSP_DIRECTIVES = [
   "default-src 'self'",
-  "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+  "script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+  "worker-src 'self'",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com",
   "font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  "connect-src 'self' https://cdn.jsdelivr.net",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

@@ -22,7 +22,11 @@
   const hooks = {
     onWarning(message) {
       console.warn(message);
-    }
+    },
+    // Off unless the host page turns it on. The share page leaves it off: a
+    // visitor following a link should not be handed a Run button for code
+    // somebody else wrote.
+    executableNotebooks: false
   };
 
   function configure(overrides) {
@@ -422,15 +426,30 @@
         ? cell.outputs.map((output) => renderNotebookOutput(output)).filter(Boolean).join("")
         : "";
 
+      // Only Python, and only when the host page allows it. A cell with no
+      // source is nothing to run.
+      const runnable = hooks.executableNotebooks
+        && /^python/.test(normalize(notebookLanguage))
+        && source.trim().length > 0;
+
+      const runControls = runnable
+        ? `<button class="notebook-run" type="button" data-cell="${cellNumber}"
+             aria-label="Run cell ${cellNumber}" title="Run this cell">
+             <i class="ph ph-play" aria-hidden="true"></i><span>Run</span>
+           </button>`
+        : "";
+
       return `
-        <section class="notebook-cell notebook-cell-code">
+        <section class="notebook-cell notebook-cell-code" data-cell="${cellNumber}"${runnable ? ' data-runnable="true"' : ""}>
           <div class="notebook-cell-head">
             <span class="notebook-cell-badge">Code</span>
             <span class="notebook-cell-index">${executionCount != null ? `In [${executionCount}]` : `Cell ${cellNumber}`}</span>
+            ${runControls}
           </div>
           <div class="notebook-cell-content">
             <pre class="notebook-code-block"><code class="language-${escapeHtml(notebookLanguage)}">${escapeHtml(source)}</code></pre>
             ${outputHtml ? `<div class="notebook-outputs">${outputHtml}</div>` : ""}
+            ${runnable ? `<div class="notebook-live-output" data-cell="${cellNumber}" hidden></div>` : ""}
           </div>
         </section>
       `;
@@ -449,6 +468,14 @@
     `;
   }
 
+  // Cell sources, keyed by cell number, so a Run handler gets the original text
+  // rather than trying to reconstruct it from highlighted markup.
+  const notebookCellSources = new Map();
+
+  function notebookSourceFor(cellNumber) {
+    return notebookCellSources.get(Number(cellNumber)) || "";
+  }
+
   function renderNotebookDocument(rawContent, title) {
     const notebook = JSON.parse(String(rawContent || "").replace(/^\uFEFF/, ""));
     const cells = Array.isArray(notebook?.cells) ? notebook.cells : null;
@@ -458,6 +485,16 @@
     }
 
     const notebookLanguage = inferNotebookLanguage(notebook);
+
+    // Fresh per document: cell 3 means cell 3 of the notebook now open, not of
+    // whichever one was open before.
+    notebookCellSources.clear();
+    cells.forEach((cell, index) => {
+      if (normalize(cell?.cell_type || "").trim() === "code") {
+        notebookCellSources.set(index + 1, normalizeNotebookText(cell?.source));
+      }
+    });
+
     const cellCounts = cells.reduce((counts, cell) => {
       const type = normalize(cell?.cell_type || "").trim();
       if (type === "markdown") {
@@ -1096,6 +1133,7 @@
     toMermaidMarkdown,
     // Notebooks
     renderNotebookDocument,
+    notebookSourceFor,
     // Dispatches on file type: notebook, diagram source, or plain markdown.
     renderDocumentContent,
     // Diagrams, code and math
