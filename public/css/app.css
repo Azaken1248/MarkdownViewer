@@ -2126,6 +2126,14 @@ button.crumb:focus-visible {
   padding: 16px;
 }
 
+/* The confirm dialog is the only one that ever opens on top of another dialog.
+   Every .modal shared z-index 100, so the winner was whichever came later in
+   the document — which put the confirmation *behind* the share and accounts
+   dialogs, making "Replace link" and "Delete account" look inert. */
+#confirmModal {
+  z-index: 120;
+}
+
 .modal.open {
   display: flex;
 }

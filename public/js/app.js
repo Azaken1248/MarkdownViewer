@@ -1806,6 +1806,42 @@ function setViewerHeading(iconClass, label, metaParts, folderId = null) {
   }
 }
 
+// Every write control in the viewer toolbar and the mobile dock, gated in one
+// place. updateActiveDocUI has three exits and each used to set these
+// independently, so a viewer ended up with live Edit and Delete buttons that
+// only failed once the server refused them.
+function applyPermissionGating() {
+  const writable = can("doc:write");
+
+  // Hidden rather than disabled: a greyed-out button that can never become
+  // usable is just clutter with a tooltip.
+  for (const control of [elements.newDocBtn, elements.uploadTrigger, elements.editDocBtn,
+    elements.createFolderBtn, elements.editCurrentDocBtn, elements.softDeleteDocBtn,
+    elements.dockNew, elements.dockUpload, elements.dockEdit]) {
+    if (control) {
+      control.hidden = !writable;
+    }
+  }
+
+  // Erasing from the archive is admin-only; the same button is "Archive" for
+  // everyone else, so it follows doc:write outside the archive view.
+  if (elements.hardDeleteDocBtn) {
+    elements.hardDeleteDocBtn.hidden = state.viewMode === "archive"
+      ? !can("doc:erase")
+      : !writable;
+  }
+
+  if (elements.restoreDocBtn) {
+    elements.restoreDocBtn.hidden = !writable || !state.isRecycleBinMode;
+  }
+
+  if (elements.manageUsersItem) {
+    elements.manageUsersItem.hidden = !can("user:manage");
+  }
+
+  updateShareButton();
+}
+
 function updateActiveDocUI(fileName) {
   if (!fileName) {
     setViewerHeading("ph-file-text", "No file selected", []);
@@ -1815,6 +1851,7 @@ function updateActiveDocUI(fileName) {
     elements.softDeleteDocBtn.disabled = true;
     elements.hardDeleteDocBtn.disabled = true;
     elements.restoreDocBtn.disabled = true;
+    applyPermissionGating();
     return;
   }
 
@@ -1833,6 +1870,7 @@ function updateActiveDocUI(fileName) {
     elements.softDeleteDocBtn.disabled = true;
     elements.hardDeleteDocBtn.disabled = false;
     elements.restoreDocBtn.disabled = false;
+    applyPermissionGating();
     return;
   }
 
@@ -1850,6 +1888,7 @@ function updateActiveDocUI(fileName) {
   elements.softDeleteDocBtn.disabled = false;
   elements.hardDeleteDocBtn.disabled = false;
   elements.restoreDocBtn.disabled = true;
+  applyPermissionGating();
 }
 
 // --- Notifications --------------------------------------------------------
@@ -2113,29 +2152,12 @@ function syncAccountUI() {
     delete elements.accountBtn.dataset.tip;
   }
 
-  // Controls that write are hidden outright rather than disabled: a viewer has
-  // no use for an editor button that always refuses.
-  const writeControls = [
-    elements.newDocBtn,
-    elements.uploadTrigger,
-    elements.editDocBtn,
-    elements.createFolderBtn
-  ];
-
-  for (const control of writeControls) {
-    if (control) {
-      control.hidden = !can("doc:write");
-    }
-  }
-
-  if (elements.manageUsersItem) {
-    elements.manageUsersItem.hidden = !can("user:manage");
-  }
-
   document.body.classList.toggle("is-signed-in", signedIn);
   document.body.classList.toggle("can-write", can("doc:write"));
-  updateShareButton();
 
+  // Re-render the tree so row actions match the new role, then re-apply the
+  // toolbar gate for whatever document is open.
+  renderDocList();
   updateActiveDocUI(state.activeFile);
 }
 
@@ -3199,6 +3221,26 @@ function buildDocContextItems(doc) {
   const many = targets.length > 1;
   const inArchive = state.viewMode === "archive";
 
+  // Without write access the menu is what a reader can actually do: open it,
+  // and share it if the role allows. Offering Cut/Rename/Delete that only fail
+  // at the server is worse than not offering them.
+  if (!can("doc:write")) {
+    const items = state.isRecycleBinMode
+      ? [{ label: "Open", icon: "ph-file-text", action: () => void openRecycleBinDocument(doc.file) }]
+      : [{ label: "Open", icon: "ph-file-text", action: () => void openDocument(doc.file, true) }];
+
+    if (!state.isRecycleBinMode && can("share:manage")) {
+      items.push({ separator: true });
+      items.push({
+        label: state.shares.has(doc.file) ? "Manage share link" : "Share...",
+        icon: "ph-link-simple",
+        action: () => openShareModal(doc.file)
+      });
+    }
+
+    return items;
+  }
+
   if (state.isRecycleBinMode) {
     return [
       {
@@ -3256,12 +3298,27 @@ function buildDocContextItems(doc) {
       shortcut: "Shift+Del",
       danger: true,
       action: () => void deleteFiles(targets, "hard")
-    }
+    },
+    ...(can("share:manage") ? [
+      { separator: true },
+      {
+        label: state.shares.has(doc.file) ? "Manage share link" : "Share...",
+        icon: "ph-link-simple",
+        disabled: many,
+        action: () => openShareModal(doc.file)
+      }
+    ] : [])
   ];
 }
 
 function buildFolderContextItems(folder) {
   const canPaste = state.clipboard.files.length > 0;
+
+  // Every entry below is a write. There is no read-only folder action, so a
+  // viewer gets no folder menu rather than a menu of refusals.
+  if (!can("doc:write")) {
+    return [];
+  }
 
   return [
     {
@@ -3645,6 +3702,10 @@ function enableDocDrag(row, doc) {
 }
 
 function enableFolderDrag(row, folder) {
+  if (!can("doc:write")) {
+    return;
+  }
+
   row.draggable = true;
 
   row.addEventListener("dragstart", (event) => {
@@ -3666,6 +3727,12 @@ function enableFolderDrag(row, folder) {
 }
 
 function canDropOnFolder(targetFolderId) {
+  // Every drop is a move. One guard here covers both the folder and document
+  // drop zones rather than each remembering to ask.
+  if (!can("doc:write")) {
+    return false;
+  }
+
   const payload = state.dragPayload;
   if (!payload) {
     return false;
@@ -3906,7 +3973,7 @@ function buildDocRow(doc, depth) {
       ),
       buildOverflowAction(() => buildDocContextItems(doc))
     );
-  } else {
+  } else if (can("doc:write")) {
     actions.append(
       buildTreeAction("Edit", "ph-pencil-simple", async () => {
         await openEditorForDocument(doc.file);
@@ -3918,7 +3985,11 @@ function buildDocRow(doc, depth) {
       buildOverflowAction(() => buildDocContextItems(doc))
     );
 
+    // Dragging a row is a move; without write access there is nothing to drag.
     enableDocDrag(row, doc);
+  } else if (can("share:manage")) {
+    // Nothing to edit, but sharing is still available from the row.
+    actions.append(buildOverflowAction(() => buildDocContextItems(doc)));
   }
 
   row.append(button, actions);
@@ -3935,7 +4006,7 @@ function renderTreeNode(node, container) {
 
   const folderRow = buildFolderRow(node, isCollapsed);
 
-  if (!state.isRecycleBinMode && node.folder) {
+  if (!state.isRecycleBinMode && node.folder && can("doc:write")) {
     folderRow.appendChild(buildFolderActions(node));
   }
 
@@ -4061,13 +4132,17 @@ function handleTreeKeydown(event) {
     return;
   }
 
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
+  // Cut, paste, rename and delete are writes. Select-all and arrow navigation
+  // are not, so they stay available to a reader.
+  const writable = can("doc:write");
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x" && writable) {
     event.preventDefault();
     cutFiles([...state.selection]);
     return;
   }
 
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && writable) {
     event.preventDefault();
     const targetFolderId = folderRow?.dataset.folderId
       || (group?.dataset.folderKey !== "__root__" ? group?.dataset.folderKey : null)
@@ -4076,7 +4151,7 @@ function handleTreeKeydown(event) {
     return;
   }
 
-  if (event.key === "F2") {
+  if (event.key === "F2" && writable) {
     event.preventDefault();
     if (docRow) {
       beginInlineRename(docRow.dataset.file);
@@ -4086,7 +4161,7 @@ function handleTreeKeydown(event) {
     return;
   }
 
-  if (event.key === "Delete" && !state.isRecycleBinMode) {
+  if (event.key === "Delete" && !state.isRecycleBinMode && writable) {
     event.preventDefault();
     const targets = docRow ? resolveTargetFiles(docRow.dataset.file) : [...state.selection];
     if (targets.length) {

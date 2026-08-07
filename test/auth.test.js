@@ -318,6 +318,17 @@ async function run(server) {
       (await viewer.post("/api/docs", { fileName: "editor-made.md", content: "x" })).status, 201);
     check("an editor can share", (await viewer.post("/api/docs/alpha.md/share")).status, 201);
     check("an editor still cannot manage accounts", (await viewer.get("/api/users")).status, 403);
+    // Account management is admin-only end to end, not just hidden in the UI.
+    check("an editor cannot create an account",
+      (await viewer.post("/api/users", { username: "sneaky", password: "kettle-drum-nineteen" })).status, 403);
+    check("an editor cannot delete one",
+      (await viewer.del(`/api/users/${created.body.user.id}`)).status, 403);
+    check("an editor cannot change a role",
+      (await viewer.patch(`/api/users/${created.body.user.id}`, { role: "admin" })).status, 403);
+    check("an editor cannot reset a password",
+      (await viewer.post(`/api/users/${created.body.user.id}/password`, { password: "kettle-drum-twenty" })).status, 403);
+    check("...and no account was created by any of that",
+      (await admin.get("/api/users")).body.users.some((u) => u.username === "sneaky"), false);
     check("an editor cannot erase from the archive",
       (await viewer.del("/api/archive/whatever.md", { confirmFile: "whatever.md" })).status, 403);
 
@@ -417,6 +428,20 @@ async function run(server) {
     check("it is marked noindex", /noindex/.test(page.headers["x-robots-tag"] || ""), true);
     check("it does not ship the app shell", page.raw.includes('id="appShell"'), false);
     check("no unrendered template placeholders leak through", /__SHARE_[A-Z_]+__/.test(page.raw), false);
+
+    // The page is served from /s/<token>, so a relative "js/share.js" resolves
+    // to /s/js/share.js and 404s — which left the page blank with no error.
+    const assetPaths = [...page.raw.matchAll(/(?:src|href)="([^"]+\.(?:js|css)[^"]*)"/g)]
+      .map((m) => m[1])
+      .filter((href) => !href.startsWith("http"));
+    check("it references at least its own scripts", assetPaths.length >= 3, true);
+    check("every local asset path is absolute, not relative to /s/",
+      assetPaths.filter((href) => !href.startsWith("/")), []);
+
+    for (const href of assetPaths) {
+      const asset = await stranger.get(href);
+      check(`  ${href} loads`, asset.status, 200);
+    }
     check("...or the file explorer", page.raw.includes('id="docList"'), false);
     check("...or the editor", page.raw.includes('id="editorModal"'), false);
 

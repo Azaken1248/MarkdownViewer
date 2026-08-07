@@ -198,7 +198,8 @@ async function run(server) {
         hideTooltip, syncFilterChip, SUPERSEARCH_LIMIT,
         applySession, refreshSession, can, openLoginModal, closeLoginModal,
         openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
-        updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders
+        updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
+        buildDocContextItems, buildFolderContextItems, canDropOnFolder
       };
     `);
     check("no exception on load", true, true);
@@ -628,6 +629,84 @@ async function run(server) {
 
     await window.__t.applyThemePreference("dark");
     check("and back to dark", doc.documentElement.dataset.theme, "dark");
+  }
+
+  console.log("=== a viewer sees no write controls ===");
+  {
+    const asRole = (role, permissions) => window.eval(`window.__t.applySession(${JSON.stringify({
+      authenticated: true,
+      publicReads: false,
+      user: { id: "u1", username: "reader", role, mustChangePassword: false },
+      permissions,
+      csrfToken: "test-csrf"
+    })})`);
+
+    asRole("viewer", ["doc:read"]);
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Hidden, not merely disabled: a control that can never become usable for
+    // this account is clutter.
+    const hidden = (id) => doc.getElementById(id)?.hidden;
+    for (const id of ["newDocBtn", "uploadTrigger", "editDocBtn", "createFolderBtn",
+      "editCurrentDocBtn", "softDeleteDocBtn", "hardDeleteDocBtn",
+      "dockNew", "dockUpload", "dockEdit", "shareDocBtn"]) {
+      check(`  ${id} is hidden`, hidden(id), true);
+    }
+
+    check("the accounts menu item is hidden", doc.getElementById("manageUsersItem").hidden, true);
+    check("no row offers Edit/Rename/Delete",
+      doc.querySelectorAll(".tree-row-doc .tree-action").length, 0);
+    check("no folder offers its actions",
+      doc.querySelectorAll(".tree-row-folder .tree-action").length, 0);
+    check("rows are not draggable", [...doc.querySelectorAll(".tree-row-doc")]
+      .every((r) => r.getAttribute("draggable") !== "true"), true);
+    check("a drop is refused outright", window.eval(
+      'window.__t.state.dragPayload = { type: "file", files: ["delta.md"] }, window.__t.canDropOnFolder(null)'), false);
+
+    // The context menu should offer what a reader can actually do.
+    const readerMenu = window.eval('window.__t.buildDocContextItems({ file: "delta.md" }).map(i => i.label)');
+    check("the context menu offers only Open", [...readerMenu], ["Open"]);
+    check("...and no folder menu at all",
+      window.eval('window.__t.buildFolderContextItems({ id: "f1", name: "X" }).length'), 0);
+
+    console.log("=== an editor gets them back ===");
+    asRole("editor", ["doc:read", "doc:write", "share:manage"]);
+    await new Promise((r) => setTimeout(r, 60));
+
+    for (const id of ["newDocBtn", "uploadTrigger", "editDocBtn", "createFolderBtn", "shareDocBtn"]) {
+      check(`  ${id} is visible`, hidden(id), false);
+    }
+    check("rows offer actions again",
+      doc.querySelectorAll(".tree-row-doc .tree-action").length > 0, true);
+    check("rows are draggable again", [...doc.querySelectorAll(".tree-row-doc")]
+      .every((r) => r.getAttribute("draggable") === "true"), true);
+    check("the accounts menu item stays hidden for an editor",
+      doc.getElementById("manageUsersItem").hidden, true);
+
+    console.log("=== only an admin is offered account management ===");
+    asRole("admin", ["doc:read", "doc:write", "share:manage", "doc:erase", "user:manage"]);
+    await new Promise((r) => setTimeout(r, 60));
+    check("the accounts menu item appears", doc.getElementById("manageUsersItem").hidden, false);
+
+    // Restore the real session for anything after this.
+    await window.eval("window.__t.refreshSession()");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  console.log("=== a confirmation opens above the dialog that asked for it ===");
+  {
+    // Every .modal shared one z-index, so the winner was document order — which
+    // put the confirm dialog behind the share and accounts dialogs, making
+    // "Replace link" and "Delete account" look like they did nothing.
+    const css = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+    const modalZ = Number(css.match(/\.modal \{[^}]*z-index:\s*(\d+)/)[1]);
+    const confirmZ = Number(css.match(/#confirmModal \{[^}]*z-index:\s*(\d+)/)[1]);
+    check("the confirm dialog stacks above every other dialog", confirmZ > modalZ, true);
+
+    // ...and it must not depend on document order, which is what broke.
+    const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+    check("(it still sits before the share dialog in the document)",
+      html.indexOf('id="confirmModal"') < html.indexOf('id="shareModal"'), true);
   }
 
   console.log("=== console output ===");
