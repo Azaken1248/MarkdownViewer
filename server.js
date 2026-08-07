@@ -68,6 +68,7 @@ const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
+const ERROR_TEMPLATE_PATH = path.join(PUBLIC_DIR, "error.html");
 const SITE_NAME = "AzaDocs";
 const EMBED_TITLE = "AzaDocs";
 const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit documents, with Mermaid diagrams and Jupyter notebooks rendered inline.";
@@ -1798,6 +1799,114 @@ async function getIndexTemplate() {
   return indexTemplateCache;
 }
 
+/* ---------------------------------------------------------------------------
+   Error responses
+
+   One place decides what an error looks like, and it depends on who is asking.
+   An API client wants JSON; a person who mistyped a URL wants a page. Express's
+   default for the second case is a bare `Cannot GET /nope` in Times New Roman.
+
+   Nothing here reveals more than the reader already knows. A 500 says a 500
+   happened; the stack goes to the log, not the page.
+   --------------------------------------------------------------------------- */
+
+const ERROR_PRESETS = {
+  400: { icon: "ph-warning-circle", heading: "That request did not make sense", message: "Something about the address or the data sent with it was malformed." },
+  401: { icon: "ph-lock-simple", heading: "You need to sign in", message: "This library is private. Sign in to continue." },
+  403: { icon: "ph-prohibit", heading: "Not allowed", message: "Your account does not have permission to do that." },
+  404: { icon: "ph-compass", heading: "There is nothing here", message: "The page you asked for does not exist, or the link that brought you here is no longer valid." },
+  413: { icon: "ph-file-x", heading: "That file is too large", message: "Documents are limited to 2MB." },
+  429: { icon: "ph-hourglass-medium", heading: "Too many attempts", message: "Wait a little while before trying again." },
+  500: { icon: "ph-bug", heading: "Something went wrong on our side", message: "The error has been logged. Trying again is usually worth a shot." },
+  503: { icon: "ph-plugs", heading: "Temporarily unavailable", message: "The server is up but something it depends on is not. Try again shortly." }
+};
+
+let errorTemplateCache = null;
+let errorTemplateCacheMtimeMs = 0;
+
+async function getErrorTemplate() {
+  const stat = await fsp.stat(ERROR_TEMPLATE_PATH);
+  if (errorTemplateCache !== null && errorTemplateCacheMtimeMs === stat.mtimeMs) {
+    return errorTemplateCache;
+  }
+
+  // eslint-disable-next-line require-atomic-updates
+  errorTemplateCache = await fsp.readFile(ERROR_TEMPLATE_PATH, "utf8");
+  // eslint-disable-next-line require-atomic-updates
+  errorTemplateCacheMtimeMs = stat.mtimeMs;
+  return errorTemplateCache;
+}
+
+function renderErrorHtml(template, { status, heading, message, detail, icon, baseUrl }) {
+  const replacements = {
+    __ERROR_STATUS__: String(status),
+    __ERROR_TITLE__: `${status} · ${heading} | ${SITE_NAME}`,
+    __ERROR_HEADING__: heading,
+    __ERROR_MESSAGE__: message,
+    __ERROR_DETAIL__: detail || "",
+    __ERROR_ICON__: icon,
+    __ERROR_FAVICON_URL__: toAbsoluteUrl(baseUrl, FAVICON_PATH),
+    __ERROR_THEME_COLOR__: EMBED_THEME_COLOR
+  };
+
+  let rendered = template;
+  for (const [token, value] of Object.entries(replacements)) {
+    rendered = rendered.split(token).join(escapeHtml(value));
+  }
+
+  return rendered;
+}
+
+// Does this look like a browser navigating, or a program calling an API?
+// Anything under /api is always JSON regardless of what it claims to accept —
+// a fetch() with a default Accept header would otherwise be handed a web page.
+function wantsHtmlError(req) {
+  if (req.path.startsWith("/api/") || req.path === "/healthz" || req.path === "/graphql" || req.path === "/oembed") {
+    return false;
+  }
+
+  if (req.xhr) {
+    return false;
+  }
+
+  return req.accepts(["html", "json"]) === "html";
+}
+
+async function sendError(req, res, status, { heading, message, detail, code } = {}) {
+  const preset = ERROR_PRESETS[status] || ERROR_PRESETS[500];
+  const resolved = {
+    status,
+    icon: preset.icon,
+    heading: heading || preset.heading,
+    message: message || preset.message,
+    detail
+  };
+
+  if (res.headersSent) {
+    return;
+  }
+
+  if (!wantsHtmlError(req)) {
+    res.status(status).json({
+      error: resolved.message,
+      ...(code ? { code } : {})
+    });
+    return;
+  }
+
+  try {
+    const template = await getErrorTemplate();
+    res.status(status).type("html").send(renderErrorHtml(template, {
+      ...resolved,
+      baseUrl: getBaseUrlFromRequest(req)
+    }));
+  } catch (templateError) {
+    // The error page itself failed. Say so in plain text rather than recursing.
+    console.error("Failed to render the error page", templateError);
+    res.status(status).type("text/plain").send(`${status} ${resolved.heading}`);
+  }
+}
+
 let shareTemplateCache = null;
 let shareTemplateCacheMtimeMs = 0;
 
@@ -2057,18 +2166,19 @@ app.get("/s/:token", async (req, res, next) => {
   try {
     const token = String(req.params.token || "");
     const share = shareStore.findByToken(token);
-    const template = await getShareTemplate();
 
     if (!share || !(await fileExists(path.join(MARKDOWN_DIR, share.file)))) {
-      // A revoked link must not keep describing what used to be behind it.
-      res.status(404).type("html").send(renderShareHtml(template, {
-        title: "Link not found",
-        description: "This share link is not valid, or the document behind it is gone.",
-        baseUrl: getBaseUrlFromRequest(req)
-      }));
+      // A revoked link must not keep describing what used to be behind it, so
+      // this is the generic page — no title, no excerpt, no card.
+      await sendError(req, res, 404, {
+        heading: "This share link is not valid",
+        message: "It may have been revoked, or the document behind it may have been deleted.",
+        detail: "Ask whoever sent it for a new link."
+      });
       return;
     }
 
+    const template = await getShareTemplate();
     const meta = await buildShareMeta(req, share);
     const shareUrl = toAbsoluteUrl(meta.baseUrl, `/s/${token}`);
 
@@ -2980,50 +3090,63 @@ app.post("/api/docs/upload", requirePermission("doc:write"), upload.single("mark
 // public/docs sits inside the static root, so express.static would happily
 // serve every document as a plain file — straight past requireRead and past the
 // share system. Documents are only ever available through the API.
-app.use("/docs", (req, res) => {
-  res.status(404).json({ error: "Not found" });
+app.use("/docs", (req, res, next) => {
+  sendError(req, res, 404).catch(next);
 });
 
 // share.html is a template, not a page: served directly it is a shell full of
 // __SHARE_*__ placeholders with no document behind it. It is only ever rendered
 // by the /s/:token route.
-app.get("/share.html", (req, res) => {
-  res.status(404).json({ error: "Not found" });
+// Both of these are templates, not pages: served directly they are shells full
+// of __SHARE_*__ / __ERROR_*__ placeholders. They are only ever rendered by the
+// routes that fill them in.
+app.get(["/share.html", "/error.html"], (req, res, next) => {
+  sendError(req, res, 404).catch(next);
 });
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
+
+// Nothing matched. Without this, Express answers a mistyped URL with a bare
+// "Cannot GET /nope" in the browser's default serif.
+app.use((req, res, next) => {
+  sendError(req, res, 404, {
+    detail: `No route for ${req.method} ${req.path}`
+  }).catch(next);
+});
 
 // Four parameters is how Express recognises error middleware, so `_next` has to
 // stay in the signature even though nothing calls it.
 app.use((error, req, res, _next) => {
   if (error instanceof HttpError) {
-    res.status(error.statusCode).json({ error: error.message });
+    void sendError(req, res, error.statusCode, { message: error.message });
     return;
   }
 
   // express.json() rejects oversized bodies before our own size check runs.
   if (error?.type === "entity.too.large") {
-    res.status(413).json({ error: "File content exceeds the 2MB limit" });
+    void sendError(req, res, 413, { message: "File content exceeds the 2MB limit" });
     return;
   }
 
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
-      res.status(413).json({ error: "Uploaded file exceeds 2MB limit" });
+      void sendError(req, res, 413, { message: "Uploaded file exceeds 2MB limit" });
       return;
     }
 
-    res.status(400).json({ error: error.message || "Upload failed" });
+    void sendError(req, res, 400, { message: error.message || "Upload failed" });
     return;
   }
 
   if (error && error.message === "Only .md, .markdown, .mmd, .mermaid, or .ipynb files are supported") {
-    res.status(400).json({ error: error.message });
+    void sendError(req, res, 400, { message: error.message });
     return;
   }
 
+  // The stack goes to the log. The reader gets a status and nothing else: an
+  // error page is not the place to publish internals.
   console.error(error);
-  res.status(500).json({ error: "Internal server error" });
+  void sendError(req, res, 500);
 });
 
 // Shutdown has to be graceful because organizer writes are read-modify-write

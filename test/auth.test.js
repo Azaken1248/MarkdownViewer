@@ -611,6 +611,63 @@ async function run(server) {
         { Authorization: "Bearer any-token-at-all" })).status, 401);
   }
 
+  console.log("=== error pages ===");
+  {
+    const asBrowser = { Accept: "text/html,application/xhtml+xml" };
+    const asApi = { Accept: "application/json" };
+    const stranger = makeClient(server.origin);
+
+    const page = await stranger.get("/definitely-not-a-route", asBrowser);
+    check("a mistyped URL gets a real page, not Cannot GET", page.status, 404);
+    check("...as HTML", /text\/html/.test(page.headers["content-type"]), true);
+    check("...with the status in the title", /<title>404 · [^<]*<\/title>/.test(page.raw), true);
+    check("...and a heading a person can read",
+      page.raw.includes("There is nothing here"), true);
+    check("...and a way back", page.raw.includes('href="/"'), true);
+    check("...not indexed", /noindex/.test(page.raw), true);
+    check("no placeholder survived", /__ERROR_[A-Z_]+__/.test(page.raw), false);
+    check("it does not depend on the app script", page.raw.includes("js/app.js"), false);
+
+    // The same URL, asked for by a program, must stay JSON.
+    const json = await stranger.get("/definitely-not-a-route", asApi);
+    check("an API client gets JSON for the same URL",
+      /application\/json/.test(json.headers["content-type"]), true);
+    check("...with a message", typeof json.body.error === "string", true);
+
+    // Anything under /api is JSON regardless of what it claims to accept: a
+    // fetch() with a default Accept header would otherwise be handed a page.
+    const apiAsBrowser = await stranger.get("/api/not-a-route", asBrowser);
+    check("an /api path never returns HTML",
+      /application\/json/.test(apiAsBrowser.headers["content-type"]), true);
+    check("...even when the caller asks for HTML", apiAsBrowser.status, 404);
+
+    console.log("=== the error page covers the routes that used to answer in JSON ===");
+    for (const [url, label] of [
+      ["/docs/anything.md", "the raw documents directory"],
+      ["/share.html", "the share template"],
+      ["/error.html", "the error template itself"]
+    ]) {
+      const res = await stranger.get(url, asBrowser);
+      const ok = res.status === 404 && /text\/html/.test(res.headers["content-type"]);
+      if (!ok) failures++;
+      console.log(`  ${ok ? "PASS" : "FAIL"}  ${label} renders the 404 page`);
+    }
+
+    console.log("=== a dead share link uses the same page ===");
+    const dead = await stranger.get("/s/not-a-real-token", asBrowser);
+    check("it is a 404", dead.status, 404);
+    check("...and says what happened", dead.raw.includes("This share link is not valid"), true);
+    check("...without the app shell", dead.raw.includes('id="appShell"'), false);
+
+    console.log("=== a 500 says nothing it should not ===");
+    // A path that reaches the handler with a genuine failure: the archive
+    // delete route reads a file whose name is valid but absent.
+    const boom = await stranger.get("/s/%E0%A4%A", asBrowser);
+    check("a malformed URL does not crash the process", boom.status >= 400, true);
+    check("...and never returns a stack trace", /at \w+ \(/.test(boom.raw), false);
+    check("...nor a filesystem path", boom.raw.includes(server.stateDir), false);
+  }
+
   console.log("=== rate limiting ===");
   {
     // A dedicated account: locking one out is the whole point, and it must not

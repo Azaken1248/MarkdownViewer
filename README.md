@@ -88,6 +88,7 @@ proxy hop rather than the client's scheme.
 │   ├── index.html            # The whole app shell. Embed meta is templated in at request time.
 │   ├── css/app.css           # One stylesheet. Design tokens at the top, light + dark.
 │   ├── share.html            # The standalone share page
+│   ├── error.html            # 404 and friends, for browsers
 │   ├── js/
 │   │   ├── app.js            # The client
 │   │   ├── markdown-core.js  # Render engine shared by both pages
@@ -280,6 +281,18 @@ with the right role, plus the `X-CSRF-Token` header.
 | `GET` | `/s/:token` | **Public.** The standalone share page |
 | `GET` | `/s/:token/card.svg` | **Public.** The `og:image` for that document |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |
+
+### Errors
+
+One handler decides what an error looks like, based on who is asking. Anything
+under `/api`, plus `/healthz`, `/graphql` and `/oembed`, always answers with
+`{"error": "..."}` JSON — a `fetch()` sending a default `Accept` header would
+otherwise be handed a web page. Everything else content-negotiates: a browser
+gets a styled page, a program gets JSON.
+
+The error page loads no application script, only the theme boot, so it still
+renders when whatever failed is the app itself. A `500` reports the status and
+nothing more; the stack goes to the log.
 | `ALL` | `/graphql` | `embedMeta`, `docsCount`, `health`. Introspection is off by default |
 | `GET` | `/oembed?url=` | oEmbed metadata for link-preview consumers |
 

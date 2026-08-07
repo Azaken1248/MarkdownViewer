@@ -132,6 +132,29 @@ console.log("=== the hidden attribute actually hides ===");
     css.trimEnd().endsWith("[hidden] {\n  display: none !important;\n}"), true);
 }
 
+console.log("=== the error page stands on its own ===");
+{
+  const html = fs.readFileSync(path.join(PUBLIC_DIR, "error.html"), "utf8");
+
+  // An error page that needs the thing that just failed is an error page that
+  // renders blank.
+  check("it loads no application script", /js\/app\.js/.test(html), false);
+  check("...and no markdown engine", /markdown-core/.test(html), false);
+  check("only the theme boot, so it matches light and dark", /theme-boot\.js/.test(html), true);
+
+  // It can be served from any URL depth, so relative asset paths would resolve
+  // against whatever the reader typed.
+  const localAssets = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)]
+    .map((m) => m[1])
+    .filter((href) => !href.startsWith("http"));
+  check("every local asset path is absolute",
+    localAssets.filter((href) => !href.startsWith("/")), []);
+
+  check("the status number is hidden from screen readers (the heading says it)",
+    /class="error-status" aria-hidden="true"/.test(html), true);
+  check("an empty detail line collapses", /\.error-detail:empty \{\s*display: none;/.test(css), true);
+}
+
 console.log("=== the share page can scroll ===");
 {
   // body is overflow:hidden so the app shell can own its scrollers. The share

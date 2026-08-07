@@ -3229,6 +3229,102 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Error pages
+
+   Served for 404 and friends when a browser is asking. Shares the app's tokens
+   so an error still looks like part of the same thing, but depends on no
+   script — an error page that needs the app to work is an error page that
+   shows a blank screen.
+   -------------------------------------------------------------------------- */
+
+.error-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--canvas);
+}
+
+.error-card {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 32px 28px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+}
+
+/* Big, faint, and behind everything: the number is for orientation, not for
+   reading first. aria-hidden in the markup, since the heading says it better. */
+.error-status {
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg);
+  opacity: 0.06;
+  user-select: none;
+}
+
+.error-icon {
+  font-size: 40px;
+  color: var(--accent);
+}
+
+.error-heading {
+  margin: 14px 0 0;
+  font-size: 22px;
+  line-height: 1.3;
+  color: var(--fg);
+}
+
+.error-message {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.error-actions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.error-detail {
+  margin: 20px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-subtle);
+  word-break: break-word;
+}
+
+/* Rendered empty when there is nothing extra to say. */
+.error-detail:empty {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .error-status {
+    font-size: 44px;
+  }
+
+  .error-card {
+    padding: 26px 20px 20px;
+  }
+}
+
+/* --------------------------------------------------------------------------
    Last word: the hidden attribute
 
    `hidden` only hides via the user-agent rule `[hidden] { display: none }`,

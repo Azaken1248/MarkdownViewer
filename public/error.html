@@ -1,0 +1,52 @@
+<!-- The error page, for browsers. API clients get JSON from the same handler;
+     see sendError() in server.js.
+
+     Deliberately minimal: no app shell, no explorer, and no script beyond the
+     theme boot. An error page that depends on the thing that just failed is an
+     error page that shows a blank screen. -->
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>__ERROR_TITLE__</title>
+<meta name="description" content="__ERROR_MESSAGE__" />
+<meta name="theme-color" content="__ERROR_THEME_COLOR__" />
+
+<!-- Nothing here is worth indexing, and a 404 in a search index is worse than
+     no result at all. -->
+<meta name="robots" content="noindex, nofollow" />
+
+<link rel="icon" type="image/svg+xml" href="__ERROR_FAVICON_URL__" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet" />
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css"
+  integrity="sha384-6p9AefaqUhEVheRlj1mpAkbngHXy9mbYMrIdcIt4Jlc9lOLIablJq3bBsLOjGwZ7" crossorigin="anonymous"
+  referrerpolicy="no-referrer" />
+
+<!-- Absolute paths: an error page can be served from any URL depth, so
+     "css/app.css" would resolve relative to whatever the reader typed. -->
+<script src="/js/theme-boot.js?v=40"></script>
+<link rel="stylesheet" href="/css/app.css?v=40" />
+
+<main class="error-page">
+  <section class="error-card">
+    <p class="error-status" aria-hidden="true">__ERROR_STATUS__</p>
+
+    <i class="ph __ERROR_ICON__ error-icon" aria-hidden="true"></i>
+
+    <h1 class="error-heading">__ERROR_HEADING__</h1>
+    <p class="error-message">__ERROR_MESSAGE__</p>
+
+    <div class="error-actions">
+      <a class="btn btn-primary" href="/">
+        <i class="ph ph-house" aria-hidden="true"></i>
+        <span>Go to AzaDocs</span>
+      </a>
+    </div>
+
+    <p class="error-detail">__ERROR_DETAIL__</p>
+  </section>
+</main>
