@@ -58,12 +58,87 @@
   --shadow-overlay: 0 8px 24px rgba(0, 2, 2, 0.8);
   --shadow-dialog: 0 16px 32px rgba(0, 2, 2, 0.9);
 
+  /* The scrollbar thumb is a control, so WCAG 1.4.11 wants 3:1 against what
+     is behind it — more than the hairline borders need. Its own token, so
+     making it visible does not thicken every border in the app. */
+  --scrollbar-thumb: #566a67;
+  --scrollbar-thumb-hover: #7b918d;
+
   --tree-row-height: 26px;
   --tree-indent: 14px;
 
   --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  color-scheme: dark;
 }
+
+/* --------------------------------------------------------------------------
+   Light theme
+
+   Every colour in the app already goes through the tokens above, so the light
+   theme is a token swap and nothing else — no component knows which theme is
+   running. Same teal, darkened until it carries text weight on a pale surface.
+
+   Dark stays the default: it is what the app has always looked like, and an
+   explicit choice is remembered. "Auto" (the third state of the toggle) is the
+   only mode that follows the operating system.
+   -------------------------------------------------------------------------- */
+
+:root[data-theme="light"] {
+  --canvas-inset: #e7eeec;
+  --canvas: #f4f8f7;
+  --surface: #ffffff;
+  --raised: #eef4f2;
+  --raised-hover: #dfeae7;
+
+  --border: #cfdcd9;
+  --border-muted: #e4ecea;
+  --border-strong: #a6b9b5;
+
+  --fg: #101b1a;
+  --fg-muted: #465956;
+  --fg-subtle: #62756f;
+  --fg-on-emphasis: #ffffff;
+
+  /* The pastel #8ed9cf is decorative on black and unreadable on white, so the
+     light theme keeps the hue and takes the lightness down until body-weight
+     text on --canvas clears 4.5:1. */
+  --accent: #10635a;
+  --accent-emphasis: #0f5b53;
+  --accent-subtle: rgba(16, 99, 90, 0.10);
+  --accent-muted: rgba(16, 99, 90, 0.34);
+  --selected: #dcece9;
+  --selected-hover: #cbe2de;
+
+  --success: #17603a;
+  --success-emphasis: #1c6f43;
+  --success-subtle: rgba(23, 96, 58, 0.12);
+
+  --danger: #97302a;
+  --danger-emphasis: #8f2d27;
+  --danger-subtle: rgba(151, 48, 42, 0.10);
+
+  --attention: #6b5210;
+  --attention-emphasis: #7a5d14;
+  --attention-subtle: rgba(107, 82, 16, 0.12);
+
+  --done: #4c3a8c;
+  --done-subtle: rgba(76, 58, 140, 0.12);
+
+  --shadow-overlay: 0 8px 24px rgba(16, 27, 26, 0.14);
+  --shadow-dialog: 0 16px 32px rgba(16, 27, 26, 0.20);
+
+  --scrollbar-thumb: #808f8c;
+  --scrollbar-thumb-hover: #62756f;
+
+  color-scheme: light;
+}
+
+/* "auto" is resolved to a concrete light/dark value in script before first
+   paint, so this stylesheet only ever has to describe two themes. Duplicating
+   the whole token block inside a prefers-color-scheme query would be the only
+   alternative, and two copies of 30 colours drift. */
 
 /* --------------------------------------------------------------------------
    Base
@@ -99,7 +174,7 @@ body.lock-scroll {
    region scrolls at all. Styled thin so they stay out of the way. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -112,14 +187,14 @@ body.lock-scroll {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--scrollbar-thumb);
   border: 2px solid transparent;
   background-clip: content-box;
   border-radius: 6px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+  background: var(--scrollbar-thumb-hover);
   background-clip: content-box;
 }
 
@@ -287,8 +362,8 @@ kbd {
   flex-shrink: 0;
   display: none;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);
@@ -421,6 +496,46 @@ kbd {
   color: var(--fg-muted);
 }
 
+.supersearch-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--raised);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+.supersearch-hint kbd {
+  font-size: 10px;
+}
+
+.supersearch-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.supersearch-more:hover,
+.supersearch-more:focus-visible {
+  background: var(--raised);
+  color: var(--accent);
+}
+
 /* --------------------------------------------------------------------------
    Layout
    -------------------------------------------------------------------------- */
@@ -475,6 +590,32 @@ kbd {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-muted);
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.filter-clear[hidden] {
+  display: none;
+}
+
+.filter-clear:hover,
+.filter-clear:focus-visible {
+  background: var(--selected-hover);
+  border-color: var(--accent);
 }
 
 .sidebar-meta {
@@ -715,8 +856,9 @@ kbd {
 .tree-action {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  /* 24px is the WCAG 2.5.8 floor for a pointer target. These were 22. */
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);
@@ -877,6 +1019,7 @@ kbd {
   gap: 5px;
   min-width: 0;
   max-width: 22ch;
+  min-height: 24px;
   padding: 2px 6px;
   border: none;
   border-radius: var(--radius-sm);
@@ -1750,6 +1893,48 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Tooltips
+
+   Positioned from script against the viewport, so it sits above everything and
+   is never clipped by a scroll container. 250 keeps it over toasts too.
+   -------------------------------------------------------------------------- */
+
+.tooltip {
+  position: fixed;
+  z-index: 250;
+  max-width: 280px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  box-shadow: var(--shadow-overlay);
+  pointer-events: none;
+  animation: tooltip-in 90ms ease-out;
+}
+
+.tooltip[hidden] {
+  display: none;
+}
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tooltip.is-above {
+  animation-name: tooltip-in-above;
+}
+
+@keyframes tooltip-in-above {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --------------------------------------------------------------------------
    Toasts
    -------------------------------------------------------------------------- */
 
@@ -2517,5 +2702,146 @@ button.crumb:focus-visible {
      the script handles on a timer, so only the visual bar is suppressed. */
   .toast-timer {
     display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Print
+
+   A document viewer that could not print the document. Everything that is
+   chrome comes off, the shell stops constraining height so the page can flow
+   across sheets, and the dark palette inverts — printing a near-black
+   background wastes a cartridge and reads worse than the screen.
+   -------------------------------------------------------------------------- */
+
+@media print {
+
+  .app-header,
+  .sidebar,
+  .sidebar-overlay,
+  .viewer-toolbar,
+  .mobile-dock,
+  .supersearch-panel,
+  .toast-region,
+  .tooltip,
+  .match-nav,
+  .modal,
+  .context-menu,
+  .empty-state {
+    display: none !important;
+  }
+
+  /* The fixed shell exists to give the sidebar and viewer their own scroll.
+     On paper there is one flow, so every clamp has to come off or only the
+     first sheet prints. */
+  html,
+  body,
+  .app-shell,
+  .layout,
+  .viewer,
+  .markdown-body {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  body,
+  .app-shell,
+  .viewer,
+  .markdown-body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .markdown-body {
+    padding: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    font-size: 11pt;
+  }
+
+  .markdown-body a {
+    color: #000000 !important;
+    text-decoration: underline;
+  }
+
+  /* Link text alone is useless on paper. Skip in-page anchors and anything
+     whose text is already the URL. */
+  .markdown-body a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    word-break: break-all;
+  }
+
+  .markdown-body pre,
+  .markdown-body code,
+  .markdown-body blockquote,
+  .markdown-body table,
+  .markdown-body th,
+  .markdown-body td {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: #999999 !important;
+  }
+
+  .markdown-body pre {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+  }
+
+  /* Splitting a code block, a table row, or a diagram across a page break is
+     the main thing that makes printed docs unusable. */
+  .markdown-body pre,
+  .markdown-body blockquote,
+  .markdown-body tr,
+  .markdown-body img,
+  .markdown-body .mermaid-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+    color: #000000 !important;
+  }
+
+  /* Diagrams are sized from a viewBox aspect-ratio for the screen; on paper
+     they only need to fit the sheet. */
+  .markdown-body .mermaid-block {
+    aspect-ratio: auto !important;
+    max-height: none !important;
+    height: auto !important;
+    border-color: #999999 !important;
+    background: #ffffff !important;
+  }
+
+  .markdown-body .mermaid-block svg {
+    height: auto !important;
+    max-width: 100% !important;
+  }
+
+  /* svg-pan-zoom's own +/- overlay is not part of the diagram. */
+  .svg-pan-zoom-control {
+    display: none !important;
+  }
+
+  .breadcrumbs {
+    color: #000000 !important;
+  }
+
+  .crumb,
+  .crumb-current,
+  .crumb-sep {
+    color: #000000 !important;
+    background: transparent !important;
+  }
+
+  @page {
+    margin: 18mm 16mm;
   }
 }

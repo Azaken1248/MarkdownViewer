@@ -35,6 +35,9 @@ const elements = {
   superSearchPanel: document.getElementById("superSearchPanel"),
   superSearchCount: document.getElementById("superSearchCount"),
   superSearchList: document.getElementById("superSearchList"),
+  superSearchHint: document.getElementById("superSearchHint"),
+  clearFilterBtn: document.getElementById("clearFilterBtn"),
+  themeToggleBtn: document.getElementById("themeToggleBtn"),
   searchMeta: document.getElementById("searchMeta"),
   selectionMeta: document.getElementById("selectionMeta"),
   contextMenu: document.getElementById("contextMenu"),
@@ -106,8 +109,13 @@ const state = {
   editorInitialContent: "",
   editorInitialFileName: "",
   mermaidReady: false,
+  // Which palette the initialized Mermaid instance was built with.
+  mermaidTheme: null,
   panZoomCounter: 0,
   searchResults: [],
+  // How many of the matches the panel is currently showing. Reset to
+  // SUPERSEARCH_LIMIT whenever the query changes; grown by "Show more".
+  searchRevealCount: 0,
   searchPanelOpen: false,
   searchRequestId: 0,
   searchInputTimer: null,
@@ -169,6 +177,8 @@ function persistWriteToken(token) {
 
 const MOBILE_BREAKPOINT = 920;
 const SUPERSEARCH_LIMIT = 8;
+// Each "Show more" click in the results panel reveals this many further rows.
+const SUPERSEARCH_PAGE_SIZE = 12;
 // How many document rows each folder group renders before offering "show more".
 const DOC_LIST_PAGE_SIZE = 50;
 const MATCH_SWIPE_THRESHOLD = 56;
@@ -815,6 +825,7 @@ function openFolderModal({ mode = "create", file = null, folderId = null, parent
 
   elements.folderModal.classList.add("open");
   elements.folderModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.folderModal);
   syncBodyLock();
   window.requestAnimationFrame(() => elements.folderNameInput.focus());
   window.requestAnimationFrame(() => {
@@ -838,6 +849,7 @@ function closeFolderModal() {
   elements.folderNameInput.value = "";
   elements.folderModal.classList.remove("open");
   elements.folderModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.folderModal);
   syncBodyLock();
 }
 
@@ -1245,23 +1257,57 @@ function syncSearchInputState(query) {
   elements.searchWrap.classList.toggle("has-value", hasQuery);
 }
 
+// Enter does two different things depending on whether you are reading a
+// document that already matches the query, and neither was signposted
+// anywhere in the app.
+function renderSearchShortcutHint(query) {
+  if (!elements.superSearchHint) {
+    return;
+  }
+
+  const traversing = !state.isRecycleBinMode
+    && state.activeFile
+    && state.jumpQuery.trim().length > 0
+    && normalize(query) === normalize(state.jumpQuery);
+
+  elements.superSearchHint.innerHTML = traversing
+    ? '<kbd>Enter</kbd> next match <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> previous <span>·</span> <kbd>Esc</kbd> exit search'
+    : '<kbd>Enter</kbd> open top result <span>·</span> <kbd>Esc</kbd> exit search';
+}
+
 function renderSuperSearchPanel(query, matches, searchTerms) {
   const trimmedQuery = String(query || "").trim();
   syncSearchInputState(query);
+  renderSearchShortcutHint(trimmedQuery);
 
   if (!trimmedQuery) {
     state.searchResults = [];
     state.searchResultsQuery = "";
+    state.searchRevealCount = SUPERSEARCH_LIMIT;
     elements.superSearchList.innerHTML = "";
     elements.superSearchCount.textContent = "0 results";
     setSuperSearchOpen(false);
     return;
   }
 
-  const topResults = matches.slice(0, SUPERSEARCH_LIMIT);
+  // A new query starts the reveal over; re-rendering the same query (a "Show
+  // more" click, a background refresh) keeps whatever the reader had unfolded.
+  if (trimmedQuery !== state.searchResultsQuery) {
+    state.searchRevealCount = SUPERSEARCH_LIMIT;
+  }
+
+  const revealCount = Math.min(
+    Math.max(state.searchRevealCount, SUPERSEARCH_LIMIT),
+    matches.length
+  );
+  const topResults = matches.slice(0, revealCount);
+  const remaining = matches.length - topResults.length;
   state.searchResults = topResults;
   state.searchResultsQuery = trimmedQuery;
-  elements.superSearchCount.textContent = `${matches.length} result(s)`;
+  state.searchRevealCount = revealCount;
+  elements.superSearchCount.textContent = remaining > 0
+    ? `Showing ${topResults.length} of ${matches.length}`
+    : `${matches.length} result${matches.length === 1 ? "" : "s"}`;
 
   if (topResults.length === 0) {
     elements.superSearchList.innerHTML = "<li class=\"supersearch-empty\">No matches. Try fewer keywords or part of the filename.</li>";
@@ -1278,6 +1324,26 @@ function renderSuperSearchPanel(query, matches, searchTerms) {
       </button>
     </li>
   `).join("");
+
+  if (remaining > 0) {
+    const more = document.createElement("li");
+    more.innerHTML = `
+      <button class="supersearch-more" type="button">
+        <i class="ph ph-caret-down" aria-hidden="true"></i>
+        <span>Show ${remaining} more</span>
+      </button>
+    `;
+    more.querySelector(".supersearch-more").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      state.searchRevealCount = revealCount + SUPERSEARCH_PAGE_SIZE;
+      renderSuperSearchPanel(query, matches, searchTerms);
+      // Land the reader on the first newly-revealed row, not back at the top.
+      const rows = elements.superSearchList.querySelectorAll(".supersearch-item");
+      rows[revealCount]?.focus();
+    });
+    elements.superSearchList.appendChild(more);
+  }
 
   elements.superSearchList.querySelectorAll(".supersearch-item").forEach((button) => {
     button.addEventListener("click", async (event) => {
@@ -1315,6 +1381,254 @@ function setNavOpen(isOpen) {
 function syncBodyLock() {
   const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen || state.unlockOpen;
   document.body.classList.toggle("lock-scroll", shouldLock);
+}
+
+/* --------------------------------------------------------------------------
+   Theme
+
+   Every colour in the stylesheet is a custom property, so switching themes is
+   a single attribute on <html>. Two things do not follow automatically and are
+   handled here: the browser-chrome theme-color meta, and Mermaid, which bakes
+   hex into the SVG it emits and has to redraw.
+
+   theme-boot.js has already applied the stored preference before first paint;
+   this only takes over once the user touches the toggle.
+   -------------------------------------------------------------------------- */
+
+const THEME_STORAGE_KEY = "mdviewer.theme";
+// Dark first: it is the app's long-standing look, so the default never
+// surprises anyone who has not asked for a change.
+const THEME_CYCLE = ["dark", "light", "auto"];
+const THEME_META = {
+  dark: { icon: "ph-moon", label: "Dark theme", next: "light" },
+  light: { icon: "ph-sun", label: "Light theme", next: "auto" },
+  auto: { icon: "ph-circle-half", label: "Theme follows your system", next: "dark" }
+};
+const THEME_COLORS = { dark: "#06090a", light: "#f4f8f7" };
+
+function themePreference() {
+  const stored = document.documentElement.dataset.themePreference;
+  return THEME_CYCLE.includes(stored) ? stored : "dark";
+}
+
+// The concrete theme in force, with "auto" already resolved.
+function activeThemeName() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function resolveThemePreference(preference) {
+  if (preference !== "auto") {
+    return preference;
+  }
+
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function syncThemeToggleUI() {
+  if (!elements.themeToggleBtn) {
+    return;
+  }
+
+  const preference = themePreference();
+  const meta = THEME_META[preference];
+  const icon = elements.themeToggleBtn.querySelector("i");
+  if (icon) {
+    icon.className = `ph ${meta.icon}`;
+  }
+
+  // Say what it is now and what the click does — an icon alone cannot.
+  const label = `${meta.label}. Switch to ${THEME_META[meta.next].label.toLowerCase()}`;
+  elements.themeToggleBtn.setAttribute("aria-label", label);
+  elements.themeToggleBtn.title = label;
+  delete elements.themeToggleBtn.dataset.tip;
+}
+
+async function applyThemePreference(preference, { announce = false } = {}) {
+  const next = THEME_CYCLE.includes(preference) ? preference : "dark";
+  const resolvedBefore = activeThemeName();
+  const resolved = resolveThemePreference(next);
+
+  document.documentElement.dataset.themePreference = next;
+  document.documentElement.dataset.theme = resolved;
+
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+  } catch {
+    // Private mode. The choice still holds for this page session.
+  }
+
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta) {
+    themeColorMeta.setAttribute("content", THEME_COLORS[resolved]);
+  }
+
+  syncThemeToggleUI();
+
+  if (announce) {
+    notify(THEME_META[next].label + " enabled.", "info");
+  }
+
+  if (resolved !== resolvedBefore) {
+    await repaintDiagramsForTheme();
+  }
+}
+
+// Mermaid renders to a static SVG with the palette inlined, so the only way to
+// recolour a diagram is to draw it again from its source.
+async function repaintDiagramsForTheme() {
+  const roots = [elements.docContent, elements.editorPreview].filter(Boolean);
+  const blocks = roots.flatMap((root) => [...root.querySelectorAll(".mermaid-block")]);
+  if (blocks.length === 0) {
+    // Nothing on screen to redraw, but the next render must not reuse the old
+    // palette.
+    state.mermaidReady = false;
+    return;
+  }
+
+  // Their SVGs are about to be replaced; leaving the instances bound would leak
+  // handlers onto detached nodes.
+  destroyPanZoomInstances();
+
+  for (const block of blocks) {
+    const source = block.dataset.mermaidSource;
+    if (!source) {
+      continue;
+    }
+
+    block.removeAttribute("data-processed");
+    // Sizing is derived from the rendered viewBox and has to be measured again.
+    block.style.aspectRatio = "";
+    block.style.maxWidth = "";
+    block.textContent = source;
+    block.classList.add("mermaid");
+  }
+
+  state.mermaidReady = false;
+
+  for (const root of roots) {
+    await renderMermaidBlocks(root);
+  }
+}
+
+function bindThemeToggle() {
+  syncThemeToggleUI();
+
+  elements.themeToggleBtn?.addEventListener("click", () => {
+    void applyThemePreference(THEME_META[themePreference()].next, { announce: true });
+  });
+
+  // Only meaningful while the preference is "auto", but the listener is cheap
+  // and the guard keeps an explicit choice from being overridden.
+  window.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => {
+    if (themePreference() === "auto") {
+      void applyThemePreference("auto");
+    }
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Modal focus containment
+
+   The dialogs claimed aria-modal="true" but nothing enforced it: a screen
+   reader could walk the whole page behind them, Tab escaped into the app, and
+   closing one dropped focus on <body>. This keeps a stack (the editor can open
+   a confirm on top of itself), marks everything below the top dialog inert,
+   and hands focus back to whatever opened it.
+   -------------------------------------------------------------------------- */
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
+
+const modalLayerStack = [];
+
+function focusableWithin(container) {
+  return [...container.querySelectorAll(FOCUSABLE_SELECTOR)].filter((node) => {
+    // offsetParent is null for display:none subtrees; position:fixed nodes have
+    // no offsetParent either, so fall back to a box check for those.
+    return node.offsetParent !== null || node.getClientRects().length > 0;
+  });
+}
+
+function syncModalInertness() {
+  const top = modalLayerStack.length
+    ? modalLayerStack[modalLayerStack.length - 1].element
+    : null;
+
+  for (const node of document.body.children) {
+    // Toasts have to stay announceable even while a dialog is up.
+    if (node.id === "toastRegion") {
+      continue;
+    }
+
+    node.inert = Boolean(top) && node !== top;
+  }
+}
+
+function trapModalTab(event) {
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  const layer = modalLayerStack[modalLayerStack.length - 1];
+  if (!layer || !layer.element.contains(event.currentTarget)) {
+    return;
+  }
+
+  const focusable = focusableWithin(layer.element);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+
+  if (event.shiftKey && (active === first || !layer.element.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function enterModalLayer(element) {
+  if (modalLayerStack.some((layer) => layer.element === element)) {
+    return;
+  }
+
+  const opener = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  element.addEventListener("keydown", trapModalTab);
+  modalLayerStack.push({ element, opener });
+  syncModalInertness();
+}
+
+function exitModalLayer(element) {
+  const index = modalLayerStack.findIndex((layer) => layer.element === element);
+  if (index === -1) {
+    return;
+  }
+
+  const [layer] = modalLayerStack.splice(index, 1);
+  element.removeEventListener("keydown", trapModalTab);
+  syncModalInertness();
+
+  // Only the dialog that actually owned focus should move it, and only if the
+  // opener is still on the page and reachable.
+  const opener = layer.opener;
+  if (opener && opener.isConnected && !opener.inert && typeof opener.focus === "function") {
+    opener.focus();
+  }
 }
 
 function inferIcon(fileName) {
@@ -1400,6 +1714,18 @@ function formatBytes(size) {
 
 function setMeta(message) {
   elements.searchMeta.textContent = message;
+  syncFilterChip();
+}
+
+// The results panel and the file tree are two views of one query. This chip is
+// what ties them together in the tree, and the way out of the filter without
+// hunting for the search box.
+function syncFilterChip() {
+  if (!elements.clearFilterBtn) {
+    return;
+  }
+
+  elements.clearFilterBtn.hidden = String(elements.searchInput.value || "").trim().length === 0;
 }
 
 // --- Breadcrumbs ----------------------------------------------------------
@@ -1728,6 +2054,7 @@ function resolveConfirmDialog(confirmed) {
   state.confirmOpen = false;
   elements.confirmModal.classList.remove("open");
   elements.confirmModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.confirmModal);
   syncBodyLock();
 
   if (typeof state.confirmResolver === "function") {
@@ -1765,6 +2092,7 @@ function requestConfirmation({
     state.confirmResolver = resolve;
     elements.confirmModal.classList.add("open");
     elements.confirmModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.confirmModal);
     syncBodyLock();
     elements.confirmProceedBtn.focus();
   });
@@ -1873,6 +2201,7 @@ function openUnlockModal() {
   elements.unlockTokenInput.value = "";
   elements.unlockModal.classList.add("open");
   elements.unlockModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.unlockModal);
   syncBodyLock();
   window.requestAnimationFrame(() => elements.unlockTokenInput.focus());
 }
@@ -1882,6 +2211,7 @@ function closeUnlockModal() {
   elements.unlockTokenInput.value = "";
   elements.unlockModal.classList.remove("open");
   elements.unlockModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.unlockModal);
   syncBodyLock();
 }
 
@@ -2394,26 +2724,12 @@ function renderDocumentContent(fileName, rawContent, title) {
   return renderMarkdown(renderedSource);
 }
 
-function ensureMermaidInitialized() {
-  if (!window.mermaid || state.mermaidReady) {
-    return;
-  }
-
-  window.mermaid.initialize({
-    startOnLoad: false,
-    // "antiscript" runs DOMPurify over diagram labels and blocks javascript:
-    // click directives, while still allowing the <br/> tags our docs rely on.
-    // Do not set this back to "loose": Mermaid renders after DOMPurify has run
-    // on the markdown, so "loose" lets an uploaded document execute script.
-    securityLevel: "antiscript",
-    theme: "base",
-    darkMode: true,
-    fontFamily: '"Inter", sans-serif',
-    // Colours belong in themeVariables, not in blanket !important overrides.
-    // The previous set filled every node with the surface colour — the same
-    // colour as the block behind it — and stroked them in --border-muted, which
-    // is barely a shade off it. Nodes have to sit a step above the background
-    // with a border that can actually be seen.
+// Mermaid bakes hex colours into the SVG it emits, so it cannot read the CSS
+// custom properties the rest of the app themes with. These two tables are the
+// diagram-side mirror of the light and dark token sets in app.css; if a token
+// there changes, change its counterpart here.
+const DIAGRAM_PALETTES = {
+  dark: {
     themeVariables: {
       background: "#0c1214",
       mainBkg: "#1c262a",
@@ -2437,7 +2753,6 @@ function ensureMermaidInitialized() {
       labelBoxBorderColor: "#2e3d42",
       labelTextColor: "#dce7e5",
       titleColor: "#dce7e5",
-      // Sequence diagrams
       actorBkg: "#1c262a",
       actorBorder: "#3f8d84",
       actorTextColor: "#dce7e5",
@@ -2448,21 +2763,69 @@ function ensureMermaidInitialized() {
       noteBkgColor: "#253238",
       noteTextColor: "#dce7e5",
       noteBorderColor: "#2e3d42",
-      // Entity relationship diagrams
       attributeBackgroundColorOdd: "#0c1214",
       attributeBackgroundColorEven: "#1c262a",
       altBackground: "#0a1013"
     },
-    er: {
-      useMaxWidth: true
+    // Fills the base theme emits that have to be corrected on this background.
+    strayFills: ["#ffffff", "white", "#ECECFF"]
+  },
+  light: {
+    themeVariables: {
+      background: "#ffffff",
+      mainBkg: "#eef4f2",
+      primaryColor: "#eef4f2",
+      primaryTextColor: "#101b1a",
+      primaryBorderColor: "#10635a",
+      secondaryColor: "#dcece9",
+      secondaryTextColor: "#101b1a",
+      secondaryBorderColor: "#a6b9b5",
+      tertiaryColor: "#f4f8f7",
+      tertiaryTextColor: "#101b1a",
+      tertiaryBorderColor: "#a6b9b5",
+      lineColor: "#465956",
+      textColor: "#101b1a",
+      nodeBorder: "#10635a",
+      nodeTextColor: "#101b1a",
+      clusterBkg: "#f4f8f7",
+      clusterBorder: "#a6b9b5",
+      edgeLabelBackground: "#ffffff",
+      labelBoxBkgColor: "#eef4f2",
+      labelBoxBorderColor: "#a6b9b5",
+      labelTextColor: "#101b1a",
+      titleColor: "#101b1a",
+      actorBkg: "#eef4f2",
+      actorBorder: "#10635a",
+      actorTextColor: "#101b1a",
+      actorLineColor: "#465956",
+      signalColor: "#465956",
+      signalTextColor: "#101b1a",
+      loopTextColor: "#101b1a",
+      noteBkgColor: "#dcece9",
+      noteTextColor: "#101b1a",
+      noteBorderColor: "#a6b9b5",
+      attributeBackgroundColorOdd: "#ffffff",
+      attributeBackgroundColorEven: "#eef4f2",
+      altBackground: "#f4f8f7"
     },
-    themeCSS: `
-      /* Only the gaps the base theme leaves on a dark background. Crucially not
-         a blanket rule on <path>: that fills edge lines and turns every
-         connector into a solid blob. */
+    // On white, the base theme's own light fills are fine; the lavender is not.
+    strayFills: ["#ECECFF"]
+  }
+};
+
+function buildDiagramThemeCss(palette) {
+  const vars = palette.themeVariables;
+  const strayShapes = palette.strayFills
+    .flatMap((fill) => ["rect", "polygon", "circle", "ellipse"].map((shape) => `${shape}[fill="${fill}"]`))
+    .join(", ");
+
+  return `
+      /* Only the gaps the base theme leaves. Crucially not a blanket rule on
+         <path>: that fills edge lines and turns every connector into a solid
+         blob. */
       text,
       tspan {
-        fill: #dce7e5;
+        fill: ${vars.textColor};
       }
 
       .nodeLabel,
@@ -2470,39 +2833,74 @@ function ensureMermaidInitialized() {
       .label,
       foreignObject div,
       foreignObject span {
-        color: #dce7e5 !important;
+        color: ${vars.textColor} !important;
       }
 
-      /* Edge labels ship with a light plate behind them. */
+      /* Edge labels ship with their own plate behind them. */
       .edgeLabel rect,
       .labelBkg,
       rect.background {
-        fill: #0c1214 !important;
+        fill: ${vars.edgeLabelBackground} !important;
         opacity: 1 !important;
       }
 
       .er.entityBox,
       .entityBox {
-        fill: #1c262a;
-        stroke: #3f8d84;
+        fill: ${vars.mainBkg};
+        stroke: ${vars.nodeBorder};
       }
 
       .relationshipLine,
       .messageLine0,
       .messageLine1 {
-        stroke: #86a09d;
+        stroke: ${vars.lineColor};
         fill: none;
       }
 
-      /* Any light fill the base theme still emits, without touching edges. */
-      rect[fill="#ffffff"], rect[fill="white"], rect[fill="#ECECFF"],
-      polygon[fill="#ffffff"], polygon[fill="white"], polygon[fill="#ECECFF"],
-      circle[fill="#ffffff"], circle[fill="white"], circle[fill="#ECECFF"],
-      ellipse[fill="#ffffff"], ellipse[fill="white"], ellipse[fill="#ECECFF"] {
-        fill: #1c262a !important;
+      /* Stray fills the base theme still emits, without touching edges. */
+      ${strayShapes} {
+        fill: ${vars.mainBkg} !important;
       }
-    `
+    `;
+}
+
+function ensureMermaidInitialized() {
+  if (!window.mermaid) {
+    return;
+  }
+
+  // Re-initialize when the theme has moved on, not only when nothing has been
+  // initialized yet — otherwise a stale palette survives a theme change.
+  const theme = activeThemeName();
+  if (state.mermaidReady && state.mermaidTheme === theme) {
+    return;
+  }
+
+  const palette = DIAGRAM_PALETTES[theme] || DIAGRAM_PALETTES.dark;
+
+  window.mermaid.initialize({
+    startOnLoad: false,
+    // "antiscript" runs DOMPurify over diagram labels and blocks javascript:
+    // click directives, while still allowing the <br/> tags our docs rely on.
+    // Do not set this back to "loose": Mermaid renders after DOMPurify has run
+    // on the markdown, so "loose" lets an uploaded document execute script.
+    securityLevel: "antiscript",
+    theme: "base",
+    darkMode: theme === "dark",
+    fontFamily: '"Inter", sans-serif',
+    // Colours belong in themeVariables, not in blanket !important overrides.
+    // An earlier set filled every node with the surface colour — the same
+    // colour as the block behind it — and stroked them in --border-muted, which
+    // is barely a shade off it. Nodes have to sit a step above the background
+    // with a border that can actually be seen.
+    themeVariables: palette.themeVariables,
+    er: {
+      useMaxWidth: true
+    },
+    themeCSS: buildDiagramThemeCss(palette)
   });
+
+  state.mermaidTheme = theme;
   state.mermaidReady = true;
 }
 
@@ -2513,6 +2911,10 @@ function promoteMermaidCodeBlocks(root) {
     const block = document.createElement("div");
     block.className = "mermaid mermaid-block";
     block.textContent = source;
+    // Kept so the diagram can be redrawn from source when the theme changes;
+    // Mermaid bakes its colours into the SVG at render time, so a repaint is
+    // the only way to recolour one.
+    block.dataset.mermaidSource = source;
     const pre = codeNode.closest("pre");
     if (pre) {
       pre.replaceWith(block);
@@ -2719,6 +3121,48 @@ function destroyPanZoomInstances(root = null) {
   }
 }
 
+// Wheel-over-diagram used to zoom instead of scrolling the page, which turned
+// every diagram into a scroll trap. Wheel zoom is now opt-in for exactly as
+// long as Ctrl/Cmd is held — the same gesture maps use.
+let wheelZoomArmed = false;
+
+function setWheelZoomArmed(armed) {
+  if (armed === wheelZoomArmed) {
+    return;
+  }
+
+  wheelZoomArmed = armed;
+  for (const instance of livePanZoomInstances.values()) {
+    try {
+      if (armed) {
+        instance.enableMouseWheelZoom();
+      } else {
+        instance.disableMouseWheelZoom();
+      }
+    } catch (error) {
+      console.error("Pan/zoom wheel toggle failed", error);
+    }
+  }
+}
+
+function bindWheelZoomModifier() {
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Control" || event.key === "Meta") {
+      setWheelZoomArmed(true);
+    }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    if (event.key === "Control" || event.key === "Meta") {
+      setWheelZoomArmed(false);
+    }
+  });
+
+  // A keyup that happens while the window is unfocused never arrives, so the
+  // modifier would stay stuck on. Reset whenever focus leaves.
+  window.addEventListener("blur", () => setWheelZoomArmed(false));
+}
+
 // svg-pan-zoom sets the SVG to width:100%/height:100%, so the block has to have
 // a height of its own or the whole thing collapses to nothing — which is what a
 // plain `height: auto` container did. Take the shape from the diagram's own
@@ -2798,10 +3242,18 @@ function applyPanZoom(root) {
         center: true,
         minZoom: 0.5,
         maxZoom: 12,
-        zoomScaleSensitivity: 0.3
+        zoomScaleSensitivity: 0.3,
+        // Off by default so scrolling the page past a diagram scrolls the page.
+        // Held Ctrl/Cmd turns it on for as long as the key is down; the +/-
+        // control icons work regardless.
+        mouseWheelZoomEnabled: false
       });
       svg.dataset.panzoomInit = "1";
       livePanZoomInstances.set(svg, panZoomInstance);
+      if (wheelZoomArmed) {
+        // Rendered while the modifier was already down.
+        panZoomInstance.enableMouseWheelZoom();
+      }
       window.requestAnimationFrame(() => {
         try {
           panZoomInstance.resize();
@@ -4708,6 +5160,7 @@ function openEditor({ mode, fileName, content }) {
 
   elements.editorModal.classList.add("open");
   elements.editorModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.editorModal);
   syncBodyLock();
 
   elements.editorInput.focus();
@@ -4732,6 +5185,7 @@ function closeEditor() {
   state.editorInitialFileName = "";
   elements.editorModal.classList.remove("open");
   elements.editorModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.editorModal);
   syncBodyLock();
 }
 
@@ -5128,6 +5582,8 @@ async function hardDeleteDeletedDocumentByFile(file) {
 async function initialize() {
   setMeta("Loading documents...");
   mountMatchNavToViewportLayer();
+  bindWheelZoomModifier();
+  bindThemeToggle();
   syncLockUI();
   await restoreWriteSession();
   syncModeUI();
@@ -5242,6 +5698,11 @@ elements.searchInput.addEventListener("keydown", async (event) => {
     closeSidebarOnMobile();
     setSuperSearchOpen(false);
   }
+});
+
+elements.clearFilterBtn?.addEventListener("click", () => {
+  exitSearchMode();
+  elements.searchInput.focus();
 });
 
 elements.matchPrevBtn.addEventListener("click", async () => {
@@ -5734,4 +6195,147 @@ document.addEventListener("click", (event) => {
   setSuperSearchOpen(false);
 });
 
+/* --------------------------------------------------------------------------
+   Tooltips
+
+   Nearly every control in this app is icon-only, and native `title` tooltips
+   are slow, unstyleable, and land in the wrong place. This adopts the existing
+   `title` attributes rather than replacing them at ~40 call sites: on first
+   hover the text is moved to `data-tip` (which also stops the native tooltip
+   from ever appearing) and drawn in one body-level element, so a tooltip is
+   never clipped by the sidebar's own scroll container.
+
+   `aria-label` still carries the accessible name, so the tooltip itself is
+   decorative and hidden from assistive tech.
+   -------------------------------------------------------------------------- */
+
+const TOOLTIP_GAP = 8;
+const TOOLTIP_EDGE_PADDING = 8;
+
+let tooltipElement = null;
+let tooltipTarget = null;
+
+function ensureTooltipElement() {
+  if (tooltipElement) {
+    return tooltipElement;
+  }
+
+  tooltipElement = document.createElement("div");
+  tooltipElement.className = "tooltip";
+  tooltipElement.setAttribute("aria-hidden", "true");
+  tooltipElement.hidden = true;
+  document.body.appendChild(tooltipElement);
+  return tooltipElement;
+}
+
+function tooltipTextFor(element) {
+  // A freshly-assigned .title wins: dynamic labels ("Archive" -> "Exit
+  // archive") are rewritten by the code that owns them.
+  const native = element.getAttribute("title");
+  if (native) {
+    element.dataset.tip = native;
+    element.removeAttribute("title");
+  }
+
+  return element.dataset.tip || "";
+}
+
+function hideTooltip() {
+  tooltipTarget = null;
+  if (tooltipElement) {
+    tooltipElement.hidden = true;
+    tooltipElement.classList.remove("is-above");
+  }
+}
+
+function showTooltip(element) {
+  const text = tooltipTextFor(element);
+  if (!text) {
+    hideTooltip();
+    return;
+  }
+
+  const tip = ensureTooltipElement();
+  tooltipTarget = element;
+  tip.textContent = text;
+  tip.hidden = false;
+
+  const anchor = element.getBoundingClientRect();
+  const box = tip.getBoundingClientRect();
+
+  // Below by default, above when the bottom of the window is in the way.
+  const above = anchor.bottom + TOOLTIP_GAP + box.height > window.innerHeight;
+  const top = above
+    ? anchor.top - box.height - TOOLTIP_GAP
+    : anchor.bottom + TOOLTIP_GAP;
+
+  const maxLeft = window.innerWidth - box.width - TOOLTIP_EDGE_PADDING;
+  const left = Math.min(
+    Math.max(anchor.left + (anchor.width - box.width) / 2, TOOLTIP_EDGE_PADDING),
+    Math.max(maxLeft, TOOLTIP_EDGE_PADDING)
+  );
+
+  tip.classList.toggle("is-above", above);
+  tip.style.top = `${Math.round(top)}px`;
+  tip.style.left = `${Math.round(left)}px`;
+}
+
+function bindTooltips() {
+  document.addEventListener("pointerover", (event) => {
+    // Touch has no hover state, and a tooltip there just covers what was
+    // tapped. The mobile dock carries visible text labels instead.
+    if (event.pointerType === "touch" || !(event.target instanceof Element)) {
+      return;
+    }
+
+    const element = event.target.closest("[title], [data-tip]");
+    if (!element || element === tooltipTarget) {
+      if (!element) {
+        hideTooltip();
+      }
+      return;
+    }
+
+    showTooltip(element);
+  });
+
+  document.addEventListener("pointerout", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    // relatedTarget null means the pointer left the window entirely.
+    const next = event.relatedTarget;
+    if (tooltipTarget && (!next || !tooltipTarget.contains(next))) {
+      hideTooltip();
+    }
+  });
+
+  document.addEventListener("focusin", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    const element = event.target.closest("[title], [data-tip]");
+    if (element && element.matches(":focus-visible")) {
+      showTooltip(element);
+    } else {
+      hideTooltip();
+    }
+  });
+
+  document.addEventListener("focusout", hideTooltip);
+  document.addEventListener("click", hideTooltip);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideTooltip();
+    }
+  });
+  // The anchor moves out from under a tooltip on any scroll, including the
+  // sidebar's own, so listen in the capture phase to catch every scroller.
+  document.addEventListener("scroll", hideTooltip, true);
+  window.addEventListener("resize", hideTooltip);
+}
+
+bindTooltips();
 initialize();

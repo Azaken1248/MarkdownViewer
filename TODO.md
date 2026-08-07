@@ -160,11 +160,14 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 - [x] **39. All three modals stay in the tab order while invisible.** `.editor-modal`, `.confirm-modal`, `.folder-modal` use `opacity: 0; pointer-events: none` (`app.css:1399`, `1469`, `1663`) — opacity-0 elements remain focusable. Tabbing through the closed app drops focus into invisible dialogs. Same bug on `.search-clear` (`app.css:186`).
   - Fixed: modals are `display: none` until `.open`, so nothing invisible stays in the tab order. `.search-clear` is `display: none` until the box has a value.
 
-- [ ] **40. No focus trap, no focus restore, no `inert` on the background.** The dialogs declare `aria-modal="true"` but screen readers can still traverse the entire page behind them, and closing a modal drops focus to `<body>`.
+- [x] **40. No focus trap, no focus restore, no `inert` on the background.** The dialogs declare `aria-modal="true"` but screen readers can still traverse the entire page behind them, and closing a modal drops focus to `<body>`.
+  - Fixed: `enterModalLayer` / `exitModalLayer` keep a stack (the editor can open a confirm on top of itself), mark every body-level sibling below the top dialog `inert`, cycle Tab within it, and hand focus back to the element that opened it. The toast region is deliberately exempt so it stays announceable. Verified for the stacked case: closing the inner dialog revives the outer one but not the app.
 
-- [ ] **41. `aria-live="polite"` on the entire `#docContent` article** (`index.html:190`). Every document load announces the whole document to screen readers.
+- [x] **41. `aria-live="polite"` on the entire `#docContent` article** (`index.html:190`). Every document load announces the whole document to screen readers.
+  - Fixed: the article is no longer a live region. The same defect was present on the whole `#superSearchPanel`, which re-announced all eight result rows on every keystroke — now only the result tally is live.
 
-- [ ] **42. Touch targets are undersized.** `.row-quick-actions .icon-btn` is 1.8rem ≈ 29px (`app.css:481`); `.icon-btn` is 2.2rem ≈ 35px. Both under the 44px minimum — and the 29px ones are the edit/move/**delete** row actions.
+- [x] **42. Touch targets are undersized.** `.row-quick-actions .icon-btn` is 1.8rem ≈ 29px (`app.css:481`); `.icon-btn` is 2.2rem ≈ 35px. Both under the 44px minimum — and the 29px ones are the edit/move/**delete** row actions.
+  - Fixed: on touch, tree rows are 44px, the row overflow button is 40px and sidebar icon buttons are 36px. On a fine pointer the bar is WCAG 2.5.8's 24px rather than 2.5.5's 44px, which is the criterion that actually applies to a mouse; `.tree-action` (22px), `.search-clear` (20px), `.crumb` and the new filter chip were all raised to clear it.
 
 - [x] **43. `prefers-reduced-motion` is never honored** (0 occurrences). Hover lifts, 220ms slide-ins, and `scrollIntoView({behavior:"smooth"})` all run unconditionally.
   - Fixed: a `prefers-reduced-motion` block reduces every transition and animation to ~0ms, and the dock's `scrollIntoView` now passes `behavior: "auto"` when the query matches.
@@ -177,25 +180,34 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 - [x] **45. Destructive actions are visually indistinguishable from safe ones.** Soft delete (`fa-trash-can`) and hard delete (`fa-trash`) sit adjacent, same size, same shape, differing only by a faint red tint and one tooltip word. Three different trash-family icons are in play (`trash-can`, `trash`, `box-archive`) with no legend anywhere.
   - Fixed: the three destructive actions are now distinct icons with distinct wording — `ph-trash` "Move to recycle bin", `ph-archive-box` "Archive", `ph-trash` "Delete forever" (archive view only) — and every destructive control carries `.danger`, which turns it red on hover instead of tinting it faintly at rest.
 
-- [ ] **46. Every action is icon-only with no text label** — header, sidebar, viewer toolbar, and row hover menus. Nothing is discoverable without hovering.
+- [x] **46. Every action is icon-only with no text label** — header, sidebar, viewer toolbar, and row hover menus. Nothing is discoverable without hovering.
+  - Fixed: a tooltip layer adopts the existing `title` attributes — on first hover the text moves to `data-tip` (which also stops the native tooltip, so they can never double up) and is drawn in one body-level element, positioned against the viewport so the sidebar's own scroll container cannot clip it. It shows on keyboard focus too, and is `aria-hidden` because `aria-label` already carries the accessible name. Skipped on touch, where the mobile dock has visible text labels instead.
 
-- [ ] **47. Two competing search UIs render the same data simultaneously** — the supersearch overlay panel *and* the filtered sidebar list.
+- [x] **47. Two competing search UIs render the same data simultaneously** — the supersearch overlay panel *and* the filtered sidebar list.
+  - Fixed by making the relationship explicit rather than deleting one of them: they do different jobs (snippets and keyboard jump vs. folder context and file actions), and the tree now carries a "Filtered" chip that says it is showing a subset and clears the query in one click. Clicking anywhere outside the panel already dismissed it, so the two are rarely on screen together.
 
-- [ ] **48. Supersearch caps at 8 results but reports the full count** (`SUPERSEARCH_LIMIT`, `app.js:104` / `1110`). "42 result(s)" with 8 rows and no "show more."
+- [x] **48. Supersearch caps at 8 results but reports the full count** (`SUPERSEARCH_LIMIT`, `app.js:104` / `1110`). "42 result(s)" with 8 rows and no "show more."
+  - Fixed: the tally reads "Showing 8 of 42" whenever it is holding results back, and a "Show 34 more" control reveals another 12 at a time, moving focus to the first newly-revealed row. A new query resets the reveal; re-rendering the same one keeps it.
 
-- [ ] **49. Wheel-zoom hijacking.** svg-pan-zoom is initialized without `mouseWheelZoomEnabled: false`, so scrolling the page with the cursor over a diagram zooms it instead. Made worse by #50.
+- [x] **49. Wheel-zoom hijacking.** svg-pan-zoom is initialized without `mouseWheelZoomEnabled: false`, so scrolling the page with the cursor over a diagram zooms it instead. Made worse by #50.
+  - Fixed: wheel zoom is off by default, so scrolling past a diagram scrolls the page. Holding Ctrl/Cmd arms it for as long as the key is down (the gesture maps use), and the +/- control icons work regardless. A window blur disarms it, since a keyup that happens unfocused never arrives.
 
 - [x] **50. Every Mermaid diagram is forced to 65vh with a 500px minimum** (`app.css:1200-1213`), regardless of content. A three-node flowchart occupies half the screen, and the block is nearly unavoidable as a wheel trap.
   - Fixed: the forced `65vh` / `500px` minimum is gone. Diagrams size to their content (`height: auto`), so a three-node flowchart takes three nodes' worth of space.
 
-- [ ] **51. Enter-to-jump-to-next-match in the search box (`app.js:3240`) is completely undiscoverable** — no hint, no shortcut legend anywhere in the app.
+- [x] **51. Enter-to-jump-to-next-match in the search box (`app.js:3240`) is completely undiscoverable** — no hint, no shortcut legend anywhere in the app.
+  - Fixed: the results panel carries a hint row that names the keys, and it changes with the mode — "Enter open top result" normally, "Enter next match · Shift+Enter previous" once you are reading a document that matches the query. The `/` focus shortcut is on the search box itself.
 
 - [x] **52. The status bar reserves 1.9rem permanently** (`app.css:893`) even when empty, and narrates routine actions ("Viewing X") into an `aria-live` region.
   - Fixed: the permanently-reserved status bar is gone entirely, replaced by toasts that occupy no layout when there is nothing to say.
 
-- [ ] **53. No print stylesheet** (0 `@media print`) — for a document viewer.
+- [x] **53. No print stylesheet** (0 `@media print`) — for a document viewer.
+  - Fixed: chrome comes off, the fixed shell's height clamp and overflow clip are released so the document flows across sheets (without this only the first page prints), the dark palette inverts, link destinations are printed after the link text, and code blocks, table rows and diagrams get `break-inside: avoid`.
 
-- [ ] **54. Hardcoded dark theme only.** No `prefers-color-scheme`, no toggle, despite `theme-color` being set.
+- [x] **54. Hardcoded dark theme only.** No `prefers-color-scheme`, no toggle, despite `theme-color` being set.
+  - Fixed: a header toggle cycles dark -> light -> auto, persisted in `localStorage`. **Dark stays the default** so nothing changes for an existing user; only "auto" follows the operating system. Because every colour already goes through a custom property, the light theme is a token swap and no component knows which theme is running — the same teal, darkened until it carries text weight on a pale surface. Two things do not follow automatically and are handled explicitly: the `theme-color` meta, and Mermaid, which bakes hex into its SVG and so is redrawn from source on a theme change.
+  - `js/theme-boot.js` applies the stored preference before first paint, and resolves "auto" to a concrete value there, so the stylesheet never has to carry a second copy of the palette inside a `prefers-color-scheme` query. It is a separate file rather than an inline script because the CSP has no `'unsafe-inline'` for scripts.
+  - Contrast measured on both themes: light body text 16.43:1, accent 6.64:1 on canvas, 5.83:1 on a selected row, primary button label 6.17:1. Scrollbar thumbs got their own token so they could reach the 3:1 that WCAG 1.4.11 asks of a control without thickening every hairline border in the app.
 
 ### Layout / CSS
 
