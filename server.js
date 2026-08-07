@@ -11,9 +11,20 @@ const app = express();
 const PORT = process.env.PORT || 4321;
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-const MARKDOWN_DIR = path.join(PUBLIC_DIR, "docs");
-const DELETED_MARKDOWN_DIR = path.join(ROOT_DIR, "deleted_markdowns");
-const DATA_DIR = path.join(ROOT_DIR, "data");
+
+// Where runtime state lives: the documents themselves, the recycle bin and the
+// folder organizer. Defaults to the checkout, which is the layout this has
+// always used. MDVIEWER_STATE_DIR moves all three together — the test suite
+// points it at a throwaway directory so a test run can never touch real
+// documents, and a deployment can use it to keep state outside the checkout.
+const STATE_DIR = process.env.MDVIEWER_STATE_DIR
+  ? path.resolve(process.env.MDVIEWER_STATE_DIR)
+  : ROOT_DIR;
+const MARKDOWN_DIR = process.env.MDVIEWER_STATE_DIR
+  ? path.join(STATE_DIR, "docs")
+  : path.join(PUBLIC_DIR, "docs");
+const DELETED_MARKDOWN_DIR = path.join(STATE_DIR, "deleted_markdowns");
+const DATA_DIR = path.join(STATE_DIR, "data");
 const ORGANIZER_FILE_PATH = path.join(DATA_DIR, "document-organizer.json");
 const DELETED_SOFT_DIR = path.join(DELETED_MARKDOWN_DIR, "soft");
 const DELETED_HARD_DIR = path.join(DELETED_MARKDOWN_DIR, "hard");
@@ -22,6 +33,8 @@ const ALLOWED_DOC_EXTENSIONS = new Set([".md", ".markdown", ".mmd", ".mermaid", 
 // Characters that are unsafe in a path segment on the platforms this can run on,
 // plus C0/C1 control characters. Everything else — accents, CJK, parentheses,
 // ampersands, plus signs — is a perfectly ordinary thing to call a document.
+// Matching control characters is the entire point of this guard.
+// eslint-disable-next-line no-control-regex
 const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]/;
 // Reserved device names on Windows, which are illegal with or without an extension.
 const RESERVED_DEVICE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
@@ -38,12 +51,21 @@ const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
-const SITE_NAME = "Markdown Docs Viewer";
-const EMBED_TITLE = "Markdown Docs Viewer | Cart Knowledge Hub";
-const EMBED_DESCRIPTION = "Browse, search, and share cart documentation with live markdown editing and Mermaid diagrams.";
-const EMBED_THEME_COLOR = "#89b4fa";
+const SITE_NAME = "AzaDocs";
+const EMBED_TITLE = "AzaDocs";
+const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit documents, with Mermaid diagrams and Jupyter notebooks rendered inline.";
+// The dark canvas, which is the default theme. The old value was Catppuccin
+// blue, left over from a palette the app no longer uses.
+const EMBED_THEME_COLOR = "#06090a";
 const EMBED_IMAGE_PATH = "/social-card.svg";
 const FAVICON_PATH = "/favicon.svg";
+const EMBED_AUTHOR_NAME = "Azaken1248";
+// Where this actually lives. Canonical, og:*, and oEmbed URLs are built from
+// this rather than from the request, so a spoofed Host header cannot redirect
+// a link preview somewhere else. PUBLIC_BASE_URL overrides it — set it to
+// http://localhost:4321 when working locally if you need the previews to point
+// at your own machine.
+const DEFAULT_PUBLIC_BASE_URL = "https://md.azaken.com";
 
 // Only trust X-Forwarded-* when we are actually behind a reverse proxy.
 // Trusting them unconditionally lets any client spoof the host/protocol used
@@ -83,6 +105,38 @@ app.use((req, res, next) => {
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   next();
 });
+
+// Request logging. One line per request, written when the response finishes so
+// the status and duration are real rather than assumed.
+//
+// Static assets are skipped by default: they are the overwhelming majority of
+// requests and drown out everything worth reading. LOG_STATIC=true includes
+// them. LOG_REQUESTS=false turns logging off entirely, which is what the test
+// suite uses to keep its output clean.
+const LOG_REQUESTS = String(process.env.LOG_REQUESTS || "true").toLowerCase() !== "false";
+const LOG_STATIC = String(process.env.LOG_STATIC || "").toLowerCase() === "true";
+const STATIC_ASSET_PATTERN = /\.(?:css|js|svg|png|jpe?g|gif|ico|woff2?|map)$/i;
+
+if (LOG_REQUESTS) {
+  app.use((req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+
+    res.on("finish", () => {
+      if (!LOG_STATIC && STATIC_ASSET_PATTERN.test(req.path)) {
+        return;
+      }
+
+      const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      // Query strings can carry search terms, which are the contents of the
+      // user's own documents. Log the path only.
+      console.log(
+        `${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ${ms.toFixed(1)}ms`
+      );
+    });
+
+    next();
+  });
+}
 
 // The envelope limit has to sit above MAX_DOC_BYTES, not equal it: JSON escaping
 // inflates the payload, so a legal 2MB document arrives as a larger body. When the
@@ -461,6 +515,9 @@ async function readOrganizerState({ forWrite = false } = {}) {
   } catch (parseError) {
     if (!organizerDamage) {
       const backupPath = await quarantineOrganizerFile(parseError.message);
+      // Worst case two concurrent readers each write a backup, which is
+      // harmless; the original file is never touched either way.
+      // eslint-disable-next-line require-atomic-updates
       organizerDamage = { backupPath, message: parseError.message };
     }
 
@@ -525,9 +582,6 @@ async function mutateOrganizerState(mutator) {
   });
 }
 
-async function writeOrganizerState(organizerState) {
-  return withOrganizerLock(() => writeOrganizerStateUnsafe(organizerState));
-}
 
 function getFolderRecordById(organizerState, folderId) {
   const normalizedFolderId = normalizeFolderId(folderId);
@@ -978,7 +1032,7 @@ function parseOriginalFilenameFromRecycleEntry(entryName) {
 }
 
 function createRecycleEntryFilename(fileName) {
-  const stamp = new Date().toISOString().replace(/[\-:.TZ]/g, "");
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "");
   const random = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${random}--${fileName}`;
 }
@@ -1187,7 +1241,7 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -1208,6 +1262,12 @@ function getBaseUrlFromRequest(req) {
   const configuredBaseUrl = String(process.env.PUBLIC_BASE_URL || "").trim();
   if (isAbsoluteHttpUrl(configuredBaseUrl)) {
     return configuredBaseUrl.replace(/\/+$/, "");
+  }
+
+  // A known public origin beats anything derived from the request. This is the
+  // strongest form of the host-header defence: there is no header to spoof.
+  if (isAbsoluteHttpUrl(DEFAULT_PUBLIC_BASE_URL)) {
+    return DEFAULT_PUBLIC_BASE_URL.replace(/\/+$/, "");
   }
 
   if (!req) {
@@ -1273,7 +1333,11 @@ async function getIndexTemplate() {
     return indexTemplateCache;
   }
 
+  // An idempotent read-through cache: concurrent misses both read the same
+  // file and store the same string.
+  // eslint-disable-next-line require-atomic-updates
   indexTemplateCache = await fsp.readFile(INDEX_TEMPLATE_PATH, "utf8");
+  // eslint-disable-next-line require-atomic-updates
   indexTemplateCacheMtimeMs = stat.mtimeMs;
   return indexTemplateCache;
 }
@@ -1318,6 +1382,32 @@ app.all(
   })
 );
 
+// A health check a process manager or uptime monitor can actually use. The
+// GraphQL `health` field returns a constant string and so only proves the
+// process is up; this proves the storage the app depends on is readable, which
+// is the failure that matters. Returns 503 when it is not, so a monitor sees a
+// failure rather than a cheerful 200.
+app.get("/healthz", async (req, res) => {
+  const startedAt = Date.now();
+
+  try {
+    const docs = await getDocs();
+    res.json({
+      status: "ok",
+      uptimeSeconds: Math.round(process.uptime()),
+      documents: docs.length,
+      checkMs: Date.now() - startedAt
+    });
+  } catch (error) {
+    console.error("Health check failed", error);
+    res.status(503).json({
+      status: "unhealthy",
+      error: "Document storage is not readable",
+      checkMs: Date.now() - startedAt
+    });
+  }
+});
+
 app.get("/oembed", (req, res) => {
   const requestedUrl = typeof req.query.url === "string" ? req.query.url.trim() : "";
   const embedMeta = buildEmbedMeta(req, requestedUrl);
@@ -1327,7 +1417,7 @@ app.get("/oembed", (req, res) => {
     type: "link",
     provider_name: embedMeta.siteName,
     provider_url: embedMeta.baseUrl,
-    author_name: "7-Eleven, Inc.",
+    author_name: EMBED_AUTHOR_NAME,
     author_url: embedMeta.baseUrl,
     title: embedMeta.title,
     url: embedMeta.canonicalUrl,
@@ -2198,7 +2288,9 @@ app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), as
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
-app.use((error, req, res, next) => {
+// Four parameters is how Express recognises error middleware, so `_next` has to
+// stay in the signature even though nothing calls it.
+app.use((error, req, res, _next) => {
   if (error instanceof HttpError) {
     res.status(error.statusCode).json({ error: error.message });
     return;
@@ -2229,10 +2321,50 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
+// Shutdown has to be graceful because organizer writes are read-modify-write
+// behind a lock: killing the process mid-write is exactly the corruption that
+// used to wipe every folder assignment. Stop accepting connections, let the
+// in-flight requests finish, then exit.
+const SHUTDOWN_GRACE_MS = 10000;
+
+function attachGracefulShutdown(server) {
+  let shuttingDown = false;
+
+  const shutdown = (signal) => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    console.log(`${signal} received, finishing in-flight requests...`);
+
+    // Anything already connected gets to finish; nothing new is accepted.
+    server.close((error) => {
+      if (error) {
+        console.error("Error while closing the server", error);
+        process.exit(1);
+      }
+
+      console.log("Shutdown complete.");
+      process.exit(0);
+    });
+
+    // A hung request must not hold the process open forever. Unref so this
+    // timer is not itself a reason to stay alive.
+    setTimeout(() => {
+      console.error(`Did not shut down within ${SHUTDOWN_GRACE_MS}ms, exiting anyway.`);
+      process.exit(1);
+    }, SHUTDOWN_GRACE_MS).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
 ensureStorageDirs()
   .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Markdown viewer running on http://localhost:${PORT}`);
+    const server = app.listen(PORT, () => {
+      console.log(`AzaDocs running on http://localhost:${PORT}`);
 
       if (CONFIGURED_WRITE_TOKEN) {
         console.log("Editing is locked behind MDVIEWER_TOKEN.");
@@ -2248,6 +2380,8 @@ ensureStorageDirs()
       console.log("  It changes on every restart - set MDVIEWER_TOKEN to keep it stable.");
       console.log("");
     });
+
+    attachGracefulShutdown(server);
   })
   .catch((error) => {
     console.error("Failed to start server", error);

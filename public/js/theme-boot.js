@@ -13,8 +13,8 @@
  * app has always looked like.
  */
 (function () {
-  var STORAGE_KEY = "mdviewer.theme";
-  var stored = null;
+  const STORAGE_KEY = "mdviewer.theme";
+  let stored = null;
 
   try {
     stored = window.localStorage.getItem(STORAGE_KEY);
@@ -27,7 +27,7 @@
     stored = "dark";
   }
 
-  var resolved = stored;
+  let resolved = stored;
   if (stored === "auto") {
     resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
       ? "light"

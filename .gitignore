@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json is deliberately NOT ignored. It is what makes `npm ci`
+# reproducible, and the README lists it as part of the project.
 
 # OS
 .DS_Store

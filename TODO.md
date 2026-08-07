@@ -37,6 +37,7 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 - [x] **4. Swipe-to-navigate throws a ReferenceError.**
   `docSwipeStart` is read at `app.js:3283` but is **never declared and there is no `touchstart` handler** that sets it. Every touch on the document body throws `ReferenceError: docSwipeStart is not defined`. The feature has never worked.
+  - **This was ticked prematurely and was still broken.** The declaration and the `touchstart` handler were never added; only the surrounding code was touched. ESLint's `no-undef` caught it on the first run (six reports across `app.js:5721-5744`). Now genuinely fixed: `docSwipeStart` is declared, a `touchstart` handler records the origin point, and multi-touch is ignored so a pinch-zoom is not read as a swipe.
 
 - [x] **5. The match-nav widget becomes an undismissable floating turd.**
   `updateJumpNavigationUI` (`app.js:744`) shows it whenever a query exists, even with zero matches. So you get a fixed-position "0 / 0" box with both arrows disabled and a close button that isn't wired (#3). On mobile it's pinned `top: 0.78rem; right: 0.75rem` (`app.css:2045`) — directly on top of the sticky header.
@@ -239,25 +240,40 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ## 🟡 Project hygiene
 
-- [ ] **63. README documents port 3000; the actual default is 4321** (`server.js:11`). The stated URL simply doesn't work.
+- [x] **63. README documents port 3000; the actual default is 4321** (`server.js:11`). The stated URL simply doesn't work.
+  - Fixed as part of a full README rewrite. Nearly every section was stale: Catppuccin, Space Grotesk, Font Awesome, "includes GraphiQL", and a project structure that predated `data/` and `deleted_markdowns/`.
 
-- [ ] **64. README documents `npm test`, which isn't defined in package.json** — running it errors.
+- [x] **64. README documents `npm test`, which isn't defined in package.json** — running it errors.
+  - Fixed by making the claim true rather than deleting it: `npm test` now runs the real suites (see #65).
 
-- [ ] **65. No tests, no linter, no CI, no formatter config.** Zero.
+- [x] **65. No tests, no linter, no CI, no formatter config.** Zero.
+  - **Tests:** five suites in `test/`, ~290 checks, ~14s, no browser. `layout`, `mobile`, `theme` and `diagrams` parse the stylesheet and client source to assert things a human cannot eyeball — WCAG contrast ratios, rendered diagram box sizes, the z-index ordering. `dom` loads the real `index.html` + `app.js` in jsdom against a server it spawns itself, seeded with a known 6-deep corpus in a temp `MDVIEWER_STATE_DIR`. That last part is what lets the write paths (cut, paste, rename, folder create) be exercised for real — previously the suite ran against the live instance and had to stay read-only.
+  - **Linter:** ESLint 9 flat config over the server, the client and the tests. It immediately paid for itself: see #4 below, plus two more dead functions (`writeOrganizerState`, `groupDocsByFolder`). The seven `require-atomic-updates` reports were each reviewed and carry an inline justification rather than a blanket disable, so the rule stays live for new code.
+  - **CI:** GitHub Actions on Node 20 and 22 — `npm ci`, lint, test, then a boot-and-healthcheck against a temp state dir.
+  - Not done: no formatter config. Adding Prettier would rewrite all ~11,500 lines in one commit, which is a separate decision.
 
-- [ ] **66. `.gitignore` excludes `package-lock.json`** (confirmed untracked) while the README lists it as part of the project structure. Reproducible installs are broken.
+- [x] **66. `.gitignore` excludes `package-lock.json`** (confirmed untracked) while the README lists it as part of the project structure. Reproducible installs are broken.
+  - Fixed: the lockfile is tracked, with a comment in `.gitignore` saying why it must not be re-added. `npm ci` verified working, and CI uses it.
 
-- [ ] **67. Three different product names:** package.json `cart-docs-viewer`, README "Cart Documentation Viewer", UI "Markdown Docs Viewer", plus `document.title` says "Cart Docs Viewer" (`app.js:2491`) while recycle-bin mode says "Markdown Docs Viewer" (`app.js:2599`).
+- [x] **67. Three different product names:** package.json `cart-docs-viewer`, README "Cart Documentation Viewer", UI "Markdown Docs Viewer", plus `document.title` says "Cart Docs Viewer" (`app.js:2491`) while recycle-bin mode says "Markdown Docs Viewer" (`app.js:2599`).
+  - Fixed: everything is **AzaDocs** — package.json, README, the header brand, `SITE_NAME`, `EMBED_TITLE`, both `document.title` branches, the startup log line, and the share card.
 
-- [ ] **68. Leftover corporate boilerplate from an unrelated template.** `author_name: "7-Eleven, Inc."` is hardcoded in the oEmbed response (`server.js:880`) and the README declares "Proprietary - 7-Eleven, Inc." — on a personal repo.
+- [x] **68. Leftover corporate boilerplate from an unrelated template.** `author_name: "7-Eleven, Inc."` is hardcoded in the oEmbed response (`server.js:880`) and the README declares "Proprietary - 7-Eleven, Inc." — on a personal repo.
+  - Fixed: oEmbed `author_name` is now an `EMBED_AUTHOR_NAME` constant set to `Azaken1248`, and the README says "Personal project. All rights reserved — not licensed for reuse." No stale corporate string remains anywhere in the repo.
 
-- [ ] **69. `EMBED_DESCRIPTION` is stale** — "Browse, search, and share **cart** documentation" (`server.js:27`), served as the OG description on every page.
+- [x] **69. `EMBED_DESCRIPTION` is stale** — "Browse, search, and share **cart** documentation" (`server.js:27`), served as the OG description on every page.
+  - Fixed, along with the rest of the embed metadata, which was stale in ways the audit did not list: `EMBED_THEME_COLOR` was still Catppuccin blue (`#89b4fa`) two palettes later, and both `social-card.svg` and `favicon.svg` were drawn in that palette. All three now track the current tokens. `PUBLIC_BASE_URL` also defaults to the real origin (`https://md.azaken.com`) rather than the request host, which removes the last way a spoofed `Host` header could influence a link preview.
 
-- [ ] **70. README omits half the API** — no folder endpoints, no `/api/docs/search`, and the project structure diagram omits `data/`, `deleted_markdowns/`, and `markdowns/`.
+- [x] **70. README omits half the API** — no folder endpoints, no `/api/docs/search`, and the project structure diagram omits `data/`, `deleted_markdowns/`, and `markdowns/`.
+  - Fixed: all 21 API routes are documented, generated by reading the route table out of `server.js` rather than from memory. (`markdowns/` is not listed because it was deleted in #29.)
 
-- [ ] **71. README troubleshooting is wrong** — it lists supported extensions without `.ipynb`, which the app does support.
+- [x] **71. README troubleshooting is wrong** — it lists supported extensions without `.ipynb`, which the app does support.
+  - Fixed: the supported-types section lists all five extensions and describes the filename rules as they actually are after #17 — unicode, parentheses and ampersands all allowed.
 
-- [ ] **72. No request logging, no health check beyond the GraphQL `health` field, no graceful shutdown.**
+- [x] **72. No request logging, no health check beyond the GraphQL `health` field, no graceful shutdown.**
+  - **Logging:** one line per request written on `finish`, so status and duration are measured rather than assumed. Static assets are excluded by default (`LOG_STATIC=true` to include them) and `LOG_REQUESTS=false` turns it off. Query strings are deliberately not logged — they carry search terms, which are the contents of the user's own documents.
+  - **Health:** `GET /healthz` actually reads the document store and returns `503` when it cannot, so a monitor sees a real failure. The GraphQL `health` field returns a constant and only ever proved the process was up.
+  - **Shutdown:** `SIGTERM`/`SIGINT` stop accepting connections, drain in-flight requests and exit, with a 10s backstop. This matters specifically because organizer writes are read-modify-write behind a lock — killing mid-write is the corruption from #12/#13.
 
 ---
 

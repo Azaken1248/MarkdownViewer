@@ -183,7 +183,7 @@ const SUPERSEARCH_PAGE_SIZE = 12;
 const DOC_LIST_PAGE_SIZE = 50;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
-const SANITIZE_ALLOWED_URI_PATTERN = /^(?:(?:(?:f|ht)tps?|mailto|tel):|data:image\/(?:bmp|gif|jpe?g|png|svg\+xml|webp|avif)(?:;charset=[^;,]+)?(?:;base64)?,|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+const SANITIZE_ALLOWED_URI_PATTERN = /^(?:(?:(?:f|ht)tps?|mailto|tel):|data:image\/(?:bmp|gif|jpe?g|png|svg\+xml|webp|avif)(?:;charset=[^;,]+)?(?:;base64)?,|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i;
 const MARKDOWN_SANITIZE_OPTIONS = {
   ALLOWED_URI_REGEXP: SANITIZE_ALLOWED_URI_PATTERN,
   ADD_DATA_URI_TAGS: ["img"]
@@ -226,7 +226,7 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -617,34 +617,6 @@ function getDocCacheVersion(doc) {
   return String(doc?.updatedAt || doc?.deletedAt || "");
 }
 
-
-function groupDocsByFolder(docs) {
-  const groups = new Map();
-
-  for (const doc of docs) {
-    const folderId = doc.folderId || null;
-    const key = folderId || "__root__";
-
-    if (!groups.has(key)) {
-      groups.set(key, {
-        folderId,
-        folderName: getFolderLabel(folderId),
-        folderOrder: getFolderOrder(folderId),
-        docs: []
-      });
-    }
-
-    groups.get(key).docs.push(doc);
-  }
-
-  return [...groups.values()].sort((left, right) => {
-    if (left.folderOrder !== right.folderOrder) {
-      return left.folderOrder - right.folderOrder;
-    }
-
-    return left.folderName.localeCompare(right.folderName);
-  });
-}
 
 function syncFolderModalUI() {
   if (!elements.folderModal) {
@@ -2286,6 +2258,8 @@ async function fetchDeletedDocs() {
   const endpoint = state.viewMode === "archive" ? "/api/archive" : "/api/recycle-bin";
   const payload = await requestJson(endpoint, { cache: "no-store" });
 
+  // Last write wins is the intent: this replaces the whole list.
+  // eslint-disable-next-line require-atomic-updates
   state.deletedDocs = (payload.docs || []).map((doc) => ({
     file: doc.file,
     originalFile: doc.originalFile || "",
@@ -3448,6 +3422,8 @@ async function pasteIntoFolder(folderId) {
   const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
   const results = await moveFilesToFolder(files, folderId, { silent: true });
 
+  // Clearing after the move is the point; a cut must survive a failed paste.
+  // eslint-disable-next-line require-atomic-updates
   state.clipboard = { files: [], mode: null };
 
   if (results.moved > 0) {
@@ -4656,7 +4632,7 @@ async function openDocument(file, pushHash, options = {}) {
         return;
       }
 
-      document.title = `${doc.title} | Cart Docs Viewer`;
+      document.title = `${doc.title} | AzaDocs`;
       if (pushHash) {
         window.location.hash = encodeURIComponent(file);
       }
@@ -4695,7 +4671,7 @@ async function openDocument(file, pushHash, options = {}) {
     // Selection-only change: repaint the highlight, don't rebuild the list.
     updateActiveRowHighlight();
     updateActiveDocUI(file);
-    document.title = `${doc.title} | Cart Docs Viewer`;
+    document.title = `${doc.title} | AzaDocs`;
     if (pushHash) {
       window.location.hash = encodeURIComponent(file);
     }
@@ -4765,6 +4741,8 @@ async function openRecycleBinDocument(file, options = {}) {
     elements.emptyState.style.display = "none";
 
     // Same reason as openDocument: claim it before the async Mermaid pass.
+    // Assigning after the earlier await is deliberate, not a race.
+    // eslint-disable-next-line require-atomic-updates
     state.activeFile = file;
     // Selection-only change: repaint the highlight, don't rebuild the list.
     updateActiveRowHighlight();
@@ -4774,8 +4752,8 @@ async function openRecycleBinDocument(file, options = {}) {
     await renderMermaidBlocks(elements.docContent);
 
     document.title = state.viewMode === "archive"
-      ? `${doc.title} | Archive | Markdown Docs Viewer`
-      : `${doc.title} | Recycle Bin | Markdown Docs Viewer`;
+      ? `${doc.title} | Archive | AzaDocs`
+      : `${doc.title} | Recycle Bin | AzaDocs`;
     setStatus(state.viewMode === "archive"
       ? `Viewing archived doc ${doc.originalFile || doc.file}`
       : `Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
@@ -5717,6 +5695,25 @@ elements.matchCloseBtn.addEventListener("click", () => {
   exitSearchMode();
 });
 
+// Swipe left/right across the document to walk search matches on a phone.
+//
+// This was declared nowhere and set nowhere: the touchend handler below read
+// `docSwipeStart` on every touch and threw a ReferenceError, so the feature had
+// never once worked and it took the rest of the handler down with it. The
+// linter is what finally surfaced it.
+let docSwipeStart = null;
+
+elements.docContent.addEventListener("touchstart", (event) => {
+  // Only single-finger gestures; two fingers is a pinch-zoom, not a swipe.
+  if (event.touches.length !== 1) {
+    docSwipeStart = null;
+    return;
+  }
+
+  const touch = event.touches[0];
+  docSwipeStart = { x: touch.clientX, y: touch.clientY };
+}, { passive: true });
+
 elements.docContent.addEventListener("touchend", (event) => {
   if (!docSwipeStart || event.changedTouches.length === 0 || !state.jumpQuery.trim()) {
     docSwipeStart = null;
@@ -5926,6 +5923,8 @@ async function switchViewMode(targetMode) {
     await refreshDeletedDocs({ preserveSearch: false });
     setStatus(nextMode === "archive" ? "Archive opened." : "Recycle bin opened.", "success");
   } catch (error) {
+    // Rollback to a value captured before the await.
+    // eslint-disable-next-line require-atomic-updates
     state.viewMode = previousMode;
     syncModeUI();
     setStatus(error.message, "error");

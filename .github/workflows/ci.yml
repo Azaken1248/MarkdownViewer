@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is what this is developed against; 22 catches anything that will
+        # break on the next LTS before it becomes urgent.
+        node: ["20", "22"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs exactly what
+      # package-lock.json pins and fails if the two have drifted.
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # The DOM suite spawns its own server against a temp state directory, so
+      # there is nothing to start here and nothing to clean up.
+      - name: Test
+        run: npm test
+
+      - name: Check the server boots and reports healthy
+        run: |
+          MDVIEWER_STATE_DIR="$(mktemp -d)" \
+          MDVIEWER_TOKEN=ci-smoke-token \
+          PORT=4321 \
+          LOG_REQUESTS=false \
+          node server.js &
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:4321/healthz > /dev/null; then
+              curl -s http://127.0.0.1:4321/healthz
+              echo
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Server never became healthy"
+          exit 1

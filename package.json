@@ -1,17 +1,27 @@
 {
-  "name": "cart-docs-viewer",
+  "name": "azadocs",
   "version": "1.0.0",
   "private": true,
-  "description": "Markdown viewer with upload and live editor",
+  "description": "A personal markdown library with a file explorer, live editor, Mermaid diagrams and full-text search.",
   "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node test/run.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "express": "^5.2.1",
     "graphql": "^16.13.2",
     "graphql-http": "^1.22.4",
     "multer": "^2.1.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.15.0",
+    "jsdom": "^25.0.1"
   }
 }
