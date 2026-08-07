@@ -8,8 +8,9 @@ Live at **<https://md.azaken.com>**.
 
 - Vanilla JavaScript on the client. No framework, no bundler, no build step.
 - Express 5 on the server, with the documents themselves as the source of truth
-  and a single JSON file for the folder structure.
-- Reads are public; every write is behind a bearer token.
+  and JSON files for folder structure, accounts and sessions.
+- Private by default: accounts with roles, and individual documents can be
+  published as standalone share links.
 
 ---
 
@@ -24,20 +25,22 @@ npm start
 
 Then open <http://localhost:4321>.
 
-On first boot the server prints a generated editor token, because it refuses to
-run with writes wide open:
+On first boot, with no accounts on disk, the server creates an admin and prints
+its credentials:
 
 ```
-  MDVIEWER_TOKEN is not set, so a temporary editor token was generated:
+  No accounts existed, so an admin was created:
 
-      7f3a1c...
+      username: aza
+      password: lolface123
 
-  Reads are public; creating, editing and deleting require this token.
-  It changes on every restart - set MDVIEWER_TOKEN to keep it stable.
+  This password is in the source and the README, so it is public
+  knowledge. You will be required to change it at first login.
 ```
 
-Paste it into the padlock button in the header to unlock editing. Set
-`MDVIEWER_TOKEN` yourself to keep it stable across restarts.
+Sign in with those, and the app will make you replace the password before it
+lets you do anything else — that password is in this file, so treat it as
+already known to everyone.
 
 ### Scripts
 
@@ -45,7 +48,7 @@ Paste it into the padlock button in the header to unlock editing. Set
 | --- | --- |
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `dom` |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 
@@ -58,7 +61,7 @@ Everything is environment variables; there is no config file.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `PORT` | `4321` | Port to listen on. |
-| `MDVIEWER_TOKEN` | generated per boot | Bearer token required by every write endpoint. If unset, one is generated and printed at startup — so the app never runs open, but the token changes on every restart. |
+| `PUBLIC_READS` | `false` | When `true`, anyone can read every document without signing in — the behaviour before accounts existed. Leave it off unless you want the whole library public; individual documents can be shared without it. |
 | `PUBLIC_BASE_URL` | `https://md.azaken.com` | Origin used to build canonical, `og:*` and oEmbed URLs. Set it to `http://localhost:4321` when working locally if you want link previews to point at your own machine. |
 | `TRUST_PROXY` | `false` | Set to `true` (or an Express trust-proxy value like `loopback`) only when running behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured. |
 | `MDVIEWER_STATE_DIR` | the checkout | Moves the documents, recycle bin and organizer somewhere else, so runtime state can live outside the repo. The test suite uses it to point at a temp directory. |
@@ -84,14 +87,24 @@ proxy hop rather than the client's scheme.
 ├── public/
 │   ├── index.html            # The whole app shell. Embed meta is templated in at request time.
 │   ├── css/app.css           # One stylesheet. Design tokens at the top, light + dark.
+│   ├── share.html            # The standalone share page
 │   ├── js/
 │   │   ├── app.js            # The client
+│   │   ├── markdown-core.js  # Render engine shared by both pages
+│   │   ├── share.js          # The share page
 │   │   └── theme-boot.js     # Applies the stored theme before first paint
 │   ├── favicon.svg
 │   ├── social-card.svg       # og:image
 │   └── docs/                 # Your documents (gitignored)
-├── data/
-│   └── document-organizer.json   # Folder tree + file→folder mappings (gitignored)
+├── lib/
+│   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
+│   ├── passwords.js          # scrypt hashing and the password policy
+│   └── shares.js             # Per-document share links
+├── data/                     # All gitignored
+│   ├── document-organizer.json   # Folder tree + file→folder mappings
+│   ├── users.json            # Accounts and password hashes
+│   ├── sessions.json         # Live sessions, ids stored hashed
+│   └── shares.json           # Share links, tokens stored hashed
 ├── deleted_markdowns/
 │   ├── soft/                 # Recycle bin (gitignored)
 │   └── hard/                 # Archive (gitignored)
@@ -138,9 +151,59 @@ write and completing a cross-filesystem move.
 
 ---
 
+## Accounts and roles
+
+Authentication is username and password. Passwords are hashed with scrypt
+(N=2^15, r=8, p=3 — one of OWASP's accepted configurations) using a per-account
+salt, and the encoded hash carries its own parameters, so they can be raised
+later without invalidating anyone's password.
+
+A session is a random 256-bit token in an `httpOnly`, `SameSite=Strict` cookie.
+Script cannot read it, so an XSS bug cannot steal a session; the server stores
+only its SHA-256, so a leak of `sessions.json` does not hand over live sessions.
+Writes additionally carry a double-submit CSRF token and an `Origin` check.
+
+| Role | Can |
+| --- | --- |
+| `viewer` | Read documents |
+| `editor` | Read, create, edit, delete, move, and publish share links |
+| `admin` | All of the above, plus erase from the archive and manage accounts |
+
+Admins manage accounts from the account menu → **Accounts**: create, change
+role, disable, delete, and reset passwords. A few things are deliberately
+impossible, because each is a way to lock everyone out permanently:
+
+- demoting, disabling or deleting your own account;
+- demoting or removing the last remaining admin.
+
+Anyone whose password was set by someone else — the seeded admin, or a new
+account — must choose their own before they can do anything. Changing a password
+ends every other session on that account.
+
+Sign-in is rate limited: 8 failed attempts locks that **account** for 15
+minutes. The per-address limit is much higher (40), because everyone behind one
+NAT or reverse proxy shares an address and an 8-strike rule there would let any
+passer-by lock out the household.
+
+## Sharing a single document
+
+With the library private, a share link is the deliberate exception. From the
+viewer toolbar, **Share this document** publishes that one document at
+`/s/<token>`, readable by anyone with the URL and no sign-in.
+
+The share page is a separate page, not a mode of the app: no explorer, no
+editor, no search, and no route back into the library. It is served `noindex`,
+since an unguessable URL stops being unguessable once a crawler files it.
+
+The token is the credential, so the server stores only its hash and shows you
+the full URL exactly once. Losing it means creating a new link, which revokes
+the old one. Renaming a document carries its share across; deleting one revokes
+it.
+
 ## API
 
-Reads are public. Writes require `Authorization: Bearer <MDVIEWER_TOKEN>`.
+Reads require a session unless `PUBLIC_READS=true`. Writes require a session
+with the right role, plus the `X-CSRF-Token` header.
 
 ### Documents
 
@@ -184,7 +247,20 @@ Reads are public. Writes require `Authorization: Bearer <MDVIEWER_TOKEN>`.
 
 | Method | Path | |
 | --- | --- | --- |
-| `GET` | `/api/session` | Whether this session can write |
+| `GET` | `/api/session` | Who you are, what you may do, and a CSRF token |
+| `POST` | `/api/auth/login` | Sign in. Sets the session cookie |
+| `POST` | `/api/auth/logout` | Sign out and revoke the session |
+| `POST` | `/api/auth/password` | Change your own password |
+| `GET` | `/api/users` | List accounts (admin) |
+| `POST` | `/api/users` | Create an account (admin) |
+| `PATCH` | `/api/users/:id` | Change role or disabled state (admin) |
+| `POST` | `/api/users/:id/password` | Reset someone's password (admin) |
+| `DELETE` | `/api/users/:id` | Delete an account (admin) |
+| `GET` | `/api/shares` | List published documents (editor) |
+| `POST` | `/api/docs/:file/share` | Publish or rotate a share link (editor) |
+| `DELETE` | `/api/docs/:file/share` | Revoke a share link (editor) |
+| `GET` | `/api/share/:token` | **Public.** The shared document |
+| `GET` | `/s/:token` | **Public.** The standalone share page |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |
 | `ALL` | `/graphql` | `embedMeta`, `docsCount`, `health`. Introspection is off by default |
 | `GET` | `/oembed?url=` | oEmbed metadata for link-preview consumers |
@@ -208,7 +284,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Five suites, ~290 checks, about 14 seconds. No browser required.
+Six suites, ~390 checks, about 30 seconds. No browser required.
 
 | Suite | What it covers |
 | --- | --- |
@@ -216,6 +292,7 @@ Five suites, ~290 checks, about 14 seconds. No browser required.
 | `mobile` | Drawer behaviour, touch target sizes, the dark palette |
 | `theme` | Light and dark tokens, contrast ratios, target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
+| `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`
@@ -240,10 +317,13 @@ pm2 save
 With a reverse proxy in front:
 
 ```bash
-MDVIEWER_TOKEN=<a long random string> \
-TRUST_PROXY=true \
-pm2 start server.js --name azadocs --update-env
+TRUST_PROXY=true pm2 start server.js --name azadocs --update-env
 ```
+
+Set `TRUST_PROXY` when there is a proxy in front, or `req.ip` is the proxy's
+address for everyone — which makes the per-address rate limit meaningless — and
+the session cookie's `Secure` flag is decided from `PUBLIC_BASE_URL`, so serve
+over HTTPS.
 
 `SIGTERM` and `SIGINT` shut down gracefully: the server stops accepting
 connections, lets in-flight requests finish, and exits — with a 10-second
@@ -267,9 +347,16 @@ outputs are worth trimming before upload.
 `$MDVIEWER_STATE_DIR/docs/`) with a supported extension. The list is served from
 disk on each request, so a refresh is enough — no restart needed.
 
-**Editing is greyed out.** The session is locked. Click the padlock and enter
-`MDVIEWER_TOKEN`. If you did not set one, it is in the startup log and changed on
-the last restart.
+**Editing controls are missing.** They are hidden rather than disabled for
+accounts that cannot use them. Check the role on your account — a `viewer` sees
+no create, upload or edit buttons.
+
+**Locked out entirely.** If the last admin password is lost, stop the server and
+delete `data/users.json`. The next boot seeds a fresh admin and prints its
+credentials. Documents, folders and shares are untouched.
+
+**"Too many failed attempts."** That account is locked for 15 minutes. It clears
+on a server restart, since the limiter is in memory.
 
 **Link previews point at the wrong host.** `PUBLIC_BASE_URL` wins over
 everything, including the request. Check what it is set to.

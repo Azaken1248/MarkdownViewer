@@ -53,7 +53,10 @@ const BROWSER_GLOBALS = {
   hljs: "readonly",
   katex: "readonly",
   renderMathInElement: "readonly",
-  svgPanZoom: "readonly"
+  svgPanZoom: "readonly",
+
+  // Our own shared render engine, loaded as a plain script before app.js.
+  MarkdownCore: "readonly"
 };
 
 const NODE_GLOBALS = {

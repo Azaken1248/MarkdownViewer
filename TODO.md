@@ -277,11 +277,13 @@ Audit date: 2026-08-06 · Files reviewed: `server.js`, `public/js/app.js`, `publ
 
 ---
 
-## Configuration added by the security fixes
+## Configuration
+
+*(The shared `MDVIEWER_TOKEN` was replaced by accounts; see the README.)*
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MDVIEWER_TOKEN` | random per boot | Bearer token required for all write endpoints. If unset, one is generated and printed to the log at startup, so the app never runs open — but it changes on every restart. |
+| `PUBLIC_READS` | `false` | When `true`, reads need no session — the pre-accounts behaviour. Off by default: these are personal documents. |
 | `TRUST_PROXY` | `false` | Set to `true` (or an express trust-proxy value like `loopback`) only when behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured when building canonical/oEmbed URLs. |
 | `ENABLE_GRAPHQL_INTROSPECTION` | `false` | Re-enables GraphQL schema introspection for local schema work. |
 | `PUBLIC_BASE_URL` | unset | Pre-existing. Overrides the request host entirely when building embed URLs — the most robust defence against host-header spoofing. |

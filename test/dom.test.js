@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { JSDOM, VirtualConsole } = require("jsdom");
-const { startTestServer } = require("./helpers/server");
+const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
 const ROOT = path.join(__dirname, "..", "public");
 
@@ -23,12 +23,19 @@ function check(label, actual, expected) {
 
 let ORIGIN = "";
 
+let sendCookies = () => "";
+let receiveCookies = () => {};
+
 function get(pathname) {
   return new Promise((resolve, reject) => {
-    http.get(`${ORIGIN}${pathname}`, (res) => {
+    const headers = sendCookies() ? { Cookie: sendCookies() } : {};
+    http.get(`${ORIGIN}${pathname}`, { headers }, (res) => {
       let data = "";
       res.on("data", (c) => (data += c));
-      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      res.on("end", () => {
+        receiveCookies(res);
+        resolve({ status: res.statusCode, body: data });
+      });
     }).on("error", reject);
   });
 }
@@ -84,7 +91,32 @@ async function run(server) {
   window.renderMathInElement = () => {};
   window.svgPanZoom = () => ({ destroy() {} });
 
-  // Proxy fetch to the live server so the app sees the real corpus.
+  // Cookie jar for the proxy below. The app's session is an httpOnly cookie, so
+  // there is nothing for the page script to carry — the transport has to.
+  const cookieJar = new Map();
+
+  function cookieHeader() {
+    return [...cookieJar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  }
+
+  sendCookies = cookieHeader;
+  receiveCookies = absorbCookies;
+
+  function absorbCookies(res) {
+    for (const raw of res.headers["set-cookie"] || []) {
+      const [pair] = raw.split(";");
+      const index = pair.indexOf("=");
+      const name = pair.slice(0, index).trim();
+      const value = pair.slice(index + 1).trim();
+      if (value) {
+        cookieJar.set(name, value);
+      } else {
+        cookieJar.delete(name);
+      }
+    }
+  }
+
+  // Proxy fetch to the spawned server so the app sees a real corpus.
   window.fetch = async (url, options = {}) => {
     const target = String(url).startsWith("http") ? String(url) : `${ORIGIN}${url}`;
     const method = (options.method || "GET").toUpperCase();
@@ -104,11 +136,18 @@ async function run(server) {
           port: parsed.port,
           path: parsed.pathname + parsed.search,
           method,
-          headers: { ...(options.headers || {}), "Content-Type": "application/json" }
+          headers: {
+            ...(options.headers || {}),
+            "Content-Type": "application/json",
+            ...(cookieHeader() ? { Cookie: cookieHeader() } : {})
+          }
         }, (res) => {
           let data = "";
           res.on("data", (c) => (data += c));
-          res.on("end", () => resolve({ status: res.statusCode, body: data }));
+          res.on("end", () => {
+            absorbCookies(res);
+            resolve({ status: res.statusCode, body: data });
+          });
         });
         req.on("error", reject);
         if (options.body) req.write(options.body);
@@ -122,7 +161,28 @@ async function run(server) {
     return makeResponse(res.status, res.body);
   };
 
+  // Sign in the way a browser does, before the app boots, so it comes up with a
+  // real session. The seeded admin must replace its public password first.
+  console.log("=== the harness signs in like a browser ===");
+  {
+    const login = await server.request("POST", "/api/auth/login",
+      { username: SEED_USERNAME, password: SEED_PASSWORD });
+    check("the seeded admin can sign in", login.status, 200);
+    check("...and is required to change its password", login.body.user.mustChangePassword, true);
+    absorbCookies({ headers: login.headers });
+
+    const changed = await server.request("POST", "/api/auth/password",
+      { currentPassword: SEED_PASSWORD, newPassword: TEST_PASSWORD },
+      { Cookie: cookieHeader(), "X-CSRF-Token": login.body.csrfToken });
+    check("the forced change succeeds", changed.status, 200);
+    absorbCookies({ headers: changed.headers });
+  }
+
   const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+  const coreSource = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
+  // markdown-core defines the render engine app.js delegates to; it has to be
+  // in scope before app.js runs, exactly as the two <script> tags arrange.
+  window.eval(coreSource);
 
   console.log("=== app.js evaluates against the real DOM ===");
   try {
@@ -135,7 +195,10 @@ async function run(server) {
         revealFolderInTree, folderPathIds, openDocument,
         renderSuperSearchPanel, applyThemePreference, themePreference,
         activeThemeName, enterModalLayer, exitModalLayer, showTooltip,
-        hideTooltip, syncFilterChip, SUPERSEARCH_LIMIT
+        hideTooltip, syncFilterChip, SUPERSEARCH_LIMIT,
+        applySession, refreshSession, can, openLoginModal, closeLoginModal,
+        openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
+        updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders
       };
     `);
     check("no exception on load", true, true);
@@ -145,9 +208,6 @@ async function run(server) {
     process.exit(1);
   }
 
-  // Unlock writes the way a real session does, so the write paths are exercised.
-  window.__t.state.writeToken = server.token;
-  window.__t.state.canWrite = true;
 
   // Let the init fetches settle.
   await new Promise((r) => setTimeout(r, 1500));
@@ -196,21 +256,39 @@ async function run(server) {
     check("clicking it reveals another page", after > before, true);
   }
 
+  // A first visit opens on a closed tree: every folder expanded at once is a
+  // wall of files with no structure visible.
+  const groupsAll = [...doc.querySelectorAll(".tree-group")];
+  check("every folder starts collapsed on a first visit",
+    groupsAll.every((g) => g.classList.contains("is-collapsed")), true);
+  check("...and that is recorded so a reload does not throw them open again",
+    JSON.parse(window.localStorage.getItem("mdviewer.collapsedFolders")).length, groupsAll.length);
+
   const firstGroup = doc.querySelector(".tree-group");
   const firstFolderBtn = firstGroup.querySelector(".tree-row-folder .tree-row-btn");
-  check("folder starts expanded", firstGroup.classList.contains("is-collapsed"), false);
-  firstFolderBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  const collapsedGroup = doc.querySelector(".tree-group");
-  check("clicking the folder collapses it", collapsedGroup.classList.contains("is-collapsed"), true);
-  check("aria-expanded follows", collapsedGroup.querySelector(".tree-row-folder .tree-row-btn").getAttribute("aria-expanded"), "false");
-  collapsedGroup.querySelector(".tree-row-folder .tree-row-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  check("clicking again expands it", doc.querySelector(".tree-group").classList.contains("is-collapsed"), false);
+  check("aria-expanded says so", firstFolderBtn.getAttribute("aria-expanded"), "false");
 
-  console.log("=== collapse-all ===");
-  doc.getElementById("collapseAllBtn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  check("every folder collapses", [...doc.querySelectorAll(".tree-group")].every((g) => g.classList.contains("is-collapsed")), true);
-  doc.getElementById("collapseAllBtn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  check("and expands again", [...doc.querySelectorAll(".tree-group")].every((g) => !g.classList.contains("is-collapsed")), true);
+  firstFolderBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  const expandedGroup = doc.querySelector(".tree-group");
+  check("clicking the folder expands it", expandedGroup.classList.contains("is-collapsed"), false);
+  check("aria-expanded follows", expandedGroup.querySelector(".tree-row-folder .tree-row-btn").getAttribute("aria-expanded"), "true");
+  check("the open folder is dropped from the stored set",
+    JSON.parse(window.localStorage.getItem("mdviewer.collapsedFolders")).includes(expandedGroup.dataset.folderKey), false);
+
+  expandedGroup.querySelector(".tree-row-folder .tree-row-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  check("clicking again collapses it", doc.querySelector(".tree-group").classList.contains("is-collapsed"), true);
+
+  console.log("=== expand-all / collapse-all ===");
+  const collapseAll = doc.getElementById("collapseAllBtn");
+  collapseAll.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  check("from a collapsed tree the button expands everything",
+    [...doc.querySelectorAll(".tree-group")].every((g) => !g.classList.contains("is-collapsed")), true);
+  collapseAll.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  check("and collapses everything again",
+    [...doc.querySelectorAll(".tree-group")].every((g) => g.classList.contains("is-collapsed")), true);
+
+  // The Explorer checks below need to see rows, so open the tree back up.
+  collapseAll.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
   // Explorer behaviour, against the seeded hierarchy.
   {

@@ -16,7 +16,14 @@ const http = require("http");
 const { spawn } = require("child_process");
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
-const WRITE_TOKEN = "test-token-do-not-use-in-production";
+
+// The password the seeded admin starts with. Public by construction — it is in
+// the source and in the README — which is exactly why the app forces it to be
+// changed at first sign-in.
+const SEED_USERNAME = "aza";
+const SEED_PASSWORD = "lolface123";
+// What the DOM suite changes it to, so it can get past the forced change.
+const TEST_PASSWORD = "harness-password-9134";
 
 // Folder tree the DOM suite expects. Six levels deep so the breadcrumb overflow
 // has something to fold, plus a sibling to paste into.
@@ -55,7 +62,7 @@ function findFreePort() {
   });
 }
 
-function request(origin, method, pathname, body) {
+function request(origin, method, pathname, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(pathname, origin);
     const payload = body === undefined ? null : JSON.stringify(body);
@@ -66,8 +73,8 @@ function request(origin, method, pathname, body) {
         path: url.pathname + url.search,
         method,
         headers: {
-          Authorization: `Bearer ${WRITE_TOKEN}`,
-          ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {})
+          ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
+          ...headers
         }
       },
       (res) => {
@@ -80,7 +87,7 @@ function request(origin, method, pathname, body) {
           } catch {
             parsed = null;
           }
-          resolve({ status: res.statusCode, body: parsed, raw: data });
+          resolve({ status: res.statusCode, body: parsed, raw: data, headers: res.headers });
         });
       }
     );
@@ -111,20 +118,27 @@ async function waitForHealth(origin, timeoutMs = 15000) {
   throw new Error(`Server did not become healthy within ${timeoutMs}ms`);
 }
 
-async function seed(origin) {
+// Seeding happens on disk, before the server starts, rather than over the API.
+// Two reasons: it needs no credentials, so the accounts file stays exactly as a
+// first boot leaves it (which is what the auth suite is there to check), and it
+// is a great deal faster than 59 HTTP round trips.
+async function seedOnDisk(stateDir) {
+  const docsDir = path.join(stateDir, "docs");
+  const dataDir = path.join(stateDir, "data");
+  await fs.mkdir(docsDir, { recursive: true });
+  await fs.mkdir(dataDir, { recursive: true });
+
+  const now = new Date().toISOString();
   const folderIds = new Map();
+  const folders = FOLDERS.map((folder, index) => {
+    const id = `folder_test_${index}`;
+    folderIds.set(folder.name, id);
+    return { id, name: folder.name, order: index, createdAt: now, updatedAt: now };
+  });
 
   for (const folder of FOLDERS) {
-    const res = await request(origin, "POST", "/api/folders", {
-      name: folder.name,
-      parentId: folder.parent ? folderIds.get(folder.parent) : null
-    });
-
-    if (res.status !== 201) {
-      throw new Error(`Seeding folder "${folder.name}" failed: ${res.status} ${res.raw}`);
-    }
-
-    folderIds.set(folder.name, res.body.folder.id);
+    const record = folders.find((entry) => entry.name === folder.name);
+    record.parentId = folder.parent ? folderIds.get(folder.parent) : null;
   }
 
   const documents = [
@@ -136,23 +150,26 @@ async function seed(origin) {
     }))
   ];
 
+  const fileFolders = {};
   for (const document of documents) {
-    const res = await request(origin, "POST", "/api/docs", {
-      fileName: document.file,
-      content: document.body,
-      folderId: document.folder ? folderIds.get(document.folder) : null
-    });
-
-    if (res.status !== 201) {
-      throw new Error(`Seeding document "${document.file}" failed: ${res.status} ${res.raw}`);
+    await fs.writeFile(path.join(docsDir, document.file), document.body, "utf8");
+    if (document.folder) {
+      fileFolders[document.file] = folderIds.get(document.folder);
     }
   }
+
+  await fs.writeFile(
+    path.join(dataDir, "document-organizer.json"),
+    JSON.stringify({ version: 2, folders, fileFolders }, null, 2),
+    "utf8"
+  );
 
   return folderIds;
 }
 
 async function startTestServer() {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "azadocs-test-"));
+  const folderIds = await seedOnDisk(stateDir);
   const port = await findFreePort();
   const origin = `http://127.0.0.1:${port}`;
 
@@ -162,7 +179,6 @@ async function startTestServer() {
       ...process.env,
       PORT: String(port),
       MDVIEWER_STATE_DIR: stateDir,
-      MDVIEWER_TOKEN: WRITE_TOKEN,
       // The suite prints its own output; per-request lines just bury it.
       LOG_REQUESTS: "false"
     },
@@ -202,12 +218,11 @@ async function startTestServer() {
 
   try {
     await Promise.race([waitForHealth(origin), exitedEarly]);
-    const folderIds = await seed(origin);
-    return { origin, stateDir, token: WRITE_TOKEN, folderIds, stop };
+    return { origin, stateDir, folderIds, stop, request: (m, p, b, h) => request(origin, m, p, b, h) };
   } catch (error) {
     await stop();
     throw error;
   }
 }
 
-module.exports = { startTestServer, WRITE_TOKEN };
+module.exports = { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD };

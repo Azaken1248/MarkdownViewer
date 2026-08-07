@@ -13,6 +13,7 @@ const SUITES = [
   ["mobile", "mobile.test.js", "Drawer behaviour, touch targets and the dark palette"],
   ["theme", "theme.test.js", "Light/dark tokens, contrast, target size and the print sheet"],
   ["diagrams", "diagrams.test.js", "Mermaid sizing and the per-theme diagram palettes"],
+  ["auth", "auth.test.js", "Passwords, sessions, CSRF, RBAC and share links"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"]
 ];
 

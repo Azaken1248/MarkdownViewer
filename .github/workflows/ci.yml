@@ -41,7 +41,6 @@ jobs:
       - name: Check the server boots and reports healthy
         run: |
           MDVIEWER_STATE_DIR="$(mktemp -d)" \
-          MDVIEWER_TOKEN=ci-smoke-token \
           PORT=4321 \
           LOG_REQUESTS=false \
           node server.js &

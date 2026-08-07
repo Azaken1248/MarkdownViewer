@@ -2845,3 +2845,404 @@ button.crumb:focus-visible {
     margin: 18mm 16mm;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Accounts, sign-in and sharing
+   -------------------------------------------------------------------------- */
+
+.dialog-lg {
+  width: min(760px, 100%);
+}
+
+/* The sign-in wall has nothing usable behind it, so its backdrop is not a
+   dismiss control — it is just an opaque cover. */
+.modal-backdrop-static {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 2, 2, 0.72);
+}
+
+.field-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-emphasis);
+  border-radius: var(--radius-md);
+  background: var(--danger-subtle);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.field-error[hidden] {
+  display: none;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
+.dialog form {
+  display: grid;
+  gap: 14px;
+}
+
+/* Account menu */
+
+.account-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 210px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.account-menu[hidden] {
+  display: none;
+}
+
+.account-identity {
+  margin: 0;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+
+.account-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-item[hidden] {
+  display: none;
+}
+
+.account-item:hover,
+.account-item:focus-visible {
+  background: var(--raised-hover);
+}
+
+.account-item.danger:hover,
+.account-item.danger:focus-visible {
+  color: var(--danger);
+}
+
+.account-item i {
+  font-size: 16px;
+  color: var(--fg-muted);
+}
+
+/* Accounts table */
+
+.users-table-wrap {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.users-table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+.users-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-muted);
+  vertical-align: middle;
+}
+
+.users-cell-name {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.users-self {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 10px;
+}
+
+.users-role {
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.users-role:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.users-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn.btn-sm {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.btn.danger:hover:not(:disabled) {
+  border-color: var(--danger-emphasis);
+  color: var(--danger);
+}
+
+.users-new {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.users-new summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.users-new-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+/* Share dialog */
+
+.share-status {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+}
+
+.share-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.share-live i {
+  font-size: 16px;
+  color: var(--fg-muted);
+}
+
+.share-sub {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
+.share-url-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-url-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+#shareDocBtn.active {
+  color: var(--accent);
+  border-color: var(--accent-muted);
+  background: var(--accent-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   The standalone share page
+
+   Its own layout rather than the app shell: no sidebar, no toolbar, nothing
+   that could navigate anywhere. It reuses .markdown-body so a shared document
+   looks exactly like it does inside the app.
+   -------------------------------------------------------------------------- */
+
+.share-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+.share-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.share-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.share-brand i {
+  font-size: 18px;
+}
+
+.share-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  padding: 2px 8px;
+  min-height: 24px;
+  border: 1px solid var(--accent-muted);
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.share-main {
+  flex: 1;
+  width: 100%;
+  /* A readable measure. The app pane is wide because it sits next to an
+     explorer; a lone document has no such excuse. */
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.share-body {
+  padding: 24px 0 32px;
+}
+
+.share-loading,
+.share-error {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 80px 16px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.share-error[hidden] {
+  display: none;
+}
+
+.share-loading i,
+.share-error i {
+  font-size: 32px;
+  color: var(--fg-subtle);
+}
+
+.share-loading i {
+  animation: share-spin 1.1s linear infinite;
+}
+
+@keyframes share-spin {
+  to { transform: rotate(360deg); }
+}
+
+.share-error h1 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--fg);
+}
+
+.share-error p,
+.share-loading p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.share-footer {
+  padding: 12px 0 32px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.share-footer[hidden] {
+  display: none;
+}
+
+.share-footer p {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+
+@media (max-width: 920px) {
+  .users-actions {
+    justify-content: flex-start;
+  }
+
+  .account-menu {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media print {
+  .share-header,
+  .share-footer,
+  .share-loading {
+    display: none !important;
+  }
+
+  .share-page,
+  .share-main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}

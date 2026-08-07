@@ -68,12 +68,56 @@ const elements = {
   folderDescription: document.getElementById("folderDescription"),
   folderNameInput: document.getElementById("folderNameInput"),
   createFolderConfirmBtn: document.getElementById("createFolderConfirmBtn"),
-  lockToggleBtn: document.getElementById("lockToggleBtn"),
-  unlockModal: document.getElementById("unlockModal"),
-  unlockBackdrop: document.getElementById("unlockBackdrop"),
-  unlockTokenInput: document.getElementById("unlockTokenInput"),
-  unlockCancelBtn: document.getElementById("unlockCancelBtn"),
-  unlockConfirmBtn: document.getElementById("unlockConfirmBtn"),
+  loginModal: document.getElementById("loginModal"),
+  loginForm: document.getElementById("loginForm"),
+  loginUsername: document.getElementById("loginUsername"),
+  loginPassword: document.getElementById("loginPassword"),
+  loginError: document.getElementById("loginError"),
+  loginSubmitBtn: document.getElementById("loginSubmitBtn"),
+  loginMessage: document.getElementById("loginMessage"),
+  loginTitle: document.getElementById("loginTitle"),
+
+  passwordModal: document.getElementById("passwordModal"),
+  passwordForm: document.getElementById("passwordForm"),
+  passwordUsername: document.getElementById("passwordUsername"),
+  currentPassword: document.getElementById("currentPassword"),
+  newPassword: document.getElementById("newPassword"),
+  confirmPassword: document.getElementById("confirmPassword"),
+  passwordError: document.getElementById("passwordError"),
+  passwordCancelBtn: document.getElementById("passwordCancelBtn"),
+  passwordBackdrop: document.getElementById("passwordBackdrop"),
+  passwordTitle: document.getElementById("passwordTitle"),
+  passwordMessage: document.getElementById("passwordMessage"),
+
+  usersModal: document.getElementById("usersModal"),
+  usersBackdrop: document.getElementById("usersBackdrop"),
+  usersTableBody: document.getElementById("usersTableBody"),
+  closeUsersBtn: document.getElementById("closeUsersBtn"),
+  newUserForm: document.getElementById("newUserForm"),
+  newUserName: document.getElementById("newUserName"),
+  newUserPassword: document.getElementById("newUserPassword"),
+  newUserRole: document.getElementById("newUserRole"),
+  newUserError: document.getElementById("newUserError"),
+  newUserDetails: document.getElementById("newUserDetails"),
+
+  shareDocBtn: document.getElementById("shareDocBtn"),
+  shareModal: document.getElementById("shareModal"),
+  shareBackdrop: document.getElementById("shareBackdrop"),
+  shareStatus: document.getElementById("shareStatus"),
+  shareUrlField: document.getElementById("shareUrlField"),
+  shareUrlInput: document.getElementById("shareUrlInput"),
+  copyShareUrlBtn: document.getElementById("copyShareUrlBtn"),
+  shareOnceHint: document.getElementById("shareOnceHint"),
+  shareCloseBtn: document.getElementById("shareCloseBtn"),
+  revokeShareBtn: document.getElementById("revokeShareBtn"),
+  createShareBtn: document.getElementById("createShareBtn"),
+
+  accountBtn: document.getElementById("accountBtn"),
+  accountMenu: document.getElementById("accountMenu"),
+  accountIdentity: document.getElementById("accountIdentity"),
+  changePasswordItem: document.getElementById("changePasswordItem"),
+  manageUsersItem: document.getElementById("manageUsersItem"),
+  signOutItem: document.getElementById("signOutItem"),
   folderPicker: document.getElementById("folderPicker"),
   folderPickerList: document.getElementById("folderPickerList"),
   moveToRootBtn: document.getElementById("moveToRootBtn"),
@@ -147,33 +191,27 @@ const state = {
   dragPayload: null,
   confirmOpen: false,
   confirmResolver: null,
-  writeToken: "",
+  // Session. Nothing here is a credential: the session itself is an httpOnly
+  // cookie the script cannot read. csrfToken is a double-submit value, useless
+  // without the cookie.
+  authenticated: false,
+  user: null,
+  permissions: [],
+  csrfToken: "",
+  publicReads: false,
+  mustChangePassword: false,
   canWrite: false,
-  unlockOpen: false
+
+  loginOpen: false,
+  passwordOpen: false,
+  passwordForced: false,
+  usersOpen: false,
+  users: [],
+
+  shareOpen: false,
+  shareFile: null,
+  shares: new Map()
 };
-
-const WRITE_TOKEN_STORAGE_KEY = "mdviewer.writeToken";
-
-function readStoredWriteToken() {
-  try {
-    return window.localStorage.getItem(WRITE_TOKEN_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function persistWriteToken(token) {
-  try {
-    if (token) {
-      window.localStorage.setItem(WRITE_TOKEN_STORAGE_KEY, token);
-    } else {
-      window.localStorage.removeItem(WRITE_TOKEN_STORAGE_KEY);
-    }
-  } catch {
-    // Storage can be unavailable in private mode; the token still works for
-    // this page session via state.writeToken.
-  }
-}
 
 const MOBILE_BREAKPOINT = 920;
 const SUPERSEARCH_LIMIT = 8;
@@ -183,34 +221,8 @@ const SUPERSEARCH_PAGE_SIZE = 12;
 const DOC_LIST_PAGE_SIZE = 50;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
-const SANITIZE_ALLOWED_URI_PATTERN = /^(?:(?:(?:f|ht)tps?|mailto|tel):|data:image\/(?:bmp|gif|jpe?g|png|svg\+xml|webp|avif)(?:;charset=[^;,]+)?(?:;base64)?,|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i;
-const MARKDOWN_SANITIZE_OPTIONS = {
-  ALLOWED_URI_REGEXP: SANITIZE_ALLOWED_URI_PATTERN,
-  ADD_DATA_URI_TAGS: ["img"]
-};
-const CODE_LANGUAGE_ALIAS = {
-  js: "javascript",
-  jsx: "javascript",
-  ts: "typescript",
-  tsx: "typescript",
-  py: "python",
-  rb: "ruby",
-  sh: "bash",
-  shell: "bash",
-  zsh: "bash",
-  yml: "yaml",
-  md: "markdown",
-  html: "xml"
-};
-
-marked.setOptions({
-  gfm: true,
-  breaks: false,
-  mangle: false,
-  headerIds: true,
-  langPrefix: "language-"
-});
-
+// The sanitizer configuration, the marked options and the code-language
+// aliases now live in markdown-core.js, shared with the share page.
 function filenameToTitle(filename) {
   return stripDocumentExtension(filename)
     .replace(/[-_]+/g, " ")
@@ -222,12 +234,7 @@ function normalize(text) {
 }
 
 function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return MarkdownCore.escapeHtml(value);
 }
 
 function escapeRegExp(value) {
@@ -239,123 +246,11 @@ function stripDocumentExtension(filename) {
 }
 
 function isNotebookFile(fileName) {
-  return /\.ipynb$/i.test(String(fileName || ""));
+  return MarkdownCore.isNotebookFile(fileName);
 }
 
-function encodeBase64Utf8(value) {
-  const bytes = new TextEncoder().encode(String(value || ""));
-  let binary = "";
 
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
 
-  return window.btoa(binary);
-}
-
-function decodeBase64Utf8(value) {
-  const binary = window.atob(String(value || ""));
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-function normalizeMatrixEnvironments(tex) {
-  const source = String(tex || "");
-  const matrixEnvironmentPattern = /\\begin\{(matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|smallmatrix)\}([\s\S]*?)\\end\{\1\}/g;
-
-  return source.replace(matrixEnvironmentPattern, (match, environmentName, body) => {
-    if (body.includes("\\\\")) {
-      return match;
-    }
-
-    const rows = body
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => line.replace(/\\+\s*$/, "").trim())
-      .filter((line) => line.length > 0);
-
-    if (rows.length <= 1) {
-      return match;
-    }
-
-    return `\\begin{${environmentName}}\n${rows.join(" \\\\ \n")}\n\\end{${environmentName}}`;
-  });
-}
-
-function normalizeMarkdownMath(markdown) {
-  const source = String(markdown || "");
-  if (!source.includes("[") && !source.includes("]") && !source.includes("\\[") && !source.includes("$$")) {
-    return source;
-  }
-
-  const lines = source.split(/\r?\n/);
-  const normalizedLines = [];
-  let inCodeFence = false;
-  let codeFenceMarker = "";
-  let inDisplayMathBlock = false;
-  let displayMathMode = "";
-  let displayMathLines = [];
-
-  const flushDisplayMathBlock = () => {
-    const tex = normalizeMatrixEnvironments(displayMathLines.join("\n").trim());
-    if (tex) {
-      normalizedLines.push(`<div class="math-block" data-math-tex="${encodeBase64Utf8(tex)}"></div>`);
-    }
-
-    displayMathLines = [];
-    inDisplayMathBlock = false;
-    displayMathMode = "";
-  };
-
-  for (const line of lines) {
-    const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[2][0];
-      if (!inCodeFence) {
-        inCodeFence = true;
-        codeFenceMarker = marker;
-      } else if (marker === codeFenceMarker) {
-        inCodeFence = false;
-        codeFenceMarker = "";
-      }
-
-      normalizedLines.push(line);
-      continue;
-    }
-
-    if (!inCodeFence) {
-      const trimmed = line.trim();
-      if (!inDisplayMathBlock && (trimmed === "[" || trimmed === "\\[" || trimmed === "$$")) {
-        inDisplayMathBlock = true;
-        displayMathMode = trimmed;
-        displayMathLines = [];
-        continue;
-      }
-
-      if (inDisplayMathBlock) {
-        const isClosingBracket = (displayMathMode === "[" || displayMathMode === "\\[") && (trimmed === "]" || trimmed === "\\]");
-        const isClosingDollar = displayMathMode === "$$" && trimmed === "$$";
-
-        if (isClosingBracket || isClosingDollar) {
-          flushDisplayMathBlock();
-          continue;
-        }
-
-        displayMathLines.push(line);
-        continue;
-      }
-    }
-
-    normalizedLines.push(line);
-  }
-
-  if (inDisplayMathBlock && displayMathLines.length > 0) {
-    normalizedLines.push(...displayMathLines);
-  }
-
-  return normalizedLines.join("\n");
-}
 
 function tokenizeSearchQuery(query) {
   return normalize(query)
@@ -825,6 +720,65 @@ function closeFolderModal() {
   syncBodyLock();
 }
 
+/* --------------------------------------------------------------------------
+   Folder collapse state
+
+   Every folder used to render expanded on every load, which on a real corpus
+   means a wall of files with no structure visible. The tree now starts fully
+   collapsed, and what you open is remembered — so a reload picks up where you
+   left off instead of throwing the whole tree open again.
+   -------------------------------------------------------------------------- */
+
+const COLLAPSED_FOLDERS_STORAGE_KEY = "mdviewer.collapsedFolders";
+let collapseStateRestored = false;
+
+function persistCollapsedFolders() {
+  try {
+    window.localStorage.setItem(
+      COLLAPSED_FOLDERS_STORAGE_KEY,
+      JSON.stringify([...state.collapsedFolderIds])
+    );
+  } catch {
+    // Private mode. The state still holds for this page session.
+  }
+}
+
+function applyInitialFolderCollapse() {
+  if (collapseStateRestored) {
+    return;
+  }
+
+  collapseStateRestored = true;
+
+  let stored = null;
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_FOLDERS_STORAGE_KEY);
+    stored = raw ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+
+  if (Array.isArray(stored)) {
+    // Folders deleted since the last visit are dropped rather than kept as
+    // dead ids that would accumulate forever.
+    const live = new Set([...state.folders.map((folder) => folder.id), "__root__"]);
+    state.collapsedFolderIds = new Set(stored.filter((id) => live.has(id)));
+    return;
+  }
+
+  // No stored preference: start with everything closed. A folder created later
+  // is not in the set, so it appears expanded, which is what you want right
+  // after making one.
+  //
+  // "__root__" is the Ungrouped bucket. It is not in state.folders, and it is
+  // usually the largest group of all, so leaving it out would defeat the point.
+  state.collapsedFolderIds = new Set([
+    ...state.folders.map((folder) => folder.id),
+    "__root__"
+  ]);
+  persistCollapsedFolders();
+}
+
 function toggleFolderCollapse(folderKey) {
   if (!folderKey) {
     return;
@@ -836,6 +790,7 @@ function toggleFolderCollapse(folderKey) {
     state.collapsedFolderIds.add(folderKey);
   }
 
+  persistCollapsedFolders();
   renderDocList();
 }
 
@@ -1351,7 +1306,8 @@ function setNavOpen(isOpen) {
 }
 
 function syncBodyLock() {
-  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen || state.unlockOpen;
+  const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen
+    || state.loginOpen || state.passwordOpen || state.usersOpen || state.shareOpen;
   document.body.classList.toggle("lock-scroll", shouldLock);
 }
 
@@ -1453,7 +1409,7 @@ async function repaintDiagramsForTheme() {
   if (blocks.length === 0) {
     // Nothing on screen to redraw, but the next render must not reuse the old
     // palette.
-    state.mermaidReady = false;
+    MarkdownCore.resetMermaidForThemeChange();
     return;
   }
 
@@ -1475,7 +1431,7 @@ async function repaintDiagramsForTheme() {
     block.classList.add("mermaid");
   }
 
-  state.mermaidReady = false;
+  MarkdownCore.resetMermaidForThemeChange();
 
   for (const root of roots) {
     await renderMermaidBlocks(root);
@@ -1642,15 +1598,11 @@ function ensureDocFilename(fileName) {
 }
 
 function isDiagramFile(fileName) {
-  return /\.(mmd|mermaid)$/i.test(String(fileName || ""));
+  return MarkdownCore.isDiagramFile(fileName);
 }
 
-function toMermaidMarkdown(diagramSource) {
-  return `\n\
-\`\`\`mermaid
-${String(diagramSource || "")}
-\`\`\`
-`;
+function toMermaidMarkdown(source) {
+  return MarkdownCore.toMermaidMarkdown(source);
 }
 
 function formatDate(isoString) {
@@ -1727,6 +1679,7 @@ function revealFolderInTree(folderId) {
     state.collapsedFolderIds.delete(id);
   }
 
+  persistCollapsedFolders();
   renderDocList();
 
   const row = findFolderRow(folderId);
@@ -1891,6 +1844,7 @@ function updateActiveDocUI(fileName) {
     doc?.updatedAt ? `updated ${formatDate(doc.updatedAt)}` : ""
   ], doc?.folderId || null);
   elements.editDocBtn.disabled = notebookFile;
+  updateShareButton();
   elements.editCurrentDocBtn.disabled = notebookFile;
   elements.dockEdit.disabled = notebookFile;
   elements.softDeleteDocBtn.disabled = false;
@@ -2070,13 +2024,28 @@ function requestConfirmation({
   });
 }
 
-async function requestJson(url, options = {}) {
-  const requestOptions = { ...options };
+/* --------------------------------------------------------------------------
+   Session
 
-  if (state.writeToken) {
+   Accounts replace the shared editor token. The session lives in an httpOnly
+   cookie the script cannot read, so there is nothing here to store or leak —
+   credentials: "same-origin" is what attaches it.
+
+   The CSRF token is the one piece the page does hold, because the whole point
+   of a double-submit token is that script has to echo it back and cross-origin
+   script cannot.
+   -------------------------------------------------------------------------- */
+
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+async function requestJson(url, options = {}) {
+  const requestOptions = { ...options, credentials: "same-origin" };
+  const method = String(options.method || "GET").toUpperCase();
+
+  if (UNSAFE_METHODS.has(method) && state.csrfToken) {
     requestOptions.headers = {
       ...(options.headers || {}),
-      Authorization: `Bearer ${state.writeToken}`
+      "X-CSRF-Token": state.csrfToken
     };
   }
 
@@ -2090,10 +2059,16 @@ async function requestJson(url, options = {}) {
   }
 
   if (response.status === 401) {
-    // The stored token is missing or no longer valid (the server generates a
-    // fresh one on restart unless MDVIEWER_TOKEN is set).
-    setWriteAccess(false);
-    throw new Error(payload?.error || "Editing is locked. Unlock editing to continue.");
+    // The session expired, was revoked, or never existed.
+    applySession({ authenticated: false, user: null, permissions: [], csrfToken: null });
+    throw new Error(payload?.error || "Your session has ended. Sign in again.");
+  }
+
+  if (response.status === 403 && payload?.code === "password_change_required") {
+    // eslint-disable-next-line require-atomic-updates
+    state.mustChangePassword = true;
+    openPasswordModal({ forced: true });
+    throw new Error(payload.error);
   }
 
   if (!response.ok) {
@@ -2103,122 +2078,619 @@ async function requestJson(url, options = {}) {
   return payload;
 }
 
-function syncLockUI() {
-  if (!elements.lockToggleBtn) {
+function can(permission) {
+  return state.permissions.includes(permission);
+}
+
+// One place decides what the session means for the UI, so a role change or a
+// sign-out cannot leave half the controls in the wrong state.
+function applySession(payload) {
+  state.authenticated = Boolean(payload?.authenticated);
+  state.user = payload?.user || null;
+  state.permissions = Array.isArray(payload?.permissions) ? payload.permissions : [];
+  state.csrfToken = payload?.csrfToken || "";
+  state.publicReads = Boolean(payload?.publicReads);
+  state.canWrite = can("doc:write");
+  state.mustChangePassword = Boolean(payload?.user?.mustChangePassword);
+
+  syncAccountUI();
+}
+
+function syncAccountUI() {
+  const signedIn = state.authenticated;
+
+  if (elements.accountBtn) {
+    const icon = elements.accountBtn.querySelector("i");
+    if (icon) {
+      icon.className = signedIn ? "ph ph-user-circle" : "ph ph-sign-in";
+    }
+
+    const label = signedIn
+      ? `Signed in as ${state.user.username} (${state.user.role}). Account menu`
+      : "Sign in";
+    elements.accountBtn.setAttribute("aria-label", label);
+    elements.accountBtn.title = label;
+    delete elements.accountBtn.dataset.tip;
+  }
+
+  // Controls that write are hidden outright rather than disabled: a viewer has
+  // no use for an editor button that always refuses.
+  const writeControls = [
+    elements.newDocBtn,
+    elements.uploadTrigger,
+    elements.editDocBtn,
+    elements.createFolderBtn
+  ];
+
+  for (const control of writeControls) {
+    if (control) {
+      control.hidden = !can("doc:write");
+    }
+  }
+
+  if (elements.manageUsersItem) {
+    elements.manageUsersItem.hidden = !can("user:manage");
+  }
+
+  document.body.classList.toggle("is-signed-in", signedIn);
+  document.body.classList.toggle("can-write", can("doc:write"));
+  updateShareButton();
+
+  updateActiveDocUI(state.activeFile);
+}
+
+async function refreshSession() {
+  try {
+    const payload = await requestJson("/api/session", { cache: "no-store" });
+    applySession(payload);
+    return payload;
+  } catch {
+    applySession({ authenticated: false, user: null, permissions: [], csrfToken: null });
+    return null;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Login, password change and account management
+   -------------------------------------------------------------------------- */
+
+function showFieldError(element, message) {
+  if (!element) {
     return;
   }
 
-  const icon = elements.lockToggleBtn.querySelector("i");
-  if (icon) {
-    icon.className = state.canWrite ? "ph ph-lock-simple-open" : "ph ph-lock-simple";
-  }
-
-  elements.lockToggleBtn.classList.toggle("active", state.canWrite);
-  const label = state.canWrite ? "Lock editing" : "Unlock editing";
-  elements.lockToggleBtn.setAttribute("aria-label", label);
-  elements.lockToggleBtn.title = state.canWrite ? "Editing unlocked - click to lock" : "Unlock editing";
+  element.textContent = message || "";
+  element.hidden = !message;
 }
 
-function setWriteAccess(canWrite, { token = null } = {}) {
-  state.canWrite = Boolean(canWrite);
+function openLoginModal() {
+  state.loginOpen = true;
+  showFieldError(elements.loginError, "");
+  elements.loginPassword.value = "";
 
-  if (!state.canWrite) {
-    state.writeToken = "";
-    persistWriteToken("");
-  } else if (token) {
-    state.writeToken = token;
-    persistWriteToken(token);
-  }
+  elements.loginModal.classList.add("open");
+  elements.loginModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.loginModal);
+  syncBodyLock();
 
-  syncLockUI();
+  window.requestAnimationFrame(() => {
+    (elements.loginUsername.value ? elements.loginPassword : elements.loginUsername).focus();
+  });
 }
 
-async function verifyWriteToken(token) {
-  const response = await fetch("/api/session", {
-    cache: "no-store",
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
+function closeLoginModal() {
+  state.loginOpen = false;
+  elements.loginPassword.value = "";
+  elements.loginModal.classList.remove("open");
+  elements.loginModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.loginModal);
+  syncBodyLock();
+}
+
+async function submitLogin() {
+  const username = String(elements.loginUsername.value || "").trim();
+  const password = String(elements.loginPassword.value || "");
+
+  if (!username || !password) {
+    showFieldError(elements.loginError, "Enter your username and password.");
+    return;
+  }
+
+  elements.loginSubmitBtn.disabled = true;
+  showFieldError(elements.loginError, "");
+
+  try {
+    // Not requestJson: a failed sign-in is an expected outcome to show inline,
+    // not an exception to toast, and there is no session to invalidate yet.
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      showFieldError(elements.loginError, payload?.error || "Sign-in failed.");
+      elements.loginPassword.select();
+      return;
+    }
+
+    applySession(payload);
+    closeLoginModal();
+
+    if (state.mustChangePassword) {
+      notify("Set a new password to continue.", "warning");
+      openPasswordModal({ forced: true });
+      return;
+    }
+
+    notify(`Signed in as ${payload.user.username}.`, "success");
+    await refreshDocs({ preserveSearch: false });
+  } catch (error) {
+    showFieldError(elements.loginError, error.message || "Sign-in failed.");
+  } finally {
+    // eslint-disable-next-line require-atomic-updates
+    elements.loginSubmitBtn.disabled = false;
+  }
+}
+
+async function signOut() {
+  try {
+    await requestJson("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Even if the call fails, drop local state — the cookie may already be gone.
+  }
+
+  applySession({ authenticated: false, user: null, permissions: [], csrfToken: null });
+  state.docs = [];
+  state.filteredDocs = [];
+  state.activeFile = null;
+  renderDocList();
+  updateActiveDocUI(null);
+  notify("Signed out.", "neutral");
+  openLoginModal();
+}
+
+function openPasswordModal({ forced = false } = {}) {
+  if (state.passwordOpen) {
+    return;
+  }
+
+  state.passwordOpen = true;
+  state.passwordForced = forced;
+
+  elements.currentPassword.value = "";
+  elements.newPassword.value = "";
+  elements.confirmPassword.value = "";
+  elements.passwordUsername.value = state.user?.username || "";
+  showFieldError(elements.passwordError, "");
+
+  elements.passwordTitle.textContent = forced ? "Choose a new password" : "Change your password";
+  elements.passwordMessage.textContent = forced
+    ? "This account is using a password someone else set. Choose your own before continuing."
+    : "Changing your password signs out every other session on your account.";
+  // Nothing behind a forced change is usable, so there is nothing to cancel to.
+  elements.passwordCancelBtn.hidden = forced;
+
+  elements.passwordModal.classList.add("open");
+  elements.passwordModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.passwordModal);
+  syncBodyLock();
+  window.requestAnimationFrame(() => elements.currentPassword.focus());
+}
+
+function closePasswordModal() {
+  if (state.passwordForced) {
+    return;
+  }
+
+  state.passwordOpen = false;
+  elements.currentPassword.value = "";
+  elements.newPassword.value = "";
+  elements.confirmPassword.value = "";
+  elements.passwordModal.classList.remove("open");
+  elements.passwordModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.passwordModal);
+  syncBodyLock();
+}
+
+async function submitPasswordChange() {
+  const currentPassword = String(elements.currentPassword.value || "");
+  const newPassword = String(elements.newPassword.value || "");
+  const confirmPassword = String(elements.confirmPassword.value || "");
+
+  if (newPassword !== confirmPassword) {
+    showFieldError(elements.passwordError, "The two new passwords do not match.");
+    elements.confirmPassword.select();
+    return;
+  }
+
+  showFieldError(elements.passwordError, "");
+
+  try {
+    const payload = await requestJson("/api/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+
+    applySession(payload);
+    state.passwordForced = false;
+    closePasswordModal();
+    notify("Password changed. Other sessions were signed out.", "success");
+
+    // A forced change blocked the initial load, so the library is still empty.
+    if (state.docs.length === 0) {
+      await refreshDocs({ preserveSearch: false });
+    }
+  } catch (error) {
+    showFieldError(elements.passwordError, error.message);
+  }
+}
+
+// -- accounts ---------------------------------------------------------------
+
+async function openUsersModal() {
+  state.usersOpen = true;
+  elements.usersModal.classList.add("open");
+  elements.usersModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.usersModal);
+  syncBodyLock();
+
+  await refreshUsers();
+}
+
+function closeUsersModal() {
+  state.usersOpen = false;
+  elements.usersModal.classList.remove("open");
+  elements.usersModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.usersModal);
+  syncBodyLock();
+}
+
+async function refreshUsers() {
+  try {
+    const payload = await requestJson("/api/users", { cache: "no-store" });
+    state.users = payload.users || [];
+    renderUsers();
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+function renderUsers() {
+  elements.usersTableBody.innerHTML = "";
+
+  for (const user of state.users) {
+    const row = document.createElement("tr");
+    const isSelf = user.id === state.user?.id;
+
+    const name = document.createElement("td");
+    name.className = "users-cell-name";
+    name.textContent = user.username;
+    if (isSelf) {
+      const badge = document.createElement("span");
+      badge.className = "users-self";
+      badge.textContent = "you";
+      name.appendChild(badge);
+    }
+    row.appendChild(name);
+
+    const roleCell = document.createElement("td");
+    const roleSelect = document.createElement("select");
+    roleSelect.className = "users-role";
+    for (const role of ["viewer", "editor", "admin"]) {
+      const option = document.createElement("option");
+      option.value = role;
+      option.textContent = role;
+      option.selected = user.role === role;
+      roleSelect.appendChild(option);
+    }
+    // Changing your own role is the one-click route to locking yourself out.
+    roleSelect.disabled = isSelf;
+    roleSelect.setAttribute("aria-label", `Role for ${user.username}`);
+    roleSelect.addEventListener("change", () => {
+      void updateUser(user.id, { role: roleSelect.value });
+    });
+    roleCell.appendChild(roleSelect);
+    row.appendChild(roleCell);
+
+    const status = document.createElement("td");
+    status.textContent = user.disabled
+      ? "Disabled"
+      : user.mustChangePassword ? "Must set password" : "Active";
+    row.appendChild(status);
+
+    const lastSeen = document.createElement("td");
+    lastSeen.textContent = user.lastLoginAt
+      ? new Date(user.lastLoginAt).toLocaleDateString()
+      : "Never";
+    row.appendChild(lastSeen);
+
+    const actions = document.createElement("td");
+    actions.className = "users-actions";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "btn btn-sm";
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset password";
+    resetBtn.addEventListener("click", () => {
+      void resetUserPassword(user);
+    });
+    actions.appendChild(resetBtn);
+
+    if (!isSelf) {
+      const disableBtn = document.createElement("button");
+      disableBtn.className = "btn btn-sm";
+      disableBtn.type = "button";
+      disableBtn.textContent = user.disabled ? "Enable" : "Disable";
+      disableBtn.addEventListener("click", () => {
+        void updateUser(user.id, { disabled: !user.disabled });
+      });
+      actions.appendChild(disableBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "btn btn-sm danger";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => {
+        void deleteUser(user);
+      });
+      actions.appendChild(deleteBtn);
+    }
+
+    row.appendChild(actions);
+    elements.usersTableBody.appendChild(row);
+  }
+}
+
+async function updateUser(id, changes) {
+  try {
+    await requestJson(`/api/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes)
+    });
+
+    await refreshUsers();
+    notify("Account updated.", "success");
+  } catch (error) {
+    notify(error.message, "error");
+    // The select still shows the value that failed; re-render to correct it.
+    await refreshUsers();
+  }
+}
+
+async function submitNewUser() {
+  showFieldError(elements.newUserError, "");
+
+  try {
+    await requestJson("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: elements.newUserName.value,
+        password: elements.newUserPassword.value,
+        role: elements.newUserRole.value
+      })
+    });
+
+    const username = elements.newUserName.value;
+    elements.newUserName.value = "";
+    elements.newUserPassword.value = "";
+    elements.newUserRole.value = "viewer";
+    elements.newUserDetails.open = false;
+
+    await refreshUsers();
+    notify(`Account "${username}" created.`, "success");
+  } catch (error) {
+    showFieldError(elements.newUserError, error.message);
+  }
+}
+
+async function resetUserPassword(user) {
+  const password = window.prompt(
+    `New password for "${user.username}".\n\nThey will be required to change it at next sign-in.`
+  );
+
+  if (password === null) {
+    return;
+  }
+
+  try {
+    await requestJson(`/api/users/${encodeURIComponent(user.id)}/password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+
+    await refreshUsers();
+    notify(`Password reset for "${user.username}". Their other sessions were signed out.`, "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+async function deleteUser(user) {
+  const confirmed = await requestConfirmation({
+    title: `Delete "${user.username}"?`,
+    message: "The account is removed and its sessions end immediately. Documents they created are not affected.",
+    confirmLabel: "Delete account",
+    tone: "danger"
   });
 
-  if (!response.ok) {
-    return false;
-  }
-
-  const payload = await response.json().catch(() => null);
-  return Boolean(payload?.canWrite);
-}
-
-async function restoreWriteSession() {
-  const storedToken = readStoredWriteToken();
-  if (!storedToken) {
-    setWriteAccess(false);
+  if (!confirmed) {
     return;
   }
 
   try {
-    const isValid = await verifyWriteToken(storedToken);
-    if (isValid) {
-      state.writeToken = storedToken;
-      setWriteAccess(true, { token: storedToken });
-      return;
-    }
-  } catch {
-    // Network trouble - treat as locked rather than assuming access.
-  }
-
-  setWriteAccess(false);
-}
-
-function openUnlockModal() {
-  state.unlockOpen = true;
-  elements.unlockTokenInput.value = "";
-  elements.unlockModal.classList.add("open");
-  elements.unlockModal.setAttribute("aria-hidden", "false");
-  enterModalLayer(elements.unlockModal);
-  syncBodyLock();
-  window.requestAnimationFrame(() => elements.unlockTokenInput.focus());
-}
-
-function closeUnlockModal() {
-  state.unlockOpen = false;
-  elements.unlockTokenInput.value = "";
-  elements.unlockModal.classList.remove("open");
-  elements.unlockModal.setAttribute("aria-hidden", "true");
-  exitModalLayer(elements.unlockModal);
-  syncBodyLock();
-}
-
-async function submitUnlock() {
-  const token = String(elements.unlockTokenInput.value || "").trim();
-  if (!token) {
-    setStatus("Enter the editor token to unlock editing.", "error");
-    elements.unlockTokenInput.focus();
-    return;
-  }
-
-  try {
-    const isValid = await verifyWriteToken(token);
-    if (!isValid) {
-      setStatus("That token was not accepted.", "error");
-      elements.unlockTokenInput.select();
-      return;
-    }
-
-    setWriteAccess(true, { token });
-    closeUnlockModal();
-    setStatus("Editing unlocked.", "success");
+    await requestJson(`/api/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
+    await refreshUsers();
+    notify(`Account "${user.username}" deleted.`, "success");
   } catch (error) {
-    setStatus(error.message, "error");
+    notify(error.message, "error");
   }
 }
 
-function handleLockToggle() {
-  if (state.canWrite) {
-    setWriteAccess(false);
-    setStatus("Editing locked.", "neutral");
+/* --------------------------------------------------------------------------
+   Share links
+
+   A share link publishes one document at an unguessable URL. The token is the
+   credential, so the server stores only its hash and hands back the full URL
+   exactly once — which is why the dialog says so, and why "create" on an
+   already-shared document is a rotation that invalidates the old link.
+   -------------------------------------------------------------------------- */
+
+async function refreshShares() {
+  if (!can("share:manage")) {
+    state.shares = new Map();
     return;
   }
 
-  openUnlockModal();
+  try {
+    const payload = await requestJson("/api/shares", { cache: "no-store" });
+    state.shares = new Map((payload.shares || []).map((share) => [share.file, share]));
+  } catch {
+    // Not fatal: the share button just will not show a "shared" state.
+    state.shares = new Map();
+  }
+}
+
+function openShareModal(file) {
+  state.shareOpen = true;
+  state.shareFile = file;
+
+  renderShareDialog();
+
+  elements.shareModal.classList.add("open");
+  elements.shareModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.shareModal);
+  syncBodyLock();
+}
+
+function closeShareModal() {
+  state.shareOpen = false;
+  state.shareFile = null;
+  elements.shareUrlInput.value = "";
+  elements.shareUrlField.hidden = true;
+  elements.shareOnceHint.hidden = true;
+  elements.shareModal.classList.remove("open");
+  elements.shareModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.shareModal);
+  syncBodyLock();
+}
+
+function renderShareDialog() {
+  const share = state.shares.get(state.shareFile);
+
+  if (share) {
+    const viewed = share.views > 0
+      ? `Opened ${share.views} time${share.views === 1 ? "" : " s"}.`.replace(" s", "s")
+      : "Not opened yet.";
+    elements.shareStatus.innerHTML = `
+      <p class="share-live"><i class="ph ph-globe-simple" aria-hidden="true"></i>
+        <span><strong>${escapeHtml(state.shareFile)}</strong> is shared publicly.</span></p>
+      <p class="share-sub">Created ${escapeHtml(new Date(share.createdAt).toLocaleDateString())} by
+        ${escapeHtml(share.createdBy || "unknown")}. ${escapeHtml(viewed)}</p>
+    `;
+    elements.revokeShareBtn.hidden = false;
+    elements.createShareBtn.textContent = "Replace link";
+  } else {
+    elements.shareStatus.innerHTML = `
+      <p class="share-live"><i class="ph ph-lock-simple" aria-hidden="true"></i>
+        <span><strong>${escapeHtml(state.shareFile)}</strong> is private.</span></p>
+      <p class="share-sub">Only signed-in accounts can read it.</p>
+    `;
+    elements.revokeShareBtn.hidden = true;
+    elements.createShareBtn.textContent = "Create link";
+  }
+}
+
+async function createShareLink() {
+  const file = state.shareFile;
+  const existing = state.shares.get(file);
+
+  if (existing) {
+    const confirmed = await requestConfirmation({
+      title: "Replace the existing link?",
+      message: "The current link stops working immediately. Anyone still using it will get a 'not valid' page.",
+      confirmLabel: "Replace link",
+      tone: "danger"
+    });
+
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  try {
+    const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/share`, { method: "POST" });
+    await refreshShares();
+    renderShareDialog();
+
+    elements.shareUrlInput.value = payload.url;
+    elements.shareUrlField.hidden = false;
+    elements.shareOnceHint.hidden = false;
+    elements.shareUrlInput.select();
+
+    updateShareButton();
+    notify(payload.rotated ? "New share link created. The old one no longer works." : "Share link created.", "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+async function revokeShareLink() {
+  const file = state.shareFile;
+  const confirmed = await requestConfirmation({
+    title: "Revoke the share link?",
+    message: `"${file}" stops being publicly readable immediately.`,
+    confirmLabel: "Revoke link",
+    tone: "danger"
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await requestJson(`/api/docs/${encodeURIComponent(file)}/share`, { method: "DELETE" });
+    await refreshShares();
+    renderShareDialog();
+    elements.shareUrlField.hidden = true;
+    elements.shareOnceHint.hidden = true;
+    updateShareButton();
+    notify("Share link revoked.", "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+// The button carries the state, so you can see at a glance whether the open
+// document is published without opening the dialog.
+function updateShareButton() {
+  if (!elements.shareDocBtn) {
+    return;
+  }
+
+  const usable = can("share:manage") && Boolean(state.activeFile) && !state.isRecycleBinMode;
+  elements.shareDocBtn.hidden = !can("share:manage");
+  elements.shareDocBtn.disabled = !usable;
+
+  const shared = usable && state.shares.has(state.activeFile);
+  elements.shareDocBtn.classList.toggle("active", shared);
+
+  const icon = elements.shareDocBtn.querySelector("i");
+  if (icon) {
+    icon.className = shared ? "ph-fill ph-link-simple" : "ph ph-link-simple";
+  }
+
+  const label = shared ? "Shared publicly - manage link" : "Share this document";
+  elements.shareDocBtn.setAttribute("aria-label", label);
+  elements.shareDocBtn.title = label;
+  delete elements.shareDocBtn.dataset.tip;
 }
 
 async function fetchDocs() {
@@ -2236,7 +2708,11 @@ async function fetchDocs() {
     updatedAt: folder.updatedAt || ""
   }));
   state.foldersById = new Map(state.folders.map((folder) => [folder.id, folder]));
+  applyInitialFolderCollapse();
+  await refreshShares();
 
+  // Last write wins; this replaces the whole list.
+  // eslint-disable-next-line require-atomic-updates
   state.docs = (payload.docs || []).map((doc) => ({
     file: doc.file,
     title: doc.title || filenameToTitle(doc.file),
@@ -2402,879 +2878,44 @@ function showEmptyState(title, message, icon = "ph-file-dashed") {
   `;
 }
 
-function renderMarkdown(markdown) {
-  const normalizedMarkdown = normalizeMarkdownMath(markdown);
-  const unsafeHtml = marked.parse(normalizedMarkdown);
-  return DOMPurify.sanitize(unsafeHtml, MARKDOWN_SANITIZE_OPTIONS);
-}
+/* --------------------------------------------------------------------------
+   Document rendering
 
-function renderMathBlocks(root) {
-  if (!root) {
-    return;
-  }
+   Markdown, notebooks, Mermaid, code highlighting and math all live in
+   public/js/markdown-core.js, which the standalone share page loads too. One
+   copy of the sanitizer and one Mermaid securityLevel, rather than two that
+   drift apart.
 
-  if (window.katex) {
-    const blockNodes = root.querySelectorAll(".math-block[data-math-tex]");
-    for (const node of blockNodes) {
-      const tex = decodeBase64Utf8(node.getAttribute("data-math-tex") || "");
-
-      try {
-        window.katex.render(tex, node, {
-          displayMode: true,
-          throwOnError: false,
-          errorColor: "#eb9b96"
-        });
-      } catch (error) {
-        console.error("Math block rendering failed", error);
-        node.textContent = tex;
-      }
-    }
-  }
-
-  if (!window.renderMathInElement) {
-    return;
-  }
-
-  try {
-    window.renderMathInElement(root, {
-      delimiters: [
-        { left: "$$", right: "$$", display: true },
-        { left: "\\[", right: "\\]", display: true },
-        { left: "\\(", right: "\\)", display: false },
-        { left: "$", right: "$", display: false }
-      ],
-      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "svg"],
-      processEscapes: true,
-      throwOnError: false,
-      errorColor: "#eb9b96"
-    });
-  } catch (error) {
-    console.error("Math rendering failed", error);
-  }
-}
+   These wrappers keep the ~40 call sites below unchanged, and stay function
+   declarations so hoisting works exactly as it did.
+   -------------------------------------------------------------------------- */
 
 function waitForNextFrame() {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-function normalizeNotebookText(value) {
-  if (Array.isArray(value)) {
-    return value.join("");
-  }
-
-  if (value == null) {
-    return "";
-  }
-
-  return String(value);
-}
-
-function inferNotebookLanguage(notebook) {
-  const rawLanguage = normalize(
-    notebook?.metadata?.language_info?.name
-      || notebook?.metadata?.language_info?.codemirror_mode?.name
-      || notebook?.metadata?.kernelspec?.language
-      || "python"
-  ).trim();
-
-  if (!rawLanguage) {
-    return "python";
-  }
-
-  if (rawLanguage.startsWith("python")) {
-    return "python";
-  }
-
-  return CODE_LANGUAGE_ALIAS[rawLanguage] || rawLanguage;
-}
-
-function getNotebookImageSource(mimeType, payload) {
-  const source = normalizeNotebookText(payload).trim();
-
-  if (mimeType === "image/svg+xml") {
-    const compactSource = source.replace(/\s+/g, "");
-    if (/^[A-Za-z0-9+/=]+$/.test(compactSource)) {
-      return `data:image/svg+xml;base64,${compactSource}`;
-    }
-
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
-  }
-
-  return `data:${mimeType};base64,${source.replace(/\s+/g, "")}`;
-}
-
-function renderNotebookMimePayload(mimeType, payload) {
-  const text = normalizeNotebookText(payload);
-
-  switch (mimeType) {
-    case "text/html":
-      return `<div class="notebook-output-html">${DOMPurify.sanitize(text, MARKDOWN_SANITIZE_OPTIONS)}</div>`;
-    case "image/svg+xml":
-    case "image/png":
-    case "image/jpeg":
-    case "image/gif":
-    case "image/webp":
-    case "image/avif":
-      return `<figure class="notebook-output notebook-output-image"><img src="${escapeHtml(getNotebookImageSource(mimeType, text))}" alt="Notebook output image" loading="lazy" /></figure>`;
-    case "text/markdown":
-      return `<div class="notebook-output-markdown">${renderMarkdown(text)}</div>`;
-    case "application/json": {
-      let formattedText = text;
-
-      try {
-        formattedText = JSON.stringify(JSON.parse(text), null, 2);
-      } catch {
-        formattedText = text;
-      }
-
-      return `<pre class="notebook-output-json">${escapeHtml(formattedText)}</pre>`;
-    }
-    case "text/plain":
-    default:
-      return `<pre class="notebook-output-text">${escapeHtml(text)}</pre>`;
-  }
-}
-
-function renderNotebookOutput(output) {
-  const outputType = String(output?.output_type || "").toLowerCase();
-
-  if (outputType === "stream") {
-    const streamName = escapeHtml(String(output?.name || "stream"));
-    const streamText = escapeHtml(normalizeNotebookText(output?.text));
-    return `
-      <section class="notebook-output notebook-output-stream">
-        <div class="notebook-output-label">${streamName}</div>
-        <pre class="notebook-output-text">${streamText}</pre>
-      </section>
-    `;
-  }
-
-  if (outputType === "error") {
-    const errorName = escapeHtml(String(output?.ename || "Error"));
-    const errorValue = escapeHtml(String(output?.evalue || ""));
-    const traceback = Array.isArray(output?.traceback)
-      ? output.traceback.map((line) => normalizeNotebookText(line)).join("\n")
-      : `${normalizeNotebookText(output?.ename)}: ${normalizeNotebookText(output?.evalue)}`;
-
-    return `
-      <section class="notebook-output notebook-output-error">
-        <div class="notebook-output-label">Error</div>
-        <div class="notebook-output-error-name">${errorName}</div>
-        <div class="notebook-output-error-value">${errorValue}</div>
-        <pre class="notebook-output-text">${escapeHtml(traceback)}</pre>
-      </section>
-    `;
-  }
-
-  const data = output?.data || {};
-  const mimeOrder = [
-    "text/html",
-    "image/svg+xml",
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/avif",
-    "text/markdown",
-    "application/json",
-    "text/plain"
-  ];
-
-  for (const mimeType of mimeOrder) {
-    if (data[mimeType] != null) {
-      const mimeClass = mimeType.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
-      return `<section class="notebook-output notebook-output-${mimeClass}">${renderNotebookMimePayload(mimeType, data[mimeType])}</section>`;
-    }
-  }
-
-  return "";
-}
-
-function renderNotebookCell(cell, index, notebookLanguage) {
-  const cellType = normalize(cell?.cell_type || "").trim();
-  const cellNumber = index + 1;
-  const source = normalizeNotebookText(cell?.source);
-
-  if (cellType === "markdown") {
-    return `
-      <section class="notebook-cell notebook-cell-markdown">
-        <div class="notebook-cell-head">
-          <span class="notebook-cell-badge">Markdown</span>
-          <span class="notebook-cell-index">Cell ${cellNumber}</span>
-        </div>
-        <div class="notebook-cell-content">
-          ${renderMarkdown(source)}
-        </div>
-      </section>
-    `;
-  }
-
-  if (cellType === "code") {
-    const executionCount = Number.isFinite(Number(cell?.execution_count))
-      ? Number(cell.execution_count)
-      : null;
-    const outputHtml = Array.isArray(cell?.outputs)
-      ? cell.outputs.map((output) => renderNotebookOutput(output)).filter(Boolean).join("")
-      : "";
-
-    return `
-      <section class="notebook-cell notebook-cell-code">
-        <div class="notebook-cell-head">
-          <span class="notebook-cell-badge">Code</span>
-          <span class="notebook-cell-index">${executionCount != null ? `In [${executionCount}]` : `Cell ${cellNumber}`}</span>
-        </div>
-        <div class="notebook-cell-content">
-          <pre class="notebook-code-block"><code class="language-${escapeHtml(notebookLanguage)}">${escapeHtml(source)}</code></pre>
-          ${outputHtml ? `<div class="notebook-outputs">${outputHtml}</div>` : ""}
-        </div>
-      </section>
-    `;
-  }
-
-  return `
-    <section class="notebook-cell notebook-cell-raw">
-      <div class="notebook-cell-head">
-        <span class="notebook-cell-badge">Raw</span>
-        <span class="notebook-cell-index">Cell ${cellNumber}</span>
-      </div>
-      <div class="notebook-cell-content">
-        <pre class="notebook-raw-block">${escapeHtml(source)}</pre>
-      </div>
-    </section>
-  `;
-}
-
-function renderNotebookDocument(rawContent, title) {
-  const notebook = JSON.parse(String(rawContent || "").replace(/^\uFEFF/, ""));
-  const cells = Array.isArray(notebook?.cells) ? notebook.cells : null;
-
-  if (!cells) {
-    throw new Error("Invalid notebook file");
-  }
-
-  const notebookLanguage = inferNotebookLanguage(notebook);
-  const cellCounts = cells.reduce((counts, cell) => {
-    const type = normalize(cell?.cell_type || "").trim();
-    if (type === "markdown") {
-      counts.markdown += 1;
-    } else if (type === "code") {
-      counts.code += 1;
-    } else if (type === "raw") {
-      counts.raw += 1;
-    }
-
-    return counts;
-  }, { markdown: 0, code: 0, raw: 0 });
-
-  const totalCells = cells.length;
-  const renderedCells = cells.map((cell, index) => renderNotebookCell(cell, index, notebookLanguage)).join("");
-
-  return `
-    <section class="notebook-summary">
-      <p class="notebook-eyebrow"><i class="ph ph-file-code"></i> Jupyter Notebook</p>
-      <h1>${escapeHtml(title || notebook?.metadata?.title || "Notebook")}</h1>
-      <p class="notebook-meta">
-        ${totalCells} cell${totalCells === 1 ? "" : "s"}
-        · ${cellCounts.markdown} markdown
-        · ${cellCounts.code} code
-        ${cellCounts.raw ? `· ${cellCounts.raw} raw` : ""}
-      </p>
-    </section>
-    <section class="notebook-cells">
-      ${renderedCells || '<p class="notebook-empty">This notebook has no cells.</p>'}
-    </section>
-  `;
-}
-
-function renderDocumentContent(fileName, rawContent, title) {
-  if (isNotebookFile(fileName)) {
-    return renderNotebookDocument(rawContent, title);
-  }
-
-  const renderedSource = isDiagramFile(fileName)
-    ? toMermaidMarkdown(rawContent)
-    : rawContent;
-
-  return renderMarkdown(renderedSource);
-}
-
-// Mermaid bakes hex colours into the SVG it emits, so it cannot read the CSS
-// custom properties the rest of the app themes with. These two tables are the
-// diagram-side mirror of the light and dark token sets in app.css; if a token
-// there changes, change its counterpart here.
-const DIAGRAM_PALETTES = {
-  dark: {
-    themeVariables: {
-      background: "#0c1214",
-      mainBkg: "#1c262a",
-      primaryColor: "#1c262a",
-      primaryTextColor: "#dce7e5",
-      primaryBorderColor: "#3f8d84",
-      secondaryColor: "#253238",
-      secondaryTextColor: "#dce7e5",
-      secondaryBorderColor: "#2e3d42",
-      tertiaryColor: "#0a1013",
-      tertiaryTextColor: "#dce7e5",
-      tertiaryBorderColor: "#2e3d42",
-      lineColor: "#86a09d",
-      textColor: "#dce7e5",
-      nodeBorder: "#3f8d84",
-      nodeTextColor: "#dce7e5",
-      clusterBkg: "#0a1013",
-      clusterBorder: "#2e3d42",
-      edgeLabelBackground: "#0c1214",
-      labelBoxBkgColor: "#1c262a",
-      labelBoxBorderColor: "#2e3d42",
-      labelTextColor: "#dce7e5",
-      titleColor: "#dce7e5",
-      actorBkg: "#1c262a",
-      actorBorder: "#3f8d84",
-      actorTextColor: "#dce7e5",
-      actorLineColor: "#86a09d",
-      signalColor: "#86a09d",
-      signalTextColor: "#dce7e5",
-      loopTextColor: "#dce7e5",
-      noteBkgColor: "#253238",
-      noteTextColor: "#dce7e5",
-      noteBorderColor: "#2e3d42",
-      attributeBackgroundColorOdd: "#0c1214",
-      attributeBackgroundColorEven: "#1c262a",
-      altBackground: "#0a1013"
-    },
-    // Fills the base theme emits that have to be corrected on this background.
-    strayFills: ["#ffffff", "white", "#ECECFF"]
-  },
-  light: {
-    themeVariables: {
-      background: "#ffffff",
-      mainBkg: "#eef4f2",
-      primaryColor: "#eef4f2",
-      primaryTextColor: "#101b1a",
-      primaryBorderColor: "#10635a",
-      secondaryColor: "#dcece9",
-      secondaryTextColor: "#101b1a",
-      secondaryBorderColor: "#a6b9b5",
-      tertiaryColor: "#f4f8f7",
-      tertiaryTextColor: "#101b1a",
-      tertiaryBorderColor: "#a6b9b5",
-      lineColor: "#465956",
-      textColor: "#101b1a",
-      nodeBorder: "#10635a",
-      nodeTextColor: "#101b1a",
-      clusterBkg: "#f4f8f7",
-      clusterBorder: "#a6b9b5",
-      edgeLabelBackground: "#ffffff",
-      labelBoxBkgColor: "#eef4f2",
-      labelBoxBorderColor: "#a6b9b5",
-      labelTextColor: "#101b1a",
-      titleColor: "#101b1a",
-      actorBkg: "#eef4f2",
-      actorBorder: "#10635a",
-      actorTextColor: "#101b1a",
-      actorLineColor: "#465956",
-      signalColor: "#465956",
-      signalTextColor: "#101b1a",
-      loopTextColor: "#101b1a",
-      noteBkgColor: "#dcece9",
-      noteTextColor: "#101b1a",
-      noteBorderColor: "#a6b9b5",
-      attributeBackgroundColorOdd: "#ffffff",
-      attributeBackgroundColorEven: "#eef4f2",
-      altBackground: "#f4f8f7"
-    },
-    // On white, the base theme's own light fills are fine; the lavender is not.
-    strayFills: ["#ECECFF"]
-  }
-};
-
-function buildDiagramThemeCss(palette) {
-  const vars = palette.themeVariables;
-  const strayShapes = palette.strayFills
-    .flatMap((fill) => ["rect", "polygon", "circle", "ellipse"].map((shape) => `${shape}[fill="${fill}"]`))
-    .join(", ");
-
-  return `
-      /* Only the gaps the base theme leaves. Crucially not a blanket rule on
-         <path>: that fills edge lines and turns every connector into a solid
-         blob. */
-      text,
-      tspan {
-        fill: ${vars.textColor};
-      }
-
-      .nodeLabel,
-      .edgeLabel,
-      .label,
-      foreignObject div,
-      foreignObject span {
-        color: ${vars.textColor} !important;
-      }
-
-      /* Edge labels ship with their own plate behind them. */
-      .edgeLabel rect,
-      .labelBkg,
-      rect.background {
-        fill: ${vars.edgeLabelBackground} !important;
-        opacity: 1 !important;
-      }
-
-      .er.entityBox,
-      .entityBox {
-        fill: ${vars.mainBkg};
-        stroke: ${vars.nodeBorder};
-      }
-
-      .relationshipLine,
-      .messageLine0,
-      .messageLine1 {
-        stroke: ${vars.lineColor};
-        fill: none;
-      }
-
-      /* Stray fills the base theme still emits, without touching edges. */
-      ${strayShapes} {
-        fill: ${vars.mainBkg} !important;
-      }
-    `;
-}
-
-function ensureMermaidInitialized() {
-  if (!window.mermaid) {
-    return;
-  }
-
-  // Re-initialize when the theme has moved on, not only when nothing has been
-  // initialized yet — otherwise a stale palette survives a theme change.
-  const theme = activeThemeName();
-  if (state.mermaidReady && state.mermaidTheme === theme) {
-    return;
-  }
-
-  const palette = DIAGRAM_PALETTES[theme] || DIAGRAM_PALETTES.dark;
-
-  window.mermaid.initialize({
-    startOnLoad: false,
-    // "antiscript" runs DOMPurify over diagram labels and blocks javascript:
-    // click directives, while still allowing the <br/> tags our docs rely on.
-    // Do not set this back to "loose": Mermaid renders after DOMPurify has run
-    // on the markdown, so "loose" lets an uploaded document execute script.
-    securityLevel: "antiscript",
-    theme: "base",
-    darkMode: theme === "dark",
-    fontFamily: '"Inter", sans-serif',
-    // Colours belong in themeVariables, not in blanket !important overrides.
-    // An earlier set filled every node with the surface colour — the same
-    // colour as the block behind it — and stroked them in --border-muted, which
-    // is barely a shade off it. Nodes have to sit a step above the background
-    // with a border that can actually be seen.
-    themeVariables: palette.themeVariables,
-    er: {
-      useMaxWidth: true
-    },
-    themeCSS: buildDiagramThemeCss(palette)
-  });
-
-  state.mermaidTheme = theme;
-  state.mermaidReady = true;
-}
-
-function promoteMermaidCodeBlocks(root) {
-  const codeNodes = root.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid");
-  codeNodes.forEach((codeNode) => {
-    const source = codeNode.textContent || "";
-    const block = document.createElement("div");
-    block.className = "mermaid mermaid-block";
-    block.textContent = source;
-    // Kept so the diagram can be redrawn from source when the theme changes;
-    // Mermaid bakes its colours into the SVG at render time, so a repaint is
-    // the only way to recolour one.
-    block.dataset.mermaidSource = source;
-    const pre = codeNode.closest("pre");
-    if (pre) {
-      pre.replaceWith(block);
-    }
-  });
+function renderMarkdown(markdown) {
+  return MarkdownCore.renderMarkdown(markdown);
 }
 
 function highlightCodeBlocks(root) {
-  if (!window.hljs) {
-    return;
-  }
-
-  const codeNodes = root.querySelectorAll("pre code");
-  codeNodes.forEach((codeNode) => {
-    if (codeNode.closest(".mermaid-block")) {
-      return;
-    }
-
-    if (codeNode.dataset.highlighted === "true") {
-      return;
-    }
-
-    try {
-      const classes = Array.from(codeNode.classList || []);
-      const languageClass = classes.find((value) => /^language-|^lang-/i.test(value));
-      const requestedRawLanguage = languageClass
-        ? languageClass.replace(/^language-|^lang-/i, "").trim().toLowerCase()
-        : "";
-      const requestedLanguage = CODE_LANGUAGE_ALIAS[requestedRawLanguage] || requestedRawLanguage;
-      const source = String(codeNode.textContent || "");
-
-      if (requestedLanguage && window.hljs.getLanguage(requestedLanguage)) {
-        const highlighted = window.hljs.highlight(source, {
-          language: requestedLanguage,
-          ignoreIllegals: true
-        });
-
-        codeNode.innerHTML = highlighted.value;
-        codeNode.classList.add("hljs", `language-${requestedLanguage}`);
-        codeNode.dataset.highlighted = "true";
-        return;
-      }
-
-      const autoHighlighted = window.hljs.highlightAuto(source);
-      codeNode.innerHTML = autoHighlighted.value;
-      codeNode.classList.add("hljs");
-      if (autoHighlighted.language) {
-        codeNode.classList.add(`language-${autoHighlighted.language}`);
-      }
-      codeNode.dataset.highlighted = "true";
-    } catch (error) {
-      console.error("Code highlighting failed", error);
-    }
-  });
+  return MarkdownCore.highlightCodeBlocks(root);
 }
 
-function normalizeMermaidSource(source) {
-  return String(source || "")
-    .replace(/\uFEFF/g, "")
-    .replace(/[\u200B-\u200D]/g, "")
-    .replace(/\u00A0/g, " ")
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/\r\n/g, "\n")
-    .trim();
+function renderDocumentContent(fileName, rawContent, title) {
+  return MarkdownCore.renderDocumentContent(fileName, rawContent, title);
 }
 
-function simplifyErDiagramSource(source) {
-  const raw = normalizeMermaidSource(source);
-  if (!/^erDiagram\b/.test(raw)) {
-    return raw;
-  }
-
-  const lines = raw.split("\n");
-  let inEntity = false;
-  const output = [];
-
-  for (const originalLine of lines) {
-    const line = originalLine.replace(/\t/g, "  ");
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      output.push("");
-      continue;
-    }
-
-    if (trimmed === "erDiagram") {
-      output.push("erDiagram");
-      continue;
-    }
-
-    if (trimmed.endsWith("{")) {
-      inEntity = true;
-      output.push(`  ${trimmed}`);
-      continue;
-    }
-
-    if (trimmed === "}") {
-      inEntity = false;
-      output.push("  }");
-      continue;
-    }
-
-    if (inEntity) {
-      const match = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)(?:\s+(PK|FK|UK))?/i);
-      if (!match) {
-        continue;
-      }
-
-      let type = match[1].toLowerCase();
-      const name = match[2];
-      const key = match[3] ? match[3].toUpperCase() : "";
-
-      if (type === "timestamp") {
-        type = "datetime";
-      }
-      if (type === "text") {
-        type = "string";
-      }
-      if (type === "enum") {
-        type = "string";
-      }
-
-      output.push(`    ${type} ${name}${key ? ` ${key}` : ""}`);
-      continue;
-    }
-
-    const relMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*)\s+(\|\|--\|\{|\|\|--o\{|o\|--\|\{|o\|--o\{|\|o--\|\{|\|o--o\{|\}\|--\|\{|\}\|--o\{|\|\|--\|\||\|\|--o\||o\|--\|\||o\|--o\|)\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.+)$/);
-    if (relMatch) {
-      const left = relMatch[1];
-      const connector = relMatch[2];
-      const right = relMatch[3];
-      const rawLabel = relMatch[4]
-        .replace(/^"|"$/g, "")
-        .replace(/[^A-Za-z0-9_ ]/g, " ")
-        .replace(/\s+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .toLowerCase();
-      const label = rawLabel || "relates_to";
-      output.push(`  ${left} ${connector} ${right} : ${label}`);
-      continue;
-    }
-
-    output.push(`  ${trimmed}`);
-  }
-
-  return output.join("\n");
+function renderMermaidBlocks(root) {
+  return MarkdownCore.renderMermaidBlocks(root);
 }
-
-async function renderSingleMermaidNode(node) {
-  const raw = normalizeMermaidSource(node.textContent || "");
-  const attempts = [raw];
-  const simplified = simplifyErDiagramSource(raw);
-  if (simplified && simplified !== raw) {
-    attempts.push(simplified);
-  }
-
-  let lastError = null;
-
-  for (const candidate of attempts) {
-    try {
-      state.panZoomCounter += 1;
-      const renderId = `mermaid-svg-${state.panZoomCounter}`;
-      const { svg, bindFunctions } = await window.mermaid.render(renderId, candidate);
-      node.innerHTML = svg;
-      if (typeof bindFunctions === "function") {
-        bindFunctions(node);
-      }
-      return true;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  const errText = String(lastError?.str || lastError?.message || "Unknown parser error");
-  node.innerHTML = `
-    <pre class="mermaid-fallback-code">${escapeHtml(raw)}</pre>
-    <p class="mermaid-fallback-error">Mermaid parse failed: ${escapeHtml(errText)}</p>
-  `;
-  return false;
-}
-
-// svg-pan-zoom binds window resize and wheel handlers per instance. They were
-// never released, so every re-render and every document switch leaked another
-// set that kept firing against detached SVGs for the life of the page.
-const livePanZoomInstances = new Map();
 
 function destroyPanZoomInstances(root = null) {
-  for (const [svg, instance] of [...livePanZoomInstances.entries()]) {
-    // A null root means "everything"; otherwise only what lives under it, plus
-    // any node that has since been detached from the document.
-    if (root && root.contains(svg) === false && svg.isConnected) {
-      continue;
-    }
-
-    try {
-      instance.destroy();
-    } catch (error) {
-      console.error("Pan/zoom destroy failed", error);
-    }
-
-    delete svg.dataset.panzoomInit;
-    livePanZoomInstances.delete(svg);
-  }
-}
-
-// Wheel-over-diagram used to zoom instead of scrolling the page, which turned
-// every diagram into a scroll trap. Wheel zoom is now opt-in for exactly as
-// long as Ctrl/Cmd is held — the same gesture maps use.
-let wheelZoomArmed = false;
-
-function setWheelZoomArmed(armed) {
-  if (armed === wheelZoomArmed) {
-    return;
-  }
-
-  wheelZoomArmed = armed;
-  for (const instance of livePanZoomInstances.values()) {
-    try {
-      if (armed) {
-        instance.enableMouseWheelZoom();
-      } else {
-        instance.disableMouseWheelZoom();
-      }
-    } catch (error) {
-      console.error("Pan/zoom wheel toggle failed", error);
-    }
-  }
+  return MarkdownCore.destroyPanZoomInstances(root);
 }
 
 function bindWheelZoomModifier() {
-  window.addEventListener("keydown", (event) => {
-    if (event.key === "Control" || event.key === "Meta") {
-      setWheelZoomArmed(true);
-    }
-  });
-
-  window.addEventListener("keyup", (event) => {
-    if (event.key === "Control" || event.key === "Meta") {
-      setWheelZoomArmed(false);
-    }
-  });
-
-  // A keyup that happens while the window is unfocused never arrives, so the
-  // modifier would stay stuck on. Reset whenever focus leaves.
-  window.addEventListener("blur", () => setWheelZoomArmed(false));
-}
-
-// svg-pan-zoom sets the SVG to width:100%/height:100%, so the block has to have
-// a height of its own or the whole thing collapses to nothing — which is what a
-// plain `height: auto` container did. Take the shape from the diagram's own
-// viewBox so each one is sized to its content instead of a blanket 65vh, and let
-// CSS clamp the extremes.
-const DIAGRAM_FALLBACK_RATIO = "16 / 9";
-const DIAGRAM_FALLBACK_WIDTH = 720;
-// Small diagrams are still scaled up to at least this, or a three-node flowchart
-// renders postage-stamp sized on a wide monitor.
-const DIAGRAM_MIN_WIDTH = 360;
-// The block's own padding and border, both sides, since aspect-ratio applies to
-// the border box.
-const DIAGRAM_BLOCK_CHROME = 26;
-
-function sizeDiagramContainer(svg) {
-  const block = svg.closest(".mermaid-block");
-  if (!block) {
-    return;
-  }
-
-  let width = 0;
-  let height = 0;
-
-  const viewBox = svg.viewBox?.baseVal;
-  if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
-    width = viewBox.width;
-    height = viewBox.height;
-  } else {
-    // No usable viewBox (some diagram types), so measure what was drawn.
-    try {
-      const box = svg.getBBox();
-      width = box.width;
-      height = box.height;
-    } catch {
-      // getBBox throws on a detached or not-yet-laid-out SVG; fall through.
-    }
-  }
-
-  if (width > 0 && height > 0) {
-    block.style.aspectRatio = `${width} / ${height}`;
-    // Capping the width at the diagram's natural size is what keeps a small
-    // diagram small. Without it, width:100% stretches a 160px flowchart across
-    // the whole pane and the aspect ratio then makes it enormously tall.
-    block.style.maxWidth = `${Math.max(width, DIAGRAM_MIN_WIDTH) + DIAGRAM_BLOCK_CHROME}px`;
-    return;
-  }
-
-  block.style.aspectRatio = DIAGRAM_FALLBACK_RATIO;
-  block.style.maxWidth = `${DIAGRAM_FALLBACK_WIDTH}px`;
-}
-
-function applyPanZoom(root) {
-  if (!window.svgPanZoom) {
-    return;
-  }
-
-  // Anything previously initialized inside this root is about to be replaced.
-  destroyPanZoomInstances(root);
-
-  const svgNodes = root.querySelectorAll(".mermaid-block svg");
-  svgNodes.forEach((svg) => {
-    if (svg.dataset.panzoomInit === "1") {
-      return;
-    }
-
-    // Must happen before svg-pan-zoom takes over the SVG's own dimensions.
-    sizeDiagramContainer(svg);
-
-    state.panZoomCounter += 1;
-    const id = svg.id || `mermaid-svg-${state.panZoomCounter}`;
-    svg.id = id;
-
-    try {
-      const panZoomInstance = window.svgPanZoom(`#${id}`, {
-        controlIconsEnabled: true,
-        fit: true,
-        center: true,
-        minZoom: 0.5,
-        maxZoom: 12,
-        zoomScaleSensitivity: 0.3,
-        // Off by default so scrolling the page past a diagram scrolls the page.
-        // Held Ctrl/Cmd turns it on for as long as the key is down; the +/-
-        // control icons work regardless.
-        mouseWheelZoomEnabled: false
-      });
-      svg.dataset.panzoomInit = "1";
-      livePanZoomInstances.set(svg, panZoomInstance);
-      if (wheelZoomArmed) {
-        // Rendered while the modifier was already down.
-        panZoomInstance.enableMouseWheelZoom();
-      }
-      window.requestAnimationFrame(() => {
-        try {
-          panZoomInstance.resize();
-          panZoomInstance.fit();
-          panZoomInstance.center();
-        } catch (error) {
-          console.error("Pan/zoom refit failed", error);
-        }
-      });
-    } catch (error) {
-      console.error("Pan/zoom init failed", error);
-    }
-  });
-}
-
-async function renderMermaidBlocks(root) {
-  ensureMermaidInitialized();
-  if (!window.mermaid) {
-    highlightCodeBlocks(root);
-    renderMathBlocks(root);
-    return;
-  }
-
-  await waitForNextFrame();
-  promoteMermaidCodeBlocks(root);
-  await waitForNextFrame();
-  const nodes = root.querySelectorAll(".mermaid");
-  if (nodes.length === 0) {
-    highlightCodeBlocks(root);
-    renderMathBlocks(root);
-    return;
-  }
-
-  let hadFailure = false;
-  for (const node of nodes) {
-    const ok = await renderSingleMermaidNode(node);
-    if (!ok) {
-      hadFailure = true;
-    }
-  }
-
-  highlightCodeBlocks(root);
-  applyPanZoom(root);
-  renderMathBlocks(root);
-  if (hadFailure) {
-    setStatus("One or more Mermaid blocks were auto-simplified or could not be parsed.", "error");
-  }
+  return MarkdownCore.bindWheelZoomModifier();
 }
 
 function closeSidebarOnMobile() {
@@ -5562,12 +5203,29 @@ async function initialize() {
   mountMatchNavToViewportLayer();
   bindWheelZoomModifier();
   bindThemeToggle();
-  syncLockUI();
-  await restoreWriteSession();
+  MarkdownCore.configure({ onWarning: (message) => notify(message, "error") });
+
+  // Who we are decides what renders, so this has to settle before anything
+  // tries to load a document.
+  const session = await refreshSession();
+
   syncModeUI();
   updateActiveDocUI(null);
   updateJumpNavigationUI();
   syncSearchInputState(elements.searchInput.value);
+
+  if (!session?.authenticated && !session?.publicReads) {
+    setMeta("Sign in to browse this library.");
+    showEmptyState("This library is private", "Sign in to browse the documents.", "ph-lock-simple");
+    openLoginModal();
+    return;
+  }
+
+  if (state.mustChangePassword) {
+    setMeta("Set a new password to continue.");
+    openPasswordModal({ forced: true });
+    return;
+  }
 
   try {
     const hashFile = decodeURIComponent(window.location.hash.replace(/^#/, ""));
@@ -5746,29 +5404,128 @@ elements.clearSearchBtn.addEventListener("click", () => {
   elements.searchInput.focus();
 });
 
-elements.lockToggleBtn.addEventListener("click", () => {
-  handleLockToggle();
-});
+// -- account menu -----------------------------------------------------------
 
-elements.unlockConfirmBtn.addEventListener("click", () => {
-  void submitUnlock();
-});
+function setAccountMenuOpen(open) {
+  elements.accountMenu.hidden = !open;
+  elements.accountBtn.setAttribute("aria-expanded", open ? "true" : "false");
 
-elements.unlockCancelBtn.addEventListener("click", () => {
-  closeUnlockModal();
-});
+  if (open) {
+    elements.accountIdentity.textContent = state.user
+      ? `${state.user.username} · ${state.user.role}`
+      : "";
+    elements.accountMenu.querySelector(".account-item:not([hidden])")?.focus();
+  }
+}
 
-elements.unlockBackdrop.addEventListener("click", () => {
-  closeUnlockModal();
-});
+elements.accountBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
 
-elements.unlockTokenInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") {
+  if (!state.authenticated) {
+    openLoginModal();
     return;
   }
 
+  setAccountMenuOpen(elements.accountMenu.hidden);
+});
+
+document.addEventListener("click", (event) => {
+  if (elements.accountMenu.hidden) {
+    return;
+  }
+
+  if (!elements.accountMenu.contains(event.target) && !elements.accountBtn.contains(event.target)) {
+    setAccountMenuOpen(false);
+  }
+});
+
+elements.changePasswordItem.addEventListener("click", () => {
+  setAccountMenuOpen(false);
+  openPasswordModal();
+});
+
+elements.manageUsersItem.addEventListener("click", () => {
+  setAccountMenuOpen(false);
+  void openUsersModal();
+});
+
+elements.signOutItem.addEventListener("click", () => {
+  setAccountMenuOpen(false);
+  void signOut();
+});
+
+// -- login ------------------------------------------------------------------
+
+elements.loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  void submitUnlock();
+  void submitLogin();
+});
+
+// -- password ---------------------------------------------------------------
+
+elements.passwordForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitPasswordChange();
+});
+
+elements.passwordCancelBtn.addEventListener("click", () => {
+  closePasswordModal();
+});
+
+elements.passwordBackdrop.addEventListener("click", () => {
+  closePasswordModal();
+});
+
+// -- users ------------------------------------------------------------------
+
+// -- sharing ----------------------------------------------------------------
+
+elements.shareDocBtn.addEventListener("click", () => {
+  if (state.activeFile) {
+    openShareModal(state.activeFile);
+  }
+});
+
+elements.shareCloseBtn.addEventListener("click", () => {
+  closeShareModal();
+});
+
+elements.shareBackdrop.addEventListener("click", () => {
+  closeShareModal();
+});
+
+elements.createShareBtn.addEventListener("click", () => {
+  void createShareLink();
+});
+
+elements.revokeShareBtn.addEventListener("click", () => {
+  void revokeShareLink();
+});
+
+elements.copyShareUrlBtn.addEventListener("click", async () => {
+  elements.shareUrlInput.select();
+
+  try {
+    await navigator.clipboard.writeText(elements.shareUrlInput.value);
+    notify("Share link copied.", "success");
+  } catch {
+    // Clipboard access needs a secure context and can be refused; the text is
+    // already selected, so Ctrl+C still works.
+    notify("Press Ctrl+C to copy the selected link.", "info");
+  }
+});
+
+elements.closeUsersBtn.addEventListener("click", () => {
+  closeUsersModal();
+});
+
+elements.usersBackdrop.addEventListener("click", () => {
+  closeUsersModal();
+});
+
+elements.newUserForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitNewUser();
 });
 
 elements.createFolderBtn.addEventListener("click", () => {
@@ -5844,6 +5601,7 @@ elements.collapseAllBtn?.addEventListener("click", () => {
     state.collapsedFolderIds.clear();
   }
 
+  persistCollapsedFolders();
   elements.collapseAllBtn.setAttribute("aria-label", anyExpanded ? "Expand all folders" : "Collapse all folders");
   elements.collapseAllBtn.title = anyExpanded ? "Expand all folders" : "Collapse all folders";
   renderDocList();
@@ -5985,7 +5743,8 @@ window.addEventListener("keydown", (event) => {
   const isTyping = target instanceof HTMLElement
     && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-  if (isTyping || state.editorOpen || state.confirmOpen || state.unlockOpen || state.folderModalOpen) {
+  if (isTyping || state.editorOpen || state.confirmOpen || state.folderModalOpen
+    || state.loginOpen || state.passwordOpen || state.usersOpen || state.shareOpen) {
     return;
   }
 
@@ -6015,9 +5774,23 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (state.unlockOpen) {
+  if (state.usersOpen) {
     event.preventDefault();
-    closeUnlockModal();
+    closeUsersModal();
+    return;
+  }
+
+  if (state.shareOpen) {
+    event.preventDefault();
+    closeShareModal();
+    return;
+  }
+
+  // A forced password change and the sign-in wall are not dismissable: there is
+  // nothing usable behind them.
+  if (state.passwordOpen && !state.passwordForced) {
+    event.preventDefault();
+    closePasswordModal();
     return;
   }
 

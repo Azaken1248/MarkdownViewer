@@ -7,7 +7,13 @@ const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
 const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
-const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+// The render engine moved into markdown-core.js so the share page could use the
+// same sanitizer and the same Mermaid security level. Read it from there.
+const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8");
+// The repaint-on-theme-change lives with whichever page owns the DOM it
+// repaints, so those checks read the pages rather than the engine.
+const appJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+const shareJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "share.js"), "utf8");
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -100,14 +106,20 @@ function ratio(a, b) {
 }
 
 // Two palettes now — one per theme — and both have to hold up.
+// Indentation-agnostic on purpose: the engine lives inside an IIFE now, and a
+// test that breaks when code is re-indented is testing the wrong thing.
 function paletteVars(name) {
-  const marker = `  ${name}: {\n    themeVariables: {`;
-  const from = js.indexOf(marker);
-  if (from === -1) return {};
-  const to = js.indexOf("    },", from);
+  const marker = new RegExp(`\\b${name}:\\s*\\{\\s*themeVariables:\\s*\\{`);
+  const match = js.match(marker);
+  if (!match) {
+    return {};
+  }
+
+  const from = match.index + match[0].length;
+  const to = js.indexOf("},", from);
   const block = js.slice(from, to);
   const out = {};
-  for (const m of block.matchAll(/^\s{6}([a-zA-Z]+):\s*"(#[0-9a-fA-F]{6})"/gm)) {
+  for (const m of block.matchAll(/([a-zA-Z]+):\s*"(#[0-9a-fA-F]{6})"/g)) {
     out[m[1]] = m[2].toLowerCase();
   }
   return out;
@@ -151,12 +163,17 @@ console.log("=== the palette follows the active theme ===");
 check("a light palette exists alongside the dark one", /DIAGRAM_PALETTES = \{[\s\S]*?light: \{/.test(js), true);
 check("init reads the active theme", js.includes("const theme = activeThemeName();"), true);
 check("darkMode is derived, not hardcoded", js.includes('darkMode: theme === "dark"'), true);
-check("diagrams are redrawn when the theme changes", js.includes("async function repaintDiagramsForTheme("), true);
-check("...from the source kept on the block", js.includes("block.dataset.mermaidSource"), true);
+check("the engine keeps the source needed to redraw", js.includes("block.dataset.mermaidSource"), true);
+check("...and exposes a way to invalidate the baked-in palette",
+  js.includes("resetMermaidForThemeChange"), true);
+check("the app redraws its diagrams on a theme change",
+  appJs.includes("async function repaintDiagramsForTheme("), true);
 check("...after releasing pan/zoom on the old SVGs",
-  js.indexOf("destroyPanZoomInstances();\n\n  for (const block of blocks)") > -1, true);
-check("...and mermaid is re-initialized with the new palette",
-  /repaintDiagramsForTheme[\s\S]*?state\.mermaidReady = false/.test(js), true);
+  appJs.indexOf("destroyPanZoomInstances();") < appJs.indexOf("block.dataset.mermaidSource"), true);
+// The share page renders the same diagrams and has the same theme toggle, so
+// it needs the same repaint or its diagrams keep the old palette.
+check("the share page does the same", shareJs.includes("resetMermaidForThemeChange"), true);
+check("...and redraws from the stored source", shareJs.includes("block.dataset.mermaidSource"), true);
 
 console.log("=== the blanket overrides that broke edges are gone ===");
 const themeCss = js.slice(js.indexOf("function buildDiagramThemeCss("), js.indexOf("function ensureMermaidInitialized("));

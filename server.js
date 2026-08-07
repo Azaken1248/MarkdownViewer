@@ -7,6 +7,21 @@ const crypto = require("crypto");
 const { createHandler } = require("graphql-http/lib/use/express");
 const { buildSchema, NoSchemaIntrospectionCustomRule } = require("graphql");
 
+const {
+  AuthStore,
+  parseCookies,
+  sessionCookieOptions,
+  publicUser,
+  permissionsFor,
+  roleCan,
+  ROLES,
+  SESSION_COOKIE,
+  SESSION_TTL_MS,
+  SEED_ADMIN_USERNAME,
+  SEED_ADMIN_PASSWORD
+} = require("./lib/auth");
+const { ShareStore } = require("./lib/shares");
+
 const app = express();
 const PORT = process.env.PORT || 4321;
 const ROOT_DIR = __dirname;
@@ -51,6 +66,7 @@ const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
+const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
 const SITE_NAME = "AzaDocs";
 const EMBED_TITLE = "AzaDocs";
 const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit documents, with Mermaid diagrams and Jupyter notebooks rendered inline.";
@@ -146,6 +162,11 @@ if (LOG_REQUESTS) {
 const JSON_BODY_LIMIT = MAX_DOC_BYTES * 2 + 64 * 1024;
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
+// Every request learns who it is from before any route runs; the guards decide
+// what that means. CSRF is checked globally so a new route cannot forget it.
+app.use(attachSession);
+app.use(requireCsrf);
+
 let indexTemplateCache = null;
 let indexTemplateCacheMtimeMs = 0;
 
@@ -163,52 +184,486 @@ const upload = multer({
 });
 
 // ---------------------------------------------------------------------------
-// Write authentication
+// Authentication and access control
 //
-// Reads stay public so shared links, social cards and oEmbed unfurls keep
-// working. Everything that mutates disk state requires a bearer token.
-// Set MDVIEWER_TOKEN to a stable secret; if it is unset a random one is
-// generated at boot and logged, so the app never starts in an open state.
+// Accounts, not a shared token. Sessions are server-side and carried in an
+// httpOnly SameSite=Strict cookie; see lib/auth.js for why each of those was
+// chosen. Roles are viewer / editor / admin.
+//
+// Reads require a session by default. PUBLIC_READS=true restores the old
+// behaviour where anyone could read every document. Individual documents can be
+// published regardless, via a share link (lib/shares.js).
 // ---------------------------------------------------------------------------
-const CONFIGURED_WRITE_TOKEN = String(process.env.MDVIEWER_TOKEN || "").trim();
-const WRITE_TOKEN = CONFIGURED_WRITE_TOKEN || crypto.randomBytes(24).toString("base64url");
 
-function extractRequestToken(req) {
-  const authHeader = String(req.get("authorization") || "");
-  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (bearerMatch) {
-    return bearerMatch[1].trim();
+const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "true";
+
+const authStore = new AuthStore({ dataDir: DATA_DIR });
+const shareStore = new ShareStore({ dataDir: DATA_DIR });
+
+// Cookies must be Secure in production or the session travels in clear text on
+// the first plain-HTTP request. Derived from the public base URL rather than
+// from the request, which an attacker controls.
+const COOKIES_SECURE = String(process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL)
+  .startsWith("https://");
+
+function currentSession(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[SESSION_COOKIE];
+  if (!token) {
+    return null;
   }
 
-  return String(req.get("x-mdviewer-token") || "").trim();
-}
-
-function isValidWriteToken(candidate) {
-  const expected = Buffer.from(WRITE_TOKEN, "utf8");
-  const provided = Buffer.from(String(candidate || ""), "utf8");
-
-  // timingSafeEqual throws on length mismatch, so compare lengths separately.
-  if (expected.length !== provided.length) {
-    return false;
+  const session = authStore.getSession(token);
+  if (!session) {
+    return null;
   }
 
-  return crypto.timingSafeEqual(expected, provided);
+  const user = authStore.findById(session.userId);
+  if (!user || user.disabled) {
+    return null;
+  }
+
+  return { token, session, user };
 }
 
-function requireWriteAuth(req, res, next) {
-  if (isValidWriteToken(extractRequestToken(req))) {
+// Populates req.auth for every request. Does not reject anything — that is the
+// job of the guards below, so a route's requirements are visible at the route.
+function attachSession(req, res, next) {
+  const found = currentSession(req);
+  req.auth = found
+    ? { user: found.user, session: found.session, token: found.token }
+    : null;
+  next();
+}
+
+function requireAuth(req, res, next) {
+  if (req.auth) {
     next();
     return;
   }
 
-  res.status(401).json({ error: "This action requires the editor token. Unlock editing to continue." });
+  res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
+}
+
+// A forced password change has to actually block things, or it is a suggestion.
+// Everything except signing out, reading the session, and setting the new
+// password is refused until it is done.
+function passwordChangePending(req) {
+  return Boolean(req.auth?.user?.mustChangePassword);
+}
+
+function refusePendingPasswordChange(res) {
+  res.status(403).json({
+    error: "Set a new password before continuing.",
+    code: "password_change_required"
+  });
+}
+
+function requireRead(req, res, next) {
+  if (passwordChangePending(req)) {
+    refusePendingPasswordChange(res);
+    return;
+  }
+
+  if (PUBLIC_READS || req.auth) {
+    next();
+    return;
+  }
+
+  res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
+}
+
+function requirePermission(permission) {
+  return function permissionGuard(req, res, next) {
+    if (!req.auth) {
+      res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
+      return;
+    }
+
+    if (passwordChangePending(req)) {
+      refusePendingPasswordChange(res);
+      return;
+    }
+
+    if (!roleCan(req.auth.user.role, permission)) {
+      // 403, not 401: the request was authenticated and is still not allowed,
+      // and re-authenticating will not change that.
+      res.status(403).json({
+        error: "Your account does not have permission to do that.",
+        code: "forbidden",
+        required: permission
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+// CSRF. SameSite=Strict already stops the browser sending the session cookie
+// from another site, so this is the second lock: a token the page has to read
+// out of its own session and echo back, which cross-origin script cannot do.
+// The Origin check catches anything that gets past both.
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function requireCsrf(req, res, next) {
+  if (SAFE_METHODS.has(req.method)) {
+    next();
+    return;
+  }
+
+  if (!req.auth) {
+    // Unauthenticated writes are rejected by the auth guards; there is no
+    // session-riding to protect against yet.
+    next();
+    return;
+  }
+
+  const origin = req.get("origin");
+  if (origin) {
+    const expected = getBaseUrlFromRequest(req);
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(origin).origin === new URL(expected).origin;
+    } catch {
+      sameOrigin = false;
+    }
+
+    // Behind a proxy the public origin and the request origin can legitimately
+    // differ, so a mismatch only fails when the token also fails, below.
+    if (!sameOrigin && !TRUST_PROXY) {
+      res.status(403).json({ error: "Cross-origin request refused.", code: "csrf" });
+      return;
+    }
+  }
+
+  const provided = String(req.get("x-csrf-token") || "");
+  const expected = String(req.auth.session.csrfToken || "");
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+
+  if (providedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(providedBuf, expectedBuf)) {
+    res.status(403).json({ error: "Session token missing or stale. Reload and try again.", code: "csrf" });
+    return;
+  }
+
+  next();
+}
+
+function sessionPayload(req) {
+  if (!req.auth) {
+    return {
+      authenticated: false,
+      publicReads: PUBLIC_READS,
+      user: null,
+      permissions: [],
+      csrfToken: null
+    };
+  }
+
+  return {
+    authenticated: true,
+    publicReads: PUBLIC_READS,
+    user: publicUser(req.auth.user),
+    permissions: permissionsFor(req.auth.user.role),
+    csrfToken: req.auth.session.csrfToken
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Auth routes
+// ---------------------------------------------------------------------------
+
+function issueSessionCookie(res, token) {
+  res.cookie(SESSION_COOKIE, token, sessionCookieOptions({
+    secure: COOKIES_SECURE,
+    maxAgeMs: SESSION_TTL_MS
+  }));
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE, sessionCookieOptions({ secure: COOKIES_SECURE }));
 }
 
 app.get("/api/session", (req, res) => {
-  res.json({
-    canWrite: isValidWriteToken(extractRequestToken(req)),
-    tokenConfigured: Boolean(CONFIGURED_WRITE_TOKEN)
-  });
+  res.json(sessionPayload(req));
+});
+
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || "");
+    const password = String(req.body?.password || "");
+
+    if (!username || !password) {
+      res.status(400).json({ error: "Username and password are required." });
+      return;
+    }
+
+    const result = await authStore.withLock(() => authStore.login(username, password, {
+      userAgent: req.get("user-agent") || "",
+      ip: req.ip || ""
+    }));
+
+    if (!result.ok) {
+      if (result.retryAfterMs) {
+        res.set("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
+      }
+
+      res.status(result.status || 401).json({ error: result.error });
+      return;
+    }
+
+    issueSessionCookie(res, result.token);
+    // Per-request object, no other holder; the rule cannot see that.
+    // eslint-disable-next-line require-atomic-updates
+    req.auth = { user: authStore.findById(result.user.id), session: result.session, token: result.token };
+    res.json(sessionPayload(req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/logout", async (req, res, next) => {
+  try {
+    if (req.auth) {
+      await authStore.withLock(() => authStore.destroySession(req.auth.token));
+    }
+
+    clearSessionCookie(res);
+    // Per-request object, no other holder; the rule cannot see that.
+    // eslint-disable-next-line require-atomic-updates
+    req.auth = null;
+    res.json(sessionPayload(req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Changing your own password revokes every session for the account, including
+// this one, so a fresh session is issued for the browser that did it. Anything
+// else would either log you out of your own tab or leave the old sessions live.
+app.post("/api/auth/password", requireAuth, async (req, res, next) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    const result = await authStore.withLock(async () => {
+      const changed = await authStore.changeOwnPassword(req.auth.user.id, currentPassword, newPassword);
+      if (!changed.ok) {
+        return changed;
+      }
+
+      const issued = await authStore.createSession(authStore.findById(req.auth.user.id), {
+        userAgent: req.get("user-agent") || "",
+        ip: req.ip || ""
+      });
+
+      return { ok: true, token: issued.token, session: issued.session };
+    });
+
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    issueSessionCookie(res, result.token);
+    req.auth = { user: authStore.findById(req.auth.user.id), session: result.session, token: result.token };
+    res.json(sessionPayload(req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Share links
+// ---------------------------------------------------------------------------
+
+function shareUrlFor(req, token) {
+  return toAbsoluteUrl(getBaseUrlFromRequest(req), `/s/${token}`);
+}
+
+app.get("/api/shares", requirePermission("share:manage"), (req, res) => {
+  res.json({ shares: shareStore.listShares() });
+});
+
+// Creating a share for a document that already has one rotates the token, which
+// is the only way to revoke a URL that has leaked.
+app.post("/api/docs/:file/share", requirePermission("share:manage"), async (req, res, next) => {
+  try {
+    const fileName = sanitizeFilename(req.params.file);
+    if (!fileName) {
+      res.status(400).json({ error: "Invalid markdown file name" });
+      return;
+    }
+
+    if (!(await fileExists(path.join(MARKDOWN_DIR, fileName)))) {
+      res.status(404).json({ error: "Markdown file not found" });
+      return;
+    }
+
+    const rotated = Boolean(shareStore.findByFile(fileName));
+    const token = await shareStore.withLock(() => shareStore.create(fileName, {
+      createdBy: req.auth.user.username
+    }));
+
+    // The only time the full token is ever returned. It is stored hashed, so
+    // there is no way to show it again later.
+    res.status(201).json({
+      file: fileName,
+      rotated,
+      url: shareUrlFor(req, token),
+      share: shareStore.describe(fileName)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/docs/:file/share", requirePermission("share:manage"), async (req, res, next) => {
+  try {
+    const fileName = sanitizeFilename(req.params.file);
+    if (!fileName) {
+      res.status(400).json({ error: "Invalid markdown file name" });
+      return;
+    }
+
+    const revoked = await shareStore.withLock(() => shareStore.revoke(fileName));
+    res.json({ file: fileName, revoked });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public: the share token is the credential. No session, no cookie, no CSRF.
+app.get("/api/share/:token", async (req, res, next) => {
+  try {
+    const share = shareStore.findByToken(String(req.params.token || ""));
+    if (!share) {
+      res.status(404).json({ error: "This share link is not valid." });
+      return;
+    }
+
+    const fullPath = path.join(MARKDOWN_DIR, share.file);
+    if (!(await fileExists(fullPath))) {
+      res.status(404).json({ error: "The shared document no longer exists." });
+      return;
+    }
+
+    const { content, stat } = await readCachedTextFile(fullPath);
+    await shareStore.withLock(() => shareStore.recordView(share.file));
+
+    // Deliberately minimal: the document and nothing about the library it came
+    // from — no folder, no neighbours, no user.
+    res.json({
+      file: share.file,
+      title: toDocTitle(share.file),
+      content,
+      updatedAt: stat.mtime.toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// User administration
+// ---------------------------------------------------------------------------
+
+app.get("/api/users", requirePermission("user:manage"), (req, res) => {
+  res.json({ users: authStore.listUsers(), roles: ROLES });
+});
+
+app.post("/api/users", requirePermission("user:manage"), async (req, res, next) => {
+  try {
+    const result = await authStore.withLock(() => authStore.createUser({
+      username: req.body?.username,
+      password: String(req.body?.password || ""),
+      role: req.body?.role || "viewer",
+      // A password chosen by someone else is a password the account owner has
+      // to replace before it means anything.
+      mustChangePassword: req.body?.mustChangePassword !== false
+    }));
+
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.status(201).json({ user: result.user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/users/:id", requirePermission("user:manage"), async (req, res, next) => {
+  try {
+    const targetId = String(req.params.id);
+
+    // Self-demotion and self-disabling are how an admin locks themselves out
+    // one click at a time. The last-admin guard in the store covers the case
+    // where they are alone; this covers the case where they are not.
+    if (targetId === req.auth.user.id && req.body?.role !== undefined && req.body.role !== "admin") {
+      res.status(400).json({ error: "You cannot change your own role. Ask another admin." });
+      return;
+    }
+
+    if (targetId === req.auth.user.id && req.body?.disabled === true) {
+      res.status(400).json({ error: "You cannot disable your own account." });
+      return;
+    }
+
+    const result = await authStore.withLock(() => authStore.updateUser(targetId, {
+      role: req.body?.role,
+      disabled: req.body?.disabled
+    }));
+
+    if (!result.ok) {
+      res.status(result.error === "No such user." ? 404 : 400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ user: result.user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/users/:id/password", requirePermission("user:manage"), async (req, res, next) => {
+  try {
+    const result = await authStore.withLock(() => authStore.resetPassword(
+      String(req.params.id),
+      String(req.body?.password || "")
+    ));
+
+    if (!result.ok) {
+      res.status(result.error === "No such user." ? 404 : 400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ user: result.user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/users/:id", requirePermission("user:manage"), async (req, res, next) => {
+  try {
+    if (String(req.params.id) === req.auth.user.id) {
+      res.status(400).json({ error: "You cannot delete your own account." });
+      return;
+    }
+
+    const result = await authStore.withLock(() => authStore.deleteUser(String(req.params.id)));
+    if (!result.ok) {
+      res.status(result.error === "No such user." ? 404 : 400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 async function ensureStorageDirs() {
@@ -1342,6 +1797,38 @@ async function getIndexTemplate() {
   return indexTemplateCache;
 }
 
+let shareTemplateCache = null;
+let shareTemplateCacheMtimeMs = 0;
+
+async function getShareTemplate() {
+  const stat = await fsp.stat(SHARE_TEMPLATE_PATH);
+  if (shareTemplateCache !== null && shareTemplateCacheMtimeMs === stat.mtimeMs) {
+    return shareTemplateCache;
+  }
+
+  // eslint-disable-next-line require-atomic-updates
+  shareTemplateCache = await fsp.readFile(SHARE_TEMPLATE_PATH, "utf8");
+  // eslint-disable-next-line require-atomic-updates
+  shareTemplateCacheMtimeMs = stat.mtimeMs;
+  return shareTemplateCache;
+}
+
+function renderShareHtml(template, { title, description, baseUrl }) {
+  const replacements = {
+    __SHARE_TITLE__: `${title} | ${SITE_NAME}`,
+    __SHARE_DESCRIPTION__: description,
+    __SHARE_FAVICON_URL__: toAbsoluteUrl(baseUrl, FAVICON_PATH),
+    __SHARE_THEME_COLOR__: EMBED_THEME_COLOR
+  };
+
+  let rendered = template;
+  for (const [token, value] of Object.entries(replacements)) {
+    rendered = rendered.split(token).join(escapeHtml(value));
+  }
+
+  return rendered;
+}
+
 const graphQLSchema = buildSchema(`
   type EmbedMeta {
     title: String!
@@ -1428,6 +1915,34 @@ app.get("/oembed", (req, res) => {
   });
 });
 
+// The standalone share view. One document, no explorer, no editor, no way back
+// into the library. noindex because "unguessable URL" stops being a control the
+// moment a crawler files it.
+app.get("/s/:token", async (req, res, next) => {
+  try {
+    const share = shareStore.findByToken(String(req.params.token || ""));
+    const template = await getShareTemplate();
+
+    if (!share || !(await fileExists(path.join(MARKDOWN_DIR, share.file)))) {
+      res.status(404).type("html").send(renderShareHtml(template, {
+        title: "Link not found",
+        description: "This share link is not valid, or the document behind it is gone.",
+        baseUrl: getBaseUrlFromRequest(req)
+      }));
+      return;
+    }
+
+    res.set("X-Robots-Tag", "noindex, nofollow");
+    res.type("html").send(renderShareHtml(template, {
+      title: toDocTitle(share.file),
+      description: `A document shared from ${SITE_NAME}.`,
+      baseUrl: getBaseUrlFromRequest(req)
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get(["/", "/index.html"], async (req, res, next) => {
   try {
     const htmlTemplate = await getIndexTemplate();
@@ -1440,7 +1955,7 @@ app.get(["/", "/index.html"], async (req, res, next) => {
   }
 });
 
-app.get("/api/docs", async (req, res, next) => {
+app.get("/api/docs", requireRead, async (req, res, next) => {
   try {
     const organizer = await readOrganizerState();
     const docs = await getDocs(organizer);
@@ -1454,7 +1969,7 @@ app.get("/api/docs", async (req, res, next) => {
   }
 });
 
-app.get("/api/docs/search", async (req, res, next) => {
+app.get("/api/docs/search", requireRead, async (req, res, next) => {
   try {
     const query = String(req.query.q || req.query.query || "");
     const requestedScope = String(req.query.scope || "docs").trim().toLowerCase();
@@ -1468,7 +1983,7 @@ app.get("/api/docs/search", async (req, res, next) => {
   }
 });
 
-app.get("/api/docs/:file", async (req, res, next) => {
+app.get("/api/docs/:file", requireRead, async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     if (!fileName) {
@@ -1499,7 +2014,7 @@ app.get("/api/docs/:file", async (req, res, next) => {
   }
 });
 
-app.put("/api/docs/:file/folder", requireWriteAuth, async (req, res, next) => {
+app.put("/api/docs/:file/folder", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     if (!fileName) {
@@ -1545,7 +2060,7 @@ app.put("/api/docs/:file/folder", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
+app.post("/api/folders", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const folderName = normalizeFolderName(req.body?.name);
     if (!folderName) {
@@ -1608,7 +2123,7 @@ app.post("/api/folders", requireWriteAuth, async (req, res, next) => {
 // Folder order was previously write-once at creation time. This lets the caller
 // hand back the ids in the order it wants; any folder omitted keeps its relative
 // position after the listed ones, so a partial list can never drop a folder.
-app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
+app.put("/api/folders/reorder", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const requestedIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : null;
     if (!requestedIds) {
@@ -1670,7 +2185,7 @@ app.put("/api/folders/reorder", requireWriteAuth, async (req, res, next) => {
 
 // Renames a folder, moves it under a new parent, or both. `parentId` is only
 // touched when the key is present, so a rename never silently reparents.
-app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
+app.put("/api/folders/:folderId", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
     if (!normalizedFolderId) {
@@ -1758,7 +2273,7 @@ app.put("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.delete("/api/folders/:folderId", requireWriteAuth, async (req, res, next) => {
+app.delete("/api/folders/:folderId", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);
     if (!normalizedFolderId) {
@@ -1799,7 +2314,7 @@ app.delete("/api/folders/:folderId", requireWriteAuth, async (req, res, next) =>
   }
 });
 
-app.post("/api/docs/:file/delete", requireWriteAuth, async (req, res, next) => {
+app.post("/api/docs/:file/delete", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     if (!fileName) {
@@ -1820,6 +2335,11 @@ app.post("/api/docs/:file/delete", requireWriteAuth, async (req, res, next) => {
     }
 
     const deletedDoc = await moveDocToRecycle(fileName, mode);
+
+    // A deleted document must stop being publicly readable. Leaving the share
+    // alive would keep it served to anyone holding the URL.
+    await shareStore.withLock(() => shareStore.revoke(fileName));
+
     res.json({
       ...deletedDoc,
       message: mode === "soft"
@@ -1831,7 +2351,7 @@ app.post("/api/docs/:file/delete", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.get("/api/recycle-bin", async (req, res, next) => {
+app.get("/api/recycle-bin", requireRead, async (req, res, next) => {
   try {
     const organizer = await readOrganizerState();
     const docs = await getRecycleDocs(organizer);
@@ -1841,7 +2361,7 @@ app.get("/api/recycle-bin", async (req, res, next) => {
   }
 });
 
-app.get("/api/recycle-bin/:entry/content", async (req, res, next) => {
+app.get("/api/recycle-bin/:entry/content", requireRead, async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1863,7 +2383,7 @@ app.get("/api/recycle-bin/:entry/content", async (req, res, next) => {
   }
 });
 
-app.post("/api/recycle-bin/:entry/restore", requireWriteAuth, async (req, res, next) => {
+app.post("/api/recycle-bin/:entry/restore", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1915,7 +2435,7 @@ app.post("/api/recycle-bin/:entry/restore", requireWriteAuth, async (req, res, n
   }
 });
 
-app.post("/api/recycle-bin/:entry/hard-delete", requireWriteAuth, async (req, res, next) => {
+app.post("/api/recycle-bin/:entry/hard-delete", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1953,7 +2473,7 @@ app.post("/api/recycle-bin/:entry/hard-delete", requireWriteAuth, async (req, re
 // Nothing reaches this directory except via an explicit archive action, and
 // DELETE below is the only place in the app that actually removes a file.
 
-app.get("/api/archive", async (req, res, next) => {
+app.get("/api/archive", requireRead, async (req, res, next) => {
   try {
     const organizer = await readOrganizerState();
     const docs = await getRecycleDocs(organizer, DELETED_HARD_DIR);
@@ -1963,7 +2483,7 @@ app.get("/api/archive", async (req, res, next) => {
   }
 });
 
-app.get("/api/archive/:entry/content", async (req, res, next) => {
+app.get("/api/archive/:entry/content", requireRead, async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -1985,7 +2505,7 @@ app.get("/api/archive/:entry/content", async (req, res, next) => {
   }
 });
 
-app.post("/api/archive/:entry/restore", requireWriteAuth, async (req, res, next) => {
+app.post("/api/archive/:entry/restore", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -2036,7 +2556,7 @@ app.post("/api/archive/:entry/restore", requireWriteAuth, async (req, res, next)
   }
 });
 
-app.delete("/api/archive/:entry", requireWriteAuth, async (req, res, next) => {
+app.delete("/api/archive/:entry", requirePermission("doc:erase"), async (req, res, next) => {
   try {
     const entryName = sanitizeRecycleEntryName(req.params.entry);
     if (!entryName) {
@@ -2104,7 +2624,7 @@ async function fileNewDocumentIntoFolder(fileName, rawFolderId) {
   return result;
 }
 
-app.post("/api/docs", requireWriteAuth, async (req, res, next) => {
+app.post("/api/docs", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const fileName = sanitizeNewFilename(req.body.fileName);
     const content = String(req.body.content || "");
@@ -2144,7 +2664,7 @@ app.post("/api/docs", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.put("/api/docs/:file", requireWriteAuth, async (req, res, next) => {
+app.put("/api/docs/:file", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     const content = String(req.body.content || "");
@@ -2180,7 +2700,7 @@ app.put("/api/docs/:file", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/docs/:file/rename", requireWriteAuth, async (req, res, next) => {
+app.post("/api/docs/:file/rename", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const fileName = sanitizeFilename(req.params.file);
     const targetName = sanitizeNewFilename(req.body?.fileName);
@@ -2236,6 +2756,8 @@ app.post("/api/docs/:file/rename", requireWriteAuth, async (req, res, next) => {
       return { folderId, folderName: folder?.name || null };
     });
 
+    await shareStore.withLock(() => shareStore.rename(fileName, targetName));
+
     const stat = await fsp.stat(targetPath);
     res.json({
       file: targetName,
@@ -2251,7 +2773,7 @@ app.post("/api/docs/:file/rename", requireWriteAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), async (req, res, next) => {
+app.post("/api/docs/upload", requirePermission("doc:write"), upload.single("markdownFile"), async (req, res, next) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: "No document file uploaded" });
@@ -2284,6 +2806,20 @@ app.post("/api/docs/upload", requireWriteAuth, upload.single("markdownFile"), as
   } catch (error) {
     next(error);
   }
+});
+
+// public/docs sits inside the static root, so express.static would happily
+// serve every document as a plain file — straight past requireRead and past the
+// share system. Documents are only ever available through the API.
+app.use("/docs", (req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+// share.html is a template, not a page: served directly it is a shell full of
+// __SHARE_*__ placeholders with no document behind it. It is only ever rendered
+// by the /s/:token route.
+app.get("/share.html", (req, res) => {
+  res.status(404).json({ error: "Not found" });
 });
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
@@ -2361,28 +2897,36 @@ function attachGracefulShutdown(server) {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-ensureStorageDirs()
-  .then(() => {
-    const server = app.listen(PORT, () => {
-      console.log(`AzaDocs running on http://localhost:${PORT}`);
+async function bootstrap() {
+  await ensureStorageDirs();
+  await authStore.load();
+  await shareStore.load();
 
-      if (CONFIGURED_WRITE_TOKEN) {
-        console.log("Editing is locked behind MDVIEWER_TOKEN.");
-        return;
-      }
+  const seeded = await authStore.seedAdminIfEmpty();
 
-      console.log("");
-      console.log("  MDVIEWER_TOKEN is not set, so a temporary editor token was generated:");
-      console.log("");
-      console.log(`      ${WRITE_TOKEN}`);
-      console.log("");
-      console.log("  Reads are public; creating, editing and deleting require this token.");
-      console.log("  It changes on every restart - set MDVIEWER_TOKEN to keep it stable.");
-      console.log("");
-    });
+  const server = app.listen(PORT, () => {
+    console.log(`AzaDocs running on http://localhost:${PORT}`);
+    console.log(PUBLIC_READS
+      ? "  Reads are PUBLIC (PUBLIC_READS=true). Anyone can read every document."
+      : "  Reads require a session. Individual documents can still be shared by link.");
 
-    attachGracefulShutdown(server);
-  })
+    if (seeded) {
+      console.log("");
+      console.log("  No accounts existed, so an admin was created:");
+      console.log("");
+      console.log(`      username: ${SEED_ADMIN_USERNAME}`);
+      console.log(`      password: ${SEED_ADMIN_PASSWORD}`);
+      console.log("");
+      console.log("  This password is in the source and the README, so it is public");
+      console.log("  knowledge. You will be required to change it at first login.");
+      console.log("");
+    }
+  });
+
+  attachGracefulShutdown(server);
+}
+
+bootstrap()
   .catch((error) => {
     console.error("Failed to start server", error);
     process.exit(1);

@@ -46,8 +46,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=36"></script>
-  <link rel="stylesheet" href="css/app.css?v=36" />
+  <script src="js/theme-boot.js?v=37"></script>
+  <link rel="stylesheet" href="css/app.css?v=37" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -69,7 +69,8 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/app.js?v=36" defer></script>
+  <script src="js/markdown-core.js?v=37" defer></script>
+  <script src="js/app.js?v=37" defer></script>
 </head>
 
 <body>
@@ -104,9 +105,31 @@
           <i class="ph ph-moon" aria-hidden="true"></i>
         </button>
 
-        <button class="icon-btn" id="lockToggleBtn" aria-label="Unlock editing" title="Unlock editing">
-          <i class="ph ph-lock-simple" aria-hidden="true"></i>
-        </button>
+        <div class="account-wrap">
+          <button class="icon-btn" id="accountBtn" aria-label="Sign in" title="Sign in" aria-haspopup="menu"
+            aria-expanded="false">
+            <i class="ph ph-sign-in" aria-hidden="true"></i>
+          </button>
+
+          <div class="account-menu" id="accountMenu" role="menu" hidden>
+            <p class="account-identity" id="accountIdentity"></p>
+
+            <button class="account-item" id="changePasswordItem" type="button" role="menuitem">
+              <i class="ph ph-key" aria-hidden="true"></i>
+              <span>Change password</span>
+            </button>
+
+            <button class="account-item" id="manageUsersItem" type="button" role="menuitem" hidden>
+              <i class="ph ph-users-three" aria-hidden="true"></i>
+              <span>Accounts</span>
+            </button>
+
+            <button class="account-item danger" id="signOutItem" type="button" role="menuitem">
+              <i class="ph ph-sign-out" aria-hidden="true"></i>
+              <span>Sign out</span>
+            </button>
+          </div>
+        </div>
 
         <button class="icon-btn" id="uploadTrigger" aria-label="Upload document file" title="Upload document">
           <i class="ph ph-upload-simple" aria-hidden="true"></i>
@@ -220,6 +243,11 @@
             <button class="icon-btn" id="editCurrentDocBtn" type="button" aria-label="Edit this document"
               title="Edit this document">
               <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+            </button>
+
+            <button class="icon-btn" id="shareDocBtn" type="button" aria-label="Share this document"
+              title="Share this document">
+              <i class="ph ph-link-simple" aria-hidden="true"></i>
             </button>
 
             <button class="icon-btn" id="softDeleteDocBtn" type="button" aria-label="Move this document to recycle bin"
@@ -350,24 +378,166 @@
     </section>
   </div>
 
-  <div class="modal" id="unlockModal" aria-hidden="true">
-    <button class="modal-backdrop" id="unlockBackdrop" aria-label="Cancel unlock"></button>
+  <div class="modal" id="loginModal" aria-hidden="true">
+    <div class="modal-backdrop modal-backdrop-static"></div>
 
-    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="unlockTitle"
-      aria-describedby="unlockMessage">
-      <h2 id="unlockTitle">Unlock editing</h2>
-      <p id="unlockMessage">Reading is open to everyone. Creating, editing and deleting documents needs the editor
-        token from the server log (or your <code>MDVIEWER_TOKEN</code>).</p>
+    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="loginTitle"
+      aria-describedby="loginMessage">
+      <h2 id="loginTitle">Sign in to AzaDocs</h2>
+      <p id="loginMessage">This library is private. Sign in to browse it.</p>
 
-      <label class="field" for="unlockTokenInput">
-        <span>Editor token</span>
-        <input id="unlockTokenInput" type="password" placeholder="Paste token" autocomplete="current-password" />
+      <!-- A real form, so password managers recognise it and Enter submits. -->
+      <form id="loginForm" autocomplete="on">
+        <label class="field" for="loginUsername">
+          <span>Username</span>
+          <input id="loginUsername" name="username" type="text" autocomplete="username" autocapitalize="none"
+            spellcheck="false" required />
+        </label>
+
+        <label class="field" for="loginPassword">
+          <span>Password</span>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required />
+        </label>
+
+        <p class="field-error" id="loginError" role="alert" hidden></p>
+
+        <div class="dialog-actions">
+          <button class="btn btn-primary" id="loginSubmitBtn" type="submit">Sign in</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal" id="passwordModal" aria-hidden="true">
+    <button class="modal-backdrop" id="passwordBackdrop" aria-label="Close"></button>
+
+    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="passwordTitle"
+      aria-describedby="passwordMessage">
+      <h2 id="passwordTitle">Change your password</h2>
+      <p id="passwordMessage">Changing your password signs out every other session on your account.</p>
+
+      <form id="passwordForm" autocomplete="on">
+        <!-- Hidden but present: password managers need the username to know
+             which entry they are updating. -->
+        <input class="visually-hidden" id="passwordUsername" type="text" autocomplete="username" tabindex="-1"
+          aria-hidden="true" />
+
+        <label class="field" for="currentPassword">
+          <span>Current password</span>
+          <input id="currentPassword" type="password" autocomplete="current-password" required />
+        </label>
+
+        <label class="field" for="newPassword">
+          <span>New password</span>
+          <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+        </label>
+
+        <label class="field" for="confirmPassword">
+          <span>Confirm new password</span>
+          <input id="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+        </label>
+
+        <p class="field-hint">At least 8 characters. Length beats punctuation.</p>
+        <p class="field-error" id="passwordError" role="alert" hidden></p>
+
+        <div class="dialog-actions">
+          <button class="btn" id="passwordCancelBtn" type="button">Cancel</button>
+          <button class="btn btn-primary" id="passwordSubmitBtn" type="submit">Change password</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal" id="shareModal" aria-hidden="true">
+    <button class="modal-backdrop" id="shareBackdrop" aria-label="Close sharing"></button>
+
+    <section class="dialog dialog-sm" role="dialog" aria-modal="true" aria-labelledby="shareTitle"
+      aria-describedby="shareDialogMessage">
+      <h2 id="shareTitle">Share this document</h2>
+      <p id="shareDialogMessage">A share link makes this one document readable by anyone who has the URL, without
+        signing in. Nothing else in your library becomes reachable.</p>
+
+      <div class="share-status" id="shareStatus"></div>
+
+      <label class="field" for="shareUrlInput" id="shareUrlField" hidden>
+        <span>Share link</span>
+        <div class="share-url-row">
+          <input id="shareUrlInput" type="text" readonly />
+          <button class="btn" id="copyShareUrlBtn" type="button">Copy</button>
+        </div>
       </label>
 
+      <p class="field-hint" id="shareOnceHint" hidden>This link is shown once. It is stored hashed, so it cannot be
+        displayed again — create a new one if you lose it, which also revokes this one.</p>
+
       <div class="dialog-actions">
-        <button class="btn" id="unlockCancelBtn" type="button">Cancel</button>
-        <button class="btn btn-primary" id="unlockConfirmBtn" type="button">Unlock</button>
+        <button class="btn" id="shareCloseBtn" type="button">Close</button>
+        <button class="btn danger" id="revokeShareBtn" type="button" hidden>Revoke link</button>
+        <button class="btn btn-primary" id="createShareBtn" type="button">Create link</button>
       </div>
+    </section>
+  </div>
+
+  <div class="modal" id="usersModal" aria-hidden="true">
+    <button class="modal-backdrop" id="usersBackdrop" aria-label="Close user management"></button>
+
+    <section class="dialog dialog-lg" role="dialog" aria-modal="true" aria-labelledby="usersTitle">
+      <div class="dialog-head">
+        <h2 id="usersTitle">Accounts</h2>
+        <button class="icon-btn" id="closeUsersBtn" type="button" aria-label="Close" title="Close">
+          <i class="ph ph-x" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="users-table-wrap">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th scope="col">User</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col">Last sign-in</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+
+      <details class="users-new" id="newUserDetails">
+        <summary>Add an account</summary>
+
+        <form id="newUserForm" autocomplete="off">
+          <div class="users-new-grid">
+            <label class="field" for="newUserName">
+              <span>Username</span>
+              <input id="newUserName" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+                required />
+            </label>
+
+            <label class="field" for="newUserPassword">
+              <span>Temporary password</span>
+              <input id="newUserPassword" type="text" autocomplete="off" minlength="8" required />
+            </label>
+
+            <label class="field" for="newUserRole">
+              <span>Role</span>
+              <select id="newUserRole">
+                <option value="viewer">Viewer — read only</option>
+                <option value="editor">Editor — read and write</option>
+                <option value="admin">Admin — everything, plus accounts</option>
+              </select>
+            </label>
+          </div>
+
+          <p class="field-hint">They will be required to choose their own password at first sign-in.</p>
+          <p class="field-error" id="newUserError" role="alert" hidden></p>
+
+          <div class="dialog-actions">
+            <button class="btn btn-primary" type="submit">Create account</button>
+          </div>
+        </form>
+      </details>
     </section>
   </div>
 
