@@ -244,11 +244,17 @@ execute code just because you looked at it.
 exposes the host JavaScript scope to Python via `import js`. On the main thread
 that is `window`, which would give a notebook the DOM, the session and
 everything the app holds in memory. In a worker it is the worker's own scope:
-no document, no window, no storage. What Python can still do is issue
-same-origin `fetch` calls, but it cannot change anything through them — every
-write endpoint requires the CSRF token, which lives on the main thread and is
-never passed in — and `connect-src` pins outbound requests to this origin and
-the Pyodide CDN.
+no document, no window, no storage.
+
+**The worker then takes its own network away.** A worker scope has no DOM, but
+it does have `fetch` — and on a same-origin request the reader's session cookie
+rides along, so `import js; js.fetch("/api/docs")` could read every document in
+the library. Once Pyodide has finished loading, the worker replaces `fetch` with
+one that permits only the Pyodide CDN (package wheels are still fetched on
+demand) and refuses everything else, and replaces `XMLHttpRequest`, `WebSocket`,
+`EventSource` and `importScripts` with stubs that throw. Writing was never
+possible: every write endpoint requires the CSRF token, which lives on the main
+thread and is never passed in.
 
 **The share page cannot run anything.** Executable cells are opt-in per page and
 the share page leaves them off, so someone following a link is never handed a
@@ -262,9 +268,21 @@ Practical limits:
   display — matplotlib figures, `_repr_html_` — is not wired up. Outputs already
   saved in the `.ipynb` still render as before.
 - Running never writes back to the file. The notebook on disk is unchanged.
+- Cells run one at a time, even if you press Run on several. Pyodide's `stdout`
+  handler belongs to the interpreter rather than to a call, so overlapping runs
+  would capture each other's output — a cell that awaited would lose its output
+  entirely to whichever cell was started next.
+- Output is capped at 200,000 characters per stream and 20,000 for the echoed
+  value, and says so where it was cut. One runaway `print` loop should not
+  build a string that freezes the page when it is rendered.
+- A cell still running after 20 seconds says so under the cell. That is a
+  notice, not a timeout — a real computation may legitimately take longer, and
+  killing it would be worse than the silence.
 - A runaway loop cannot be interrupted; WebAssembly needs `SharedArrayBuffer`
   for that, which needs COOP/COEP headers this app does not set. **Restart
   Python** terminates the worker, which is the way out.
+- Switching to another document mid-run discards that run's result rather than
+  writing it under an unrelated notebook.
 
 This costs three CSP allowances, all narrow: `'wasm-unsafe-eval'` in
 `script-src` (WebAssembly compilation only — `'unsafe-eval'` is still refused),

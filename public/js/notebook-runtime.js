@@ -91,12 +91,30 @@
     return () => statusListeners.delete(listener);
   }
 
-  function runCell(notebookId, code) {
+  // How long a cell may run before we say something. Not a kill: a real
+  // computation can legitimately take a while, and terminating someone's work
+  // because it was slow would be worse than the silence. The cell is told it is
+  // still going and that Restart is the way out.
+  const SLOW_CELL_MS = 20000;
+
+  function runCell(notebookId, code, { onSlow } = {}) {
     const id = nextRunId++;
     const target = ensureWorker();
 
     return new Promise((resolve) => {
-      pending.set(id, resolve);
+      const slowTimer = global.setTimeout(() => {
+        try {
+          onSlow?.();
+        } catch (error) {
+          console.error("Slow-cell callback failed", error);
+        }
+      }, SLOW_CELL_MS);
+
+      pending.set(id, (message) => {
+        global.clearTimeout(slowTimer);
+        resolve(message);
+      });
+
       target.postMessage({ type: "run", id, notebookId, code });
     });
   }

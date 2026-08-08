@@ -773,6 +773,49 @@ async function run(server) {
       runtime.includes("function ensureWorker()"), true);
     check("...and index.html does not preload pyodide",
       fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes("pyodide"), false);
+
+    // A worker scope has no DOM, but it does have the network — and the
+    // reader's cookies ride along on a same-origin request. `import js;
+    // js.fetch("/api/docs")` read the whole library until this went in.
+    check("the worker takes its own network away", worker.includes("installNetworkGuard()"), true);
+    check("...after Pyodide has loaded, not before",
+      /loadPyodide\([\s\S]{0,200}installNetworkGuard\(\)/.test(worker), true);
+    check("...allowing only the package CDN",
+      /startsWith\(`\$\{PYODIDE_ORIGIN\}\/`\)/.test(worker), true);
+    check("...and closing XHR as well", worker.includes('"XMLHttpRequest"'), true);
+    check("...and the streaming transports",
+      worker.includes('"WebSocket"') && worker.includes('"EventSource"'), true);
+    check("...and importScripts, which would pull in more code",
+      /self\.importScripts = \(\) => \{/.test(worker), true);
+
+    // Pyodide's stdout handler belongs to the interpreter, not to a call, so
+    // two overlapping runs captured each other's output. They now queue.
+    check("runs are serialised", /queue = queue\.then\(\(\) => execute\(message\)\)/.test(worker), true);
+    check("...and a failure cannot stall the queue",
+      /queue = queue\.then[\s\S]{0,120}\.catch\(/.test(worker), true);
+    check("...and the handler is cleared when a run ends",
+      /finally \{[\s\S]{0,200}setStdout\(\{\}\)/.test(worker), true);
+    check("resetting a namespace also waits its turn",
+      /"reset"[\s\S]{0,200}queue = queue\.then\(/.test(worker), true);
+
+    // One `while True: print(x)` should not build a string that freezes the
+    // page when it is rendered.
+    check("stream output is capped", /MAX_STREAM_CHARS = \d+/.test(worker), true);
+    check("...and so is the echoed value", /MAX_RESULT_CHARS = \d+/.test(worker), true);
+    check("...and truncation says so", worker.includes("output truncated at"), true);
+
+    // Not a kill — a real computation may take a while — but silence for
+    // minutes reads as a hang.
+    check("a slow cell is told it is still going", /SLOW_CELL_MS = \d+/.test(runtime), true);
+    check("...and the notice is cancelled when the result lands",
+      /clearTimeout\(slowTimer\)/.test(runtime), true);
+
+    // Switching documents mid-run used to write the result into a node that
+    // had already been thrown away.
+    const app = withoutComments(fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8"));
+    check("a result is dropped if the document changed",
+      /state\.activeFile !== startedFor/.test(app), true);
+    check("...or if its output node is gone", /!target\.isConnected/.test(app), true);
   }
 
   console.log("=== the share page cannot run anything ===");

@@ -2797,6 +2797,11 @@ async function runNotebookCell(button) {
     return;
   }
 
+  // Which document this run belongs to. Switching away mid-run replaces the
+  // whole article, and writing into the detached node would put one notebook's
+  // output under another's cell.
+  const startedFor = state.activeFile;
+
   button.disabled = true;
   button.classList.add("is-running");
   target.hidden = false;
@@ -2805,14 +2810,33 @@ async function runNotebookCell(button) {
   try {
     // The notebook's filename keys the kernel namespace, so cells in one
     // document share variables and two notebooks do not collide.
-    const result = await NotebookRuntime.runCell(state.activeFile || "notebook", code);
+    const result = await NotebookRuntime.runCell(startedFor || "notebook", code, {
+      onSlow: () => {
+        if (target.isConnected) {
+          target.innerHTML = "";
+          const note = document.createElement("p");
+          note.className = "notebook-run-empty";
+          note.textContent = "Still running. Use Restart Python if it is stuck.";
+          target.appendChild(note);
+        }
+      }
+    });
+
+    // The reader has moved on; their current notebook must not gain output
+    // from the one they left.
+    if (state.activeFile !== startedFor || !target.isConnected) {
+      return;
+    }
+
     renderRunOutput(target, result);
 
     if (!result.ok) {
       notify(`Cell ${cellNumber} failed.`, "error");
     }
   } catch (error) {
-    renderRunOutput(target, { ok: false, error: error.message });
+    if (target.isConnected) {
+      renderRunOutput(target, { ok: false, error: error.message });
+    }
   } finally {
     // Re-enabling the button that started this run; nothing else holds it.
     // eslint-disable-next-line require-atomic-updates
