@@ -9,7 +9,7 @@ Live at **<https://md.azaken.com>**.
 - Vanilla JavaScript on the client. No framework, no bundler, no build step.
 - Notebook code cells run Python in the browser via Pyodide, on request.
 - A Links section for the docs sites you keep coming back to, saved as cards
-  carrying each page's own title and description.
+  carrying each page's own title and description, filed into groups.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -316,8 +316,42 @@ page with no metadata still produces a usable card. A page that cannot be read
 at all is still saved, with the hostname as its title and a marker saying so:
 the link is the point, and the metadata is a convenience.
 
+### Grouping
+
+Links can be filed into **groups**, and into more than one at a time — a page
+about an osu! render API belongs under both `osu` and `APIs`, and being made to
+pick one while pasting a URL is exactly the friction that stops anything being
+filed at all.
+
+There are three ways to do it, in ascending order of effort:
+
+- **Drag a card onto a group chip.** No dialog, no typing. The fastest way
+  through a backlog.
+- **The tag button on a card** turns its chip row into a text field. Enter
+  saves, Escape puts it back.
+- **The Groups field in the Add dialog**, comma separated, with the existing
+  groups offered as you type. Adding while a group is selected pre-fills it,
+  because adding a link while looking at a group nearly always means "into this
+  one".
+
+The chip bar above the grid filters: **All**, one chip per group with its count,
+and **Ungrouped** when anything is unfiled. Clicking the selected chip clears
+it. A chip on a card jumps to that group. The text filter searches group names
+too, so a group can be found by typing rather than by hunting along the bar.
+
+Groups are derived from the links themselves, not kept in a list of their own: a
+group exists exactly as long as something is in it, and the last link leaving
+takes it with it. There is nothing to create, rename or tidy up. Names are
+matched without regard to case, so typing `osu` when `OSU` already exists joins
+that group rather than starting a second one beside it — the spelling first used
+is the one kept. Up to 8 groups per link, 40 characters each.
+
+Re-reading a page replaces what the page said about itself and leaves the filing
+alone.
+
 Links are the same for everyone: any signed-in account sees the list, and
-`doc:write` (editor or admin) is needed to add, edit, re-read or remove one.
+`doc:write` (editor or admin) is needed to add, edit, file, re-read or remove
+one.
 
 ### What the server will not fetch
 
@@ -447,7 +481,7 @@ with the right role, plus the `X-CSRF-Token` header.
 | `DELETE` | `/api/users/:id` | Delete an account (admin) |
 | `GET` | `/api/links` | List saved links |
 | `POST` | `/api/links` | Save a link, reading the page for its metadata (editor) |
-| `PATCH` | `/api/links/:id` | Edit a card, or `{"refresh":true}` to re-read the page (editor) |
+| `PATCH` | `/api/links/:id` | Edit a card or its groups, or `{"refresh":true}` to re-read the page (editor) |
 | `DELETE` | `/api/links/:id` | Remove a saved link (editor) |
 | `GET` | `/api/shares` | List published documents (editor) |
 | `POST` | `/api/docs/:file/share` | Publish or rotate a share link (editor) |
@@ -499,7 +533,7 @@ network: the suite is deterministic on a runner with no egress.
 | `theme` | Light and dark tokens, contrast ratios (including syntax highlighting), target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
-| `links` | What the link fetcher refuses to reach, metadata parsing, storage, RBAC |
+| `links` | What the link fetcher refuses to reach, metadata parsing, grouping, storage, RBAC |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`

@@ -41,8 +41,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=45"></script>
-  <link rel="stylesheet" href="css/app.css?v=45" />
+  <script src="js/theme-boot.js?v=47"></script>
+  <link rel="stylesheet" href="css/app.css?v=47" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -64,11 +64,11 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=45" defer></script>
+  <script src="js/markdown-core.js?v=47" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=45" defer></script>
-  <script src="js/app.js?v=45" defer></script>
+  <script src="js/notebook-runtime.js?v=47" defer></script>
+  <script src="js/app.js?v=47" defer></script>
 </head>
 
 <body>
@@ -318,6 +318,11 @@
 
             <span class="links-count" id="linksCount" aria-live="polite"></span>
           </div>
+
+          <!-- Filter chips. Built from the links themselves, so a group exists
+               exactly as long as something is in it. Drop a card on one to file
+               it there. -->
+          <div class="links-groups" id="linksGroups" role="group" aria-label="Filter by group"></div>
 
           <div class="links-grid" id="linksGrid"></div>
 
@@ -630,6 +635,15 @@
           <span>Note <em>(optional)</em></span>
           <input id="linkNoteInput" type="text" placeholder="Why this is worth keeping" autocomplete="off"
             maxlength="500" />
+        </label>
+
+        <label class="field" for="linkGroupsInput">
+          <span>Groups <em>(optional, comma separated)</em></span>
+          <!-- A datalist rather than a select: existing groups are offered, but
+               a new one is just typing, which is the whole point of them. -->
+          <input id="linkGroupsInput" type="text" placeholder="osu, APIs" autocomplete="off"
+            list="linkGroupOptions" />
+          <datalist id="linkGroupOptions"></datalist>
         </label>
 
         <p class="dialog-error" id="linkError" role="alert" hidden></p>

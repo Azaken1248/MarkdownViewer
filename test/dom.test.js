@@ -900,6 +900,146 @@ async function run(server) {
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
   }
 
+  console.log("=== links can be grouped ===");
+  {
+    const grouped = [
+      { id: "g1", url: "https://osu.ppy.sh/", title: "osu!", description: "", note: "", groups: ["osu", "games"], fetched: true },
+      { id: "g2", url: "https://docs.render.azaken.com/", title: "OsuRender API", description: "", note: "", groups: ["osu", "APIs"], fetched: true },
+      { id: "g3", url: "https://expressjs.com/", title: "Express", description: "", note: "", groups: ["APIs"], fetched: true },
+      { id: "g4", url: "https://example.com/", title: "Loose", description: "", note: "", groups: [], fetched: true }
+    ];
+
+    window.eval(`window.__t.state.links = ${JSON.stringify(grouped)}; window.__t.state.linkGroupFilter = null; window.__t.state.linkFilter = ""; window.__t.state.viewMode = "links"; window.__t.renderLinks();`);
+
+    const chipLabels = () => [...doc.querySelectorAll("#linksGroups .group-chip")]
+      .map((chip) => chip.textContent.replace(/(\D)(\d+)$/, "$1 $2").trim());
+
+    check("a chip per group, plus All and Ungrouped",
+      chipLabels(), ["All 4", "APIs 2", "games 1", "osu 2", "Ungrouped 1"]);
+    check("All and Ungrouped are not mistaken for group names",
+      doc.querySelectorAll("#linksGroups .group-chip[data-group]").length, 3);
+
+    // Alphabetical regardless of case, so the bar does not reorder itself as
+    // groups are added.
+    check("chips are in a stable order",
+      [...doc.querySelectorAll("#linksGroups .group-chip[data-group]")].map((c) => c.dataset.group),
+      ["APIs", "games", "osu"]);
+
+    // "All" and "Ungrouped" are not group names, so they carry their own
+    // attributes rather than an empty data-group that would collide.
+    const findChip = (selector) => doc.querySelector(`#linksGroups .group-chip${selector}`);
+    const clickChip = (selector) => {
+      const chip = findChip(selector);
+      chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      return chip;
+    };
+
+    clickChip('[data-group="osu"]');
+    check("selecting a group filters the grid",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent),
+      ["osu!", "OsuRender API"]);
+    check("...and the chip says it is selected",
+      findChip('[data-group="osu"]').getAttribute("aria-pressed"), "true");
+    check("...and the count reflects it", doc.getElementById("linksCount").textContent, "2 of 4");
+
+    // Clicking the selected chip again is the way back out; a filter you cannot
+    // clear from the thing that set it is a trap.
+    clickChip('[data-group="osu"]');
+    check("clicking it again clears the filter",
+      doc.querySelectorAll("#linksGrid .link-card").length, 4);
+
+    clickChip("[data-group-none]");
+    check("Ungrouped shows only the unfiled",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent), ["Loose"]);
+
+    clickChip("[data-group-none]");
+
+    // A group with two links in it is one chip, not two.
+    check("a link in several groups shows all of them",
+      [...doc.querySelectorAll('#linksGrid .link-card[data-id="g2"] .link-card-group')].map((c) => c.textContent),
+      ["osu", "APIs"]);
+
+    // Clicking a chip on a card is the fastest way to see everything beside it.
+    doc.querySelector('#linksGrid .link-card[data-id="g3"] .link-card-group')
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a chip on a card filters to that group",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent),
+      ["OsuRender API", "Express"]);
+    clickChip('[data-group="APIs"]');
+
+    // The text filter searches group names too, so a group can be found by
+    // typing rather than by hunting along the chip bar.
+    window.eval('window.__t.state.linkFilter = "games"; window.__t.renderLinks();');
+    check("the text filter matches a group name",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent), ["osu!"]);
+    window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+
+    // The add dialog offers what already exists, and pre-fills the group you
+    // are looking at, since adding while filtered almost always means "here".
+    clickChip('[data-group="osu"]');
+    window.eval("window.__t.openLinkModal()");
+    check("the dialog pre-fills the selected group",
+      doc.getElementById("linkGroupsInput").value, "osu");
+    check("...and offers the existing groups",
+      [...doc.querySelectorAll("#linkGroupOptions option")].map((o) => o.value), ["APIs", "games", "osu"]);
+    window.eval("window.__t.closeLinkModal()");
+    clickChip('[data-group="osu"]');
+
+    // With nothing filed there is nothing to filter by, and a lone "All" chip
+    // is a control that does nothing.
+    window.eval('window.__t.state.links = [{ id: "z", url: "https://x.example/", title: "Z", groups: [], fetched: true }]; window.__t.renderLinks();');
+    check("no chip bar when nothing is grouped",
+      doc.querySelectorAll("#linksGroups .group-chip").length, 0);
+
+    window.eval(`window.__t.state.links = ${JSON.stringify(grouped)}; window.__t.renderLinks();`);
+  }
+
+  console.log("=== a card can be filed by dragging it onto a group ===");
+  {
+    const card = doc.querySelector('#linksGrid .link-card[data-id="g4"]');
+    check("cards are draggable", card.getAttribute("draggable"), "true");
+
+    const transfer = { effectAllowed: "", dropEffect: "", data: {}, setData(k, v) { this.data[k] = v; } };
+    card.dispatchEvent(Object.assign(new window.Event("dragstart", { bubbles: true }), { dataTransfer: transfer }));
+    check("the drag knows which card it is", window.eval("window.__t.state.linkDragId"), "g4");
+    check("...and puts the URL on the transfer, which some browsers require",
+      transfer.data["text/plain"], "https://example.com/");
+
+    const chip = doc.querySelector('#linksGroups .group-chip[data-group="osu"]');
+    chip.dispatchEvent(Object.assign(new window.Event("dragover", { bubbles: true, cancelable: true }), { dataTransfer: transfer }));
+    check("the chip says it will take the drop", chip.classList.contains("drop-target"), true);
+
+    chip.dispatchEvent(Object.assign(new window.Event("drop", { bubbles: true, cancelable: true }), { dataTransfer: transfer }));
+    await new Promise((r) => setTimeout(r, 120));
+    check("...and stops saying so afterwards", chip.classList.contains("drop-target"), false);
+
+    // The PATCH goes to a link id the fixture server has never heard of, so the
+    // request fails and the card is put back rather than left showing a group
+    // the server never accepted.
+    check("a refused drop does not leave the card looking filed",
+      window.eval('(window.__t.state.links.find(l => l.id === "g4").groups || []).length'), 0);
+
+    card.dispatchEvent(new window.Event("dragend", { bubbles: true }));
+    check("the drag is cleared when it ends", window.eval("window.__t.state.linkDragId"), null);
+  }
+
+  console.log("=== a viewer cannot file anything ===");
+  {
+    window.eval('window.__t.applySession({ authenticated: true, user: { username: "r", role: "viewer" }, permissions: ["doc:read"], csrfToken: "t" });');
+    window.eval("window.__t.renderLinks()");
+
+    check("cards are not draggable", [...doc.querySelectorAll("#linksGrid .link-card")]
+      .every((c) => c.getAttribute("draggable") !== "true"), true);
+    check("...and offer no group editor",
+      doc.querySelectorAll("#linksGrid .link-card-actions").length, 0);
+    check("but the chips still filter",
+      doc.querySelectorAll("#linksGroups .group-chip").length > 0, true);
+
+    await window.eval("window.__t.refreshSession()");
+    await new Promise((r) => setTimeout(r, 200));
+    window.eval('window.__t.state.viewMode = "docs"; window.__t.syncModeUI();');
+  }
+
   console.log("=== the add-link form actually sends the URL ===");
   {
     // The bug this exists for: requestJson did not set Content-Type, so

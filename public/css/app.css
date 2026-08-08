@@ -1217,6 +1217,138 @@ button.crumb:focus-visible {
   white-space: nowrap;
 }
 
+/* --- Groups -------------------------------------------------------------- */
+
+.links-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.links-groups:empty {
+  display: none;
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 24px minimum pointer target (WCAG 2.5.8); the padding gets it there
+     without making a row of chips feel like a row of buttons. */
+  min-height: 24px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.group-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.group-chip.active {
+  border-color: var(--accent-muted);
+  background: var(--selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.group-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.group-chip-count {
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.group-chip.active .group-chip-count {
+  color: inherit;
+}
+
+/* Dragging a card over a chip files it there. The chip has to say so, or the
+   drop is a guess. */
+.group-chip.drop-target {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* Chips on a card are labels, not controls that filter — clicking one does
+   filter, but they read as belonging to the card. */
+.link-card-groups {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.link-card-group {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.link-card-group:hover {
+  border-color: var(--accent-muted);
+  color: var(--accent);
+}
+
+.link-card-group:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The inline editor that replaces the chip row while filing a card. */
+.link-card-group-edit {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.link-card-group-edit input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--accent-muted);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.link-card-group-edit input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* A card being dragged onto a chip. */
+.link-card.dragging {
+  opacity: 0.5;
+}
+
 /* auto-fill, not auto-fit: with auto-fit a single card stretches to the full
    width of a wide window, which reads as a banner rather than as one of a set. */
 .links-grid {

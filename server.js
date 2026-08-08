@@ -652,7 +652,9 @@ function throttleLinkFetch(req, res) {
 }
 
 app.get("/api/links", requireRead, (req, res) => {
-  res.json({ links: linkStore.list() });
+  // Groups travel with the list rather than on their own route: the chip bar is
+  // derived from the links, so a second request could only ever disagree.
+  res.json({ links: linkStore.list(), groups: linkStore.groups() });
 });
 
 app.post("/api/links", requirePermission("doc:write"), async (req, res, next) => {
@@ -664,10 +666,11 @@ app.post("/api/links", requirePermission("doc:write"), async (req, res, next) =>
     const preview = await linkPreview.describeUrl(req.body?.url);
     const link = await linkStore.withLock(() => linkStore.create(preview, {
       createdBy: req.auth?.user?.username || null,
-      note: req.body?.note
+      note: req.body?.note,
+      groups: req.body?.groups
     }));
 
-    res.status(201).json({ link });
+    res.status(201).json({ link, groups: linkStore.groups() });
   } catch (error) {
     if (error instanceof linkPreview.LinkPreviewError || error.status) {
       res.status(error.status || 400).json({ error: error.message, existingId: error.existingId });
@@ -691,7 +694,8 @@ app.patch("/api/links/:id", requirePermission("doc:write"), async (req, res, nex
     let changes = {
       title: req.body?.title,
       description: req.body?.description,
-      note: req.body?.note
+      note: req.body?.note,
+      groups: req.body?.groups
     };
 
     if (req.body?.refresh) {
@@ -699,12 +703,14 @@ app.patch("/api/links/:id", requirePermission("doc:write"), async (req, res, nex
         return;
       }
 
+      // Re-reading the page replaces what the page said. It must not touch how
+      // the link was filed, so the groups are carried across explicitly.
       const preview = await linkPreview.describeUrl(link.url);
-      changes = { ...preview };
+      changes = { ...preview, groups: req.body?.groups };
     }
 
     const updated = await linkStore.withLock(() => linkStore.update(link.id, changes));
-    res.json({ link: updated });
+    res.json({ link: updated, groups: linkStore.groups() });
   } catch (error) {
     if (error instanceof linkPreview.LinkPreviewError || error.status) {
       res.status(error.status || 400).json({ error: error.message });
@@ -723,7 +729,7 @@ app.delete("/api/links/:id", requirePermission("doc:write"), async (req, res, ne
       return;
     }
 
-    res.json({ removed: true });
+    res.json({ removed: true, groups: linkStore.groups() });
   } catch (error) {
     next(error);
   }

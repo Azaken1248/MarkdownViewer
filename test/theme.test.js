@@ -67,6 +67,12 @@ const PAIRS = [
   ["muted text on a surface", "--fg-muted", "--surface", 4.5],
   ["muted text on the canvas", "--fg-muted", "--canvas", 4.5],
   ["subtle text on a surface", "--fg-subtle", "--surface", 3.0],
+  // Group chips on a card, and inline code, sit on --raised rather than on a
+  // plain surface.
+  ["muted text on a raised surface", "--fg-muted", "--raised", 4.5],
+  // A selected group chip is accent-on-selected, the same pair a selected tree
+  // row uses.
+  ["a selected group chip", "--accent", "--selected", 4.5],
   ["accent text on the canvas", "--accent", "--canvas", 4.5],
   ["accent on a selected row", "--accent", "--selected", 4.5],
   ["accent on a raised surface", "--accent", "--raised", 4.5],

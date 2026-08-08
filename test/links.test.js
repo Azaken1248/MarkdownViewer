@@ -15,7 +15,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const preview = require("../lib/link-preview");
-const { LinkStore, canonicalKey } = require("../lib/links");
+const { LinkStore, canonicalKey, normalizeGroups, MAX_GROUPS_PER_LINK, MAX_GROUP_LENGTH } = require("../lib/links");
 const { makeClient } = require("./helpers/client");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
@@ -224,6 +224,47 @@ function refuses(label, url) {
     await store.update(link.id, { title: "Express 5" });
     check("a card can be edited by hand", store.find(link.id).title, "Express 5");
 
+    console.log("=== groups ===");
+    // A comma-separated string is what the dialog sends; an array is what the
+    // API takes. Both have to work, because both are used.
+    check("a comma-separated string becomes a list",
+      normalizeGroups(" osu ,  APIs ,, "), ["osu", "APIs"]);
+    check("an array is accepted too", normalizeGroups(["osu", "APIs"]), ["osu", "APIs"]);
+    check("whitespace inside a name is collapsed",
+      normalizeGroups("web   frameworks"), ["web frameworks"]);
+    check("the same name twice is one group", normalizeGroups("osu, osu"), ["osu"]);
+    // Otherwise "osu" and "OSU" sit next to each other as separate chips, which
+    // is never what anyone meant.
+    check("case does not start a second group", normalizeGroups("osu, OSU, Osu"), ["osu"]);
+    check("...and the spelling first used is kept", normalizeGroups("OSU, osu"), ["OSU"]);
+    check("empty entries are dropped", normalizeGroups(", ,  ,"), []);
+    check("nothing at all is an empty list", normalizeGroups(undefined), []);
+    check("a name is capped", normalizeGroups("x".repeat(200))[0].length, MAX_GROUP_LENGTH);
+    check("the number of groups is capped",
+      normalizeGroups(Array.from({ length: 40 }, (_, i) => `g${i}`)).length, MAX_GROUPS_PER_LINK);
+
+    await store.update(link.id, { groups: "osu, APIs" });
+    check("a link can be filed", store.find(link.id).groups, ["osu", "APIs"]);
+
+    // The bug this guards: refreshing sends new metadata and no groups, and a
+    // card must not come home unfiled because its page was re-read.
+    await store.update(link.id, { title: "Express 5", fetched: true, fetchedAt: new Date().toISOString() });
+    check("re-reading a page leaves the filing alone", store.find(link.id).groups, ["osu", "APIs"]);
+
+    await store.update(link.id, { groups: [] });
+    check("...but it can be emptied deliberately", store.find(link.id).groups, []);
+
+    await store.update(link.id, { groups: ["osu"] });
+    const second = await store.create({ url: "https://osu.ppy.sh/", title: "osu!" }, { groups: ["osu", "games"] });
+    check("groups are counted across links",
+      store.groups(), [{ name: "games", count: 1 }, { name: "osu", count: 2 }]);
+    check("...in alphabetical order regardless of case",
+      store.groups().map((g) => g.name), ["games", "osu"]);
+
+    await store.remove(second.id);
+    check("a group disappears when its last link does",
+      store.groups().map((g) => g.name), ["osu"]);
+
     check("a link is removed", await store.remove(link.id), true);
     check("...and removing it twice is not an error", await store.remove(link.id), false);
     check("...and the file reflects it",
@@ -330,5 +371,12 @@ async function api(server) {
       (await admin.patch("/api/links/nope", { title: "x" })).status, 404);
     check("...and so is removing one",
       (await admin.del("/api/links/nope")).status, 404);
+  }
+
+  console.log("=== the list carries the groups in use ===");
+  {
+    const list = await admin.get("/api/links");
+    check("the response has a groups list", Array.isArray(list.body.groups), true);
+    check("...empty while nothing is filed", list.body.groups, []);
   }
 }

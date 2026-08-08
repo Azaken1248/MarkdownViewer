@@ -66,6 +66,9 @@ const elements = {
   linkForm: document.getElementById("linkForm"),
   linkUrlInput: document.getElementById("linkUrlInput"),
   linkNoteInput: document.getElementById("linkNoteInput"),
+  linkGroupsInput: document.getElementById("linkGroupsInput"),
+  linkGroupOptions: document.getElementById("linkGroupOptions"),
+  linksGroups: document.getElementById("linksGroups"),
   linkError: document.getElementById("linkError"),
   saveLinkBtn: document.getElementById("saveLinkBtn"),
   editorModal: document.getElementById("editorModal"),
@@ -174,7 +177,11 @@ const state = {
   },
 
   links: [],
+  linkGroups: [],
   linkFilter: "",
+  // null = every link; "" = only the ungrouped ones; otherwise a group name.
+  linkGroupFilter: null,
+  linkDragId: null,
   linkModalOpen: false,
 
   filteredDocs: [],
@@ -3418,14 +3425,259 @@ function linkHost(link) {
   }
 }
 
-function matchingLinks() {
-  const needle = state.linkFilter.trim().toLowerCase();
-  if (!needle) {
-    return state.links;
+function linkGroupsOf(link) {
+  return Array.isArray(link.groups) ? link.groups : [];
+}
+
+function inSelectedGroup(link) {
+  if (state.linkGroupFilter === null) {
+    return true;
   }
 
-  return state.links.filter((link) => [link.title, link.description, link.note, link.url, link.siteName]
-    .some((field) => String(field || "").toLowerCase().includes(needle)));
+  const groups = linkGroupsOf(link);
+
+  // "" is the Ungrouped chip, which is the one filter you cannot express as a
+  // group name and the one you need most while filing a backlog.
+  if (state.linkGroupFilter === "") {
+    return groups.length === 0;
+  }
+
+  const wanted = state.linkGroupFilter.toLowerCase();
+  return groups.some((name) => name.toLowerCase() === wanted);
+}
+
+function matchingLinks() {
+  const needle = state.linkFilter.trim().toLowerCase();
+
+  return state.links.filter((link) => {
+    if (!inSelectedGroup(link)) {
+      return false;
+    }
+
+    if (!needle) {
+      return true;
+    }
+
+    // The group names are searched too, so typing a group name finds its links
+    // whether or not the chip is selected.
+    return [link.title, link.description, link.note, link.url, link.siteName, ...linkGroupsOf(link)]
+      .some((field) => String(field || "").toLowerCase().includes(needle));
+  });
+}
+
+// Derived here rather than trusted from the server, so the chip bar is correct
+// the instant a card changes rather than after the next round trip.
+function groupCounts() {
+  const counts = new Map();
+
+  for (const link of state.links) {
+    for (const name of linkGroupsOf(link)) {
+      const key = name.toLowerCase();
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, { name, count: 1 });
+      }
+    }
+  }
+
+  return [...counts.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function selectLinkGroup(value) {
+  // Clicking the selected chip clears it, so the filter is its own way out.
+  state.linkGroupFilter = state.linkGroupFilter === value ? null : value;
+  renderLinks();
+}
+
+async function setLinkGroups(id, groups) {
+  const link = state.links.find((entry) => entry.id === id);
+  if (!link) {
+    return;
+  }
+
+  const before = linkGroupsOf(link);
+
+  try {
+    const payload = await requestJson(`/api/links/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ groups })
+    });
+
+    state.links = state.links.map((entry) => (entry.id === id ? payload.link : entry));
+    renderLinks();
+  } catch (error) {
+    // Put the card back the way it was: the optimistic render already happened
+    // in the drag case, and a card silently showing a group the server refused
+    // is worse than an error.
+    link.groups = before;
+    renderLinks();
+    notify(error.message, "error");
+  }
+}
+
+function renderGroupChips() {
+  if (!elements.linksGroups) {
+    return;
+  }
+
+  const counts = groupCounts();
+  const ungrouped = state.links.filter((link) => linkGroupsOf(link).length === 0).length;
+
+  elements.linksGroups.innerHTML = "";
+
+  // No chip bar for a library with no groups in it: an "All (3)" chip on its
+  // own is a control that does nothing.
+  if (counts.length === 0) {
+    return;
+  }
+
+  const chip = (label, value, count) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = state.linkGroupFilter === value ? "group-chip active" : "group-chip";
+    button.setAttribute("aria-pressed", String(state.linkGroupFilter === value));
+
+    // "All" and "Ungrouped" are not group names, and both would otherwise sit
+    // in data-group as an empty string — indistinguishable from each other and
+    // from a group that happens to be unnamed.
+    if (value === null) {
+      button.dataset.groupAll = "";
+    } else if (value === "") {
+      button.dataset.groupNone = "";
+    } else {
+      button.dataset.group = value;
+    }
+
+    const text = document.createElement("span");
+    text.textContent = label;
+    button.appendChild(text);
+
+    if (typeof count === "number") {
+      const badge = document.createElement("span");
+      badge.className = "group-chip-count";
+      badge.textContent = String(count);
+      button.appendChild(badge);
+    }
+
+    button.addEventListener("click", () => selectLinkGroup(value));
+
+    // Dropping a card on a chip files it there — the quickest way to group a
+    // backlog, since it needs no dialog and no typing.
+    if (value !== null && value !== "" && can("doc:write")) {
+      button.addEventListener("dragover", (event) => {
+        if (!state.linkDragId) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        button.classList.add("drop-target");
+      });
+
+      button.addEventListener("dragleave", () => button.classList.remove("drop-target"));
+
+      button.addEventListener("drop", (event) => {
+        event.preventDefault();
+        button.classList.remove("drop-target");
+
+        const id = state.linkDragId;
+        if (!id) {
+          return;
+        }
+
+        const link = state.links.find((entry) => entry.id === id);
+        const existing = link ? linkGroupsOf(link) : [];
+        if (existing.some((name) => name.toLowerCase() === value.toLowerCase())) {
+          notify(`Already in "${value}".`, "neutral");
+          return;
+        }
+
+        void setLinkGroups(id, [...existing, value]);
+      });
+    }
+
+    elements.linksGroups.appendChild(button);
+    return button;
+  };
+
+  chip("All", null, state.links.length);
+  for (const group of counts) {
+    chip(group.name, group.name, group.count);
+  }
+  if (ungrouped > 0) {
+    chip("Ungrouped", "", ungrouped);
+  }
+}
+
+function syncGroupDatalist() {
+  if (!elements.linkGroupOptions) {
+    return;
+  }
+
+  elements.linkGroupOptions.innerHTML = "";
+  for (const group of groupCounts()) {
+    const option = document.createElement("option");
+    option.value = group.name;
+    elements.linkGroupOptions.appendChild(option);
+  }
+}
+
+// Filing a card without leaving the grid: the chip row becomes a text field
+// holding the current groups, Enter saves, Escape puts it back.
+function beginGroupEdit(card, link) {
+  if (card.querySelector(".link-card-group-edit")) {
+    return;
+  }
+
+  const row = card.querySelector(".link-card-groups");
+  const editor = document.createElement("div");
+  editor.className = "link-card-group-edit";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = linkGroupsOf(link).join(", ");
+  input.setAttribute("aria-label", `Groups for ${link.title || link.url}`);
+  input.placeholder = "osu, APIs";
+  input.setAttribute("list", "linkGroupOptions");
+  editor.appendChild(input);
+
+  let settled = false;
+  const finish = (save) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+
+    if (save) {
+      void setLinkGroups(link.id, input.value);
+    } else {
+      renderLinks();
+    }
+  };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      finish(false);
+    }
+  });
+
+  input.addEventListener("blur", () => finish(true));
+
+  if (row) {
+    row.replaceWith(editor);
+  } else {
+    card.appendChild(editor);
+  }
+
+  input.focus();
+  input.select();
 }
 
 function renderLinkCard(link) {
@@ -3462,6 +3714,24 @@ function renderLinkCard(link) {
     card.appendChild(note);
   }
 
+  const groups = linkGroupsOf(link);
+  if (groups.length > 0) {
+    const row = document.createElement("div");
+    row.className = "link-card-groups";
+
+    for (const name of groups) {
+      const groupChip = document.createElement("button");
+      groupChip.type = "button";
+      groupChip.className = "link-card-group";
+      groupChip.textContent = name;
+      groupChip.title = `Show only "${name}"`;
+      groupChip.addEventListener("click", () => selectLinkGroup(name));
+      row.appendChild(groupChip);
+    }
+
+    card.appendChild(row);
+  }
+
   const foot = document.createElement("div");
   foot.className = "link-card-foot";
 
@@ -3486,6 +3756,15 @@ function renderLinkCard(link) {
     const actions = document.createElement("div");
     actions.className = "link-card-actions";
 
+    const group = document.createElement("button");
+    group.type = "button";
+    group.className = "icon-btn icon-btn-sm";
+    group.title = "Edit groups";
+    group.setAttribute("aria-label", `Edit groups for ${link.title || link.url}`);
+    group.innerHTML = '<i class="ph ph-tag" aria-hidden="true"></i>';
+    group.addEventListener("click", () => beginGroupEdit(card, link));
+    actions.appendChild(group);
+
     const refresh = document.createElement("button");
     refresh.type = "button";
     refresh.className = "icon-btn icon-btn-sm";
@@ -3508,6 +3787,26 @@ function renderLinkCard(link) {
   }
 
   card.appendChild(foot);
+
+  // Dragging a card onto a group chip files it there. Only worth offering when
+  // there is a chip to drop it on and the account may change anything.
+  if (can("doc:write")) {
+    card.draggable = true;
+
+    card.addEventListener("dragstart", (event) => {
+      state.linkDragId = link.id;
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "copy";
+      // Some browsers refuse to start a drag with nothing on the transfer.
+      event.dataTransfer.setData("text/plain", link.url);
+    });
+
+    card.addEventListener("dragend", () => {
+      state.linkDragId = null;
+      card.classList.remove("dragging");
+    });
+  }
+
   return card;
 }
 
@@ -3528,6 +3827,13 @@ function renderLinks() {
     elements.linksEmpty.querySelector("h3").textContent = "Nothing matches";
     elements.linksEmpty.querySelector("p").textContent =
       `No saved link mentions "${state.linkFilter.trim()}".`;
+  } else if (visible.length === 0 && state.linkGroupFilter) {
+    elements.linksEmpty.querySelector("h3").textContent = "This group is empty";
+    elements.linksEmpty.querySelector("p").textContent =
+      `Nothing is filed under "${state.linkGroupFilter}" any more.`;
+  } else if (visible.length === 0 && state.linkGroupFilter === "") {
+    elements.linksEmpty.querySelector("h3").textContent = "Everything is filed";
+    elements.linksEmpty.querySelector("p").textContent = "No link is outside a group.";
   } else if (visible.length === 0) {
     elements.linksEmpty.querySelector("h3").textContent = "No links yet";
     elements.linksEmpty.querySelector("p").textContent =
@@ -3538,6 +3844,8 @@ function renderLinks() {
     ? `${state.links.length} link${state.links.length === 1 ? "" : "s"}`
     : `${visible.length} of ${state.links.length}`;
 
+  renderGroupChips();
+  syncGroupDatalist();
   renderLinkSidebar(visible);
 }
 
@@ -3572,6 +3880,15 @@ function renderLinkSidebar(visible) {
 async function refreshLinks() {
   const payload = await requestJson("/api/links");
   state.links = Array.isArray(payload.links) ? payload.links : [];
+  state.linkGroups = Array.isArray(payload.groups) ? payload.groups : [];
+
+  // A chip that no longer exists must not stay selected, or the grid is empty
+  // with no way to see why.
+  if (state.linkGroupFilter && !state.links.some((link) =>
+    (link.groups || []).some((name) => name.toLowerCase() === state.linkGroupFilter.toLowerCase()))) {
+    state.linkGroupFilter = null;
+  }
+
   renderLinks();
 }
 
@@ -3583,6 +3900,9 @@ function openLinkModal() {
   state.linkModalOpen = true;
   elements.linkUrlInput.value = "";
   elements.linkNoteInput.value = "";
+  // Adding while a group is selected almost always means "into this group".
+  elements.linkGroupsInput.value = state.linkGroupFilter || "";
+  syncGroupDatalist();
   elements.linkError.hidden = true;
   elements.linkError.textContent = "";
   elements.linkModal.classList.add("open");
@@ -3622,7 +3942,11 @@ async function submitLink() {
   try {
     const payload = await requestJson("/api/links", {
       method: "POST",
-      body: JSON.stringify({ url, note: elements.linkNoteInput.value.trim() })
+      body: JSON.stringify({
+        url,
+        note: elements.linkNoteInput.value.trim(),
+        groups: elements.linkGroupsInput.value
+      })
     });
 
     state.links.unshift(payload.link);
@@ -3644,10 +3968,17 @@ async function submitLink() {
 }
 
 async function refreshLink(id) {
+  const current = state.links.find((entry) => entry.id === id);
+  if (!current) {
+    return;
+  }
+
   try {
     const payload = await requestJson(`/api/links/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ refresh: true })
+      // The server replaces the metadata wholesale on a refresh, so the groups
+      // are sent back with it or the card comes home unfiled.
+      body: JSON.stringify({ refresh: true, groups: linkGroupsOf(current) })
     });
 
     state.links = state.links.map((link) => (link.id === id ? payload.link : link));
