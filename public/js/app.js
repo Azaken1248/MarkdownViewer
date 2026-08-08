@@ -3322,6 +3322,17 @@ async function moveFolderToParent(folderId, parentId) {
   }
 }
 
+// One entry point for "make a new document", so the toolbar button and the two
+// context menus cannot drift apart. folderId preselects the picker.
+function startNewDocument(folderId = null) {
+  openEditor({
+    mode: "create",
+    fileName: "",
+    content: "# New Markdown\n\nStart writing here...",
+    folderId
+  });
+}
+
 // --- Context menu ---------------------------------------------------------
 
 function closeContextMenu() {
@@ -3485,6 +3496,11 @@ function buildFolderContextItems(folder) {
   }
 
   return [
+    {
+      label: "New file",
+      icon: "ph-file-plus",
+      action: () => startNewDocument(folder.id)
+    },
     {
       label: "New subfolder",
       icon: "ph-folder-plus",
@@ -4967,7 +4983,7 @@ function syncEditorPaneScroll(sourceElement, targetElement) {
 
 // The folder picker only appears when creating: an existing document is moved
 // with the dedicated Move action, which already handles reassignment.
-function syncEditorFolderPicker(mode) {
+function syncEditorFolderPicker(mode, folderId) {
   const select = elements.editorFolderSelect;
   if (!select || !elements.editorFolderField) {
     return;
@@ -4992,14 +5008,17 @@ function syncEditorFolderPicker(mode) {
     select.appendChild(option);
   }
 
-  select.value = "";
+  // Creating from a folder's own menu should land in that folder; the picker
+  // is still there to change it. A stale id (folder deleted in another tab)
+  // falls back to the root rather than selecting nothing.
+  select.value = folderId && state.folders.some((folder) => folder.id === folderId) ? folderId : "";
 }
 
-function openEditor({ mode, fileName, content }) {
+function openEditor({ mode, fileName, content, folderId = null }) {
   state.editorMode = mode;
   state.editorFile = mode === "edit" ? fileName : null;
   state.editorOpen = true;
-  syncEditorFolderPicker(mode);
+  syncEditorFolderPicker(mode, folderId);
 
   elements.editorFileName.value = fileName || "";
   // Editing the name is how you rename: saving renames the file first, then writes
@@ -5910,27 +5929,41 @@ elements.docList.addEventListener("contextmenu", (event) => {
   }
 
   event.preventDefault();
-  openContextMenu(event.clientX, event.clientY, [
-    {
-      label: "New folder",
-      icon: "ph-folder-plus",
-      action: () => openFolderModal({ mode: "create" })
-    },
-    {
-      label: state.clipboard.files.length
-        ? `Paste ${state.clipboard.files.length} file(s) into Ungrouped`
-        : "Paste",
-      icon: "ph-clipboard-text",
-      disabled: state.clipboard.files.length === 0,
-      action: () => void pasteIntoFolder(null)
-    },
-    { separator: true },
-    {
-      label: "Select all",
-      icon: "ph-check-square",
-      action: () => setSelection(visibleFileOrder)
-    }
-  ]);
+
+  // Creating is a write, so a viewer is left with the one entry that is not.
+  const items = [];
+
+  if (can("doc:write")) {
+    items.push(
+      {
+        label: "New file",
+        icon: "ph-file-plus",
+        action: () => startNewDocument(null)
+      },
+      {
+        label: "New folder",
+        icon: "ph-folder-plus",
+        action: () => openFolderModal({ mode: "create" })
+      },
+      {
+        label: state.clipboard.files.length
+          ? `Paste ${state.clipboard.files.length} file(s) into Ungrouped`
+          : "Paste",
+        icon: "ph-clipboard-text",
+        disabled: state.clipboard.files.length === 0,
+        action: () => void pasteIntoFolder(null)
+      },
+      { separator: true }
+    );
+  }
+
+  items.push({
+    label: "Select all",
+    icon: "ph-check-square",
+    action: () => setSelection(visibleFileOrder)
+  });
+
+  openContextMenu(event.clientX, event.clientY, items);
 });
 
 // A context menu must not survive the next interaction anywhere on the page.
@@ -6265,11 +6298,7 @@ elements.uploadInput.addEventListener("change", () => {
 });
 
 elements.newDocBtn.addEventListener("click", () => {
-  openEditor({
-    mode: "create",
-    fileName: "",
-    content: "# New Markdown\n\nStart writing here..."
-  });
+  startNewDocument(null);
 });
 
 elements.editDocBtn.addEventListener("click", () => {

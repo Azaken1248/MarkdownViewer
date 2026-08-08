@@ -1,6 +1,36 @@
-<!-- Stroke is the app's --accent (#8ed9cf). A bare stroke with no background
-     reads on both light and dark browser chrome. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8ed9cf" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+<!-- AzaDocs.
+
+     Note before editing: a standalone .svg is parsed as XML, and XML forbids a
+     double hyphen inside a comment. The previous version of this file named the
+     CSS custom properties it drew from, hyphens and all, which made the whole
+     document fail to parse — so the icon never rendered anywhere. Refer to the
+     tokens by name only.
+
+     A tile, not a bare glyph. The old icon was an outlined book stroked in the
+     accent teal with no background, which had two further problems: pale teal
+     sits at about 1.6:1 on light browser chrome, so it vanished in a
+     light-themed tab strip, and iOS paints apple-touch-icon on white, where the
+     same thing happened at 180px. Drawing its own dark ground fixes both, and
+     matches the app: flat opaque surfaces, a hairline border, one teal accent,
+     no gradients.
+
+     Built to survive 16px. The silhouette carries it: a teal page on a dark
+     square. The fold and the two text lines are detail for the sizes that can
+     show them, and they merge back into the page shape rather than into noise
+     when they cannot. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="AzaDocs">
+  <rect width="32" height="32" rx="7" fill="#0c1214" />
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="#2e3d42" />
+
+  <!-- The page, in the accent teal that carries the app's identity. -->
+  <path d="M8.6 8a2.4 2.4 0 0 1 2.4-2.4h7.3l5.1 5.1v13.3A2.4 2.4 0 0 1 21 26.4H11A2.4 2.4 0 0 1 8.6 24z"
+    fill="#8ed9cf" />
+  <!-- The folded corner, in the darker accent, so it reads as a shade of the
+       same colour rather than as a second one. -->
+  <path d="M18.3 5.6l5.1 5.1h-3.9a1.2 1.2 0 0 1-1.2-1.2z" fill="#3f8d84" />
+
+  <!-- Text, cut back out to the tile colour. Two lines, not three: at 16px a
+       third closes the gaps and the page turns into a solid block. -->
+  <rect x="11.7" y="13.6" width="8.8" height="2.3" rx="1.15" fill="#0c1214" />
+  <rect x="11.7" y="19.2" width="5.9" height="2.3" rx="1.15" fill="#0c1214" />
 </svg>

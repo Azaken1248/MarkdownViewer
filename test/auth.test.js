@@ -578,17 +578,15 @@ async function run(server) {
     check("twitter mirrors it", meta("twitter:title"), "Quarterly Planning");
     check("no placeholder survived", /__SHARE_[A-Z_]+__/.test(page), false);
 
-    console.log("=== the card image carries the document's title ===");
-    const card = await stranger.get(`/s/${token}/card.svg`);
-    check("the card renders", card.status, 200);
-    check("...as an SVG", /image\/svg\+xml/.test(card.headers["content-type"]), true);
-    check("...with the title in it", card.raw.includes("Quarterly Planning"), true);
-    check("...and the filename underneath", card.raw.includes("preview-fixture.md"), true);
-    check("og:image points at it", meta("og:image").endsWith(`/s/${token}/card.svg`), true);
-    check("the card is not indexed either",
-      /noindex/.test(card.headers["x-robots-tag"] || ""), true);
-    check("a bogus token gets no card",
-      (await stranger.get("/s/not-a-token/card.svg")).status, 404);
+    // The preview is text only. The SVG card that used to be here was not
+    // rendered by Slack, Discord or X — which is most of where a link gets
+    // pasted — so it cost a route and a renderer to show nothing.
+    console.log("=== the preview claims no image ===");
+    check("no og:image", /property="og:image"/.test(page), false);
+    check("...and no twitter:image", /name="twitter:image"/.test(page), false);
+    check("twitter falls back to the text card", meta("twitter:card"), "summary");
+    check("the card route is gone",
+      (await stranger.get(`/s/${token}/card.svg`)).status, 404);
 
     console.log("=== a revoked link stops describing what was behind it ===");
     await admin.del("/api/docs/preview-fixture.md/share");
@@ -596,8 +594,6 @@ async function run(server) {
     check("the page 404s", gone.status, 404);
     check("...and leaks neither the title", gone.raw.includes("Quarterly Planning"), false);
     check("...nor the content", gone.raw.includes("cart rewrite"), false);
-    check("...and the card goes with it",
-      (await stranger.get(`/s/${token}/card.svg`)).status, 404);
   }
 
   console.log("=== summarising odd documents ===");

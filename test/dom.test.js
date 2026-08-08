@@ -206,7 +206,7 @@ async function run(server) {
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
-        uploadFolder, isUploadableFile
+        uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor
       };
     `);
     check("no exception on load", true, true);
@@ -818,6 +818,25 @@ async function run(server) {
     check("...or if its output node is gone", /!target\.isConnected/.test(app), true);
   }
 
+  console.log("=== the favicon is a valid document ===");
+  {
+    // A standalone .svg is served as image/svg+xml and parsed as XML, which is
+    // unforgiving in a way HTML is not. This file's comment used to name the
+    // CSS tokens it drew from ("--accent"), and a double hyphen inside an XML
+    // comment is illegal, so the whole document failed to parse and the icon
+    // silently never rendered — in the tab, and on iOS at 180px.
+    const svg = fs.readFileSync(path.join(ROOT, "favicon.svg"), "utf8");
+    const parsed = new window.DOMParser().parseFromString(svg, "image/svg+xml");
+    const error = parsed.querySelector("parsererror");
+    check("favicon.svg parses as XML", error ? error.textContent.trim() : null, null);
+    check("...and its root is an svg", parsed.documentElement.tagName, "svg");
+
+    // The old icon was a bare pale-teal stroke, which sits at ~1.6:1 on light
+    // browser chrome and on the white iOS paints apple-touch-icon onto.
+    check("it draws its own ground rather than borrowing the chrome's",
+      /<rect[^>]*width="32"[^>]*fill="#0c1214"/.test(svg), true);
+  }
+
   console.log("=== the share page cannot run anything ===");
   {
     const shareHtml = fs.readFileSync(path.join(ROOT, "share.html"), "utf8");
@@ -918,6 +937,18 @@ async function run(server) {
     // Hidden, not merely disabled: a control that can never become usable for
     // this account is clutter.
     const hidden = (id) => doc.getElementById(id)?.hidden;
+
+    // The menu on the empty area below the rows is built in an event handler
+    // rather than a function, so it is read back off the DOM it renders into.
+    const emptySpaceMenuLabels = () => {
+      const list = doc.getElementById("docList");
+      const event = new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      list.dispatchEvent(event);
+      const labels = [...doc.getElementById("contextMenu").querySelectorAll(".context-item span")]
+        .map((span) => span.textContent);
+      window.eval("window.__t.closeContextMenu()");
+      return labels;
+    };
     for (const id of ["newDocBtn", "uploadTrigger", "editDocBtn", "createFolderBtn",
       "editCurrentDocBtn", "softDeleteDocBtn", "hardDeleteDocBtn",
       "dockNew", "dockUpload", "dockEdit", "shareDocBtn"]) {
@@ -939,6 +970,8 @@ async function run(server) {
     check("the context menu offers only Open", [...readerMenu], ["Open"]);
     check("...and no folder menu at all",
       window.eval('window.__t.buildFolderContextItems({ id: "f1", name: "X" }).length'), 0);
+    check("...and the empty-space menu offers no way to create",
+      [...emptySpaceMenuLabels()], ["Select all"]);
 
     console.log("=== an editor gets them back ===");
     asRole("editor", ["doc:read", "doc:write", "share:manage"]);
@@ -953,6 +986,27 @@ async function run(server) {
       .every((r) => r.getAttribute("draggable") === "true"), true);
     check("the accounts menu item stays hidden for an editor",
       doc.getElementById("manageUsersItem").hidden, true);
+
+    // Creating a document was reachable only from the toolbar; a right-click,
+    // which is where you go to act on a place in the tree, offered a folder and
+    // a paste and no way to make a file.
+    const folderMenu = window.eval('window.__t.buildFolderContextItems({ id: "f1", name: "X" }).map(i => i.label || "-")');
+    check("a folder's menu can create a file in it", [...folderMenu].includes("New file"), true);
+    check("...and it comes first", [...folderMenu][0], "New file");
+    check("the empty-space menu can too", [...emptySpaceMenuLabels()].includes("New file"), true);
+
+    // ...and it lands in the folder that was right-clicked, not in Ungrouped.
+    window.eval('window.__t.state.folders = [{ id: "f1", name: "X", order: 0, parentId: null }]');
+    window.eval('window.__t.startNewDocument("f1")');
+    check("a file made from a folder's menu starts in that folder",
+      doc.getElementById("editorFolderSelect").value, "f1");
+    window.eval('window.__t.startNewDocument(null)');
+    check("...and from the toolbar it starts at the top level",
+      doc.getElementById("editorFolderSelect").value, "");
+    window.eval('window.__t.startNewDocument("gone")');
+    check("...and a folder that no longer exists falls back to the top level",
+      doc.getElementById("editorFolderSelect").value, "");
+    window.eval("window.__t.closeEditor?.()");
 
     console.log("=== only an admin is offered account management ===");
     asRole("admin", ["doc:read", "doc:write", "share:manage", "doc:erase", "user:manage"]);

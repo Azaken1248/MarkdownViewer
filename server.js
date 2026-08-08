@@ -78,7 +78,6 @@ const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit 
 // The dark canvas, which is the default theme. The old value was Catppuccin
 // blue, left over from a palette the app no longer uses.
 const EMBED_THEME_COLOR = "#06090a";
-const EMBED_IMAGE_PATH = "/social-card.svg";
 const FAVICON_PATH = "/favicon.svg";
 const EMBED_AUTHOR_NAME = "Azaken1248";
 // Where this actually lives. Canonical, og:*, and oEmbed URLs are built from
@@ -1793,7 +1792,6 @@ function buildEmbedMeta(req, requestedUrl) {
     description: EMBED_DESCRIPTION,
     siteName: SITE_NAME,
     canonicalUrl,
-    imageUrl: toAbsoluteUrl(baseUrl, EMBED_IMAGE_PATH),
     faviconUrl: toAbsoluteUrl(baseUrl, FAVICON_PATH),
     themeColor: EMBED_THEME_COLOR,
     oEmbedUrl: `${toAbsoluteUrl(baseUrl, "/oembed")}?url=${encodeURIComponent(canonicalUrl)}`,
@@ -1807,7 +1805,6 @@ function renderIndexWithEmbedMeta(htmlTemplate, embedMeta) {
     __EMBED_DESCRIPTION__: embedMeta.description,
     __EMBED_CANONICAL_URL__: embedMeta.canonicalUrl,
     __EMBED_SITE_NAME__: embedMeta.siteName,
-    __EMBED_IMAGE_URL__: embedMeta.imageUrl,
     __EMBED_FAVICON_URL__: embedMeta.faviconUrl,
     __EMBED_THEME_COLOR__: embedMeta.themeColor,
     __EMBED_OEMBED_URL__: embedMeta.oEmbedUrl
@@ -1965,8 +1962,6 @@ function renderShareHtml(template, {
   description,
   baseUrl,
   shareUrl = "",
-  imageUrl = "",
-  imageAlt = "",
   modifiedAt = ""
 }) {
   const replacements = {
@@ -1978,8 +1973,6 @@ function renderShareHtml(template, {
     __SHARE_URL__: shareUrl || toAbsoluteUrl(baseUrl, "/"),
     __SHARE_SITE_NAME__: SITE_NAME,
     __SHARE_AUTHOR__: EMBED_AUTHOR_NAME,
-    __SHARE_IMAGE_URL__: imageUrl || toAbsoluteUrl(baseUrl, EMBED_IMAGE_PATH),
-    __SHARE_IMAGE_ALT__: imageAlt || `${SITE_NAME} share card`,
     __SHARE_MODIFIED__: modifiedAt,
     __SHARE_FAVICON_URL__: toAbsoluteUrl(baseUrl, FAVICON_PATH),
     __SHARE_THEME_COLOR__: EMBED_THEME_COLOR
@@ -1993,107 +1986,12 @@ function renderShareHtml(template, {
   return rendered;
 }
 
-// A share card carrying the document's own title, so an unfurl shows what was
-// shared rather than the same generic app card every time.
-//
-// SVG rather than a rasteriser: this app has no image toolchain and adding one
-// for a preview would be a poor trade. The cost is that some unfurlers (Slack,
-// Discord, X) will not render an SVG og:image and fall back to showing no
-// picture — the title, description and site name still come through.
-function escapeXml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-// SVG has no text wrapping, so the lines are measured and broken here.
-function wrapForCard(text, maxCharsPerLine, maxLines) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
-  const lines = [];
-  let line = "";
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (candidate.length <= maxCharsPerLine) {
-      line = candidate;
-      continue;
-    }
-
-    if (line) {
-      lines.push(line);
-    }
-
-    line = word;
-
-    if (lines.length === maxLines) {
-      break;
-    }
-  }
-
-  if (line && lines.length < maxLines) {
-    lines.push(line);
-  }
-
-  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
-    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[\s.,;:!?-]+$/, "")}…`;
-  }
-
-  return lines;
-}
-
-function renderShareCardSvg({ title, subtitle }) {
-  const titleLines = wrapForCard(title, 26, 3);
-  const fontSize = titleLines.length > 2 ? 62 : 74;
-  const startY = 300 - ((titleLines.length - 1) * fontSize * 0.62);
-
-  const titleMarkup = titleLines
-    .map((line, index) => `<tspan x="122" y="${Math.round(startY + index * fontSize * 1.24)}">${escapeXml(line)}</tspan>`)
-    .join("\n    ");
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="${escapeXml(title)}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#06090a" />
-      <stop offset="55%" stop-color="#0a1113" />
-      <stop offset="100%" stop-color="#101b1e" />
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#8ed9cf" />
-      <stop offset="100%" stop-color="#5fb8ae" />
-    </linearGradient>
-  </defs>
-
-  <rect width="1200" height="630" fill="url(#bg)" />
-  <rect x="64" y="62" width="1072" height="506" rx="30" fill="#0c1214" stroke="#2e3d42" stroke-width="2" />
-  <rect x="122" y="96" width="72" height="6" rx="3" fill="url(#accent)" />
-
-  <text fill="#dce7e5" font-size="${fontSize}" font-weight="700" font-family="Inter, Segoe UI, Arial, sans-serif">
-    ${titleMarkup}
-  </text>
-
-  <text x="122" y="470" fill="#86a09d" font-size="28" font-family="Inter, Segoe UI, Arial, sans-serif">${escapeXml(subtitle)}</text>
-
-  <g transform="translate(122,502)" fill="none" stroke="#8ed9cf" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <g transform="scale(1.5)">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </g>
-  </g>
-  <text x="168" y="527" fill="#8ed9cf" font-size="24" font-family="Inter, Segoe UI, Arial, sans-serif">${escapeXml(SITE_NAME)}</text>
-</svg>
-`;
-}
-
 const graphQLSchema = buildSchema(`
   type EmbedMeta {
     title: String!
     description: String!
     siteName: String!
     canonicalUrl: String!
-    imageUrl: String!
     faviconUrl: String!
     themeColor: String!
     oEmbedUrl: String!
@@ -2225,34 +2123,7 @@ app.get("/s/:token", async (req, res, next) => {
       description: meta.description,
       baseUrl: meta.baseUrl,
       shareUrl,
-      imageUrl: `${shareUrl}/card.svg`,
-      imageAlt: `Share card for "${meta.title}"`,
       modifiedAt: meta.updatedAt
-    }));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// The og:image for a shared document. Public for the same reason the share is:
-// the token is the credential, and an unfurler fetches this without a session.
-app.get("/s/:token/card.svg", async (req, res, next) => {
-  try {
-    const share = shareStore.findByToken(String(req.params.token || ""));
-    if (!share || !(await fileExists(path.join(MARKDOWN_DIR, share.file)))) {
-      res.status(404).json({ error: "Not found" });
-      return;
-    }
-
-    const meta = await buildShareMeta(req, share);
-
-    res.set("X-Robots-Tag", "noindex, nofollow");
-    // Short cache: the title tracks the document's own heading, so it changes
-    // when the document does.
-    res.set("Cache-Control", "public, max-age=300");
-    res.type("image/svg+xml").send(renderShareCardSvg({
-      title: meta.title,
-      subtitle: share.file
     }));
   } catch (error) {
     next(error);

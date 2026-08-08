@@ -76,6 +76,21 @@ const PAIRS = [
   ["success text on a surface", "--success", "--surface", 4.5],
   ["attention text on a surface", "--attention", "--surface", 4.5],
   ["done text on a surface", "--done", "--surface", 4.5],
+  // A code block is --surface and inline code is --raised. These five were
+  // literals in the .hljs rules with no light value at all, which left most of
+  // the text in every code block at 1.5–2.1:1 on white.
+  ["a keyword in a code block", "--code-keyword", "--surface", 4.5],
+  ["a keyword in inline code", "--code-keyword", "--raised", 4.5],
+  ["a function name in a code block", "--code-entity", "--surface", 4.5],
+  ["a function name in inline code", "--code-entity", "--raised", 4.5],
+  ["a string in a code block", "--code-string", "--surface", 4.5],
+  ["a string in inline code", "--code-string", "--raised", 4.5],
+  ["a number in a code block", "--code-constant", "--surface", 4.5],
+  ["a number in inline code", "--code-constant", "--raised", 4.5],
+  ["a decorator in a code block", "--code-meta", "--surface", 4.5],
+  ["a decorator in inline code", "--code-meta", "--raised", 4.5],
+  ["a comment in a code block", "--fg-muted", "--surface", 4.5],
+
   ["border against the canvas", "--border", "--canvas", 1.2],
   ["hairline separator against a surface", "--border-strong", "--surface", 1.4],
   ["scrollbar thumb against the canvas", "--scrollbar-thumb", "--canvas", 3.0],
@@ -94,10 +109,18 @@ for (const [name, T] of [["dark", dark], ["light", light]]) {
 }
 
 console.log("=== the light theme is a complete swap, not a partial one ===");
-const darkOnly = Object.keys(tokens(":root")).filter((k) => /color|fg|bg|accent|border|canvas|surface|raised|selected|success|danger|attention|done|shadow/.test(k));
+const darkOnly = Object.keys(tokens(":root")).filter((k) => /color|fg|bg|accent|border|canvas|surface|raised|selected|success|danger|attention|done|shadow|code-/.test(k));
 const lightKeys = Object.keys(tokens(':root[data-theme="light"]'));
 const missing = darkOnly.filter((k) => !lightKeys.includes(k));
 check("every colour token is redefined", missing, []);
+
+// The syntax colours were literals in the .hljs rules, which is exactly how
+// they escaped the swap. Nothing may set a colour from a literal again.
+// Everything after the token blocks is component CSS. Print is exempt: it
+// deliberately forces black on white for paper, whatever the screen theme is.
+const components = css.slice(css.indexOf("color-scheme: light")).replace(/@media print[\s\S]*$/, "");
+const literals = [...components.matchAll(/(?:^|;|\{)\s*color:\s*(#[0-9a-f]{3,8})/gi)].map((m) => m[1]);
+check("no rule sets a text colour from a hard-coded hex", literals, []);
 check("color-scheme is declared for both", /color-scheme: dark/.test(css) && /color-scheme: light/.test(css), true);
 
 console.log("=== auto is resolved before paint, not duplicated in CSS ===");

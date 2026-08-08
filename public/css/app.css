@@ -49,6 +49,16 @@
   --done: #bcaae8;
   --done-subtle: rgba(188, 170, 232, 0.12);
 
+  /* Syntax highlighting. Tokens rather than literals in the .hljs rules,
+     because these were the one part of the palette that never got a light
+     theme: five pastels tuned for a near-black background, left at 1.5–2.1:1
+     on white, which is most of the text in a code block. */
+  --code-keyword: #e8a0a1;
+  --code-entity: #c9b8f2;
+  --code-string: #a9ded7;
+  --code-constant: #a3c8de;
+  --code-meta: #e5bd94;
+
   /* Geometry */
   --radius-lg: 12px;
   --radius-md: 6px;
@@ -125,6 +135,15 @@
 
   --done: #4c3a8c;
   --done-subtle: rgba(76, 58, 140, 0.12);
+
+  /* Same five hues, within a few degrees, taken down until each clears 4.5:1
+     on both code backgrounds — the block (--surface, white) and inline
+     (--raised). They land at 6.6–8.7:1. */
+  --code-keyword: #9b2f2b;
+  --code-entity: #5533a8;
+  --code-string: #0f5f56;
+  --code-constant: #1c5674;
+  --code-meta: #7a4c11;
 
   --shadow-overlay: 0 8px 24px rgba(16, 27, 26, 0.14);
   --shadow-dialog: 0 16px 32px rgba(16, 27, 26, 0.20);
@@ -1553,7 +1572,7 @@ button.crumb:focus-visible {
   fill: var(--accent);
 }
 
-/* --- Syntax highlighting (GitHub Dark) ---------------------------------- */
+/* --- Syntax highlighting ---------------------------------- */
 
 .markdown-body pre code.hljs {
   display: block;
@@ -1580,7 +1599,7 @@ button.crumb:focus-visible {
 .hljs-doctag,
 .hljs-name,
 .hljs-strong {
-  color: #e8a0a1;
+  color: var(--code-keyword);
 }
 
 .hljs-title,
@@ -1588,7 +1607,7 @@ button.crumb:focus-visible {
 .hljs-title.function_,
 .hljs-built_in,
 .hljs-type {
-  color: #c9b8f2;
+  color: var(--code-entity);
 }
 
 .hljs-string,
@@ -1596,7 +1615,7 @@ button.crumb:focus-visible {
 .hljs-bullet,
 .hljs-addition,
 .hljs-regexp {
-  color: #a9ded7;
+  color: var(--code-string);
 }
 
 .hljs-number,
@@ -1604,13 +1623,13 @@ button.crumb:focus-visible {
 .hljs-attribute,
 .hljs-variable,
 .hljs-template-variable {
-  color: #a3c8de;
+  color: var(--code-constant);
 }
 
 .hljs-meta,
 .hljs-subst,
 .hljs-template-tag {
-  color: #e5bd94;
+  color: var(--code-meta);
 }
 
 .hljs-deletion {

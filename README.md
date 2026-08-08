@@ -73,7 +73,7 @@ Everything is environment variables; there is no config file.
 ### Notes on the public deployment
 
 The canonical origin is baked in rather than read from the request. A `Host`
-header is attacker-controlled, and building `og:image` or the oEmbed URL from it
+header is attacker-controlled, and building the canonical or oEmbed URL from it
 lets someone else decide where a link preview points. `PUBLIC_BASE_URL`
 overrides the default; nothing else does.
 
@@ -98,7 +98,6 @@ proxy hop rather than the client's scheme.
 │   │   ├── share.js          # The share page
 │   │   └── theme-boot.js     # Applies the stored theme before first paint
 │   ├── favicon.svg
-│   ├── social-card.svg       # og:image
 │   └── docs/                 # Your documents (gitignored)
 ├── lib/
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
@@ -116,7 +115,7 @@ proxy hop rather than the client's scheme.
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The five suites
+│   └── *.test.js             # The six suites
 ├── server.js                 # Express app, ~2,400 lines
 ├── eslint.config.js
 ├── package.json
@@ -308,17 +307,17 @@ the old one. Renaming a document carries its share across; deleting one revokes
 it.
 
 The link preview describes **the document**, not the app: `og:title` is the
-document's own H1 (falling back to its filename), `og:description` is the
-opening prose with the markdown stripped out, and `og:image` is a card
-generated per document at `/s/<token>/card.svg` carrying its title. Front
-matter, code fences and tables are excluded from the summary, since a preview
-reading `## Overview` is worse than none. Notebooks are summarised from their
-first markdown cell and diagram sources are labelled by type.
+document's own H1 (falling back to its filename) and `og:description` is the
+opening prose with the markdown stripped out. Front matter, code fences and
+tables are excluded from the summary, since a preview reading `## Overview` is
+worse than none. Notebooks are summarised from their first markdown cell and
+diagram sources are labelled by type.
 
-The card is an SVG, because this app has no image toolchain and adding one for
-a preview would be a poor trade. Some unfurlers (Slack, Discord, X) will not
-render an SVG `og:image` and show no picture — the title, description and site
-name still come through.
+There is no `og:image`. There was one — an SVG card generated per document —
+but this app has no image rasteriser, and Slack, Discord and X all decline to
+render an SVG `og:image`, which is most of the places a link actually gets
+pasted. It cost a route and a renderer to show nothing, so the preview is text
+only and `twitter:card` is `summary` rather than `summary_large_image`.
 
 Revoking a link takes the preview with it: a dead token renders a generic
 "not found" page that names neither the document nor its contents.
@@ -385,7 +384,6 @@ with the right role, plus the `X-CSRF-Token` header.
 | `DELETE` | `/api/docs/:file/share` | Revoke a share link (editor) |
 | `GET` | `/api/share/:token` | **Public.** The shared document |
 | `GET` | `/s/:token` | **Public.** The standalone share page |
-| `GET` | `/s/:token/card.svg` | **Public.** The `og:image` for that document |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |
 
 ### Errors
@@ -427,7 +425,7 @@ Six suites, ~390 checks, about 30 seconds. No browser required.
 | --- | --- |
 | `layout` | Shell geometry, which element owns each scroll, the z-index scale |
 | `mobile` | Drawer behaviour, touch target sizes, the dark palette |
-| `theme` | Light and dark tokens, contrast ratios, target sizes, the print stylesheet |
+| `theme` | Light and dark tokens, contrast ratios (including syntax highlighting), target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
