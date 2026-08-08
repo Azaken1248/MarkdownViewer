@@ -41,8 +41,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=44"></script>
-  <link rel="stylesheet" href="css/app.css?v=44" />
+  <script src="js/theme-boot.js?v=45"></script>
+  <link rel="stylesheet" href="css/app.css?v=45" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -64,11 +64,11 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=44" defer></script>
+  <script src="js/markdown-core.js?v=45" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=44" defer></script>
-  <script src="js/app.js?v=44" defer></script>
+  <script src="js/notebook-runtime.js?v=45" defer></script>
+  <script src="js/app.js?v=45" defer></script>
 </head>
 
 <body>
@@ -207,6 +207,11 @@
               <i class="ph ph-archive-box" aria-hidden="true"></i>
             </button>
 
+            <button class="icon-btn icon-btn-sm" id="toggleLinksBtn" aria-label="Show saved links"
+              aria-pressed="false" title="Saved links">
+              <i class="ph ph-link-simple" aria-hidden="true"></i>
+            </button>
+
             <button class="icon-btn icon-btn-sm" id="refreshDocs" aria-label="Refresh file list" title="Refresh">
               <i class="ph ph-arrow-clockwise" aria-hidden="true"></i>
             </button>
@@ -295,6 +300,34 @@
              the entire document on every load. The breadcrumb trail and the
              toast region carry the "which file is open" news instead. -->
         <article id="docContent" class="markdown-body"></article>
+
+        <!-- Saved links. Its own pane rather than a kind of document: a link is
+             not a file, has no content to render, and belongs to no folder. -->
+        <section id="linksPane" class="links-pane" hidden>
+          <div class="links-toolbar">
+            <button class="btn btn-primary" id="addLinkBtn" type="button">
+              <i class="ph ph-plus" aria-hidden="true"></i>
+              <span>Add link</span>
+            </button>
+
+            <div class="links-filter">
+              <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+              <input id="linkSearchInput" type="search" placeholder="Filter links" autocomplete="off"
+                aria-label="Filter saved links" />
+            </div>
+
+            <span class="links-count" id="linksCount" aria-live="polite"></span>
+          </div>
+
+          <div class="links-grid" id="linksGrid"></div>
+
+          <div class="links-empty" id="linksEmpty" hidden>
+            <i class="ph ph-link-simple" aria-hidden="true"></i>
+            <h3>No links yet</h3>
+            <p>Paste the address of a docs site and it will be saved with the title and
+              description the page gives for itself.</p>
+          </div>
+        </section>
 
         <!-- Appears only once a Python kernel has been started, which only
              happens when someone presses Run on a cell. -->
@@ -566,6 +599,49 @@
           </div>
         </form>
       </details>
+    </section>
+  </div>
+
+  <div class="modal" id="linkModal" aria-hidden="true">
+    <button class="modal-backdrop" id="linkBackdrop" aria-label="Close"></button>
+
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="linkModalTitle"
+      aria-describedby="linkModalDescription">
+      <div class="dialog-head">
+        <div>
+          <h2 id="linkModalTitle">Add a link</h2>
+          <p id="linkModalDescription">The page is read once, now, for its title and description. Nothing
+            is fetched again unless you ask for it.</p>
+        </div>
+
+        <button class="icon-btn" id="closeLinkModalBtn" aria-label="Close" title="Close" type="button">
+          <i class="ph ph-x" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <form id="linkForm" novalidate>
+        <label class="field" for="linkUrlInput">
+          <span>Address</span>
+          <input id="linkUrlInput" type="url" inputmode="url" placeholder="https://pyodide.org/en/stable/"
+            autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label class="field" for="linkNoteInput">
+          <span>Note <em>(optional)</em></span>
+          <input id="linkNoteInput" type="text" placeholder="Why this is worth keeping" autocomplete="off"
+            maxlength="500" />
+        </label>
+
+        <p class="dialog-error" id="linkError" role="alert" hidden></p>
+
+        <div class="dialog-actions">
+          <button class="btn" id="cancelLinkBtn" type="button">Cancel</button>
+          <button class="btn btn-primary" id="saveLinkBtn" type="submit">
+            <i class="ph ph-plus" aria-hidden="true"></i>
+            <span>Add link</span>
+          </button>
+        </div>
+      </form>
     </section>
   </div>
 

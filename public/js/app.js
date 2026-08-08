@@ -51,6 +51,23 @@ const elements = {
   sidebar: document.getElementById("sidebar"),
   emptyState: document.getElementById("emptyState"),
   docContent: document.getElementById("docContent"),
+  toggleLinksBtn: document.getElementById("toggleLinksBtn"),
+  viewerToolbar: document.getElementById("viewerToolbar"),
+  linksPane: document.getElementById("linksPane"),
+  linksGrid: document.getElementById("linksGrid"),
+  linksEmpty: document.getElementById("linksEmpty"),
+  linksCount: document.getElementById("linksCount"),
+  linkSearchInput: document.getElementById("linkSearchInput"),
+  addLinkBtn: document.getElementById("addLinkBtn"),
+  linkModal: document.getElementById("linkModal"),
+  linkBackdrop: document.getElementById("linkBackdrop"),
+  closeLinkModalBtn: document.getElementById("closeLinkModalBtn"),
+  cancelLinkBtn: document.getElementById("cancelLinkBtn"),
+  linkForm: document.getElementById("linkForm"),
+  linkUrlInput: document.getElementById("linkUrlInput"),
+  linkNoteInput: document.getElementById("linkNoteInput"),
+  linkError: document.getElementById("linkError"),
+  saveLinkBtn: document.getElementById("saveLinkBtn"),
   editorModal: document.getElementById("editorModal"),
   editorBackdrop: document.getElementById("editorBackdrop"),
   closeEditorBtn: document.getElementById("closeEditorBtn"),
@@ -139,18 +156,26 @@ const state = {
   foldersById: new Map(),
   rootFolderLabel: "Ungrouped",
 
-  // "docs" | "recycle" | "archive". Most code only cares whether we are
-  // browsing deleted documents (read-only), which both non-docs modes are, so
-  // isRecycleBinMode stays available as a derived accessor.
+  // "docs" | "recycle" | "archive" | "links". Most code only cares whether we
+  // are browsing deleted documents (read-only), so isRecycleBinMode stays
+  // available as a derived accessor.
   viewMode: "docs",
 
+  // Named modes, not "anything that is not docs". It used to be the latter,
+  // which was true while recycle and archive were the only other views — and
+  // would have quietly told every caller that the links pane was a bin of
+  // deleted documents.
   get isRecycleBinMode() {
-    return this.viewMode !== "docs";
+    return this.viewMode === "recycle" || this.viewMode === "archive";
   },
 
   set isRecycleBinMode(value) {
     this.viewMode = value ? "recycle" : "docs";
   },
+
+  links: [],
+  linkFilter: "",
+  linkModalOpen: false,
 
   filteredDocs: [],
   contentCache: new Map(),
@@ -1315,7 +1340,7 @@ function setNavOpen(isOpen) {
 
 function syncBodyLock() {
   const shouldLock = elements.appShell.classList.contains("nav-open") || state.editorOpen || state.confirmOpen || state.folderModalOpen
-    || state.loginOpen || state.passwordOpen || state.usersOpen || state.shareOpen;
+    || state.loginOpen || state.passwordOpen || state.usersOpen || state.shareOpen || state.linkModalOpen;
   document.body.classList.toggle("lock-scroll", shouldLock);
 }
 
@@ -1845,6 +1870,23 @@ function applyPermissionGating() {
 
   if (elements.manageUsersItem) {
     elements.manageUsersItem.hidden = !can("user:manage");
+  }
+
+  // A viewer can read the saved links but not add, refresh or remove one.
+  // Adding makes the server fetch a URL, which is a write in every sense that
+  // matters here.
+  if (elements.addLinkBtn) {
+    elements.addLinkBtn.hidden = !writable;
+  }
+
+  if (!writable && state.linkModalOpen) {
+    closeLinkModal();
+  }
+
+  // The per-card buttons are built at render time, so the cards have to be
+  // rebuilt for a role change to reach them.
+  if (state.viewMode === "links") {
+    renderLinks();
   }
 
   // A menu left open over a control that has just been hidden.
@@ -2986,9 +3028,38 @@ async function loadDeletedDocContent(entryFile, { forceReload = false } = {}) {
 function syncModeUI() {
   const inRecycleBin = state.viewMode === "recycle";
   const inArchive = state.viewMode === "archive";
+  const inLinks = state.viewMode === "links";
   const inTrashView = inRecycleBin || inArchive;
 
-  elements.sidebarTitle.textContent = inArchive ? "Archive" : inRecycleBin ? "Recycle bin" : "Files";
+  elements.sidebarTitle.textContent = inLinks
+    ? "Links"
+    : inArchive ? "Archive" : inRecycleBin ? "Recycle bin" : "Files";
+
+  if (elements.toggleLinksBtn) {
+    elements.toggleLinksBtn.classList.toggle("active", inLinks);
+    elements.toggleLinksBtn.setAttribute("aria-pressed", String(inLinks));
+    elements.toggleLinksBtn.setAttribute("aria-label", inLinks ? "Exit saved links" : "Show saved links");
+    elements.toggleLinksBtn.title = inLinks ? "Exit saved links" : "Saved links";
+  }
+
+  // The links pane replaces the document viewer rather than sitting beside it:
+  // there is no open document in this mode, so the toolbar, the empty state and
+  // the article all step aside.
+  if (elements.linksPane) {
+    elements.linksPane.hidden = !inLinks;
+  }
+
+  if (elements.viewerToolbar) {
+    elements.viewerToolbar.hidden = inLinks;
+  }
+
+  if (inLinks) {
+    elements.emptyState.style.display = "none";
+    elements.docContent.classList.remove("visible");
+    if (elements.kernelBar) {
+      elements.kernelBar.hidden = true;
+    }
+  }
 
   elements.toggleRecycleBinBtn.classList.toggle("active", inRecycleBin);
   elements.toggleRecycleBinBtn.setAttribute("aria-pressed", String(inRecycleBin));
@@ -3317,6 +3388,288 @@ async function moveFolderToParent(folderId, parentId) {
     });
     await refreshDocs({ preserveSearch: true });
     notify(`Moved "${getFolderLabel(folderId)}" into ${parentId ? getFolderLabel(parentId) : "the top level"}.`, "success");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+// --- Saved links -----------------------------------------------------------
+//
+// A link is a URL plus what the page said about itself when it was added. The
+// server reads the page once, on add; the card renders from that snapshot, so
+// opening this section makes no request to any of the sites in it.
+
+function linkHost(link) {
+  try {
+    return new URL(link.url).hostname.replace(/^www\./, "");
+  } catch {
+    return link.url;
+  }
+}
+
+function matchingLinks() {
+  const needle = state.linkFilter.trim().toLowerCase();
+  if (!needle) {
+    return state.links;
+  }
+
+  return state.links.filter((link) => [link.title, link.description, link.note, link.url, link.siteName]
+    .some((field) => String(field || "").toLowerCase().includes(needle)));
+}
+
+function renderLinkCard(link) {
+  const card = document.createElement("article");
+  card.className = "link-card";
+  card.dataset.id = link.id;
+
+  const title = document.createElement("h3");
+  title.className = "link-card-title";
+
+  const anchor = document.createElement("a");
+  anchor.href = link.url;
+  anchor.target = "_blank";
+  // noopener stops the opened page reaching back through window.opener;
+  // noreferrer also keeps this app's URL out of the other site's logs. Both
+  // matter more here than usual, because these are addresses someone typed.
+  anchor.rel = "noopener noreferrer";
+  anchor.setAttribute("referrerpolicy", "no-referrer");
+  anchor.textContent = link.title || linkHost(link);
+  title.appendChild(anchor);
+  card.appendChild(title);
+
+  if (link.description) {
+    const description = document.createElement("p");
+    description.className = "link-card-desc";
+    description.textContent = link.description;
+    card.appendChild(description);
+  }
+
+  if (link.note) {
+    const note = document.createElement("p");
+    note.className = "link-card-note";
+    note.textContent = link.note;
+    card.appendChild(note);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "link-card-foot";
+
+  const host = document.createElement("span");
+  host.className = "link-card-host";
+  host.textContent = linkHost(link);
+  host.title = link.url;
+  foot.appendChild(host);
+
+  // A page that could not be read is still a link worth keeping, so it is saved
+  // either way — but the card should not pretend the description is missing
+  // because the site has none.
+  if (!link.fetched) {
+    const warn = document.createElement("span");
+    warn.className = "link-card-warn";
+    warn.title = link.fetchError || "The page could not be read.";
+    warn.innerHTML = '<i class="ph ph-warning-circle" aria-hidden="true"></i>';
+    foot.appendChild(warn);
+  }
+
+  if (can("doc:write")) {
+    const actions = document.createElement("div");
+    actions.className = "link-card-actions";
+
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "icon-btn icon-btn-sm";
+    refresh.title = "Re-read this page";
+    refresh.setAttribute("aria-label", `Re-read ${link.title || link.url}`);
+    refresh.innerHTML = '<i class="ph ph-arrow-clockwise" aria-hidden="true"></i>';
+    refresh.addEventListener("click", () => void refreshLink(link.id));
+    actions.appendChild(refresh);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-btn icon-btn-sm danger";
+    remove.title = "Remove this link";
+    remove.setAttribute("aria-label", `Remove ${link.title || link.url}`);
+    remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i>';
+    remove.addEventListener("click", () => void removeLink(link.id));
+    actions.appendChild(remove);
+
+    foot.appendChild(actions);
+  }
+
+  card.appendChild(foot);
+  return card;
+}
+
+function renderLinks() {
+  if (!elements.linksGrid) {
+    return;
+  }
+
+  const visible = matchingLinks();
+
+  elements.linksGrid.innerHTML = "";
+  for (const link of visible) {
+    elements.linksGrid.appendChild(renderLinkCard(link));
+  }
+
+  elements.linksEmpty.hidden = visible.length > 0;
+  if (visible.length === 0 && state.linkFilter.trim()) {
+    elements.linksEmpty.querySelector("h3").textContent = "Nothing matches";
+    elements.linksEmpty.querySelector("p").textContent =
+      `No saved link mentions "${state.linkFilter.trim()}".`;
+  } else if (visible.length === 0) {
+    elements.linksEmpty.querySelector("h3").textContent = "No links yet";
+    elements.linksEmpty.querySelector("p").textContent =
+      "Paste the address of a docs site and it will be saved with the title and description the page gives for itself.";
+  }
+
+  elements.linksCount.textContent = state.links.length === visible.length
+    ? `${state.links.length} link${state.links.length === 1 ? "" : "s"}`
+    : `${visible.length} of ${state.links.length}`;
+
+  renderLinkSidebar(visible);
+}
+
+// The sidebar keeps working in this mode: the same list, as rows, so the tree
+// pane is not simply blank while the cards are on screen.
+function renderLinkSidebar(visible) {
+  if (state.viewMode !== "links" || !elements.docList) {
+    return;
+  }
+
+  elements.docList.innerHTML = "";
+
+  for (const link of visible) {
+    const row = document.createElement("div");
+    row.className = "tree-row tree-row-link";
+
+    const anchor = document.createElement("a");
+    anchor.className = "tree-row-btn";
+    anchor.href = link.url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.setAttribute("referrerpolicy", "no-referrer");
+    anchor.title = link.url;
+    anchor.innerHTML = '<i class="ph ph-link-simple" aria-hidden="true"></i><span></span>';
+    anchor.querySelector("span").textContent = link.title || linkHost(link);
+
+    row.appendChild(anchor);
+    elements.docList.appendChild(row);
+  }
+}
+
+async function refreshLinks() {
+  const payload = await requestJson("/api/links");
+  state.links = Array.isArray(payload.links) ? payload.links : [];
+  renderLinks();
+}
+
+function openLinkModal() {
+  if (!can("doc:write")) {
+    return;
+  }
+
+  state.linkModalOpen = true;
+  elements.linkUrlInput.value = "";
+  elements.linkNoteInput.value = "";
+  elements.linkError.hidden = true;
+  elements.linkError.textContent = "";
+  elements.linkModal.classList.add("open");
+  elements.linkModal.setAttribute("aria-hidden", "false");
+  enterModalLayer(elements.linkModal);
+  syncBodyLock();
+  elements.linkUrlInput.focus();
+}
+
+function closeLinkModal() {
+  state.linkModalOpen = false;
+  elements.linkModal.classList.remove("open");
+  elements.linkModal.setAttribute("aria-hidden", "true");
+  exitModalLayer(elements.linkModal);
+  syncBodyLock();
+}
+
+function showLinkError(message) {
+  elements.linkError.textContent = message;
+  elements.linkError.hidden = false;
+}
+
+async function submitLink() {
+  const url = elements.linkUrlInput.value.trim();
+  if (!url) {
+    showLinkError("Enter a URL.");
+    elements.linkUrlInput.focus();
+    return;
+  }
+
+  elements.linkError.hidden = true;
+  elements.saveLinkBtn.disabled = true;
+  const label = elements.saveLinkBtn.querySelector("span");
+  const original = label.textContent;
+  label.textContent = "Reading the page…";
+
+  try {
+    const payload = await requestJson("/api/links", {
+      method: "POST",
+      body: JSON.stringify({ url, note: elements.linkNoteInput.value.trim() })
+    });
+
+    state.links.unshift(payload.link);
+    renderLinks();
+    closeLinkModal();
+    notify(payload.link.fetched
+      ? `Saved "${payload.link.title}".`
+      : `Saved, but that page could not be read: ${payload.link.fetchError}`,
+    payload.link.fetched ? "success" : "warning");
+  } catch (error) {
+    // The dialog stays open with the message in it: the URL is still in the
+    // field, which is what you want if it needs a correction.
+    showLinkError(error.message);
+  } finally {
+    // eslint-disable-next-line require-atomic-updates
+    elements.saveLinkBtn.disabled = false;
+    label.textContent = original;
+  }
+}
+
+async function refreshLink(id) {
+  try {
+    const payload = await requestJson(`/api/links/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ refresh: true })
+    });
+
+    state.links = state.links.map((link) => (link.id === id ? payload.link : link));
+    renderLinks();
+    notify(payload.link.fetched ? "Link updated." : `Could not read that page: ${payload.link.fetchError}`,
+      payload.link.fetched ? "success" : "warning");
+  } catch (error) {
+    notify(error.message, "error");
+  }
+}
+
+async function removeLink(id) {
+  const link = state.links.find((entry) => entry.id === id);
+  if (!link) {
+    return;
+  }
+
+  const shouldProceed = await requestConfirmation({
+    title: "Remove this link?",
+    message: `"${link.title || link.url}" will be removed from your saved links. The site itself is untouched.`,
+    confirmLabel: "Remove",
+    tone: "danger"
+  });
+
+  if (!shouldProceed) {
+    return;
+  }
+
+  try {
+    await requestJson(`/api/links/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.links = state.links.filter((entry) => entry.id !== id);
+    renderLinks();
+    notify("Link removed.", "success");
   } catch (error) {
     notify(error.message, "error");
   }
@@ -6071,6 +6424,12 @@ async function switchViewMode(targetMode) {
       return;
     }
 
+    if (nextMode === "links") {
+      await refreshLinks();
+      setStatus("Saved links opened.", "success");
+      return;
+    }
+
     await refreshDeletedDocs({ preserveSearch: false });
     setStatus(nextMode === "archive" ? "Archive opened." : "Recycle bin opened.", "success");
   } catch (error) {
@@ -6088,6 +6447,25 @@ elements.toggleRecycleBinBtn.addEventListener("click", () => {
 
 elements.toggleArchiveBtn.addEventListener("click", () => {
   void switchViewMode("archive");
+});
+
+elements.toggleLinksBtn.addEventListener("click", () => {
+  void switchViewMode("links");
+});
+
+elements.addLinkBtn.addEventListener("click", openLinkModal);
+elements.closeLinkModalBtn.addEventListener("click", closeLinkModal);
+elements.cancelLinkBtn.addEventListener("click", closeLinkModal);
+elements.linkBackdrop.addEventListener("click", closeLinkModal);
+
+elements.linkForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitLink();
+});
+
+elements.linkSearchInput.addEventListener("input", () => {
+  state.linkFilter = elements.linkSearchInput.value;
+  renderLinks();
 });
 
 elements.softDeleteDocBtn.addEventListener("click", () => {
@@ -6176,6 +6554,12 @@ window.addEventListener("keydown", (event) => {
   if (state.shareOpen) {
     event.preventDefault();
     closeShareModal();
+    return;
+  }
+
+  if (state.linkModalOpen) {
+    event.preventDefault();
+    closeLinkModal();
     return;
   }
 

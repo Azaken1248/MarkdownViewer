@@ -1156,6 +1156,233 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Saved links
+
+   A grid of cards rather than tree rows: a link has no folder, no content and
+   no ordering to respect, and the two lines of description it carries are the
+   reason to keep it — a 26px row cannot show them.
+   -------------------------------------------------------------------------- */
+
+.links-pane {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px 24px 40px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.links-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.links-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg-muted);
+}
+
+.links-filter input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.links-filter input:focus {
+  outline: none;
+}
+
+.links-filter:focus-within {
+  border-color: var(--accent-muted);
+}
+
+.links-count {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+/* auto-fill, not auto-fit: with auto-fit a single card stretches to the full
+   width of a wide window, which reads as a banner rather than as one of a set. */
+.links-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.link-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.link-card:hover {
+  border-color: var(--border-strong);
+  background: var(--raised);
+}
+
+.link-card:focus-within {
+  border-color: var(--accent-muted);
+}
+
+/* The whole card is the link. The anchor covers it through a pseudo-element so
+   the title stays the accessible name, rather than wrapping every card in an
+   <a> and nesting the buttons inside it. */
+.link-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg);
+}
+
+.link-card-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.link-card-title a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.link-card-title a:hover {
+  color: var(--accent);
+}
+
+.link-card-title a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.link-card-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  /* Three lines: enough for a real description, few enough that cards in a row
+     stay the same height. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.link-card-note {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-subtle);
+}
+
+.link-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  min-height: 24px;
+}
+
+.link-card-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-card-warn {
+  color: var(--attention);
+}
+
+/* Above the card-covering pseudo-element, or they cannot be clicked. */
+.link-card-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.link-card:hover .link-card-actions,
+.link-card:focus-within .link-card-actions {
+  opacity: 1;
+}
+
+/* Touch has no hover to reveal them, and a control that never appears is not a
+   control. */
+@media (hover: none) {
+  .link-card-actions {
+    opacity: 1;
+  }
+}
+
+.links-empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.links-empty i {
+  font-size: 32px;
+  color: var(--fg-subtle);
+}
+
+.links-empty h3 {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.links-empty p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 46ch;
+}
+
+.dialog-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-emphasis);
+  border-radius: var(--radius-md);
+  background: var(--danger-subtle);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+/* --------------------------------------------------------------------------
    Markdown body
    -------------------------------------------------------------------------- */
 

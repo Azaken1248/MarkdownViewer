@@ -5,9 +5,9 @@
 // worth testing (a guard that does not run, a cookie without httpOnly, a
 // session that survives a password change) only exist at that level.
 
-const http = require("http");
 const fsp = require("fs/promises");
 const path = require("path");
+const { makeClient } = require("./helpers/client");
 const { startTestServer } = require("./helpers/server");
 const passwords = require("../lib/passwords");
 const excerpt = require("../lib/excerpt");
@@ -24,145 +24,6 @@ function check(label, actual, expected) {
 
 // A tiny cookie-aware HTTP client, so the tests exercise the same flow a
 // browser would: the session arrives as Set-Cookie and is echoed back.
-function makeClient(origin) {
-  const jar = new Map();
-  let csrfToken = "";
-
-  async function request(method, pathname, body, extraHeaders = {}) {
-    const url = new URL(pathname, origin);
-    const payload = body === undefined ? null : JSON.stringify(body);
-    const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-
-    const headers = {
-      ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      ...(csrfToken && !["GET", "HEAD"].includes(method) ? { "X-CSRF-Token": csrfToken } : {}),
-      ...extraHeaders
-    };
-
-    return new Promise((resolve, reject) => {
-      const req = http.request({
-        host: url.hostname,
-        port: url.port,
-        path: url.pathname + url.search,
-        method,
-        headers
-      }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          const setCookies = res.headers["set-cookie"] || [];
-          for (const raw of setCookies) {
-            const [pair] = raw.split(";");
-            const index = pair.indexOf("=");
-            const name = pair.slice(0, index).trim();
-            const value = pair.slice(index + 1).trim();
-            if (!value) {
-              jar.delete(name);
-            } else {
-              jar.set(name, value);
-            }
-          }
-
-          let parsed = null;
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            parsed = null;
-          }
-
-          if (parsed?.csrfToken !== undefined) {
-            csrfToken = parsed.csrfToken || "";
-          }
-
-          resolve({ status: res.statusCode, body: parsed, raw: data, headers: res.headers, setCookies });
-        });
-      });
-
-      req.on("error", reject);
-      if (payload) {
-        req.write(payload);
-      }
-      req.end();
-    });
-  }
-
-  // Folder upload is the only multipart endpoint, so the client needs to be
-  // able to build one.
-  async function postMultipart(pathname, files, fields = {}) {
-    const boundary = `----azadocs${Math.random().toString(16).slice(2)}`;
-    const chunks = [];
-
-    for (const [name, value] of Object.entries(fields)) {
-      chunks.push(Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
-      ));
-    }
-
-    for (const file of files) {
-      chunks.push(Buffer.from(
-        `--${boundary}\r\n`
-        + `Content-Disposition: form-data; name="files"; filename="${file.name}"\r\n`
-        + "Content-Type: text/markdown\r\n\r\n"
-      ));
-      chunks.push(Buffer.from(file.content));
-      chunks.push(Buffer.from("\r\n"));
-    }
-
-    chunks.push(Buffer.from(`--${boundary}--\r\n`));
-    const body = Buffer.concat(chunks);
-
-    const url = new URL(pathname, origin);
-    const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-
-    return new Promise((resolve, reject) => {
-      const req = http.request({
-        host: url.hostname,
-        port: url.port,
-        path: url.pathname,
-        method: "POST",
-        headers: {
-          "Content-Type": `multipart/form-data; boundary=${boundary}`,
-          "Content-Length": body.length,
-          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {})
-        }
-      }, (res) => {
-        let data = "";
-        res.on("data", (c) => (data += c));
-        res.on("end", () => {
-          let parsed = null;
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            parsed = null;
-          }
-          resolve({ status: res.statusCode, body: parsed, raw: data });
-        });
-      });
-
-      req.on("error", reject);
-      req.write(body);
-      req.end();
-    });
-  }
-
-  return {
-    postMultipart,
-    get: (p, h) => request("GET", p, undefined, h),
-    post: (p, b, h) => request("POST", p, b === undefined ? {} : b, h),
-    patch: (p, b) => request("PATCH", p, b),
-    del: (p, b) => request("DELETE", p, b),
-    jar,
-    get csrf() {
-      return csrfToken;
-    },
-    set csrf(value) {
-      csrfToken = value;
-    }
-  };
-}
-
 (async () => {
   // The shared helper seeds documents using the write token; auth tests need a
   // server that starts empty of accounts so seeding is observable.

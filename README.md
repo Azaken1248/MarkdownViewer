@@ -8,6 +8,8 @@ Live at **<https://md.azaken.com>**.
 
 - Vanilla JavaScript on the client. No framework, no bundler, no build step.
 - Notebook code cells run Python in the browser via Pyodide, on request.
+- A Links section for the docs sites you keep coming back to, saved as cards
+  carrying each page's own title and description.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -49,7 +51,7 @@ already known to everyone.
 | --- | --- |
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `dom` |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 
@@ -102,20 +104,23 @@ proxy hop rather than the client's scheme.
 ├── lib/
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
 │   ├── excerpt.js            # Title and summary for link previews
+│   ├── link-preview.js       # Fetches a URL safely and reads its og: tags
+│   ├── links.js              # Saved links
 │   ├── passwords.js          # scrypt hashing and the password policy
 │   └── shares.js             # Per-document share links
 ├── data/                     # All gitignored
 │   ├── document-organizer.json   # Folder tree + file→folder mappings
 │   ├── users.json            # Accounts and password hashes
 │   ├── sessions.json         # Live sessions, ids stored hashed
-│   └── shares.json           # Share links, tokens stored hashed
+│   ├── shares.json           # Share links, tokens stored hashed
+│   └── links.json            # Saved links
 ├── deleted_markdowns/
 │   ├── soft/                 # Recycle bin (gitignored)
 │   └── hard/                 # Archive (gitignored)
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The six suites
+│   └── *.test.js             # The seven suites
 ├── server.js                 # Express app, ~2,400 lines
 ├── eslint.config.js
 ├── package.json
@@ -291,6 +296,67 @@ has no integrity attribute; the WASM payload it fetches is not integrity-checked
 either, which is inherent to how Pyodide ships rather than something given up
 here.
 
+## Saved links
+
+The **Links** button in the explorer header opens a section for the pages you
+keep going back to — a framework's docs, an RFC, a GitHub repo. Paste an
+address and it is saved as a card carrying the page's own title and
+description, with an optional note of your own. Clicking the card opens the
+site.
+
+The page is read **once**, when you add it. The card renders from that
+snapshot, so opening this section makes no request to any of the sites in it —
+which matters both for speed and because a section that quietly pinged twenty
+sites every time you looked at it is a section that tells twenty sites when you
+are online. **Re-read** on a card asks for a fresh copy.
+
+`og:title` and `og:description` are preferred, then `twitter:`, then the
+ordinary `<title>` and `<meta name="description">`, then the hostname — so a
+page with no metadata still produces a usable card. A page that cannot be read
+at all is still saved, with the hostname as its title and a marker saying so:
+the link is the point, and the metadata is a convenience.
+
+Links are the same for everyone: any signed-in account sees the list, and
+`doc:write` (editor or admin) is needed to add, edit, re-read or remove one.
+
+### What the server will not fetch
+
+Adding a link is the only place this app makes an outbound request to an
+address someone else chose, which makes it the only place server-side request
+forgery is possible. The server sits inside a network you do not otherwise
+reach from a browser: other services on `localhost`, other machines on the LAN,
+and — on a cloud host — the instance metadata endpoint at `169.254.169.254`,
+which hands out credentials to anything that asks.
+
+So `lib/link-preview.js` checks the **address**, not the hostname:
+
+- **Only `http` and `https`**, and only on ports 80 and 443. `file:`, `gopher:`
+  and friends are refused, and restricting the port stops the endpoint being
+  useful as a scanner.
+- **Private, loopback, link-local, carrier-NAT and multicast ranges are
+  refused**, for IPv4 and IPv6, including the forms that disguise one as the
+  other: `::ffff:127.0.0.1`, `2002::/16` (6to4) and `64:ff9b::/96` (NAT64).
+- **The check happens inside the socket lookup**, not before it. Checking a
+  hostname and then handing the same hostname to an HTTP client leaves a gap: a
+  DNS server that answers publicly once and privately the second time passes
+  the check and connects somewhere else. Validating in `lookup` means the
+  address that was approved is the address the socket gets.
+- **Redirects are followed by hand**, up to four hops, each re-validated. A
+  public URL that 302s to `http://127.0.0.1:6379/` is the same attack with an
+  extra step, and every HTTP client follows redirects by default.
+- **Credentials in the URL are refused**, and the request carries no cookies,
+  no authentication and no referrer.
+- **The response is capped** at 1MB and 8 seconds, and anything that is not
+  HTML is dropped unread.
+
+On top of that, adding is limited to 20 fetches a minute per account, so an
+account cannot use the endpoint as a general-purpose proxy.
+
+The `links` test suite covers every one of those refusals, without touching the
+network.
+
+---
+
 ## Sharing a single document
 
 With the library private, a share link is the deliberate exception. From the
@@ -379,6 +445,10 @@ with the right role, plus the `X-CSRF-Token` header.
 | `PATCH` | `/api/users/:id` | Change role or disabled state (admin) |
 | `POST` | `/api/users/:id/password` | Reset someone's password (admin) |
 | `DELETE` | `/api/users/:id` | Delete an account (admin) |
+| `GET` | `/api/links` | List saved links |
+| `POST` | `/api/links` | Save a link, reading the page for its metadata (editor) |
+| `PATCH` | `/api/links/:id` | Edit a card, or `{"refresh":true}` to re-read the page (editor) |
+| `DELETE` | `/api/links/:id` | Remove a saved link (editor) |
 | `GET` | `/api/shares` | List published documents (editor) |
 | `POST` | `/api/docs/:file/share` | Publish or rotate a share link (editor) |
 | `DELETE` | `/api/docs/:file/share` | Revoke a share link (editor) |
@@ -419,7 +489,8 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Six suites, ~390 checks, about 30 seconds. No browser required.
+Seven suites, ~500 checks, under a minute. No browser required, and no
+network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
 | --- | --- |
@@ -428,6 +499,7 @@ Six suites, ~390 checks, about 30 seconds. No browser required.
 | `theme` | Light and dark tokens, contrast ratios (including syntax highlighting), target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
+| `links` | What the link fetcher refuses to reach, metadata parsing, storage, RBAC |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`

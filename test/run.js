@@ -14,6 +14,7 @@ const SUITES = [
   ["theme", "theme.test.js", "Light/dark tokens, contrast, target size and the print sheet"],
   ["diagrams", "diagrams.test.js", "Mermaid sizing and the per-theme diagram palettes"],
   ["auth", "auth.test.js", "Passwords, sessions, CSRF, RBAC and share links"],
+  ["links", "links.test.js", "Saved links: SSRF refusals, metadata parsing, storage and RBAC"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"]
 ];
 

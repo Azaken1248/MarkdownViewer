@@ -21,6 +21,8 @@ const {
   SEED_ADMIN_PASSWORD
 } = require("./lib/auth");
 const { ShareStore } = require("./lib/shares");
+const { LinkStore } = require("./lib/links");
+const linkPreview = require("./lib/link-preview");
 const excerpt = require("./lib/excerpt");
 
 const app = express();
@@ -237,6 +239,7 @@ const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "t
 
 const authStore = new AuthStore({ dataDir: DATA_DIR });
 const shareStore = new ShareStore({ dataDir: DATA_DIR });
+const linkStore = new LinkStore({ dataDir: DATA_DIR });
 
 // Cookies must be Secure in production or the session travels in clear text on
 // the first plain-HTTP request. Derived from the public base URL rather than
@@ -599,6 +602,128 @@ app.get("/api/share/:token", async (req, res, next) => {
       content,
       updatedAt: stat.mtime.toISOString()
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Saved links
+//
+// Reading the list is a read; adding, editing and removing are writes, so they
+// sit behind doc:write like everything else that changes the library.
+//
+// Adding and refreshing also make the server fetch a URL someone else chose,
+// which is the one outbound request this app makes. lib/link-preview.js decides
+// what may be fetched; the limit below decides how often, so an account cannot
+// use this as a general-purpose proxy or a scanner.
+// ---------------------------------------------------------------------------
+
+const LINK_FETCH_WINDOW_MS = 60_000;
+const LINK_FETCH_MAX_PER_WINDOW = 20;
+const linkFetchLog = new Map();
+
+function throttleLinkFetch(req, res) {
+  const key = req.auth?.user?.id || req.ip || "anonymous";
+  const now = Date.now();
+  const recent = (linkFetchLog.get(key) || []).filter((at) => now - at < LINK_FETCH_WINDOW_MS);
+
+  if (recent.length >= LINK_FETCH_MAX_PER_WINDOW) {
+    res.status(429).json({
+      error: "Too many links fetched just now. Wait a minute and try again."
+    });
+    return false;
+  }
+
+  recent.push(now);
+  linkFetchLog.set(key, recent);
+
+  // The map is keyed by account, so it cannot grow without bound in normal use,
+  // but a long-running process should not keep dead entries either.
+  if (linkFetchLog.size > 500) {
+    for (const [id, times] of linkFetchLog) {
+      if (times.every((at) => now - at >= LINK_FETCH_WINDOW_MS)) {
+        linkFetchLog.delete(id);
+      }
+    }
+  }
+
+  return true;
+}
+
+app.get("/api/links", requireRead, (req, res) => {
+  res.json({ links: linkStore.list() });
+});
+
+app.post("/api/links", requirePermission("doc:write"), async (req, res, next) => {
+  try {
+    if (!throttleLinkFetch(req, res)) {
+      return;
+    }
+
+    const preview = await linkPreview.describeUrl(req.body?.url);
+    const link = await linkStore.withLock(() => linkStore.create(preview, {
+      createdBy: req.auth?.user?.username || null,
+      note: req.body?.note
+    }));
+
+    res.status(201).json({ link });
+  } catch (error) {
+    if (error instanceof linkPreview.LinkPreviewError || error.status) {
+      res.status(error.status || 400).json({ error: error.message, existingId: error.existingId });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+// Editing the card by hand, and re-reading the page, are the same route: both
+// are "change what this card says". `refresh: true` asks for the second.
+app.patch("/api/links/:id", requirePermission("doc:write"), async (req, res, next) => {
+  try {
+    const link = linkStore.find(String(req.params.id || ""));
+    if (!link) {
+      res.status(404).json({ error: "No such link." });
+      return;
+    }
+
+    let changes = {
+      title: req.body?.title,
+      description: req.body?.description,
+      note: req.body?.note
+    };
+
+    if (req.body?.refresh) {
+      if (!throttleLinkFetch(req, res)) {
+        return;
+      }
+
+      const preview = await linkPreview.describeUrl(link.url);
+      changes = { ...preview };
+    }
+
+    const updated = await linkStore.withLock(() => linkStore.update(link.id, changes));
+    res.json({ link: updated });
+  } catch (error) {
+    if (error instanceof linkPreview.LinkPreviewError || error.status) {
+      res.status(error.status || 400).json({ error: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.delete("/api/links/:id", requirePermission("doc:write"), async (req, res, next) => {
+  try {
+    const removed = await linkStore.withLock(() => linkStore.remove(String(req.params.id || "")));
+    if (!removed) {
+      res.status(404).json({ error: "No such link." });
+      return;
+    }
+
+    res.json({ removed: true });
   } catch (error) {
     next(error);
   }
@@ -3371,6 +3496,7 @@ async function bootstrap() {
   await ensureStorageDirs();
   await authStore.load();
   await shareStore.load();
+  await linkStore.load();
 
   const seeded = await authStore.seedAdminIfEmpty();
 

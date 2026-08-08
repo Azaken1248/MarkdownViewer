@@ -206,7 +206,8 @@ async function run(server) {
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
-        uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor
+        uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
+        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks
       };
     `);
     check("no exception on load", true, true);
@@ -771,8 +772,14 @@ async function run(server) {
     // ~10MB before a single package. Opening a markdown file must not pay it.
     check("the runtime loads lazily, on the first run",
       runtime.includes("function ensureWorker()"), true);
-    check("...and index.html does not preload pyodide",
-      fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes("pyodide"), false);
+    // The rule is that the page pulls in no part of the runtime up front, not
+    // that the word never appears — a placeholder URL in a dialog mentioning
+    // pyodide.org is not a 10MB download.
+    const indexHtml = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+    check("...and index.html loads no pyodide asset",
+      /<(script|link)[^>]*pyodide/i.test(indexHtml), false);
+    check("...nor the worker that would fetch it",
+      indexHtml.includes("pyodide-worker"), false);
 
     // A worker scope has no DOM, but it does have the network — and the
     // reader's cookies ride along on a same-origin request. `import js;
@@ -816,6 +823,100 @@ async function run(server) {
     check("a result is dropped if the document changed",
       /state\.activeFile !== startedFor/.test(app), true);
     check("...or if its output node is gone", /!target\.isConnected/.test(app), true);
+  }
+
+  console.log("=== saved links render as cards ===");
+  {
+    const links = [
+      { id: "a1", url: "https://pyodide.org/en/stable/", title: "Pyodide", description: "Python in the browser", siteName: "Pyodide", note: "runtime docs", fetched: true, fetchError: null },
+      { id: "b2", url: "https://expressjs.com/", title: "Express", description: "Fast, unopinionated", siteName: "Express", note: "", fetched: true, fetchError: null },
+      { id: "c3", url: "https://gone.example/x", title: "gone.example", description: "", siteName: "", note: "", fetched: false, fetchError: "That site could not be read." }
+    ];
+
+    window.eval(`window.__t.state.links = ${JSON.stringify(links)}; window.__t.state.viewMode = "links"; window.__t.renderLinks();`);
+
+    const cards = [...doc.querySelectorAll("#linksGrid .link-card")];
+    check("one card per link", cards.length, 3);
+    check("the title is the link text", cards[0].querySelector(".link-card-title a").textContent, "Pyodide");
+    check("...and the description is shown",
+      cards[0].querySelector(".link-card-desc").textContent, "Python in the browser");
+    check("...and the host, not the whole URL",
+      cards[0].querySelector(".link-card-host").textContent, "pyodide.org");
+    check("...with the full URL on hover",
+      cards[0].querySelector(".link-card-host").title, "https://pyodide.org/en/stable/");
+    check("a note is shown when there is one",
+      cards[0].querySelector(".link-card-note").textContent, "runtime docs");
+    check("...and no empty note element when there is not",
+      cards[1].querySelector(".link-card-note"), null);
+
+    // The card is a way out of this app to someone else's site. window.opener
+    // would let that site reach back into this page, and a referrer would tell
+    // it where the reader came from.
+    const anchor = cards[0].querySelector(".link-card-title a");
+    check("it opens in a new tab", anchor.getAttribute("target"), "_blank");
+    check("...with no opener", anchor.getAttribute("rel").includes("noopener"), true);
+    check("...and no referrer", anchor.getAttribute("rel").includes("noreferrer"), true);
+    check("...belt and braces on the attribute too", anchor.getAttribute("referrerpolicy"), "no-referrer");
+
+    // A page that could not be read is still worth keeping; the card says so
+    // rather than silently showing a bare hostname with no description.
+    check("a link whose page could not be read is flagged",
+      Boolean(cards[2].querySelector(".link-card-warn")), true);
+    check("...with the reason on hover",
+      cards[2].querySelector(".link-card-warn").title, "That site could not be read.");
+    check("...and a readable one is not", cards[0].querySelector(".link-card-warn"), null);
+
+    check("the count is shown", doc.getElementById("linksCount").textContent, "3 links");
+    check("the empty state is hidden while there are cards",
+      doc.getElementById("linksEmpty").hidden, true);
+
+    // Titles are set as text, never as markup: they come from a page this app
+    // does not control.
+    window.eval(`window.__t.state.links = [{ id: "x", url: "https://x.example/", title: "<img src=x onerror=alert(1)>", description: "<script>alert(2)<\\/script>", note: "", fetched: true }]; window.__t.renderLinks();`);
+    const hostile = doc.querySelector("#linksGrid .link-card");
+    check("a hostile title is text, not markup",
+      hostile.querySelector(".link-card-title a").textContent, "<img src=x onerror=alert(1)>");
+    check("...and inserts no element", hostile.querySelectorAll("img, script").length, 0);
+    check("...and neither does the description",
+      hostile.querySelector(".link-card-desc").textContent, "<script>alert(2)</script>");
+
+    window.eval(`window.__t.state.links = ${JSON.stringify(links)}; window.__t.renderLinks();`);
+
+    // Filtering.
+    window.eval('window.__t.state.linkFilter = "unopinionated"; window.__t.renderLinks();');
+    check("the filter matches the description too",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent), ["Express"]);
+    check("...and says how many of how many",
+      doc.getElementById("linksCount").textContent, "1 of 3");
+
+    window.eval('window.__t.state.linkFilter = "nothing-matches-this"; window.__t.renderLinks();');
+    check("no matches shows the empty state", doc.getElementById("linksEmpty").hidden, false);
+    check("...saying why", doc.querySelector("#linksEmpty h3").textContent, "Nothing matches");
+
+    window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+  }
+
+  console.log("=== links are a view of their own, not a bin of documents ===");
+  {
+    // isRecycleBinMode used to be "anything that is not docs", which would have
+    // told every caller that this pane held deleted documents.
+    check("the links view is not a recycle bin",
+      window.eval('window.__t.state.viewMode = "links", window.__t.state.isRecycleBinMode'), false);
+    check("...but the recycle bin still is",
+      window.eval('window.__t.state.viewMode = "recycle", window.__t.state.isRecycleBinMode'), true);
+    check("...and so is the archive",
+      window.eval('window.__t.state.viewMode = "archive", window.__t.state.isRecycleBinMode'), true);
+    check("...and documents are not",
+      window.eval('window.__t.state.viewMode = "docs", window.__t.state.isRecycleBinMode'), false);
+
+    window.eval('window.__t.state.viewMode = "links"; window.__t.syncModeUI();');
+    check("the pane is shown", doc.getElementById("linksPane").hidden, false);
+    check("...and the document toolbar steps aside", doc.getElementById("viewerToolbar").hidden, true);
+    check("...and the sidebar says where you are", doc.getElementById("sidebarTitle").textContent, "Links");
+
+    window.eval('window.__t.state.viewMode = "docs"; window.__t.syncModeUI();');
+    check("leaving hides the pane again", doc.getElementById("linksPane").hidden, true);
+    check("...and gives the toolbar back", doc.getElementById("viewerToolbar").hidden, false);
   }
 
   console.log("=== the favicon is a valid document ===");
