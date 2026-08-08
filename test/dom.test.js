@@ -136,9 +136,13 @@ async function run(server) {
           port: parsed.port,
           path: parsed.pathname + parsed.search,
           method,
+          // Deliberately passes the client's headers through untouched. This
+          // used to add Content-Type itself, which meant a caller that forgot
+          // it still worked here and failed in a browser: express.json()
+          // ignores a body that does not say it is JSON, so the server saw an
+          // empty req.body and complained about a missing field.
           headers: {
             ...(options.headers || {}),
-            "Content-Type": "application/json",
             ...(cookieHeader() ? { Cookie: cookieHeader() } : {})
           }
         }, (res) => {
@@ -207,7 +211,7 @@ async function run(server) {
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
-        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks
+        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink
       };
     `);
     check("no exception on load", true, true);
@@ -894,6 +898,62 @@ async function run(server) {
     check("...saying why", doc.querySelector("#linksEmpty h3").textContent, "Nothing matches");
 
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+  }
+
+  console.log("=== the add-link form actually sends the URL ===");
+  {
+    // The bug this exists for: requestJson did not set Content-Type, so
+    // express.json() left req.body empty and the server answered "Enter a URL."
+    // for a URL that was plainly in the field. Every other caller happened to
+    // set the header by hand, so only the newest one was affected.
+    //
+    // Checked by asking the server to refuse for a *specific* reason. Getting
+    // "private network" back proves the address arrived and was parsed; getting
+    // "Enter a URL" back would mean it never left.
+    doc.getElementById("linkUrlInput").value = "http://127.0.0.1/api/docs";
+    doc.getElementById("linkNoteInput").value = "";
+    await window.eval("window.__t.submitLink()");
+
+    const message = doc.getElementById("linkError").textContent;
+    check("the server saw the address that was typed",
+      /private network/i.test(message), true);
+    check("...rather than an empty body", /enter a url/i.test(message), false);
+    check("the dialog stays open so the address can be corrected",
+      doc.getElementById("linkError").hidden, false);
+
+    // And the header itself, since that is the thing that was missing.
+    const realFetch = window.fetch;
+
+    const headersUsedBy = async (expression) => {
+      const sent = [];
+      window.fetch = async (url, options = {}) => {
+        sent.push(options);
+        return realFetch(url, options);
+      };
+
+      try {
+        await window.eval(expression).catch(() => {});
+      } finally {
+        // Restoring a stub this function installed itself; nothing else runs
+        // against this window in between.
+        // eslint-disable-next-line require-atomic-updates
+        window.fetch = realFetch;
+      }
+
+      return Object.keys(sent[0]?.headers || {}).map((name) => name.toLowerCase());
+    };
+
+    const posted = await headersUsedBy(
+      'window.__t.requestJson("/api/links", { method: "POST", body: JSON.stringify({ url: "file:///etc/passwd" }) })');
+    check("a JSON body is labelled as JSON", posted.includes("content-type"), true);
+    check("...and the CSRF token still rides along", posted.includes("x-csrf-token"), true);
+
+    // A GET has no body and must not claim one.
+    const fetched = await headersUsedBy('window.__t.requestJson("/api/links")');
+    check("a GET is not labelled as JSON", fetched.includes("content-type"), false);
+
+    doc.getElementById("linkUrlInput").value = "";
+    window.eval("window.__t.closeLinkModal()");
   }
 
   console.log("=== links are a view of their own, not a bin of documents ===");

@@ -2135,12 +2135,23 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 async function requestJson(url, options = {}) {
   const requestOptions = { ...options, credentials: "same-origin" };
   const method = String(options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+
+  // express.json() only parses a body that says it is JSON, and silently leaves
+  // req.body empty otherwise — so a caller that forgot this header got a
+  // confusing "that field is missing" from the server rather than an error.
+  // Every caller used to set it by hand, and every new one was one omission
+  // away from the same bug. A string body from here is always JSON.
+  if (typeof options.body === "string" && !Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
+    headers["Content-Type"] = "application/json";
+  }
 
   if (UNSAFE_METHODS.has(method) && state.csrfToken) {
-    requestOptions.headers = {
-      ...(options.headers || {}),
-      "X-CSRF-Token": state.csrfToken
-    };
+    headers["X-CSRF-Token"] = state.csrfToken;
+  }
+
+  if (Object.keys(headers).length > 0) {
+    requestOptions.headers = headers;
   }
 
   const response = await fetch(url, requestOptions);
