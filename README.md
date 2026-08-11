@@ -10,6 +10,8 @@ Live at **<https://md.azaken.com>**.
 - Notebook code cells run Python in the browser via Pyodide, on request.
 - A Links section for the docs sites you keep coming back to, saved as cards
   carrying each page's own title and description, filed into groups.
+- Two editors: markdown source with a live preview, or a visual mode that
+  rewrites only the blocks you actually touch.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -51,7 +53,7 @@ already known to everyone.
 | --- | --- |
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `visual`, `dom` |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 
@@ -95,6 +97,7 @@ proxy hop rather than the client's scheme.
 │   ├── js/
 │   │   ├── app.js            # The client
 │   │   ├── markdown-core.js  # Render engine shared by both pages
+│   │   ├── visual-editor.js  # Block splitting + markdown serialization
 │   │   ├── notebook-runtime.js   # Talks to the Python worker
 │   │   ├── pyodide-worker.js     # Python (Pyodide/WASM), isolated from the DOM
 │   │   ├── share.js          # The share page
@@ -120,7 +123,7 @@ proxy hop rather than the client's scheme.
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The seven suites
+│   └── *.test.js             # The eight suites
 ├── server.js                 # Express app, ~2,400 lines
 ├── eslint.config.js
 ├── package.json
@@ -323,6 +326,45 @@ pinned to an exact version but cannot carry an SRI hash, because `importScripts`
 has no integrity attribute; the WASM payload it fetches is not integrity-checked
 either, which is inherent to how Pyodide ships rather than something given up
 here.
+
+## Editing
+
+The editor has two surfaces, switched from the toolbar.
+
+**Markdown** is the source, with a live preview beside it. Below 1160px the two
+become **Write** and **Preview** tabs, so each gets the whole pane.
+
+**Visual** edits the document as formatted text. Headings are headings, bold is
+bold, lists are lists.
+
+### What the visual editor will not do to your documents
+
+Every WYSIWYG markdown editor faces the same problem: parse the document into a
+tree, edit one word, write the tree back, and the whole file returns subtly
+different — list markers swapped, emphasis re-spelled, wrapping redone, a table
+realigned. For documents you did not write in this app, that is not cosmetic; it
+is an unasked-for diff on every file you open.
+
+So this one does not round-trip the document. **It round-trips only the blocks
+you touched.**
+
+The source is cut into blocks — including the blank runs between them — and each
+block keeps its exact text. Joining them back reproduces the input byte for
+byte, which is asserted against every markdown document in the library on every
+test run, not just against fixtures. Editing a block replaces that block and
+nothing else. Fix a typo in one paragraph and the diff is that paragraph.
+
+Blocks that markdown expresses more precisely than formatted text can — **code
+fences, tables, math, raw HTML and front matter** — are not rendered as rich
+text at all. They appear as their own source in a labelled box and are edited as
+source. Pretending to WYSIWYG a table and then rewriting its alignment is
+exactly the damage this design exists to avoid.
+
+The toolbar covers bold, italic, inline code, links, headings, lists, quotes and
+dividers, with `Ctrl+B`, `Ctrl+I` and `Ctrl+K`. Pasting inserts plain text: the
+formatting from wherever you copied is not the formatting this document uses.
+
+---
 
 ## Saved links
 
@@ -554,7 +596,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Seven suites, ~500 checks, under a minute. No browser required, and no
+Eight suites, ~600 checks, under a minute. No browser required, and no
 network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
@@ -565,6 +607,7 @@ network: the suite is deterministic on a runner with no egress.
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `links` | What the link fetcher refuses to reach, metadata parsing, grouping, storage, RBAC |
+| `visual` | The block round trip, over fixtures and over every real document |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`

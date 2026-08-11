@@ -188,6 +188,10 @@ async function run(server) {
   // in scope before app.js runs, exactly as the two <script> tags arrange.
   window.eval(coreSource);
 
+  // Block splitting for the visual editor, loaded before app.js as the page
+  // loads it.
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
+
   // The notebook Python controller, loaded before app.js the same way the page
   // loads it. jsdom has no Worker, but nothing here constructs one until a Run
   // button is pressed.
@@ -212,7 +216,7 @@ async function run(server) {
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
-        syncEditorTabs, selectEditorTab, openEditor
+        syncEditorTabs, selectEditorTab, openEditor, setEditorSurface, renderVisualEditor
       };
     `);
     check("no exception on load", true, true);
@@ -927,6 +931,68 @@ async function run(server) {
     check("...saying why", doc.querySelector("#linksEmpty h3").textContent, "Nothing matches");
 
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+  }
+
+  console.log("=== the visual editor edits only what you touch ===");
+  {
+    const source = "# Title\n\nSome   text here.\n\n| a  | b  |\n|----|----|\n| 1  | 2  |\n\n```js\nconst x = 1;\n```\n";
+    window.eval(`window.__t.openEditor({ mode: "create", fileName: "v.md", content: ${JSON.stringify(source)} })`);
+    window.eval('window.__t.setEditorSurface("visual")');
+
+    check("the visual surface is shown", doc.getElementById("visualSurface").hidden, false);
+    check("...and the source grid steps aside", doc.getElementById("editorGrid").hidden, true);
+    check("the switch says which mode it is in",
+      doc.getElementById("surfaceVisualBtn").getAttribute("aria-pressed"), "true");
+
+    const blocks = [...doc.querySelectorAll("#visualDoc .ve-block")];
+    check("a block per drawn block, blanks excluded", blocks.length, 4);
+    check("prose is editable as text",
+      blocks.filter((b) => b.getAttribute("contenteditable") === "true").length, 2);
+
+    // A table and a fence are shown as source, because rewriting either from a
+    // rendering is how alignment and languages get lost.
+    const sources = blocks.filter((b) => b.classList.contains("ve-source"));
+    check("the table and the fence are shown as source", sources.length, 2);
+    check("...labelled with what they are",
+      sources.map((b) => b.querySelector(".ve-source-head").textContent), ["Table", "Code · js"]);
+    check("...and hold their own markdown",
+      sources[1].querySelector("textarea").value, "```js\nconst x = 1;\n```");
+
+    // Switching back with nothing touched must return the document unchanged.
+    window.eval('window.__t.setEditorSurface("markdown")');
+    check("an untouched document comes back byte-for-byte",
+      doc.getElementById("editorInput").value, source);
+
+    // Now edit one paragraph and check the rest is still exactly as it was.
+    window.eval('window.__t.setEditorSurface("visual")');
+    const paragraph = [...doc.querySelectorAll('#visualDoc .ve-block[contenteditable="true"]')][1];
+    paragraph.innerHTML = "<p>Some <strong>text</strong> here.</p>";
+    paragraph.dispatchEvent(new window.Event("input", { bubbles: true }));
+    window.eval('window.__t.setEditorSurface("markdown")');
+
+    const after = doc.getElementById("editorInput").value;
+    check("the edited paragraph is rewritten", after.includes("Some **text** here."), true);
+    check("the heading is untouched", after.startsWith("# Title\n"), true);
+    // The irregular padding is the tell: a whole-document rewrite would have
+    // realigned this table.
+    check("the table keeps its own alignment", after.includes("| 1  | 2  |"), true);
+    check("...and its delimiter row", after.includes("|----|----|"), true);
+    check("the fence is untouched", after.includes("```js\nconst x = 1;\n```"), true);
+
+    // Editing a source block goes back as typed, with no interpretation.
+    window.eval('window.__t.setEditorSurface("visual")');
+    const fence = [...doc.querySelectorAll("#visualDoc .ve-source")][1].querySelector("textarea");
+    fence.value = "```js\nconst x = 2;\n```";
+    fence.dispatchEvent(new window.Event("input", { bubbles: true }));
+    window.eval('window.__t.setEditorSurface("markdown")');
+    check("a source block is saved as typed",
+      doc.getElementById("editorInput").value.includes("const x = 2;"), true);
+
+    // The editor opens on markdown; visual is a deliberate switch.
+    window.eval('window.__t.openEditor({ mode: "create", fileName: "w.md", content: "# x\\n" })');
+    check("the editor opens on the source surface",
+      window.eval("window.__t.state.editorSurface"), "markdown");
+    window.eval("window.__t.closeEditor()");
   }
 
   console.log("=== the editor tabs show one pane at a time ===");

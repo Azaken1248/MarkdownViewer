@@ -57,6 +57,8 @@ const BROWSER_GLOBALS = {
 
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
+  // Block splitting and markdown serialization for the visual editor.
+  VisualEditor: "readonly",
   // The notebook Python controller, loaded before app.js.
   NotebookRuntime: "readonly",
   Worker: "readonly"

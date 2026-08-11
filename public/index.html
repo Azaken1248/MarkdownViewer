@@ -41,8 +41,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=52"></script>
-  <link rel="stylesheet" href="css/app.css?v=52" />
+  <script src="js/theme-boot.js?v=53"></script>
+  <link rel="stylesheet" href="css/app.css?v=53" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -64,11 +64,13 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=52" defer></script>
+  <script src="js/markdown-core.js?v=53" defer></script>
+  <!-- Block splitting and markdown serialization for the visual editor. -->
+  <script src="js/visual-editor.js?v=53" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=52" defer></script>
-  <script src="js/app.js?v=52" defer></script>
+  <script src="js/notebook-runtime.js?v=53" defer></script>
+  <script src="js/app.js?v=53" defer></script>
 </head>
 
 <body>
@@ -402,6 +404,20 @@
           <select id="editorFolderSelect"></select>
         </label>
 
+        <!-- Markdown or formatted text. A mode, not a pane: the visual editor
+             takes the whole width, because reading formatted text next to its
+             own source is not what it is for. -->
+        <div class="surface-switch" role="group" aria-label="Editing mode">
+          <button class="surface-btn" id="surfaceMarkdownBtn" type="button" aria-pressed="true">
+            <i class="ph ph-code" aria-hidden="true"></i>
+            <span>Markdown</span>
+          </button>
+          <button class="surface-btn" id="surfaceVisualBtn" type="button" aria-pressed="false">
+            <i class="ph ph-text-aa" aria-hidden="true"></i>
+            <span>Visual</span>
+          </button>
+        </div>
+
         <div class="editor-actions">
           <button class="btn btn-primary" id="saveDocBtn" type="button">
             <i class="ph ph-floppy-disk" aria-hidden="true"></i>
@@ -429,6 +445,58 @@
           <i class="ph ph-eye" aria-hidden="true"></i>
           <span>Preview</span>
         </button>
+      </div>
+
+      <!-- The visual surface. Replaces the grid rather than joining it. -->
+      <div class="visual-surface" id="visualSurface" hidden>
+        <div class="visual-toolbar" id="visualToolbar" role="toolbar" aria-label="Formatting">
+          <button class="visual-tool" type="button" data-command="bold" title="Bold (Ctrl+B)" aria-label="Bold">
+            <i class="ph ph-text-b" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-command="italic" title="Italic (Ctrl+I)" aria-label="Italic">
+            <i class="ph ph-text-italic" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-command="code" title="Inline code" aria-label="Inline code">
+            <i class="ph ph-code-simple" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-command="link" title="Link (Ctrl+K)" aria-label="Link">
+            <i class="ph ph-link-simple" aria-hidden="true"></i>
+          </button>
+
+          <span class="visual-tool-sep" aria-hidden="true"></span>
+
+          <button class="visual-tool" type="button" data-block="h1" title="Heading 1" aria-label="Heading 1">
+            <span class="visual-tool-text">H1</span>
+          </button>
+          <button class="visual-tool" type="button" data-block="h2" title="Heading 2" aria-label="Heading 2">
+            <span class="visual-tool-text">H2</span>
+          </button>
+          <button class="visual-tool" type="button" data-block="h3" title="Heading 3" aria-label="Heading 3">
+            <span class="visual-tool-text">H3</span>
+          </button>
+          <button class="visual-tool" type="button" data-block="p" title="Body text" aria-label="Body text">
+            <span class="visual-tool-text">¶</span>
+          </button>
+
+          <span class="visual-tool-sep" aria-hidden="true"></span>
+
+          <button class="visual-tool" type="button" data-command="ul" title="Bulleted list" aria-label="Bulleted list">
+            <i class="ph ph-list-bullets" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-command="ol" title="Numbered list" aria-label="Numbered list">
+            <i class="ph ph-list-numbers" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-block="blockquote" title="Quote" aria-label="Quote">
+            <i class="ph ph-quotes" aria-hidden="true"></i>
+          </button>
+          <button class="visual-tool" type="button" data-command="hr" title="Divider" aria-label="Divider">
+            <i class="ph ph-minus" aria-hidden="true"></i>
+          </button>
+
+          <span class="visual-hint" id="visualHint" aria-live="polite"></span>
+        </div>
+
+        <div class="visual-doc" id="visualDoc"></div>
       </div>
 
       <div class="editor-grid" id="editorGrid">

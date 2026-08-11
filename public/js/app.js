@@ -78,6 +78,13 @@ const elements = {
   editorFileName: document.getElementById("editorFileName"),
   editorFolderField: document.getElementById("editorFolderField"),
   editorTabs: document.getElementById("editorTabs"),
+  editorGrid: document.getElementById("editorGrid"),
+  surfaceMarkdownBtn: document.getElementById("surfaceMarkdownBtn"),
+  surfaceVisualBtn: document.getElementById("surfaceVisualBtn"),
+  visualSurface: document.getElementById("visualSurface"),
+  visualToolbar: document.getElementById("visualToolbar"),
+  visualDoc: document.getElementById("visualDoc"),
+  visualHint: document.getElementById("visualHint"),
   editorTabWrite: document.getElementById("editorTabWrite"),
   editorTabPreview: document.getElementById("editorTabPreview"),
   editorWritePane: document.getElementById("editorWritePane"),
@@ -196,6 +203,8 @@ const state = {
   // "write" | "preview". Only consulted below the tab breakpoint; above it both
   // panes are visible and this is inert.
   editorTab: "write",
+  // "markdown" | "visual". Which surface the editor is showing.
+  editorSurface: "markdown",
   editorFile: null,
   editorOpen: false,
   editorInitialContent: "",
@@ -5712,6 +5721,246 @@ function syncEditorFolderPicker(mode, folderId) {
   select.value = folderId && state.folders.some((folder) => folder.id === folderId) ? folderId : "";
 }
 
+/* --- The visual editor ----------------------------------------------------
+ *
+ * Blocks in, blocks out. visual-editor.js cuts the source into blocks that
+ * reassemble byte for byte; this renders them, tracks which ones were actually
+ * typed into, and rewrites only those. Everything else goes back exactly as it
+ * came in, so opening a document and changing one word produces a one-word
+ * diff rather than a reformatted file.
+ */
+
+let visualBlocks = [];
+
+function visualSourceLabel(block) {
+  switch (block.type) {
+    case "fence":
+      return block.info ? `Code · ${block.info}` : "Code";
+    case "table":
+      return "Table";
+    case "math":
+      return "Math";
+    case "html":
+      return "HTML";
+    case "frontmatter":
+      return "Front matter";
+    default:
+      return "Source";
+  }
+}
+
+function renderVisualBlock(block, index) {
+  const wrapper = document.createElement("div");
+  wrapper.dataset.index = String(index);
+
+  // A block markdown expresses more precisely than formatted text can is shown
+  // as its source. Nothing is gained by rendering a table you then have to
+  // rewrite from the rendering.
+  if (!VisualEditor.isRich(block)) {
+    wrapper.className = "ve-block ve-source";
+
+    const head = document.createElement("div");
+    head.className = "ve-source-head";
+    head.textContent = visualSourceLabel(block);
+    wrapper.appendChild(head);
+
+    const area = document.createElement("textarea");
+    area.value = block.source.replace(/\n+$/, "");
+    area.spellcheck = false;
+    area.rows = Math.min(20, Math.max(2, area.value.split("\n").length));
+    area.setAttribute("aria-label", `${visualSourceLabel(block)} source`);
+    area.addEventListener("input", () => {
+      block.dirty = true;
+      block.sourceOverride = area.value;
+      markEditorDirty();
+    });
+    wrapper.appendChild(area);
+    return wrapper;
+  }
+
+  wrapper.className = "ve-block markdown-body";
+  // setAttribute, not the property: the attribute is what CSS and querySelector
+  // see, and not every DOM implementation reflects the property back to it.
+  wrapper.setAttribute("contenteditable", "true");
+  wrapper.spellcheck = true;
+  wrapper.innerHTML = MarkdownCore.renderMarkdown(block.source);
+
+  wrapper.addEventListener("input", () => {
+    block.dirty = true;
+    markEditorDirty();
+  });
+
+  return wrapper;
+}
+
+function renderVisualEditor() {
+  if (!elements.visualDoc) {
+    return;
+  }
+
+  visualBlocks = VisualEditor.splitBlocks(elements.editorInput.value);
+  elements.visualDoc.innerHTML = "";
+
+  for (const [index, block] of visualBlocks.entries()) {
+    // A run of blank lines is spacing, not content. It is kept in the model so
+    // the document reassembles exactly, and simply not drawn.
+    if (block.type === "blank") {
+      continue;
+    }
+
+    elements.visualDoc.appendChild(renderVisualBlock(block, index));
+  }
+
+  const sourceCount = visualBlocks.filter((block) => !VisualEditor.isRich(block) && block.type !== "blank").length;
+  elements.visualHint.textContent = sourceCount > 0
+    ? `${sourceCount} block${sourceCount === 1 ? "" : "s"} shown as source`
+    : "";
+}
+
+/* Back to markdown.
+ *
+ * Only dirty blocks are re-serialized. This is the whole safety property, and
+ * the reason the visual editor can be pointed at documents written elsewhere.
+ */
+function collectVisualMarkdown() {
+  const out = [];
+
+  for (const [index, block] of visualBlocks.entries()) {
+    if (!block.dirty) {
+      out.push(block.source);
+      continue;
+    }
+
+    if (!VisualEditor.isRich(block)) {
+      const value = String(block.sourceOverride ?? "").replace(/\n+$/, "");
+      out.push(value ? `${value}\n` : "");
+      continue;
+    }
+
+    const node = elements.visualDoc.querySelector(`.ve-block[data-index="${index}"]`);
+    out.push(node ? VisualEditor.serializeEditedBlock(node) : block.source);
+  }
+
+  return out.join("");
+}
+
+function syncMarkdownFromVisual() {
+  if (state.editorSurface !== "visual") {
+    return;
+  }
+
+  const next = collectVisualMarkdown();
+  if (next !== elements.editorInput.value) {
+    elements.editorInput.value = next;
+  }
+}
+
+function setEditorSurface(surface) {
+  const visual = surface === "visual";
+
+  // Leaving visual mode writes the blocks back before the source is shown.
+  if (!visual && state.editorSurface === "visual") {
+    syncMarkdownFromVisual();
+  }
+
+  state.editorSurface = visual ? "visual" : "markdown";
+
+  elements.surfaceMarkdownBtn.setAttribute("aria-pressed", String(!visual));
+  elements.surfaceVisualBtn.setAttribute("aria-pressed", String(visual));
+  elements.visualSurface.hidden = !visual;
+  elements.editorGrid.hidden = visual;
+  if (elements.editorTabs) {
+    elements.editorTabs.hidden = visual;
+  }
+
+  if (visual) {
+    renderVisualEditor();
+    elements.visualDoc.querySelector('[contenteditable="true"]')?.focus();
+  } else {
+    syncEditorTabs();
+    void renderEditorPreview();
+  }
+}
+
+function markEditorDirty() {
+  // The editor's unsaved-changes check compares against the source, so the
+  // source has to keep up with what the blocks say.
+  syncMarkdownFromVisual();
+}
+
+/* The toolbar.
+ *
+ * execCommand is deprecated and still the only thing every browser implements
+ * for editing a contenteditable selection. The alternative is hand-rolled Range
+ * surgery for bold, italic and lists, which is a great deal of code to
+ * reimplement worse. What it produces is normalised by the serializer anyway —
+ * a <b> becomes ** either way.
+ */
+function applyVisualCommand(command) {
+  const selection = window.getSelection();
+  const block = selection?.anchorNode
+    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
+      ?.closest(".ve-block[contenteditable]")
+    : null;
+
+  if (!block) {
+    notify("Put the cursor in a block first.", "neutral");
+    return;
+  }
+
+  const run = (name, value) => document.execCommand(name, false, value);
+
+  switch (command) {
+    case "bold": run("bold"); break;
+    case "italic": run("italic"); break;
+    case "ul": run("insertUnorderedList"); break;
+    case "ol": run("insertOrderedList"); break;
+    case "hr": run("insertHTML", "<hr>"); break;
+    case "code": {
+      const text = String(selection).trim();
+      if (!text) {
+        notify("Select the text to mark as code.", "neutral");
+        return;
+      }
+      run("insertHTML", `<code>${MarkdownCore.escapeHtml(text)}</code>`);
+      break;
+    }
+    case "link": {
+      const text = String(selection).trim();
+      const href = window.prompt("Link address", "https://");
+      if (!href) {
+        return;
+      }
+      if (text) {
+        run("createLink", href);
+      } else {
+        run("insertHTML", `<a href="${MarkdownCore.escapeHtml(href)}">${MarkdownCore.escapeHtml(href)}</a>`);
+      }
+      break;
+    }
+    default:
+      return;
+  }
+
+  block.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function applyVisualBlockFormat(tag) {
+  const selection = window.getSelection();
+  const block = selection?.anchorNode
+    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
+      ?.closest(".ve-block[contenteditable]")
+    : null;
+
+  if (!block) {
+    notify("Put the cursor in a block first.", "neutral");
+    return;
+  }
+
+  document.execCommand("formatBlock", false, tag.toUpperCase());
+  block.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 /* Write / Preview tabs, for when the two panes cannot sit side by side.
  *
  * The breakpoint is a width, not a device, so a narrow window on a desktop gets
@@ -5770,6 +6019,8 @@ function openEditor({ mode, fileName, content, folderId = null }) {
   // Always opens on Write: the editor is opened to type in, and landing on a
   // preview of what you already have would be a step to undo every time.
   state.editorTab = "write";
+  // Markdown is the surface the editor opens on; Visual is a deliberate switch.
+  setEditorSurface("markdown");
   syncEditorTabs();
   syncEditorFolderPicker(mode, folderId);
 
@@ -6029,6 +6280,9 @@ async function uploadFolder(picked, folderId = null) {
 }
 
 async function saveEditorDocument() {
+  // Whatever is on screen has to reach the source before it is written.
+  syncMarkdownFromVisual();
+
   const fileName = ensureDocFilename(elements.editorFileName.value.trim());
   const content = elements.editorInput.value;
 
@@ -7093,6 +7347,58 @@ elements.editDocBtn.addEventListener("click", () => {
 
 elements.editCurrentDocBtn.addEventListener("click", () => {
   openEditorForCurrentDoc();
+});
+
+elements.surfaceMarkdownBtn.addEventListener("click", () => setEditorSurface("markdown"));
+elements.surfaceVisualBtn.addEventListener("click", () => setEditorSurface("visual"));
+
+// Delegated, so the toolbar can grow without another listener each time.
+elements.visualToolbar.addEventListener("mousedown", (event) => {
+  // The selection in the contenteditable must survive the click, and focusing
+  // a button destroys it.
+  if (event.target.closest(".visual-tool")) {
+    event.preventDefault();
+  }
+});
+
+elements.visualToolbar.addEventListener("click", (event) => {
+  const tool = event.target.closest(".visual-tool");
+  if (!tool) {
+    return;
+  }
+
+  if (tool.dataset.block) {
+    applyVisualBlockFormat(tool.dataset.block);
+  } else if (tool.dataset.command) {
+    applyVisualCommand(tool.dataset.command);
+  }
+});
+
+// The shortcuts people already have in their fingers. Ctrl+B and Ctrl+I are
+// handled by contenteditable itself; Ctrl+K is not, and browsers would
+// otherwise take it for the address bar.
+elements.visualDoc.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey)) {
+    return;
+  }
+
+  if (event.key === "k" || event.key === "K") {
+    event.preventDefault();
+    applyVisualCommand("link");
+  }
+});
+
+// Pasting rich text into a contenteditable brings the source site's markup
+// with it — fonts, colours, spans, classes. Only the text is wanted; the
+// formatting people are pasting is not the formatting this document uses.
+elements.visualDoc.addEventListener("paste", (event) => {
+  const text = event.clipboardData?.getData("text/plain");
+  if (typeof text !== "string") {
+    return;
+  }
+
+  event.preventDefault();
+  document.execCommand("insertText", false, text);
 });
 
 elements.editorTabWrite.addEventListener("click", () => selectEditorTab("write"));
