@@ -93,10 +93,15 @@ async function run(server) {
   // parsed. The parsing itself is marked's, and the serializers that read these
   // shapes back are checked against the real library in the visual suite.
   const escape = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  window.marked = {
-    setOptions() {},
-    parse(md) {
+  // One block at a time. The reading view hands marked a whole document while
+  // the editor hands it a single block, so parse() below splits the input first
+  // and this renders each piece.
+  const renderOneBlock = (md) => {
       const text = String(md);
+
+      if (text.trim() === "") {
+        return "";
+      }
 
       const fence = text.match(/^ {0,3}(?:```|~~~)(\S*)[^\n]*\n([\s\S]*?)(?:\n)?(?:```|~~~)\s*$/);
       if (fence) {
@@ -121,7 +126,36 @@ async function run(server) {
         return text.trim();
       }
 
+      // GFM task lists, rendered the way marked renders them — the checkbox
+      // disabled, which is exactly the default the app has to override.
+      if (lines.length > 0 && lines.every((line) => /^\s*([-*+]|\d+[.)])\s/.test(line))) {
+        const items = lines.map((line) => {
+          const item = line.replace(/^\s*([-*+]|\d+[.)])\s+/, "");
+          const task = item.match(/^\[([ xX])\]\s+([\s\S]*)$/);
+          return task
+            ? `<li><input${task[1] === " " ? "" : " checked=\"\""} disabled="" type="checkbox"> ${escape(task[2])}</li>`
+            : `<li>${escape(item)}</li>`;
+        }).join("");
+        return `<ul>${items}</ul>`;
+      }
+
       return `<p>${text.replace(/[<>]/g, "")}</p>`;
+  };
+
+  window.marked = {
+    setOptions() {},
+    parse(md) {
+      const text = String(md);
+
+      // Chunk with the app's own splitter rather than on blank lines, so a
+      // fence containing one is not torn in half. It is loaded by the time any
+      // rendering happens; before that there is only ever a single block.
+      const split = window.VisualEditor?.splitBlocks;
+      if (!split) {
+        return renderOneBlock(text);
+      }
+
+      return split(text).map((block) => renderOneBlock(block.source)).filter(Boolean).join("\n");
     }
   };
   window.DOMPurify = { sanitize: (html) => html };
@@ -1334,6 +1368,126 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== a checkbox on the page ticks the box in the file ===");
+  {
+    const source = [
+      "# Jobs",
+      "",
+      "- [ ] buy milk",
+      "- [x] call back",
+      "",
+      "```md",
+      "- [ ] not a checkbox",
+      "```",
+      ""
+    ].join("\n");
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "jobs.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("jobs.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+    check("the task list is open", window.eval("window.__t.state.activeFile"), "jobs.md");
+
+    const boxes = () => [...doc.querySelectorAll('#docContent li input[type="checkbox"]')];
+    check("the tasks are on the page as checkboxes", boxes().length, 2);
+    check("...and the one in the code fence is not among them",
+      doc.querySelectorAll("#docContent pre input").length, 0);
+    check("a checkbox is live, not a picture of one",
+      boxes().map((b) => b.disabled), [false, false]);
+    check("...showing what the file says", boxes().map((b) => b.checked), [false, true]);
+
+    // Ticking one. No dialog, no save button — the click is the edit.
+    boxes()[0].checked = true;
+    boxes()[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+
+    const ticked = JSON.parse((await get("/api/docs/jobs.md")).body).content;
+    check("the tick reached the file", ticked.includes("- [x] buy milk"), true);
+    check("...without disturbing the task beside it", ticked.includes("- [x] call back"), true);
+    check("...or the one inside the fence", ticked.includes("```md\n- [ ] not a checkbox\n```"), true);
+    check("...and the rest of the file is byte-for-byte what it was",
+      ticked, source.replace("- [ ] buy milk", "- [x] buy milk"));
+    check("the page was not rebuilt under the click",
+      doc.getElementById("docContent").querySelectorAll("li").length, 2);
+
+    // And clearing one.
+    boxes()[1].checked = false;
+    boxes()[1].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+
+    const cleared = JSON.parse((await get("/api/docs/jobs.md")).body).content;
+    check("clearing a box reaches the file too", cleared.includes("- [ ] call back"), true);
+    check("...and the one ticked a moment ago stayed ticked",
+      cleared.includes("- [x] buy milk"), true);
+
+    // Reopening proves the file, not the page, is the record.
+    await window.eval('window.__t.openDocument("jobs.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 500));
+    check("reopening shows what was ticked", boxes().map((b) => b.checked), [true, false]);
+
+    // The same boxes have to work while the document is being edited in place,
+    // where they sit inside a contenteditable that would otherwise swallow the
+    // click. Here the tick is part of the edit rather than a save of its own.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const editing = [...doc.querySelectorAll("#docContent .ve-block input[type=\"checkbox\"]")];
+    check("the boxes are still there while editing", editing.length, 2);
+    check("...and still live", editing.map((b) => b.disabled), [false, false]);
+    check("...but not part of the text being typed",
+      editing.every((b) => b.getAttribute("contenteditable") === "false"), true);
+    check("nothing is dirty yet", window.eval("window.__t.isPageEditDirty()"), false);
+
+    editing[1].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    check("clicking a box in the editor ticks it", editing[1].checked, true);
+    check("...and counts as an edit", window.eval("window.__t.isPageEditDirty()"), true);
+    check("...which the block writes back as markdown",
+      window.eval("window.__t.collectPageMarkdown()").includes("- [x] call back"), true);
+    check("...leaving the task above it alone",
+      window.eval("window.__t.collectPageMarkdown()").includes("- [x] buy milk"), true);
+
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+    const fromEditor = JSON.parse((await get("/api/docs/jobs.md")).body).content;
+    check("saving the page keeps the tick", fromEditor.includes("- [x] call back"), true);
+    check("...and the fence is still untouched",
+      fromEditor.includes("```md\n- [ ] not a checkbox\n```"), true);
+  }
+
+  console.log("=== a reader is shown the boxes but cannot tick them ===");
+  {
+    const session = (role, permissions) => window.eval(`window.__t.applySession(${JSON.stringify({
+      authenticated: true,
+      permissions,
+      user: { id: "u1", username: "reader", role, mustChangePassword: false },
+      csrfToken: "t"
+    })})`);
+    const editorSession = window.eval("JSON.stringify(window.__t.state.permissions)");
+
+    session("viewer", ["doc:read"]);
+    await window.eval('window.__t.openDocument("jobs.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 500));
+
+    const boxes = [...doc.querySelectorAll('#docContent li input[type="checkbox"]')];
+    check("a reader still sees the tasks", boxes.length, 2);
+    check("...but every box is inert", boxes.map((b) => b.disabled), [true, true]);
+    check("...and none is wired up",
+      boxes.some((b) => b.hasAttribute("data-task-index")), false);
+    check("...so there is nothing for a click to act on",
+      window.eval("window.__t.state.taskMarkers.length"), 0);
+
+    session("editor", JSON.parse(editorSession));
+    await window.eval('window.__t.openDocument("jobs.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 500));
+    check("giving the permission back makes them live again",
+      [...doc.querySelectorAll('#docContent li input[type="checkbox"]')].every((b) => !b.disabled), true);
   }
 
   console.log("=== the editor tabs show one pane at a time ===");

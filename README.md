@@ -13,6 +13,8 @@ Live at **<https://md.azaken.com>**.
 - Documents are edited in place, on the page you read them on — tables as
   tables, code as code — rewriting only the blocks you actually touch, or as
   markdown source, one button away.
+- Task list checkboxes are live while you read: click one and that single
+  character changes in the file, with no editor to open and nothing to save.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -343,6 +345,28 @@ and **Preview** tabs, so each gets the whole pane. Edits made on the page come
 with you.
 
 `Ctrl+S` saves, `Escape` leaves, and both ask before losing anything.
+
+### Task lists tick without opening anything
+
+A `- [ ]` renders as a checkbox, and the checkbox works — while you are reading,
+with no editor to open, nothing to save and no dialog in the way. Click it and
+the file changes. It works inside the editor too, where the tick counts as part
+of the edit rather than a save of its own.
+
+Ticking is a **one-character** edit: the box is located as an offset into the
+source and that single character is replaced, so every other byte of the file is
+untouched by construction rather than by care. The page is not re-rendered
+either — the box you clicked is the box that changes, and your scroll position
+stays where it was.
+
+Which character is the whole problem, because a `- [ ]` inside a code fence is
+text rather than a checkbox. So the markers are counted by walking the same
+blocks the editor uses, skipping the ones a renderer never turns into list
+items, which keeps the count in step with what is actually on the page. Before
+any box is made live the two are checked against each other — same number of
+boxes as markers, each in the same state — and if they disagree the boxes stay
+inert rather than risk ticking the wrong line of a file. Read-only accounts,
+notebooks and the recycle bin keep them inert as well.
 
 ### What editing will not do to your documents
 

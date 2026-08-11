@@ -2712,6 +2712,30 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Task lists
+
+   A box that can be ticked has to look like one. marked renders task lists
+   disabled, so the inert case is the one already styled by the browser and the
+   live case is what needs saying: a pointer, the accent colour, and a focus
+   ring for anyone arriving by keyboard rather than mouse.
+   -------------------------------------------------------------------------- */
+
+.markdown-body li input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+
+.markdown-body li input[type="checkbox"]:not(:disabled) {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.markdown-body li input[type="checkbox"]:not(:disabled):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
    Editing the document on the page
 
    The editing surface is the reading surface: #docContent keeps its class, its

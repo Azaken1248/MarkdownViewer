@@ -358,5 +358,80 @@ console.log("=== every fence in the real library survives being parsed and writt
   check("an untouched fence comes back exactly as it was", broken.slice(0, 5), []);
 }
 
+console.log("=== a checkbox is one character in the file ===");
+{
+  const doc = [
+    "# Jobs",                     // 0
+    "",                           // 1
+    "- [ ] one",                  // 2
+    "- [x] two",                  // 3
+    "  - [ ] nested",             // 4
+    "",                           // 5
+    "> - [x] quoted",             // 6
+    "",                           // 7
+    "1. [ ] numbered",            // 8
+    "",                           // 9
+    "```md",                      // 10
+    "- [ ] not a checkbox",       // 11
+    "```",                        // 12
+    "",                           // 13
+    "- [x]tight is not one either",
+    ""
+  ].join("\n");
+
+  const markers = VE.taskMarkers(doc);
+
+  // Five: the fenced one is code and the tight one has no space after the
+  // bracket, so a renderer makes a checkbox of neither.
+  check("every real task is found, and nothing else is", markers.length, 5);
+  check("...with the ticked ones known apart",
+    markers.map((m) => m.checked), [false, true, false, true, false]);
+  check("each marker points at the character between the brackets",
+    markers.map((m) => doc[m.index]), [" ", "x", " ", "x", " "]);
+  check("the last one found is the numbered task, so the fence was skipped",
+    doc.slice(markers[4].index).startsWith(" ] numbered"), true);
+
+  // The whole point of an offset: the edit cannot reach anything else.
+  const ticked = VE.setTaskMarker(doc, markers[0].index, true);
+  check("ticking changes exactly one character", ticked.length, doc.length);
+  check("...and it is the right one", ticked.includes("- [x] one"), true);
+  check("...leaving every other byte alone",
+    [...doc].filter((c, i) => c !== ticked[i]).length, 1);
+  check("clearing it puts the file back exactly as it was",
+    VE.setTaskMarker(ticked, markers[0].index, false), doc);
+
+  check("a nested task is reachable", VE.setTaskMarker(doc, markers[2].index, true).includes("  - [x] nested"), true);
+  check("so is one in a quote", VE.setTaskMarker(doc, markers[3].index, false).includes("> - [ ] quoted"), true);
+  check("so is a numbered one", VE.setTaskMarker(doc, markers[4].index, true).includes("1. [x] numbered"), true);
+
+  // An offset that no longer exists must not be able to corrupt the file.
+  check("an index past the end changes nothing", VE.setTaskMarker(doc, doc.length, true), doc);
+  check("a nonsense index changes nothing", VE.setTaskMarker(doc, -1, true), doc);
+}
+
+console.log("=== every task marker in the real library round-trips ===");
+{
+  const docsDir = path.join(ROOT, "docs");
+  const files = walkDocuments(docsDir);
+
+  let tasks = 0;
+  const broken = [];
+
+  for (const name of files) {
+    const source = fs.readFileSync(name, "utf8");
+    for (const marker of VE.taskMarkers(source)) {
+      tasks += 1;
+
+      // Whatever it says now, saying it again must leave the file identical.
+      if (VE.setTaskMarker(source, marker.index, marker.checked) !== source) {
+        broken.push(`${path.relative(docsDir, name)} @ ${marker.index}`);
+      }
+    }
+  }
+
+  console.log(`  (${tasks} tasks in ${files.length} documents)`);
+  check("writing a task's own state back is a no-op", broken.slice(0, 5), []);
+}
+
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -650,6 +650,63 @@
     return `${out.join("\n")}${trailing ? "\n" : ""}`;
   }
 
+  // --- Task lists ---------------------------------------------------------
+  //
+  // A checkbox on the page is one character in the file. Finding which one is
+  // the whole problem: "- [ ]" inside a code fence is text, not a checkbox, so
+  // counting markers through the raw source would drift out of step with the
+  // rendering on the first fence that mentions one. Walking the blocks instead
+  // means the count can only include blocks a renderer turns into list items.
+  //
+  // GFM wants a whitespace character after the bracket, so "- [x]done" is an
+  // ordinary list item and is deliberately not matched here.
+  const TASK_MARKER_RE = /^([ \t]*(?:>[ \t]*)*)([-*+]|\d{1,9}[.)])([ \t]+)\[([ xX])\](?=[ \t])/;
+  const TASK_BLOCK_SKIP = new Set(["fence", "math", "frontmatter", "html"]);
+
+  // Every task-list marker in the document, in the order a renderer meets them,
+  // each with the offset of the one character that says whether it is ticked.
+  function taskMarkers(source) {
+    const text = String(source == null ? "" : source);
+    const found = [];
+    let blockStart = 0;
+
+    for (const block of splitBlocks(text)) {
+      if (!TASK_BLOCK_SKIP.has(block.type)) {
+        let lineStart = blockStart;
+
+        for (const line of block.source.split("\n")) {
+          const match = TASK_MARKER_RE.exec(line);
+          if (match) {
+            found.push({
+              // Past the indent, the bullet, the gap and the opening bracket.
+              index: lineStart + match[1].length + match[2].length + match[3].length + 1,
+              checked: match[4] !== " "
+            });
+          }
+
+          lineStart += line.length + 1;
+        }
+      }
+
+      blockStart += block.source.length;
+    }
+
+    return found;
+  }
+
+  // Ticking a box is a one-character edit. Everything else in the file — every
+  // marker style, every trailing space, the newline at the end or its absence —
+  // is untouched by construction rather than by care.
+  function setTaskMarker(source, index, checked) {
+    const text = String(source == null ? "" : source);
+
+    if (!Number.isInteger(index) || index < 0 || index >= text.length) {
+      return text;
+    }
+
+    return `${text.slice(0, index)}${checked ? "x" : " "}${text.slice(index + 1)}`;
+  }
+
   global.VisualEditor = {
     splitBlocks,
     joinBlocks,
@@ -665,6 +722,8 @@
     tableElementToMarkdown,
     parseFence,
     serializeFence,
+    taskMarkers,
+    setTaskMarker,
     RICH_TYPES
   };
 })(typeof window === "undefined" ? globalThis : window);
