@@ -216,7 +216,9 @@ async function run(server) {
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
-        syncEditorTabs, selectEditorTab, openEditor, setEditorSurface, renderVisualEditor
+        syncEditorTabs, selectEditorTab, openEditor,
+        startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown,
+        openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
     `);
     check("no exception on load", true, true);
@@ -933,66 +935,198 @@ async function run(server) {
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
   }
 
-  console.log("=== the visual editor edits only what you touch ===");
+  console.log("=== editing happens on the document itself ===");
   {
-    const source = "# Title\n\nSome   text here.\n\n| a  | b  |\n|----|----|\n| 1  | 2  |\n\n```js\nconst x = 1;\n```\n";
-    window.eval(`window.__t.openEditor({ mode: "create", fileName: "v.md", content: ${JSON.stringify(source)} })`);
-    window.eval('window.__t.setEditorSurface("visual")');
+    // Prose, a table, a fence and a reference-style link that resolves from a
+    // definition at the very bottom — the case that per-block rendering would
+    // lose if the definitions were not carried along.
+    const source = [
+      "# Title",
+      "",
+      "Some   text here, and a [reference][docs] link.",
+      "",
+      "| a  | b  |",
+      "|----|----|",
+      "| 1  | 2  |",
+      "",
+      "```js",
+      "const x = 1;",
+      "```",
+      "",
+      "[docs]: https://example.com/docs",
+      ""
+    ].join("\n");
 
-    check("the visual surface is shown", doc.getElementById("visualSurface").hidden, false);
-    check("...and the source grid steps aside", doc.getElementById("editorGrid").hidden, true);
-    check("the switch says which mode it is in",
-      doc.getElementById("surfaceVisualBtn").getAttribute("aria-pressed"), "true");
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "in-place.md", content: source }))}
+    })`);
 
-    const blocks = [...doc.querySelectorAll("#visualDoc .ve-block")];
-    check("a block per drawn block, blanks excluded", blocks.length, 4);
-    check("prose is editable as text",
+    await window.eval('window.__t.refreshDocs({ openFile: "in-place.md", preserveSearch: false })');
+    await new Promise((r) => setTimeout(r, 700));
+    check("the document is open for reading",
+      window.eval("window.__t.state.activeFile"), "in-place.md");
+
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    check("the pencil edits in place rather than opening a dialog",
+      doc.getElementById("editorModal").classList.contains("open"), false);
+    check("the document itself becomes the editing surface",
+      doc.getElementById("docContent").classList.contains("doc-editing"), true);
+    check("...and it is still the same article element",
+      doc.getElementById("docContent").classList.contains("markdown-body"), true);
+    check("the edit bar is on show", doc.getElementById("pageEditBar").hidden, false);
+    check("...with the formatting toolbar in it",
+      Boolean(doc.querySelector("#pageEditBar #visualToolbar")), true);
+    check("the bar knows where the sticky toolbar ends",
+      /^\d+px$/.test(doc.getElementById("pageEditBar").style.getPropertyValue("--page-edit-top")), true);
+
+    const blocks = [...doc.querySelectorAll("#docContent .ve-block")];
+    check("a block per drawn block, blank runs excluded", blocks.length, 5);
+    check("prose is editable where it sits",
       blocks.filter((b) => b.getAttribute("contenteditable") === "true").length, 2);
 
-    // A table and a fence are shown as source, because rewriting either from a
-    // rendering is how alignment and languages get lost.
-    const sources = blocks.filter((b) => b.classList.contains("ve-source"));
-    check("the table and the fence are shown as source", sources.length, 2);
-    check("...labelled with what they are",
-      sources.map((b) => b.querySelector(".ve-source-head").textContent), ["Table", "Code · js"]);
-    check("...and hold their own markdown",
-      sources[1].querySelector("textarea").value, "```js\nconst x = 1;\n```");
+    // The point of the whole exercise: the page still looks like the document.
+    // marked is stubbed in this suite, so what is checked here is that these
+    // blocks go through the renderer at all rather than being replaced by a
+    // source box — whether the renderer makes a <table> out of a table is the
+    // renderer's business, and the reading view already proves it.
+    const embeds = blocks.filter((b) => b.classList.contains("ve-embed"));
+    check("the table, the fence and the definitions are not typed into", embeds.length, 3);
+    check("each is rendered, not swapped for a textarea",
+      embeds.every((b) => b.querySelector(".ve-embed-view") && !b.querySelector("textarea")), true);
+    check("the table's rendering is of the table",
+      embeds[0].querySelector(".ve-embed-view").textContent.includes("| 1  | 2  |"), true);
+    check("each offers its source", embeds.map((b) => b.querySelector(".ve-embed-edit").textContent.trim()),
+      ["Edit table", "Edit code (js)", "Edit link definitions"]);
+    check("none is typed into directly",
+      embeds.every((b) => b.getAttribute("contenteditable") === "false"), true);
+    check("a block that renders to nothing is marked rather than left invisible",
+      embeds[2].querySelector(".ve-embed-note").textContent, "link definitions");
 
-    // Switching back with nothing touched must return the document unchanged.
-    window.eval('window.__t.setEditorSurface("markdown")');
+    // Definitions live at the bottom of the file and are used halfway up it, so
+    // they are handed to every block that gets rendered on its own.
+    const prose = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')][1];
+    check("link definitions travel with each block for rendering",
+      prose.textContent.includes("[docs]: https://example.com/docs"), true);
+
+    check("nothing has changed yet", window.eval("window.__t.isPageEditDirty()"), false);
     check("an untouched document comes back byte-for-byte",
-      doc.getElementById("editorInput").value, source);
+      window.eval("window.__t.collectPageMarkdown()"), source);
 
-    // Now edit one paragraph and check the rest is still exactly as it was.
-    window.eval('window.__t.setEditorSurface("visual")');
-    const paragraph = [...doc.querySelectorAll('#visualDoc .ve-block[contenteditable="true"]')][1];
+    // Edit one paragraph; everything else must come back exactly as it was.
+    const paragraph = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')][1];
     paragraph.innerHTML = "<p>Some <strong>text</strong> here.</p>";
     paragraph.dispatchEvent(new window.Event("input", { bubbles: true }));
-    window.eval('window.__t.setEditorSurface("markdown")');
 
-    const after = doc.getElementById("editorInput").value;
-    check("the edited paragraph is rewritten", after.includes("Some **text** here."), true);
-    check("the heading is untouched", after.startsWith("# Title\n"), true);
+    check("the bar says there is something to save", doc.getElementById("pageEditState").textContent, "Unsaved changes");
+
+    const edited = window.eval("window.__t.collectPageMarkdown()");
+    check("the edited paragraph is rewritten", edited.includes("Some **text** here."), true);
+    check("the heading is untouched", edited.startsWith("# Title\n"), true);
     // The irregular padding is the tell: a whole-document rewrite would have
     // realigned this table.
-    check("the table keeps its own alignment", after.includes("| 1  | 2  |"), true);
-    check("...and its delimiter row", after.includes("|----|----|"), true);
-    check("the fence is untouched", after.includes("```js\nconst x = 1;\n```"), true);
+    check("the table keeps its own alignment", edited.includes("| 1  | 2  |"), true);
+    check("...and its delimiter row", edited.includes("|----|----|"), true);
+    check("the fence is untouched", edited.includes("```js\nconst x = 1;\n```"), true);
+    check("the link definition is still at the bottom",
+      edited.trimEnd().endsWith("[docs]: https://example.com/docs"), true);
 
-    // Editing a source block goes back as typed, with no interpretation.
-    window.eval('window.__t.setEditorSurface("visual")');
-    const fence = [...doc.querySelectorAll("#visualDoc .ve-source")][1].querySelector("textarea");
+    // Asking for a fence's source swaps that one block, and only that block.
+    embeds[1].querySelector(".ve-embed-edit").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const fence = embeds[1].querySelector("textarea");
+    check("the fence hands over its own markdown", fence.value, "```js\nconst x = 1;\n```");
+    check("...labelled with what it is", embeds[1].querySelector(".ve-embed-head").textContent, "code (js)");
+    check("the table beside it is still rendered", Boolean(embeds[0].querySelector(".ve-embed-view")), true);
+    check("...and was not opened along with it", embeds[0].querySelectorAll("textarea").length, 0);
+
     fence.value = "```js\nconst x = 2;\n```";
     fence.dispatchEvent(new window.Event("input", { bubbles: true }));
-    window.eval('window.__t.setEditorSurface("markdown")');
-    check("a source block is saved as typed",
-      doc.getElementById("editorInput").value.includes("const x = 2;"), true);
+    check("a source block is kept as typed",
+      window.eval("window.__t.collectPageMarkdown()").includes("const x = 2;"), true);
 
-    // The editor opens on markdown; visual is a deliberate switch.
-    window.eval('window.__t.openEditor({ mode: "create", fileName: "w.md", content: "# x\\n" })');
-    check("the editor opens on the source surface",
-      window.eval("window.__t.state.editorSurface"), "markdown");
+    embeds[1].querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    check("Done puts the rendering back", Boolean(embeds[1].querySelector(".ve-embed-view")), true);
+    check("...and takes the source box away", embeds[1].querySelectorAll("textarea").length, 0);
+    check("...showing what was typed",
+      embeds[1].querySelector(".ve-embed-view").textContent.includes("const x = 2;"), true);
+
+    // Saving writes what is on screen and goes back to reading.
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+
+    check("saving leaves editing mode", window.eval("window.__t.pageEditActive()"), false);
+    check("...and takes the bar away", doc.getElementById("pageEditBar").hidden, true);
+    check("...and the document reads normally again",
+      doc.getElementById("docContent").classList.contains("doc-editing"), false);
+    check("no editing wrappers survive in the reading view",
+      doc.querySelectorAll("#docContent .ve-block").length, 0);
+
+    const saved = await get("/api/docs/in-place.md");
+    const savedText = JSON.parse(saved.body).content;
+    check("the paragraph reached the file", savedText.includes("Some **text** here."), true);
+    check("the fence reached the file", savedText.includes("const x = 2;"), true);
+    check("the table survived the round trip byte for byte",
+      savedText.includes("| a  | b  |\n|----|----|\n| 1  | 2  |"), true);
+    check("and so did the heading", savedText.startsWith("# Title\n"), true);
+
+    // Cancelling with edits asks first, and restores what is on disk.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+    const heading = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    heading.innerHTML = "<h1>Renamed</h1>";
+    heading.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    const cancelling = window.eval("window.__t.cancelPageEdit()");
+    await new Promise((r) => setTimeout(r, 100));
+    check("cancelling with unsaved edits asks first",
+      doc.getElementById("confirmModal").classList.contains("open"), true);
+    window.eval("window.__t.resolveConfirmDialog(false)");
+    await cancelling;
+    check("saying no leaves you editing", window.eval("window.__t.pageEditActive()"), true);
+    check("...with the edit still there",
+      window.eval("window.__t.collectPageMarkdown()").includes("# Renamed"), true);
+
+    const discarding = window.eval("window.__t.cancelPageEdit()");
+    await new Promise((r) => setTimeout(r, 100));
+    window.eval("window.__t.resolveConfirmDialog(true)");
+    await discarding;
+    await new Promise((r) => setTimeout(r, 300));
+    check("discarding goes back to reading", window.eval("window.__t.pageEditActive()"), false);
+    check("...and the discarded edit is gone",
+      doc.getElementById("docContent").innerHTML.includes("Renamed"), false);
+    check("...leaving the document on screen, rendered as it always was",
+      doc.getElementById("docContent").textContent.includes("Title"), true);
+    check("...through the ordinary render path, with no block wrappers",
+      doc.querySelectorAll("#docContent .ve-block").length, 0);
+
+    // Handing off to the source editor carries the edits with it.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+    const para2 = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')][1];
+    para2.innerHTML = "<p>Carried across.</p>";
+    para2.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await window.eval("window.__t.openSourceFromPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    check("the source editor opens", doc.getElementById("editorModal").classList.contains("open"), true);
+    check("...holding the edits made on the page",
+      doc.getElementById("editorInput").value.includes("Carried across."), true);
+    check("...and the page is no longer in editing mode",
+      window.eval("window.__t.pageEditActive()"), false);
+    check("the dialog has no visual tab of its own",
+      doc.querySelectorAll("#editorModal .surface-switch").length, 0);
     window.eval("window.__t.closeEditor()");
+
+    check("the reading view is the one it started as",
+      doc.getElementById("docContent").classList.contains("doc-editing"), false);
+    check("...with no editing furniture left in it",
+      doc.querySelectorAll("#docContent .ve-block, #docContent .ve-embed-edit").length, 0);
+    check("...and nothing in it is editable",
+      doc.querySelectorAll('#docContent [contenteditable="true"]').length, 0);
   }
 
   console.log("=== the editor tabs show one pane at a time ===");

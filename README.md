@@ -10,8 +10,8 @@ Live at **<https://md.azaken.com>**.
 - Notebook code cells run Python in the browser via Pyodide, on request.
 - A Links section for the docs sites you keep coming back to, saved as cards
   carrying each page's own title and description, filed into groups.
-- Two editors: markdown source with a live preview, or a visual mode that
-  rewrites only the blocks you actually touch.
+- Documents are edited in place, on the page you read them on, rewriting only
+  the blocks you actually touch — or as markdown source, one button away.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -329,15 +329,21 @@ here.
 
 ## Editing
 
-The editor has two surfaces, switched from the toolbar.
+The pencil in the toolbar makes **the document you are reading editable where it
+is**. Same column, same width, same type, same rendering — diagrams still drawn,
+code still highlighted, tables still tables. Nothing moves when you start,
+because nothing about the page has changed: the article element, its class and
+its layout are the ones that were already on screen. A formatting bar appears
+under the toolbar and the cursor goes into the text.
 
-**Markdown** is the source, with a live preview beside it. Below 1160px the two
-become **Write** and **Preview** tabs, so each gets the whole pane.
+**Markdown** in that bar hands what is on screen to the source editor: the
+markdown, with a live preview beside it. Below 1160px the two become **Write**
+and **Preview** tabs, so each gets the whole pane. Edits made on the page come
+with you.
 
-**Visual** edits the document as formatted text. Headings are headings, bold is
-bold, lists are lists.
+`Ctrl+S` saves, `Escape` leaves, and both ask before losing anything.
 
-### What the visual editor will not do to your documents
+### What editing will not do to your documents
 
 Every WYSIWYG markdown editor faces the same problem: parse the document into a
 tree, edit one word, write the tree back, and the whole file returns subtly
@@ -355,14 +361,27 @@ test run, not just against fixtures. Editing a block replaces that block and
 nothing else. Fix a typo in one paragraph and the diff is that paragraph.
 
 Blocks that markdown expresses more precisely than formatted text can — **code
-fences, tables, math, raw HTML and front matter** — are not rendered as rich
-text at all. They appear as their own source in a labelled box and are edited as
-source. Pretending to WYSIWYG a table and then rewriting its alignment is
-exactly the damage this design exists to avoid.
+fences, tables, math, raw HTML and front matter** — are never typed into
+directly. They stay rendered, so the page still looks like the document, and
+**Edit table** or **Edit code** on the block opens its markdown when you want
+it. Pretending to WYSIWYG a table and then rewriting its alignment is exactly
+the damage this design exists to avoid.
+
+A block with no rendered form at all — a paragraph of nothing but link
+definitions — is marked rather than left as an invisible thing you could delete
+without seeing it happen. Definitions from the bottom of the file are handed to
+every block while it renders, so a `[reference][link]` halfway up still resolves
+even though each block is rendered on its own.
 
 The toolbar covers bold, italic, inline code, links, headings, lists, quotes and
 dividers, with `Ctrl+B`, `Ctrl+I` and `Ctrl+K`. Pasting inserts plain text: the
 formatting from wherever you copied is not the formatting this document uses.
+
+The block wrappers carry no border, padding, background or overflow, which is
+what lets the children's margins collapse through them exactly as they do
+between siblings — the reason the text does not move by a pixel when editing
+starts. The focus mark is drawn out of the flow, in the margin. The layout suite
+checks all of that, because it is a promise a stylesheet can quietly break.
 
 ---
 

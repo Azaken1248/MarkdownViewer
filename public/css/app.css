@@ -2712,61 +2712,53 @@ button.crumb:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   The visual editor
+   Editing the document on the page
 
-   A block-based contenteditable, one block per markdown block. Per block
-   rather than one big editable region, because the boundaries are what the
-   serializer works on: an edited block is rewritten and every other block is
-   emitted exactly as it was found.
+   The editing surface is the reading surface: #docContent keeps its class, its
+   column, its width and its type, and the blocks inside it are the same
+   rendering it shows the rest of the time.
+
+   Nothing in here may change the document's metrics. The block wrappers carry
+   no border, no padding and no background, so their children's margins collapse
+   through them exactly as they do when the elements are siblings — which is why
+   the text does not move by a pixel when editing starts. Focus is drawn with an
+   absolutely positioned rule and hover with opacity, neither of which takes up
+   space.
    -------------------------------------------------------------------------- */
 
-.surface-switch {
+.page-edit-bar {
+  position: sticky;
+  /* Directly under the viewer toolbar, whose height depends on what is in it
+     and is measured rather than guessed. */
+  top: var(--page-edit-top, 45px);
+  z-index: 19;
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--canvas);
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
-.surface-btn {
-  display: inline-flex;
+.page-edit-actions {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  padding: 4px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.page-edit-state {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
   white-space: nowrap;
 }
 
-.surface-btn[aria-pressed="true"] {
-  background: var(--selected);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.surface-btn:hover:not([aria-pressed="true"]) {
-  color: var(--fg);
-}
-
-.surface-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.visual-surface {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  background: var(--canvas);
+/* While the document is being edited, the controls that would take you
+   somewhere else are the ones in the bar. */
+body.page-editing #editCurrentDocBtn,
+body.page-editing #dockEdit {
+  display: none;
 }
 
 .visual-toolbar {
@@ -2774,10 +2766,6 @@ button.crumb:focus-visible {
   align-items: center;
   gap: 2px;
   flex-wrap: wrap;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
 }
 
 .visual-tool {
@@ -2817,55 +2805,117 @@ button.crumb:focus-visible {
   background: var(--border);
 }
 
-.visual-hint {
-  margin-left: auto;
-  font-size: 11.5px;
-  color: var(--fg-subtle);
-}
-
-.visual-doc {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: auto;
-  padding: 20px clamp(16px, 6vw, 64px) 120px;
-}
-
-.ve-block {
+/* One wrapper per markdown block, because the block boundaries are what the
+   serializer works on: an edited block is rewritten and every other block is
+   emitted exactly as it was found. */
+.markdown-body.doc-editing .ve-block {
   position: relative;
-  border-radius: var(--radius-sm);
-  /* Room for the focus ring without shifting the text. */
-  padding: 2px 8px;
-  margin: 0 -8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
-.ve-block:focus-within {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
+/* The reading view kills the first element's top margin; with wrappers in the
+   way the same rule has to reach one level deeper. */
+.markdown-body.doc-editing> .ve-block:first-child> :first-child {
+  margin-top: 0;
 }
 
-.ve-block [contenteditable]:focus {
+.markdown-body.doc-editing .ve-block[contenteditable="true"]:focus {
   outline: none;
 }
 
-/* A block markdown says more precisely than formatted text can: a code fence,
-   a table, math, raw HTML, front matter. Shown and edited as its source,
-   because rewriting one from a rendered view is how tables lose their
-   alignment and fences lose their language. */
-.ve-source {
-  margin: 12px -8px;
-  padding: 0;
+/* A rule in the margin, out of the flow, so showing which block has the cursor
+   costs the layout nothing. */
+.markdown-body.doc-editing .ve-block[contenteditable="true"]:focus::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* An empty document still needs somewhere to put the cursor. This block is the
+   one the editor adds for that; it is not in the file until it is typed in. */
+.markdown-body.doc-editing .ve-placeholder {
+  display: block;
+  min-height: 1.7em;
+}
+
+.markdown-body.doc-editing .ve-placeholder:empty::after {
+  content: "Write here";
+  color: var(--fg-subtle);
+}
+
+/* Code, tables, math, diagrams, raw HTML, front matter: markdown says these
+   more precisely than formatted text can, so they stay rendered and are edited
+   as their source on request. Rewriting a table from its rendering is exactly
+   how column alignment disappears. */
+.markdown-body.doc-editing .ve-embed {
+  position: relative;
+}
+
+.markdown-body.doc-editing .ve-embed-edit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-embed:hover .ve-embed-edit,
+.markdown-body.doc-editing .ve-embed-edit:focus-visible {
+  opacity: 1;
+}
+
+.markdown-body.doc-editing .ve-embed-edit:hover {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+}
+
+/* Nothing hovers on a touch screen, so the button cannot be something you have
+   to hover to find. */
+@media (hover: none) {
+  .markdown-body.doc-editing .ve-embed-edit {
+    opacity: 1;
+  }
+}
+
+.markdown-body.doc-editing .ve-embed-note {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+}
+
+.markdown-body.doc-editing .ve-embed.is-source-open {
+  margin: 16px 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
   overflow: hidden;
 }
 
-.ve-source-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ve-embed-head {
   padding: 5px 10px;
   border-bottom: 1px solid var(--border-muted);
   background: var(--raised);
@@ -2876,7 +2926,7 @@ button.crumb:focus-visible {
   letter-spacing: 0.05em;
 }
 
-.ve-source textarea {
+.ve-embed-source {
   display: block;
   width: 100%;
   padding: 10px;
@@ -2892,10 +2942,33 @@ button.crumb:focus-visible {
   font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
 }
 
-.ve-source textarea:focus {
+.ve-embed-source:focus {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--accent-muted);
 }
+
+.ve-embed-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 10px 10px;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-embed-done:hover {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+}
+
+
 
 /* Hidden until the split becomes a stack; see the media query near the end. */
 .editor-tabs {
@@ -4128,6 +4201,36 @@ button.crumb:focus-visible {
    order and importance. Anything that must stay laid out while invisible needs
    a different mechanism than `hidden`.
    -------------------------------------------------------------------------- */
+
+/* On a phone the formatting tools would wrap to three rows and eat the top
+   third of the document. One scrolling row keeps the document in view, and the
+   Save and Cancel buttons stay put beside it where they can always be found. */
+@media (max-width: 920px) {
+  .page-edit-bar {
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .visual-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .visual-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .visual-tool {
+    min-width: 34px;
+    min-height: 34px;
+    flex-shrink: 0;
+  }
+
+  .page-edit-state {
+    display: none;
+  }
+}
 
 [hidden] {
   display: none !important;

@@ -249,5 +249,43 @@ console.log("=== the editor shows the characters that are there ===");
   check("...and also turns calt off", /font-feature-settings:[^;]*"calt"\s*0/.test(code), true);
 }
 
+console.log("=== editing the document does not move the document ===");
+{
+  // The whole claim of in-place editing is that starting to edit changes
+  // nothing about the page. Wrapping every markdown block in a div can only
+  // keep that promise while the wrappers are metrically invisible: a border,
+  // padding, or an overflow value on them would stop the children's margins
+  // collapsing through and every gap in the document would change the moment
+  // the pencil was pressed.
+  const block = rule(".markdown-body.doc-editing .ve-block");
+  check("the block wrappers exist", Boolean(block), true);
+  check("they add no margin", /margin:\s*0/.test(block), true);
+  check("they add no padding", /padding:\s*0/.test(block), true);
+  check("they add no border", /border:\s*0/.test(block), true);
+  check("they add no background", /background:\s*none/.test(block), true);
+  check("...and nothing sets overflow on them, which would also stop collapsing",
+    /overflow/.test(block), false);
+  check("...and nothing sets a height on them", /height/.test(block), false);
+
+  // Focus has to be visible without taking up space, so it is drawn out of
+  // flow rather than as a border or an outline offset.
+  const focus = (css.match(/:focus::before\s*\{([^}]*)\}/) || [])[1] || "";
+  check("the focus mark is positioned out of the flow", /position:\s*absolute/.test(focus), true);
+  check("...in the margin, beside the text rather than in it", /left:\s*-\d+px/.test(focus), true);
+
+  // The first element's top margin is killed in the reading view; with wrappers
+  // in the way the same rule has to reach one level deeper or the document
+  // gains a gap at the top when editing starts.
+  check("the first block still loses its top margin",
+    /\.markdown-body\.doc-editing>\s*\.ve-block:first-child>\s*:first-child\s*\{[^}]*margin-top:\s*0/.test(css), true);
+
+  // The bar sits below the sticky toolbar, which is 20 in the z-index scale.
+  const bar = rule(".page-edit-bar");
+  check("the edit bar sticks", /position:\s*sticky/.test(bar), true);
+  check("...below the toolbar rather than over it", /z-index:\s*19/.test(bar), true);
+  check("...at an offset measured from the toolbar, not guessed",
+    /top:\s*var\(--page-edit-top/.test(bar), true);
+}
+
 console.log(failures === 0 ? "\nALL LAYOUT CHECKS PASSED" : `\n${failures} LAYOUT CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

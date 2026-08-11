@@ -79,12 +79,12 @@ const elements = {
   editorFolderField: document.getElementById("editorFolderField"),
   editorTabs: document.getElementById("editorTabs"),
   editorGrid: document.getElementById("editorGrid"),
-  surfaceMarkdownBtn: document.getElementById("surfaceMarkdownBtn"),
-  surfaceVisualBtn: document.getElementById("surfaceVisualBtn"),
-  visualSurface: document.getElementById("visualSurface"),
+  pageEditBar: document.getElementById("pageEditBar"),
+  pageEditState: document.getElementById("pageEditState"),
+  pageEditSourceBtn: document.getElementById("pageEditSourceBtn"),
+  pageEditCancelBtn: document.getElementById("pageEditCancelBtn"),
+  pageEditSaveBtn: document.getElementById("pageEditSaveBtn"),
   visualToolbar: document.getElementById("visualToolbar"),
-  visualDoc: document.getElementById("visualDoc"),
-  visualHint: document.getElementById("visualHint"),
   editorTabWrite: document.getElementById("editorTabWrite"),
   editorTabPreview: document.getElementById("editorTabPreview"),
   editorWritePane: document.getElementById("editorWritePane"),
@@ -203,8 +203,15 @@ const state = {
   // "write" | "preview". Only consulted below the tab breakpoint; above it both
   // panes are visible and this is inert.
   editorTab: "write",
-  // "markdown" | "visual". Which surface the editor is showing.
-  editorSurface: "markdown",
+  // Editing the open document in place, in the viewer. `initial` is the source
+  // it was entered with, which is both what Cancel restores and what "has this
+  // changed?" is measured against.
+  pageEdit: {
+    active: false,
+    file: null,
+    title: "",
+    initial: ""
+  },
   editorFile: null,
   editorOpen: false,
   editorInitialContent: "",
@@ -5205,6 +5212,15 @@ async function applySearch(query) {
 }
 
 async function openDocument(file, pushHash, options = {}) {
+  // Opening something else while the page is being edited would replace the
+  // edits with another document and say nothing about it.
+  if (pageEditActive() && file !== state.pageEdit.file) {
+    const left = await cancelPageEdit({ restore: false });
+    if (!left) {
+      return;
+    }
+  }
+
   const requestId = ++state.openDocumentRequestId;
 
   try {
@@ -5721,171 +5737,485 @@ function syncEditorFolderPicker(mode, folderId) {
   select.value = folderId && state.folders.some((folder) => folder.id === folderId) ? folderId : "";
 }
 
-/* --- The visual editor ----------------------------------------------------
+/* --- Editing the document on the page -------------------------------------
  *
- * Blocks in, blocks out. visual-editor.js cuts the source into blocks that
- * reassemble byte for byte; this renders them, tracks which ones were actually
- * typed into, and rewrites only those. Everything else goes back exactly as it
- * came in, so opening a document and changing one word produces a one-word
- * diff rather than a reformatted file.
+ * Not a mode in a dialog: the document you are reading becomes the document you
+ * are editing, in the same column, at the same width, in the same type, with its
+ * diagrams and highlighted code still drawn. Nothing moves when you start, which
+ * is the whole point — an editor that relayouts the page has already stopped
+ * being the page.
+ *
+ * Underneath it is the block model in visual-editor.js. The source is cut into
+ * blocks that reassemble byte for byte; only the blocks actually typed into are
+ * written back. Open a document, fix one word, save, and the diff is that word,
+ * even for the files here that were written somewhere else entirely.
  */
 
-let visualBlocks = [];
+let pageBlocks = [];
+// Link reference definitions live at the bottom of a document and are used
+// halfway up it. Rendering a block on its own would lose them, so they are
+// collected once and appended to each block before rendering — for the
+// rendering only, never for what gets written back.
+let pageLinkReferences = "";
 
-function visualSourceLabel(block) {
+const REFERENCE_DEFINITION_RE = /^ {0,3}\[[^\]\n]+\]:\s*\S+/;
+
+function collectLinkReferences(markdown) {
+  const found = String(markdown || "")
+    .split("\n")
+    .filter((line) => REFERENCE_DEFINITION_RE.test(line));
+
+  return found.length > 0 ? `\n\n${found.join("\n")}\n` : "";
+}
+
+/* A block that is nothing but link definitions.
+ *
+ * It renders to nothing at all, so as formatted text it would be an invisible
+ * block you could put the cursor in and destroy without seeing it happen. It is
+ * markdown that has no rendered form — which is exactly the case the source
+ * boxes exist for.
+ */
+function isDefinitionsBlock(block) {
+  if (block.type !== "paragraph") {
+    return false;
+  }
+
+  const lines = block.source.split("\n").filter((line) => line.trim() !== "");
+  return lines.length > 0 && lines.every((line) => REFERENCE_DEFINITION_RE.test(line));
+}
+
+// Whether a block is written back from its own source rather than from the DOM.
+function isSourceBlock(block) {
+  return !VisualEditor.isRich(block) || isDefinitionsBlock(block);
+}
+
+function pageEditActive() {
+  return state.pageEdit.active;
+}
+
+// The source a block currently stands for: what its own textarea says if it has
+// one, otherwise the text it came in with.
+function blockSource(block) {
+  if (block.sourceOverride == null) {
+    return block.source;
+  }
+
+  const value = String(block.sourceOverride).replace(/\n+$/, "");
+  return value ? `${value}\n` : "";
+}
+
+function embedLabel(block) {
   switch (block.type) {
     case "fence":
-      return block.info ? `Code · ${block.info}` : "Code";
+      return block.info ? `code (${block.info})` : "code";
     case "table":
-      return "Table";
+      return "table";
     case "math":
-      return "Math";
+      return "math";
     case "html":
       return "HTML";
     case "frontmatter":
-      return "Front matter";
+      return "front matter";
     default:
-      return "Source";
+      return isDefinitionsBlock(block) ? "link definitions" : "source";
   }
 }
 
-function renderVisualBlock(block, index) {
-  const wrapper = document.createElement("div");
-  wrapper.dataset.index = String(index);
-
-  // A block markdown expresses more precisely than formatted text can is shown
-  // as its source. Nothing is gained by rendering a table you then have to
-  // rewrite from the rendering.
-  if (!VisualEditor.isRich(block)) {
-    wrapper.className = "ve-block ve-source";
-
-    const head = document.createElement("div");
-    head.className = "ve-source-head";
-    head.textContent = visualSourceLabel(block);
-    wrapper.appendChild(head);
-
-    const area = document.createElement("textarea");
-    area.value = block.source.replace(/\n+$/, "");
-    area.spellcheck = false;
-    area.rows = Math.min(20, Math.max(2, area.value.split("\n").length));
-    area.setAttribute("aria-label", `${visualSourceLabel(block)} source`);
-    area.addEventListener("input", () => {
-      block.dirty = true;
-      block.sourceOverride = area.value;
-      markEditorDirty();
-    });
-    wrapper.appendChild(area);
-    return wrapper;
-  }
-
-  wrapper.className = "ve-block markdown-body";
-  // setAttribute, not the property: the attribute is what CSS and querySelector
-  // see, and not every DOM implementation reflects the property back to it.
-  wrapper.setAttribute("contenteditable", "true");
-  wrapper.spellcheck = true;
-  wrapper.innerHTML = MarkdownCore.renderMarkdown(block.source);
-
-  wrapper.addEventListener("input", () => {
-    block.dirty = true;
-    markEditorDirty();
-  });
-
-  return wrapper;
+function markPageEditDirty() {
+  updatePageEditState();
 }
 
-function renderVisualEditor() {
-  if (!elements.visualDoc) {
+function updatePageEditState() {
+  if (!elements.pageEditState) {
     return;
   }
 
-  visualBlocks = VisualEditor.splitBlocks(elements.editorInput.value);
-  elements.visualDoc.innerHTML = "";
+  elements.pageEditState.textContent = isPageEditDirty() ? "Unsaved changes" : "No changes yet";
+}
 
-  for (const [index, block] of visualBlocks.entries()) {
-    // A run of blank lines is spacing, not content. It is kept in the model so
-    // the document reassembles exactly, and simply not drawn.
+/* A block that survives being shown as formatted text. It is the rendered
+ * markdown, editable in place — no frame, no handle, nothing to tell you that
+ * the paragraph you are typing in is a paragraph in a list of blocks.
+ */
+function renderRichBlock(block, index) {
+  const node = document.createElement("div");
+  node.className = "ve-block";
+  node.dataset.index = String(index);
+  // setAttribute, not the property: the attribute is what CSS and querySelector
+  // see, and not every DOM implementation reflects the property back to it.
+  node.setAttribute("contenteditable", "true");
+  node.spellcheck = true;
+  node.innerHTML = MarkdownCore.renderMarkdown(block.source + pageLinkReferences);
+
+  node.addEventListener("input", () => {
+    block.dirty = true;
+    markPageEditDirty();
+  });
+
+  return node;
+}
+
+/* Everything markdown says more precisely than formatted text can: code fences,
+ * tables, math, raw HTML, front matter.
+ *
+ * These stay rendered — a table is still a table, a diagram is still a diagram —
+ * because the page is supposed to look like the document. They are simply not
+ * typed into directly. Asking for one opens its source, which is the only
+ * honest way to edit a table without silently rewriting its alignment.
+ */
+function renderEmbedBlock(block, index) {
+  const node = document.createElement("div");
+  node.className = "ve-block ve-embed";
+  node.dataset.index = String(index);
+  node.setAttribute("contenteditable", "false");
+  paintEmbedBlock(node, block);
+  return node;
+}
+
+function paintEmbedBlock(node, block) {
+  node.classList.remove("is-source-open");
+  // A diagram in here may already own a pan-zoom instance bound to an element
+  // that is about to be thrown away.
+  destroyPanZoomInstances(node);
+  node.innerHTML = "";
+
+  const view = document.createElement("div");
+  view.className = "ve-embed-view";
+
+  if (block.type === "frontmatter" || isDefinitionsBlock(block)) {
+    // Neither of these appears in the document as it reads, so showing them as
+    // a rendered anything would be an invention. They get a marker instead —
+    // visible enough to find, small enough not to be part of the prose.
+    view.innerHTML = `<span class="ve-embed-note">${MarkdownCore.escapeHtml(embedLabel(block))}</span>`;
+  } else {
+    view.innerHTML = MarkdownCore.renderMarkdown(blockSource(block) + pageLinkReferences);
+  }
+
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "ve-embed-edit";
+  open.title = `Edit this ${embedLabel(block)} as markdown`;
+  open.innerHTML = `<i class="ph ph-code" aria-hidden="true"></i><span>Edit ${embedLabel(block)}</span>`;
+  open.addEventListener("click", () => openEmbedSource(node, block));
+
+  node.append(view, open);
+  void renderMermaidBlocks(node);
+}
+
+function openEmbedSource(node, block) {
+  node.classList.add("is-source-open");
+  destroyPanZoomInstances(node);
+  node.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "ve-embed-head";
+  head.textContent = embedLabel(block);
+
+  const area = document.createElement("textarea");
+  area.className = "ve-embed-source";
+  area.value = blockSource(block).replace(/\n+$/, "");
+  area.spellcheck = false;
+  area.setAttribute("aria-label", `${embedLabel(block)} source`);
+
+  const fit = () => {
+    area.rows = Math.min(24, Math.max(2, area.value.split("\n").length));
+  };
+  fit();
+
+  area.addEventListener("input", () => {
+    block.dirty = true;
+    block.sourceOverride = area.value;
+    fit();
+    markPageEditDirty();
+  });
+
+  const done = document.createElement("button");
+  done.type = "button";
+  done.className = "ve-embed-done";
+  done.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i><span>Done</span>';
+  done.addEventListener("click", () => paintEmbedBlock(node, block));
+
+  node.append(head, area, done);
+  area.focus();
+}
+
+function renderPageEditor(markdown) {
+  pageBlocks = VisualEditor.splitBlocks(markdown);
+  pageLinkReferences = collectLinkReferences(markdown);
+
+  destroyPanZoomInstances(elements.docContent);
+  elements.docContent.innerHTML = "";
+  elements.docContent.classList.add("doc-editing", "visible");
+
+  for (const [index, block] of pageBlocks.entries()) {
+    // A run of blank lines is spacing, not content. It stays in the model so the
+    // document reassembles exactly, and is simply not drawn.
     if (block.type === "blank") {
       continue;
     }
 
-    elements.visualDoc.appendChild(renderVisualBlock(block, index));
+    elements.docContent.appendChild(isSourceBlock(block)
+      ? renderEmbedBlock(block, index)
+      : renderRichBlock(block, index));
   }
 
-  const sourceCount = visualBlocks.filter((block) => !VisualEditor.isRich(block) && block.type !== "blank").length;
-  elements.visualHint.textContent = sourceCount > 0
-    ? `${sourceCount} block${sourceCount === 1 ? "" : "s"} shown as source`
-    : "";
+  // An empty document, or one made entirely of code and tables, would have
+  // nowhere to put the cursor. Give it a paragraph to start in; it contributes
+  // nothing to the file until something is typed into it.
+  if (!elements.docContent.querySelector('[contenteditable="true"]')) {
+    const index = pageBlocks.length;
+    pageBlocks.push({ type: "paragraph", source: "" });
+    const node = renderRichBlock(pageBlocks[index], index);
+    // Only this one carries a placeholder. A block that is empty because the
+    // document says so must not sprout words the file does not contain.
+    node.classList.add("ve-placeholder");
+    elements.docContent.appendChild(node);
+  }
+
+  void renderMermaidBlocks(elements.docContent);
+  updatePageEditState();
 }
 
 /* Back to markdown.
  *
- * Only dirty blocks are re-serialized. This is the whole safety property, and
- * the reason the visual editor can be pointed at documents written elsewhere.
+ * Only dirty blocks are re-serialized. That is the whole safety property, and
+ * the reason this can be pointed at a library written elsewhere.
  */
-function collectVisualMarkdown() {
+function collectPageMarkdown() {
   const out = [];
 
-  for (const [index, block] of visualBlocks.entries()) {
+  for (const [index, block] of pageBlocks.entries()) {
     if (!block.dirty) {
       out.push(block.source);
       continue;
     }
 
-    if (!VisualEditor.isRich(block)) {
-      const value = String(block.sourceOverride ?? "").replace(/\n+$/, "");
-      out.push(value ? `${value}\n` : "");
+    if (isSourceBlock(block)) {
+      out.push(blockSource(block));
       continue;
     }
 
-    const node = elements.visualDoc.querySelector(`.ve-block[data-index="${index}"]`);
+    const node = elements.docContent.querySelector(`.ve-block[data-index="${index}"]`);
     out.push(node ? VisualEditor.serializeEditedBlock(node) : block.source);
   }
 
   return out.join("");
 }
 
-function syncMarkdownFromVisual() {
-  if (state.editorSurface !== "visual") {
+function isPageEditDirty() {
+  return pageEditActive() && collectPageMarkdown() !== state.pageEdit.initial;
+}
+
+// The bar sits under the viewer toolbar, which is sticky and whose height
+// depends on what is in it. Measuring beats guessing.
+function syncPageEditOffset() {
+  if (!elements.pageEditBar || !elements.viewerToolbar) {
     return;
   }
 
-  const next = collectVisualMarkdown();
-  if (next !== elements.editorInput.value) {
-    elements.editorInput.value = next;
+  const height = elements.viewerToolbar.offsetHeight || 45;
+  elements.pageEditBar.style.setProperty("--page-edit-top", `${height}px`);
+}
+
+/* Put the reading view back from markdown already in hand. No refetch: the
+ * content is what was loaded to edit, so a round trip to the server would only
+ * add a delay and a way to fail.
+ */
+async function restorePageView(file, markdown, title) {
+  destroyPanZoomInstances(elements.docContent);
+  elements.docContent.innerHTML = renderDocumentContent(file, markdown, title || file);
+  elements.docContent.classList.add("visible");
+  await renderMermaidBlocks(elements.docContent);
+}
+
+async function startPageEdit() {
+  if (pageEditActive()) {
+    return;
+  }
+
+  if (state.isRecycleBinMode) {
+    setStatus("Restore this document before editing it.", "error");
+    return;
+  }
+
+  if (!state.activeFile) {
+    setStatus("Open a document first, then choose Edit.", "error");
+    return;
+  }
+
+  if (isNotebookFile(state.activeFile)) {
+    setStatus("Notebook files are view-only in this viewer.", "neutral");
+    return;
+  }
+
+  if (!can("doc:write")) {
+    setStatus("Your account cannot edit documents.", "error");
+    return;
+  }
+
+  // A .mmd file is diagram source that the viewer wraps in a fence to render.
+  // Its content is not markdown, so cutting it into markdown blocks would be
+  // reading it as something it is not. It goes straight to the source editor.
+  if (isDiagramFile(state.activeFile)) {
+    await openEditorForDocument(state.activeFile);
+    return;
+  }
+
+  const file = state.activeFile;
+  const doc = getDocByFile(file);
+
+  let content;
+  try {
+    content = await loadDocContent(file);
+  } catch (error) {
+    setStatus(error.message, "error");
+    return;
+  }
+
+  // Loading is async and the sidebar is not. If the reader moved on while the
+  // content was in flight, editing what they left would be a surprise.
+  if (state.activeFile !== file) {
+    return;
+  }
+
+  state.pageEdit = {
+    active: true,
+    file,
+    title: doc?.title || file,
+    initial: content
+  };
+
+  // Search highlights belong to the rendering that is about to be replaced.
+  resetJumpNavigation();
+
+  document.body.classList.add("page-editing");
+  elements.pageEditBar.hidden = false;
+  syncPageEditOffset();
+  renderPageEditor(content);
+
+  elements.docContent.querySelector('[contenteditable="true"]')?.focus();
+  setStatus(`Editing ${docName(file)} on the page.`, "neutral");
+}
+
+function exitPageEdit() {
+  state.pageEdit = { active: false, file: null, title: "", initial: "" };
+  pageBlocks = [];
+  pageLinkReferences = "";
+  elements.pageEditBar.hidden = true;
+  elements.docContent.classList.remove("doc-editing");
+  document.body.classList.remove("page-editing");
+}
+
+/* Saving keeps you where you were reading.
+ *
+ * Re-rendering resets the scroll, and being thrown to the top of a long document
+ * every time you fix a sentence in the middle of it is its own reason not to
+ * edit anything.
+ */
+function viewerScroll() {
+  return elements.docContent.closest(".viewer") || null;
+}
+
+async function savePageEdit() {
+  if (!pageEditActive()) {
+    return;
+  }
+
+  const { file, title } = state.pageEdit;
+  const content = collectPageMarkdown();
+
+  if (content === state.pageEdit.initial) {
+    exitPageEdit();
+    await restorePageView(file, content, title);
+    setStatus(`No changes to save in ${docName(file)}.`, "neutral");
+    return;
+  }
+
+  const viewer = viewerScroll();
+  const offset = viewer ? viewer.scrollTop : 0;
+
+  elements.pageEditSaveBtn.disabled = true;
+
+  try {
+    const payload = await requestJson(`/api/docs/${docUrl(file)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content })
+    });
+
+    exitPageEdit();
+    await refreshDocs({ openFile: payload.file || file, preserveSearch: true });
+
+    if (viewer) {
+      viewer.scrollTop = offset;
+    }
+
+    setStatus(`Saved ${payload.file || file}.`, "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    elements.pageEditSaveBtn.disabled = false;
   }
 }
 
-function setEditorSurface(surface) {
-  const visual = surface === "visual";
-
-  // Leaving visual mode writes the blocks back before the source is shown.
-  if (!visual && state.editorSurface === "visual") {
-    syncMarkdownFromVisual();
+async function cancelPageEdit({ confirm = true, restore = true } = {}) {
+  if (!pageEditActive()) {
+    return true;
   }
 
-  state.editorSurface = visual ? "visual" : "markdown";
+  if (confirm && isPageEditDirty()) {
+    const discard = await requestConfirmation({
+      title: "Discard your edits?",
+      message: `${docName(state.pageEdit.file)} has changes that have not been saved.`,
+      confirmLabel: "Discard Changes",
+      tone: "danger"
+    });
 
-  elements.surfaceMarkdownBtn.setAttribute("aria-pressed", String(!visual));
-  elements.surfaceVisualBtn.setAttribute("aria-pressed", String(visual));
-  elements.visualSurface.hidden = !visual;
-  elements.editorGrid.hidden = visual;
-  if (elements.editorTabs) {
-    elements.editorTabs.hidden = visual;
+    if (!discard) {
+      return false;
+    }
   }
 
-  if (visual) {
-    renderVisualEditor();
-    elements.visualDoc.querySelector('[contenteditable="true"]')?.focus();
-  } else {
-    syncEditorTabs();
-    void renderEditorPreview();
+  const { file, initial, title } = state.pageEdit;
+  exitPageEdit();
+
+  // A caller that is about to draw a different document does not need this one
+  // rendered first, only to be thrown away a frame later.
+  if (restore) {
+    await restorePageView(file, initial, title);
+    setStatus(`Stopped editing ${docName(file)}.`, "neutral");
   }
+
+  return true;
 }
 
-function markEditorDirty() {
-  // The editor's unsaved-changes check compares against the source, so the
-  // source has to keep up with what the blocks say.
-  syncMarkdownFromVisual();
+/* The way out to the source.
+ *
+ * Edits made on the page come with you, so the switch is not a decision you have
+ * to make before you start. The page behind the dialog goes back to what is on
+ * disk: the dialog now owns the unsaved version, and it already asks before
+ * throwing it away.
+ */
+async function openSourceFromPageEdit() {
+  if (!pageEditActive()) {
+    return;
+  }
+
+  const { file, initial, title } = state.pageEdit;
+  const content = collectPageMarkdown();
+  const doc = getDocByFile(file);
+
+  exitPageEdit();
+  await restorePageView(file, initial, title);
+
+  openEditor({
+    mode: "edit",
+    fileName: file,
+    content,
+    folderId: doc?.folderId || null
+  });
 }
 
 /* The toolbar.
@@ -5896,18 +6226,25 @@ function markEditorDirty() {
  * reimplement worse. What it produces is normalised by the serializer anyway —
  * a <b> becomes ** either way.
  */
-function applyVisualCommand(command) {
+function editableBlockFromSelection() {
   const selection = window.getSelection();
-  const block = selection?.anchorNode
-    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
-      ?.closest(".ve-block[contenteditable]")
-    : null;
+  const anchor = selection?.anchorNode;
+  if (!anchor) {
+    return null;
+  }
 
+  const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+  return element?.closest('.ve-block[contenteditable="true"]') || null;
+}
+
+function applyVisualCommand(command) {
+  const block = editableBlockFromSelection();
   if (!block) {
-    notify("Put the cursor in a block first.", "neutral");
+    notify("Put the cursor in the text first.", "neutral");
     return;
   }
 
+  const selection = window.getSelection();
   const run = (name, value) => document.execCommand(name, false, value);
 
   switch (command) {
@@ -5946,14 +6283,9 @@ function applyVisualCommand(command) {
 }
 
 function applyVisualBlockFormat(tag) {
-  const selection = window.getSelection();
-  const block = selection?.anchorNode
-    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
-      ?.closest(".ve-block[contenteditable]")
-    : null;
-
+  const block = editableBlockFromSelection();
   if (!block) {
-    notify("Put the cursor in a block first.", "neutral");
+    notify("Put the cursor in the text first.", "neutral");
     return;
   }
 
@@ -6019,8 +6351,6 @@ function openEditor({ mode, fileName, content, folderId = null }) {
   // Always opens on Write: the editor is opened to type in, and landing on a
   // preview of what you already have would be a step to undo every time.
   state.editorTab = "write";
-  // Markdown is the surface the editor opens on; Visual is a deliberate switch.
-  setEditorSurface("markdown");
   syncEditorTabs();
   syncEditorFolderPicker(mode, folderId);
 
@@ -6280,9 +6610,6 @@ async function uploadFolder(picked, folderId = null) {
 }
 
 async function saveEditorDocument() {
-  // Whatever is on screen has to reach the source before it is written.
-  syncMarkdownFromVisual();
-
   const fileName = ensureDocFilename(elements.editorFileName.value.trim());
   const content = elements.editorInput.value;
 
@@ -7066,6 +7393,17 @@ elements.refreshDocs.addEventListener("click", async () => {
 
 // Both trash-view toggles flip between their own mode and "docs", so they share one handler.
 async function switchViewMode(targetMode) {
+  // Leaving the documents view takes the document being edited off the screen,
+  // so it has to ask the same question closing the editor would. Asked before
+  // the modes are read, so what is written back cannot be based on a view that
+  // moved on while the question was on screen.
+  if (pageEditActive()) {
+    const left = await cancelPageEdit({ restore: false });
+    if (!left) {
+      return;
+    }
+  }
+
   const previousMode = state.viewMode;
   const nextMode = previousMode === targetMode ? "docs" : targetMode;
 
@@ -7261,7 +7599,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("beforeunload", (event) => {
-  if (!isEditorDirty()) {
+  if (!isEditorDirty() && !isPageEditDirty()) {
     return;
   }
 
@@ -7271,6 +7609,11 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 window.addEventListener("resize", () => {
+  // The toolbar the edit bar sticks below wraps to two rows on a narrow window.
+  if (pageEditActive()) {
+    syncPageEditOffset();
+  }
+
   if (window.innerWidth > MOBILE_BREAKPOINT && elements.appShell.classList.contains("nav-open")) {
     setNavOpen(false);
   }
@@ -7345,12 +7688,23 @@ elements.editDocBtn.addEventListener("click", () => {
   openEditorForCurrentDoc();
 });
 
+// The pencil edits the document where it is. The source editor is one button
+// away from there, for when markdown is what you actually want to type.
 elements.editCurrentDocBtn.addEventListener("click", () => {
-  openEditorForCurrentDoc();
+  void startPageEdit();
 });
 
-elements.surfaceMarkdownBtn.addEventListener("click", () => setEditorSurface("markdown"));
-elements.surfaceVisualBtn.addEventListener("click", () => setEditorSurface("visual"));
+elements.pageEditSaveBtn.addEventListener("click", () => {
+  void savePageEdit();
+});
+
+elements.pageEditCancelBtn.addEventListener("click", () => {
+  void cancelPageEdit();
+});
+
+elements.pageEditSourceBtn.addEventListener("click", () => {
+  void openSourceFromPageEdit();
+});
 
 // Delegated, so the toolbar can grow without another listener each time.
 elements.visualToolbar.addEventListener("mousedown", (event) => {
@@ -7377,8 +7731,25 @@ elements.visualToolbar.addEventListener("click", (event) => {
 // The shortcuts people already have in their fingers. Ctrl+B and Ctrl+I are
 // handled by contenteditable itself; Ctrl+K is not, and browsers would
 // otherwise take it for the address bar.
-elements.visualDoc.addEventListener("keydown", (event) => {
+elements.docContent.addEventListener("keydown", (event) => {
+  if (!pageEditActive()) {
+    return;
+  }
+
+  // Escape leaves editing, and asks first if there is anything to lose.
+  if (event.key === "Escape") {
+    event.preventDefault();
+    void cancelPageEdit();
+    return;
+  }
+
   if (!(event.ctrlKey || event.metaKey)) {
+    return;
+  }
+
+  if (event.key === "s" || event.key === "S") {
+    event.preventDefault();
+    void savePageEdit();
     return;
   }
 
@@ -7391,7 +7762,11 @@ elements.visualDoc.addEventListener("keydown", (event) => {
 // Pasting rich text into a contenteditable brings the source site's markup
 // with it — fonts, colours, spans, classes. Only the text is wanted; the
 // formatting people are pasting is not the formatting this document uses.
-elements.visualDoc.addEventListener("paste", (event) => {
+elements.docContent.addEventListener("paste", (event) => {
+  if (!pageEditActive() || !event.target.closest?.('[contenteditable="true"]')) {
+    return;
+  }
+
   const text = event.clipboardData?.getData("text/plain");
   if (typeof text !== "string") {
     return;
@@ -7484,7 +7859,7 @@ elements.dockNew.addEventListener("click", () => {
 });
 
 elements.dockEdit.addEventListener("click", () => {
-  openEditorForCurrentDoc();
+  void startPageEdit();
 });
 
 window.addEventListener("hashchange", () => {
