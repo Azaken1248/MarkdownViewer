@@ -684,6 +684,56 @@ async function run(server) {
     }
   }
 
+  console.log("=== everything is listed alphabetically ===");
+  {
+    await admin.post("/api/folders", { name: "zeta" });
+    await admin.post("/api/folders", { name: "Alpha sort" });
+    await admin.post("/api/folders", { name: "middle" });
+
+    const tops = (await admin.get("/api/docs")).body.folders
+      .filter((f) => !f.parentId)
+      .map((f) => f.name);
+    const wanted = [...tops].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    check("folders come back in name order", tops, wanted);
+    // Case must not split the list into two runs, which a plain sort would do.
+    check("...case-insensitively",
+      tops.indexOf("Alpha sort") < tops.indexOf("middle")
+      && tops.indexOf("middle") < tops.indexOf("zeta"), true);
+
+    const sortFolder = (await admin.get("/api/docs")).body.folders.find((f) => f.name === "zeta").id;
+    for (const name of ["page-10.md", "page-2.md", "Banana.md", "apple.md"]) {
+      await admin.post("/api/docs", { fileName: name, content: `# ${name}\n`, folderId: sortFolder });
+    }
+
+    const inZeta = (await admin.get("/api/docs")).body.docs
+      .filter((d) => d.file.startsWith("zeta/"))
+      .map((d) => d.file.slice("zeta/".length));
+
+    check("documents are alphabetical too, ignoring case",
+      inZeta, ["apple.md", "Banana.md", "page-2.md", "page-10.md"]);
+
+    // The last one is the point of comparing numbers as numbers: a plain
+    // string sort puts page-10 before page-2.
+    check("...with numbers compared as numbers",
+      inZeta.indexOf("page-2.md") < inZeta.indexOf("page-10.md"), true);
+
+    // Editing a document used to move it to the top of its folder, because the
+    // list was sorted by modification time.
+    await admin.put("/api/docs/zeta/page-10.md", { content: "# touched\n" });
+    const afterEdit = (await admin.get("/api/docs")).body.docs
+      .filter((d) => d.file.startsWith("zeta/"))
+      .map((d) => d.file.slice("zeta/".length));
+    check("editing a document does not move it", afterEdit, inZeta);
+
+    // The endpoint is gone; "reorder" now just looks like a folder id that
+    // does not exist. What matters is that nothing it used to do still happens.
+    const beforeReorder = (await admin.get("/api/docs")).body.folders.map((f) => f.name);
+    const gone = await admin.put("/api/folders/reorder", { folderIds: [sortFolder] });
+    check("the reorder endpoint is gone", gone.status >= 400, true);
+    check("...and the order is untouched",
+      (await admin.get("/api/docs")).body.folders.map((f) => f.name), beforeReorder);
+  }
+
   console.log("=== the store survives a restart ===");
   {
     // Sessions and accounts are files, not memory: a restart must not sign

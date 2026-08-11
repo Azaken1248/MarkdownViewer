@@ -153,11 +153,17 @@ flat directory could not express — the second used to become `README-1.md`.
 Names have to be unique within a folder, which is the filesystem's own rule
 rather than one this app adds.
 
-`data/document-organizer.json` still holds the folder tree — ids, names,
-parents and ordering — because a folder needs a stable identity that survives
-being renamed, and an ordering the alphabet does not provide. But it no longer
-records where any document lives: the directory a file sits in *is* the answer,
-so the two can never disagree. Folders nest up to 8 levels.
+`data/document-organizer.json` still holds the folder tree — ids, names and
+nesting — because a folder needs a stable identity that survives being renamed.
+But it no longer records where any document lives: the directory a file sits in
+*is* the answer, so the two can never disagree. Folders nest up to 8 levels.
+
+Folders and documents are listed **alphabetically**, case-insensitively, with
+numbers compared as numbers so `page-2.md` comes before `page-10.md`. There is
+no manual ordering and nothing to drag: the list is wherever the alphabet puts
+it, which is also where you will look for something. Editing a document does
+not move it — the list used to be sorted by modification time within a folder,
+so saving a file sent it to the top.
 
 Renaming or moving a folder is one `rename` on disk and no paths rewritten
 anywhere. Deleting one moves its documents back to the top level rather than
@@ -476,7 +482,6 @@ depending on what sits in front of it is not worth a tidier route pattern.
 | --- | --- | --- |
 | `POST` | `/api/folders` | Create. Accepts `parentId` for nesting |
 | `PUT` | `/api/folders/:folderId` | Rename and/or reparent |
-| `PUT` | `/api/folders/reorder` | Reorder within one parent |
 | `DELETE` | `/api/folders/:folderId` | Delete the subtree. Documents are unfiled, never deleted |
 
 ### Recycle bin and archive

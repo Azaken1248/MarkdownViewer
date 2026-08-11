@@ -1148,13 +1148,29 @@ function collectFolderSubtreeIds(folders, rootId) {
 
 // Documents are sorted by their folder's position in a depth-first walk, so a
 // flat list still comes back in the order the tree displays.
+/* Alphabetical, case-insensitively, and numbers compared as numbers so
+ * "page-2" comes before "page-10" rather than after it. Used for folders and
+ * for documents, on both sides, so the tree and the flat list agree.
+ */
+function compareNames(left, right) {
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+}
+
+/* A key that sorts a flat list of documents into the order the nested tree
+ * draws them: each ancestor's name in turn, so a folder's documents follow it
+ * and its subfolders sort among themselves.
+ *
+ * Keyed on names rather than on the stored `order`, because the tree is
+ * alphabetical now. \u0000 separates the levels: it cannot appear in a folder
+ * name, so "A" and "A B" cannot run together into the same key.
+ */
 function buildFolderSortKeys(folders) {
   const keys = new Map();
 
   for (const folder of folders) {
     const key = getFolderAncestry(folders, folder.id)
-      .map((entry) => String(entry.order ?? 0).padStart(6, "0"))
-      .join(".");
+      .map((entry) => entry.name.toLowerCase())
+      .join("\u0000");
     keys.set(folder.id, key);
   }
 
@@ -1328,7 +1344,13 @@ function resolveFolderInfo(organizerState, filePath) {
 }
 
 function serializeFolders(folders, allFolders = folders) {
-  return folders.map((folder) => ({
+  // Sorted here rather than only in the client, so the API's own answer is in
+  // the order the tree draws it. Depth-first by path, so a folder's children
+  // follow it instead of the whole list being flat-sorted by name.
+  const sorted = [...folders].sort((left, right) =>
+    compareNames(getFolderPath(allFolders, left.id), getFolderPath(allFolders, right.id)));
+
+  return sorted.map((folder) => ({
     id: folder.id,
     name: folder.name,
     parentId: folder.parentId || null,
@@ -2116,16 +2138,13 @@ async function getDocs(organizerState = null) {
 
   docs.sort((a, b) => {
     if (a.folderSortKey !== b.folderSortKey) {
-      return a.folderSortKey < b.folderSortKey ? -1 : 1;
+      return compareNames(a.folderSortKey, b.folderSortKey);
     }
 
-    const rightTime = Date.parse(b.updatedAt) || 0;
-    const leftTime = Date.parse(a.updatedAt) || 0;
-    if (rightTime !== leftTime) {
-      return rightTime - leftTime;
-    }
-
-    return a.file.localeCompare(b.file);
+    // By name, not by when it was last touched. Editing a document used to
+    // teleport it to the top of its folder, which is the opposite of what a
+    // list you navigate by eye should do.
+    return compareNames(toDocTitle(a.file), toDocTitle(b.file)) || compareNames(a.file, b.file);
   });
   return docs;
 }
@@ -2825,68 +2844,14 @@ app.post("/api/folders", requirePermission("doc:write"), async (req, res, next) 
 // Folder order was previously write-once at creation time. This lets the caller
 // hand back the ids in the order it wants; any folder omitted keeps its relative
 // position after the listed ones, so a partial list can never drop a folder.
-app.put("/api/folders/reorder", requirePermission("doc:write"), async (req, res, next) => {
-  try {
-    const requestedIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : null;
-    if (!requestedIds) {
-      res.status(400).json({ error: "folderIds must be an array of folder ids" });
-      return;
-    }
+/* There is no reorder endpoint any more.
+ *
+ * Folders and documents are listed alphabetically, so a stored position cannot
+ * change what anyone sees. `order` is still written when a folder is created,
+ * because the organizer's shape is otherwise unchanged and a field nothing
+ * reads is cheaper than another format change so soon after the last one.
+ */
 
-    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
-      const byId = new Map(organizer.folders.map((folder) => [folder.id, folder]));
-      const seen = new Set();
-      const ordered = [];
-
-      for (const rawId of requestedIds) {
-        const folderId = normalizeFolderId(rawId);
-        if (!folderId || seen.has(folderId)) {
-          continue;
-        }
-
-        const folder = byId.get(folderId);
-        if (!folder) {
-          throw new HttpError(404, `Folder not found: ${folderId}`);
-        }
-
-        seen.add(folderId);
-        ordered.push(folder);
-      }
-
-      // Order is per sibling group now, so a reorder request has to describe one
-      // group. Mixing levels would make the resulting indices meaningless.
-      const parents = new Set(ordered.map((folder) => folder.parentId || null));
-      if (parents.size > 1) {
-        throw new HttpError(400, "All folders in a reorder must share the same parent");
-      }
-
-      const targetParent = ordered.length ? (ordered[0].parentId || null) : null;
-
-      // Siblings the caller left out keep their relative order after the listed
-      // ones, so a partial list can never drop or shuffle an unmentioned folder.
-      for (const folder of organizer.folders) {
-        if (!seen.has(folder.id) && (folder.parentId || null) === targetParent) {
-          ordered.push(folder);
-        }
-      }
-
-      const now = new Date().toISOString();
-      ordered.forEach((folder, index) => {
-        if (folder.order !== index) {
-          folder.order = index;
-          folder.updatedAt = now;
-        }
-      });
-    });
-
-    res.json({ folders: serializeFolders(savedOrganizer.folders) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Renames a folder, moves it under a new parent, or both. `parentId` is only
-// touched when the key is present, so a rename never silently reparents.
 app.put("/api/folders/:folderId", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const normalizedFolderId = normalizeFolderId(req.params.folderId);

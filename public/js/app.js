@@ -637,7 +637,7 @@ function renderFolderPickerList() {
     childrenOf.get(key).push(folder);
   }
   for (const list of childrenOf.values()) {
-    list.sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+    list.sort((left, right) => compareNames(left.name, right.name));
   }
 
   const folders = [];
@@ -689,44 +689,10 @@ function renderFolderPickerList() {
   });
 }
 
-// Swaps a folder with its neighbour and persists the whole ordering, so the
-// server never has to infer intent from a single index.
-// Order is scoped to a sibling group now, so only the folder's own siblings are
-// reordered — moving a child never disturbs folders at another level.
-async function moveFolderBy(folderId, offset) {
-  const folder = getFolderRecord(folderId);
-  if (!folder) {
-    return;
-  }
-
-  const siblings = state.folders
-    .filter((entry) => (entry.parentId || null) === (folder.parentId || null))
-    .sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
-
-  const index = siblings.findIndex((entry) => entry.id === folderId);
-  const target = index + offset;
-
-  if (index < 0 || target < 0 || target >= siblings.length) {
-    return;
-  }
-
-  [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
-
-  try {
-    await requestJson("/api/folders/reorder", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ folderIds: siblings.map((entry) => entry.id) })
-    });
-
-    await refreshDocs({ preserveSearch: true });
-    notify(`Moved "${folder.name}" ${offset < 0 ? "up" : "down"}.`, "success");
-  } catch (error) {
-    notify(error.message, "error");
-  }
-}
+// Folders and documents are listed alphabetically, so there is no manual
+// ordering to move a folder within. The "move up" / "move down" row actions and
+// the reorder request they sent are gone with it — a control that cannot change
+// what you see is worse than no control.
 
 function openFolderModal({ mode = "create", file = null, folderId = null, parentId = null } = {}) {
   state.folderModalOpen = true;
@@ -2159,6 +2125,14 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // The name of a document, without the folder it sits in. A document's identity
 // is its path now ("docs/README.md"), and a row in a tree that already shows
 // the folder should say "README.md".
+/* Alphabetical, case-insensitively, with numbers compared as numbers so
+ * "page-2" sorts before "page-10". The server sorts the same way; this exists
+ * so the client can re-sort after a local change without waiting for a reload.
+ */
+function compareNames(left, right) {
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+}
+
 function docName(file) {
   const value = String(file || "");
   const index = value.lastIndexOf("/");
@@ -4505,6 +4479,14 @@ function buildFolderTree(docs) {
     docsByFolder.get(key).push(doc);
   }
 
+  // The server already sorts, but a document renamed or moved in this session
+  // is placed locally before the next reload, and it should land in the right
+  // place rather than at the end of its folder.
+  for (const list of docsByFolder.values()) {
+    list.sort((left, right) => compareNames(left.title || left.file, right.title || right.file)
+      || compareNames(left.file, right.file));
+  }
+
   const childrenOf = new Map();
   for (const folder of state.folders) {
     const key = folder.parentId || "__top__";
@@ -4515,7 +4497,7 @@ function buildFolderTree(docs) {
   }
 
   for (const list of childrenOf.values()) {
-    list.sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
+    list.sort((left, right) => compareNames(left.name, right.name));
   }
 
   const isSearching = Boolean(elements.searchInput.value.trim());
@@ -4764,23 +4746,10 @@ function buildFolderActions(node) {
   const actions = document.createElement("div");
   actions.className = "tree-actions";
 
-  const siblings = state.folders
-    .filter((entry) => (entry.parentId || null) === (folder.parentId || null))
-    .sort((left, right) => (left.order - right.order) || left.name.localeCompare(right.name));
-  const position = siblings.findIndex((entry) => entry.id === folder.id);
-
   actions.append(
     buildTreeAction("New subfolder", "ph-folder-plus", () => {
       openFolderModal({ mode: "create", parentId: folder.id });
     }),
-
-    buildTreeAction(`Move ${folder.name} up`, "ph-arrow-up", () => {
-      void moveFolderBy(folder.id, -1);
-    }, { disabled: position <= 0 }),
-
-    buildTreeAction(`Move ${folder.name} down`, "ph-arrow-down", () => {
-      void moveFolderBy(folder.id, 1);
-    }, { disabled: position < 0 || position >= siblings.length - 1 }),
 
     buildTreeAction(`Rename ${folder.name}`, "ph-pencil-simple", () => {
       beginInlineFolderRename(folder.id);
@@ -5730,7 +5699,7 @@ function syncEditorFolderPicker(mode, folderId) {
   rootOption.textContent = state.rootFolderLabel || "Ungrouped";
   select.appendChild(rootOption);
 
-  for (const folder of [...state.folders].sort((left, right) => left.order - right.order)) {
+  for (const folder of [...state.folders].sort((left, right) => compareNames(left.name, right.name))) {
     const option = document.createElement("option");
     option.value = folder.id;
     option.textContent = folder.name;
