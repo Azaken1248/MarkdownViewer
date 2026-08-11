@@ -4436,10 +4436,12 @@ function beginInlineRename(file) {
   // path here would be a move the endpoint refuses.
   beginInlineEdit(label, docName(file), async (nextName) => {
     try {
+      // fileName, not name: the endpoint reads fileName, and sending the wrong
+      // key meant sanitizeNewFilename got undefined and answered "Invalid
+      // document file name" for every rename typed into the tree.
       const payload = await requestJson(`/api/docs/${docUrl(file)}/rename`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nextName })
+        body: JSON.stringify({ fileName: nextName })
       });
       state.contentCache.delete(file);
       const openedFile = state.activeFile === file ? payload.file : state.activeFile;

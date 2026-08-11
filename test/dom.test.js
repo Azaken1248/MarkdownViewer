@@ -403,6 +403,30 @@ async function run(server) {
     await new Promise((r) => setTimeout(r, 100));
     check("escape restores the row", Boolean(rowFor(D("alpha.md"))?.querySelector(".tree-rename-input")), false);
 
+    // And now one that actually goes through. This block only ever opened the
+    // box and pressed Escape, so it never noticed that the request sent `name`
+    // where the endpoint reads `fileName` — every rename typed into the tree
+    // came back "Invalid document file name", and had since the tree was built.
+    window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+    const committing = rowFor(D("alpha.md")).querySelector(".tree-rename-input");
+    committing.value = "alpha-inline.md";
+    committing.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise((r) => setTimeout(r, 600));
+
+    const renamedPath = `${D("alpha.md").slice(0, D("alpha.md").lastIndexOf("/") + 1)}alpha-inline.md`;
+    check("the rename actually lands", Boolean(rowFor(renamedPath)), true);
+    check("...and the old row is gone", Boolean(rowFor(D("alpha.md"))), false);
+    check("...and it stayed in its folder",
+      window.eval(`window.__t.state.docs.some(d => d.file === ${JSON.stringify(renamedPath)})`), true);
+
+    // Put it back, so everything after this still finds alpha.md.
+    window.eval(`window.__t.beginInlineRename(${JSON.stringify(renamedPath)})`);
+    const restoring = rowFor(renamedPath).querySelector(".tree-rename-input");
+    restoring.value = "alpha.md";
+    restoring.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise((r) => setTimeout(r, 600));
+    check("(restored for the checks below)", Boolean(rowFor(D("alpha.md"))), true);
+
     console.log("=== breadcrumbs ===");
     const nav = doc.getElementById("breadcrumbs");
     check("the breadcrumb nav exists", Boolean(nav), true);
