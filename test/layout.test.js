@@ -192,6 +192,47 @@ console.log("=== the editor split stays even ===");
     /overflow-wrap:\s*anywhere/.test(preview), true);
 }
 
+console.log("=== a narrow editor becomes two tabs ===");
+{
+  // Stacking put the preview a screen below the thing that produced it, and
+  // left the textarea short. One pane at a time, with a tap to switch.
+  const tabs = rule(".editor-tabs");
+  check("the tab bar is hidden by default", /display:\s*none/.test(tabs), true);
+
+  const narrow = mediaBlock("@media (max-width: 1160px)");
+  check("...and appears below the split point", /\.editor-tabs \{[^}]*display:\s*flex/.test(narrow), true);
+  check("the grid collapses to one column",
+    /\.editor-grid \{[^}]*grid-template-columns:\s*1fr/.test(narrow), true);
+
+  // Both panes occupy the same cell, so the hidden one takes no room. Stacking
+  // them in separate rows is the thing being replaced.
+  check("both panes share one cell", /\.editor-pane \{[^}]*grid-row:\s*1/.test(narrow), true);
+  check("...and one column too", /\.editor-pane \{[^}]*grid-column:\s*1/.test(narrow), true);
+  check("the labels give way to the tabs",
+    /\.editor-label \{[^}]*display:\s*none/.test(narrow), true);
+
+  // The CSS decides whether the tab bar is visible; the client decides whether
+  // a pane is hidden. If those disagree you get a tab bar that controls
+  // nothing, or no visible pane at all.
+  const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+  const jsQuery = (js.match(/EDITOR_TABS_QUERY = "([^"]+)"/) || [])[1];
+  check("the client uses the same breakpoint as the stylesheet",
+    jsQuery, "(max-width: 1160px)");
+  check("...and puts both panes back when the window widens past it",
+    /matchMedia\?\.\(EDITOR_TABS_QUERY\)\.addEventListener\?\.\("change", syncEditorTabs\)/.test(js), true);
+  check("above the breakpoint neither pane is hidden",
+    /pane\.hidden = tabbed && !selected/.test(js), true);
+
+  // A hidden element has no width, and Mermaid draws to the width it measures.
+  check("switching to preview redraws it at its real width",
+    /state\.editorTab === "preview"\)\s*\{\s*[\s\S]{0,300}renderEditorPreview\(\)/.test(js), true);
+
+  const tab = rule(".editor-tab");
+  check("the tabs are a comfortable touch target", /min-height:\s*44px/.test(tab), true);
+  check("the selected one is marked for assistive tech, not just coloured",
+    /\.editor-tab\[aria-selected="true"\]/.test(css), true);
+}
+
 console.log("=== the editor shows the characters that are there ===");
 {
   // JetBrains Mono draws "###" as one glyph spread across the cells it

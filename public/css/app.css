@@ -2711,6 +2711,51 @@ button.crumb:focus-visible {
   margin-left: auto;
 }
 
+/* Hidden until the split becomes a stack; see the media query near the end. */
+.editor-tabs {
+  display: none;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.editor-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* 44px, the comfortable touch target, since this is a phone control. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.editor-tab i {
+  font-size: 16px;
+}
+
+.editor-tab[aria-selected="true"] {
+  border-color: var(--accent-muted);
+  background: var(--selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.editor-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .editor-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2839,14 +2884,44 @@ button.crumb:focus-visible {
    Responsive
    -------------------------------------------------------------------------- */
 
+/* One pane at a time below the split point.
+ *
+ * Stacking them put the preview under the textarea, which on a phone meant the
+ * preview was a screen away from the thing that produced it and the textarea
+ * was short enough to be awkward on its own. Tabs give each of them the whole
+ * pane and make switching a single tap.
+ *
+ * The rule is width, not device, so a narrow window on a desktop gets the same
+ * treatment — and the tab bar is display:none above the breakpoint rather than
+ * conditionally rendered, so there is one DOM either way. */
 @media (max-width: 1160px) {
-  .editor-grid {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
+  .editor-tabs {
+    display: flex;
   }
 
+  .editor-grid {
+    grid-template-columns: 1fr;
+    /* The pane owns its scrolling, as it does on a wide screen. Scrolling the
+       grid instead would scroll the tab bar away. */
+    overflow: hidden;
+  }
+
+  /* Only the selected pane is laid out at all. Not visibility or opacity: a
+     hidden-but-present pane still takes a grid row, which is what put the
+     preview below the editor in the first place. */
   .editor-pane {
-    min-height: 320px;
+    grid-row: 1;
+    grid-column: 1;
+    min-height: 0;
+  }
+
+  .editor-pane[hidden] {
+    display: none;
+  }
+
+  /* The tab already says which pane this is. */
+  .editor-label {
+    display: none;
   }
 }
 

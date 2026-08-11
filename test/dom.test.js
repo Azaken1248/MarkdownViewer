@@ -211,7 +211,8 @@ async function run(server) {
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
-        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink
+        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
+        syncEditorTabs, selectEditorTab, openEditor
       };
     `);
     check("no exception on load", true, true);
@@ -898,6 +899,67 @@ async function run(server) {
     check("...saying why", doc.querySelector("#linksEmpty h3").textContent, "Nothing matches");
 
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+  }
+
+  console.log("=== the editor tabs show one pane at a time ===");
+  {
+    // jsdom's matchMedia always reports false, so the breakpoint is driven
+    // directly. That is the honest thing to drive anyway: the question is what
+    // the client does once the query matches, not whether jsdom can evaluate a
+    // media query.
+    const realMatchMedia = window.matchMedia;
+    let narrow = false;
+    window.matchMedia = () => ({
+      get matches() { return narrow; },
+      addEventListener() {},
+      removeEventListener() {}
+    });
+
+    const write = doc.getElementById("editorWritePane");
+    const preview = doc.getElementById("editorPreviewPane");
+    const writeTab = doc.getElementById("editorTabWrite");
+    const previewTab = doc.getElementById("editorTabPreview");
+
+    narrow = false;
+    window.eval("window.__t.syncEditorTabs()");
+    check("on a wide screen both panes are shown", [write.hidden, preview.hidden], [false, false]);
+
+    narrow = true;
+    window.eval("window.__t.syncEditorTabs()");
+    check("on a narrow one only Write is", [write.hidden, preview.hidden], [false, true]);
+    check("...and the tab says so", writeTab.getAttribute("aria-selected"), "true");
+    check("...while the other does not", previewTab.getAttribute("aria-selected"), "false");
+    // One tab in the tab order, arrows move between them — how a tablist works.
+    check("only the selected tab is in the tab order",
+      [writeTab.tabIndex, previewTab.tabIndex], [0, -1]);
+
+    previewTab.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("tapping Preview swaps them", [write.hidden, preview.hidden], [true, false]);
+    check("...and moves the selection", previewTab.getAttribute("aria-selected"), "true");
+
+    // An arrow key on the tab bar goes back.
+    doc.getElementById("editorTabs").dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    check("an arrow key moves between tabs", [write.hidden, preview.hidden], [false, true]);
+
+    // The failure this prevents: a pane left hidden with no tab bar on screen
+    // to bring it back.
+    previewTab.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    narrow = false;
+    window.eval("window.__t.syncEditorTabs()");
+    check("widening past the breakpoint restores both panes",
+      [write.hidden, preview.hidden], [false, false]);
+
+    // Opening the editor always lands on Write; nobody opens an editor to read.
+    narrow = true;
+    window.eval('window.__t.state.editorTab = "preview"');
+    window.eval('window.__t.openEditor({ mode: "create", fileName: "", content: "# x" })');
+    check("the editor opens on Write", window.eval("window.__t.state.editorTab"), "write");
+    check("...whatever tab was left selected last time", [write.hidden, preview.hidden], [false, true]);
+    window.eval("window.__t.closeEditor()");
+
+    window.matchMedia = realMatchMedia;
+    window.eval("window.__t.syncEditorTabs()");
   }
 
   console.log("=== links can be grouped ===");

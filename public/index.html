@@ -41,8 +41,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=48"></script>
-  <link rel="stylesheet" href="css/app.css?v=48" />
+  <script src="js/theme-boot.js?v=49"></script>
+  <link rel="stylesheet" href="css/app.css?v=49" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -64,11 +64,11 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=48" defer></script>
+  <script src="js/markdown-core.js?v=49" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=48" defer></script>
-  <script src="js/app.js?v=48" defer></script>
+  <script src="js/notebook-runtime.js?v=49" defer></script>
+  <script src="js/app.js?v=49" defer></script>
 </head>
 
 <body>
@@ -414,14 +414,31 @@
         </div>
       </div>
 
-      <div class="editor-grid">
-        <section class="editor-pane">
+      <!-- Narrow screens show one pane at a time and these choose which. Hidden
+           on a wide screen, where both are on show and a tab would be a control
+           for something already true. -->
+      <div class="editor-tabs" id="editorTabs" role="tablist" aria-label="Editor view">
+        <button class="editor-tab" id="editorTabWrite" type="button" role="tab"
+          aria-selected="true" aria-controls="editorWritePane">
+          <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+          <span>Write</span>
+        </button>
+
+        <button class="editor-tab" id="editorTabPreview" type="button" role="tab"
+          aria-selected="false" aria-controls="editorPreviewPane">
+          <i class="ph ph-eye" aria-hidden="true"></i>
+          <span>Preview</span>
+        </button>
+      </div>
+
+      <div class="editor-grid" id="editorGrid">
+        <section class="editor-pane" id="editorWritePane" role="tabpanel" aria-labelledby="editorTabWrite">
           <p class="editor-label">Markdown</p>
           <textarea id="editorInput" spellcheck="false" placeholder="# Start writing"
             aria-label="Markdown source"></textarea>
         </section>
 
-        <section class="editor-pane">
+        <section class="editor-pane" id="editorPreviewPane" role="tabpanel" aria-labelledby="editorTabPreview">
           <p class="editor-label">Preview</p>
           <article id="editorPreview" class="markdown-body editor-preview visible"></article>
         </section>

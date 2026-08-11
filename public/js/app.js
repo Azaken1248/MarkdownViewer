@@ -77,6 +77,11 @@ const elements = {
   saveDocBtn: document.getElementById("saveDocBtn"),
   editorFileName: document.getElementById("editorFileName"),
   editorFolderField: document.getElementById("editorFolderField"),
+  editorTabs: document.getElementById("editorTabs"),
+  editorTabWrite: document.getElementById("editorTabWrite"),
+  editorTabPreview: document.getElementById("editorTabPreview"),
+  editorWritePane: document.getElementById("editorWritePane"),
+  editorPreviewPane: document.getElementById("editorPreviewPane"),
   editorFolderSelect: document.getElementById("editorFolderSelect"),
   editorInput: document.getElementById("editorInput"),
   editorPreview: document.getElementById("editorPreview"),
@@ -188,6 +193,9 @@ const state = {
   contentCache: new Map(),
   activeFile: null,
   editorMode: "create",
+  // "write" | "preview". Only consulted below the tab breakpoint; above it both
+  // panes are visible and this is inert.
+  editorTab: "write",
   editorFile: null,
   editorOpen: false,
   editorInitialContent: "",
@@ -5709,10 +5717,65 @@ function syncEditorFolderPicker(mode, folderId) {
   select.value = folderId && state.folders.some((folder) => folder.id === folderId) ? folderId : "";
 }
 
+/* Write / Preview tabs, for when the two panes cannot sit side by side.
+ *
+ * The breakpoint is a width, not a device, so a narrow window on a desktop gets
+ * tabs too and widening it puts both panes back. It has to match the media
+ * query in the stylesheet exactly — the CSS decides whether the tab bar is
+ * visible and this decides whether a pane is hidden, and if they disagree you
+ * get a tab bar controlling nothing, or worse, no visible pane at all. The
+ * layout suite checks the two against each other.
+ */
+const EDITOR_TABS_QUERY = "(max-width: 1160px)";
+
+function editorTabsActive() {
+  return Boolean(window.matchMedia?.(EDITOR_TABS_QUERY).matches);
+}
+
+function syncEditorTabs() {
+  const tabbed = editorTabsActive();
+  const showing = state.editorTab === "preview" ? "preview" : "write";
+
+  for (const [name, tab, pane] of [
+    ["write", elements.editorTabWrite, elements.editorWritePane],
+    ["preview", elements.editorTabPreview, elements.editorPreviewPane]
+  ]) {
+    if (!tab || !pane) {
+      continue;
+    }
+
+    const selected = name === showing;
+    tab.setAttribute("aria-selected", String(selected));
+    // Only one tab is in the tab order; the arrow keys move between them.
+    tab.tabIndex = selected ? 0 : -1;
+    // Above the breakpoint both panes are on show and neither is hidden,
+    // whatever the tab state happens to be.
+    pane.hidden = tabbed && !selected;
+  }
+}
+
+function selectEditorTab(name) {
+  state.editorTab = name === "preview" ? "preview" : "write";
+  syncEditorTabs();
+
+  if (state.editorTab === "preview") {
+    // Mermaid measures the element it draws into, and a pane that was
+    // display:none measures zero — so a diagram laid out while the tab was
+    // hidden comes out the wrong size. Redraw now that it has a width.
+    void renderEditorPreview();
+  } else {
+    elements.editorInput.focus();
+  }
+}
+
 function openEditor({ mode, fileName, content, folderId = null }) {
   state.editorMode = mode;
   state.editorFile = mode === "edit" ? fileName : null;
   state.editorOpen = true;
+  // Always opens on Write: the editor is opened to type in, and landing on a
+  // preview of what you already have would be a step to undo every time.
+  state.editorTab = "write";
+  syncEditorTabs();
   syncEditorFolderPicker(mode, folderId);
 
   elements.editorFileName.value = fileName || "";
@@ -7034,6 +7097,27 @@ elements.editDocBtn.addEventListener("click", () => {
 elements.editCurrentDocBtn.addEventListener("click", () => {
   openEditorForCurrentDoc();
 });
+
+elements.editorTabWrite.addEventListener("click", () => selectEditorTab("write"));
+elements.editorTabPreview.addEventListener("click", () => selectEditorTab("preview"));
+
+// Arrow keys move between tabs, which is what a tablist is expected to do and
+// the only way to reach the other tab from the keyboard once one is out of the
+// tab order.
+elements.editorTabs.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return;
+  }
+
+  event.preventDefault();
+  const next = state.editorTab === "write" ? "preview" : "write";
+  selectEditorTab(next);
+  (next === "write" ? elements.editorTabWrite : elements.editorTabPreview).focus();
+});
+
+// Widening the window past the breakpoint has to put both panes back, or a
+// pane stays hidden with no tab bar left to bring it back.
+window.matchMedia?.(EDITOR_TABS_QUERY).addEventListener?.("change", syncEditorTabs);
 
 elements.editorInput.addEventListener("input", () => {
   scheduleEditorPreview();
