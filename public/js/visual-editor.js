@@ -410,6 +410,246 @@
     return markdown ? `${markdown}\n` : "";
   }
 
+  /* ---------------------------------------------------------------------
+     Tables
+
+     A table is a grid of text and an alignment for each column. Both of those
+     survive being edited as a grid, which is why a table can be typed into
+     directly rather than through its markdown. What does not survive is the
+     spacing of the source — so a table is rewritten only when it has actually
+     been edited, and then it is rewritten properly: columns padded to a
+     consistent width and the alignment row rebuilt from the alignments the
+     original declared.
+     ------------------------------------------------------------------- */
+
+  // Split a table row on its unescaped pipes. The outer pipes are optional in
+  // GFM, so an empty first or last cell that came from one is dropped.
+  function splitTableRow(line) {
+    const text = String(line).trim();
+    const cells = [];
+    let current = "";
+
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === "\\" && text[i + 1] === "|") {
+        current += "\\|";
+        i += 1;
+        continue;
+      }
+
+      if (text[i] === "|") {
+        cells.push(current);
+        current = "";
+        continue;
+      }
+
+      current += text[i];
+    }
+
+    cells.push(current);
+
+    if (cells.length > 1 && text.startsWith("|") && cells[0].trim() === "") {
+      cells.shift();
+    }
+
+    if (cells.length > 1 && text.endsWith("|") && cells[cells.length - 1].trim() === "") {
+      cells.pop();
+    }
+
+    return cells.map((cell) => cell.trim());
+  }
+
+  // What each column's delimiter cell declares: "left", "center", "right", or
+  // "" for a table that never said.
+  function tableAlignments(source) {
+    const delimiter = String(source).split("\n")[1] || "";
+
+    return splitTableRow(delimiter).map((cell) => {
+      const left = cell.startsWith(":");
+      const right = cell.endsWith(":");
+      if (left && right) {
+        return "center";
+      }
+      if (right) {
+        return "right";
+      }
+      if (left) {
+        return "left";
+      }
+      return "";
+    });
+  }
+
+  function alignmentRule(align, width) {
+    const size = Math.max(3, width);
+
+    switch (align) {
+      case "left":
+        return `:${"-".repeat(size - 1)}`;
+      case "right":
+        return `${"-".repeat(size - 1)}:`;
+      case "center":
+        return `:${"-".repeat(size - 2)}:`;
+      default:
+        return "-".repeat(size);
+    }
+  }
+
+  function serializeTable(rows, alignments = []) {
+    if (rows.length === 0) {
+      return "";
+    }
+
+    const columns = rows.reduce((most, row) => Math.max(most, row.length), 0);
+    const grid = rows.map((row) => {
+      const cells = row.slice();
+      while (cells.length < columns) {
+        cells.push("");
+      }
+      return cells;
+    });
+
+    // Three is the narrowest a delimiter cell can be and still carry a colon at
+    // each end, so it is the floor for every column.
+    const widths = [];
+    for (let i = 0; i < columns; i += 1) {
+      widths.push(grid.reduce((most, row) => Math.max(most, row[i].length), 3));
+    }
+
+    const line = (cells) => `| ${cells.map((cell, i) => cell.padEnd(widths[i])).join(" | ")} |`;
+
+    const out = [
+      line(grid[0]),
+      `| ${widths.map((width, i) => alignmentRule(alignments[i] || "", width)).join(" | ")} |`
+    ];
+
+    for (const row of grid.slice(1)) {
+      out.push(line(row));
+    }
+
+    return `${out.join("\n")}\n`;
+  }
+
+  function tableCellToMarkdown(cell) {
+    return childrenToMarkdown(cell)
+      // A cell is one line by definition; a newline inside it would end the row.
+      .replace(/\s*\n\s*/g, " ")
+      // And a bare pipe would start a new one.
+      .replace(/\|/g, "\\|")
+      .trim();
+  }
+
+  function tableElementToMarkdown(table, alignments = []) {
+    const rows = [];
+
+    for (const row of table.querySelectorAll("tr")) {
+      const cells = [...row.children]
+        .filter((cell) => ["th", "td"].includes(cell.tagName.toLowerCase()))
+        .map((cell) => tableCellToMarkdown(cell));
+
+      if (cells.length > 0) {
+        rows.push(cells);
+      }
+    }
+
+    return serializeTable(rows, alignments);
+  }
+
+  /* ---------------------------------------------------------------------
+     Fences
+
+     The text inside a fence is literal, so it can be typed into as itself.
+     What has to be preserved around it is the fence's own shape: the marker it
+     was written with, its length, its indentation and its info string. A block
+     fenced with four tildes stays fenced with four tildes.
+     ------------------------------------------------------------------- */
+
+  function parseFence(source) {
+    const text = String(source);
+    // A fence at the very end of a file with no final newline has to stay that
+    // way; adding one would be an edit to a block nobody touched.
+    const trailing = text.endsWith("\n");
+    const lines = text.replace(/\n$/, "").split("\n");
+    const opened = (lines[0] || "").match(FENCE_RE);
+
+    if (!opened) {
+      return { indent: "", marker: "```", info: "", body: lines.join("\n"), closed: true, trailing };
+    }
+
+    const indent = opened[1];
+    const marker = opened[2];
+    const info = opened[3].trim();
+
+    const last = lines.length - 1;
+    const closing = last > 0
+      && new RegExp(`^\\s{0,3}\\${marker[0]}{${marker.length},}\\s*$`).test(lines[last]);
+
+    // The fence's own indentation is not part of the code — a renderer strips
+    // it before showing the block, so the body here is what is on screen.
+    const strip = new RegExp(`^ {0,${indent.length}}`);
+    const bodyLines = lines
+      .slice(1, closing ? last : last + 1)
+      .map((line) => (indent ? line.replace(strip, "") : line));
+
+    return {
+      indent,
+      marker,
+      info,
+      body: bodyLines.join("\n"),
+      // One empty line and no lines at all are both the empty string. Keeping
+      // the lines themselves is what tells them apart, so a fence whose entire
+      // content is a blank line comes back with it.
+      bodyLines,
+      // An unclosed fence stays unclosed: closing it would change where the
+      // block ends, which is a decision about the rest of the document.
+      closed: closing,
+      // The closing line as it was actually written, trailing spaces and all.
+      close: closing ? lines[last] : "",
+      // The opening line likewise, so a fence written "``` js" is not tidied
+      // into "```js" by the act of editing the code under it. `declared` is
+      // what that line said, so a changed language can be told from an
+      // unchanged one.
+      open: lines[0],
+      declared: info,
+      trailing
+    };
+  }
+
+  /* Blank lines at the end of a code block are code — an empty last line in a
+   * shell script is still a line — so the body goes back exactly as given and
+   * only the fence itself is rebuilt around it.
+   */
+  function serializeFence({
+    indent = "",
+    marker = "```",
+    info = "",
+    body = "",
+    bodyLines = null,
+    closed = true,
+    close = "",
+    open = "",
+    declared = null,
+    trailing = true
+  }) {
+    const text = String(body);
+    // The parsed lines are used only while they still say the same thing as the
+    // body — which is how an edit that emptied the block is told from a block
+    // that was one blank line to begin with.
+    const kept = Array.isArray(bodyLines) && bodyLines.join("\n") === text ? bodyLines : null;
+    const source = kept || (text === "" ? [] : text.split("\n"));
+    const lines = source.map((line) => (line ? `${indent}${line}` : line));
+
+    // The opening line is rebuilt only when the language actually changed;
+    // otherwise it goes back exactly as it was written.
+    const opening = open && info === declared ? open : `${indent}${marker}${info}`;
+    const out = [opening, ...lines];
+
+    if (closed) {
+      out.push(close || `${indent}${marker}`);
+    }
+
+    return `${out.join("\n")}${trailing ? "\n" : ""}`;
+  }
+
   global.VisualEditor = {
     splitBlocks,
     joinBlocks,
@@ -419,6 +659,12 @@
     childrenToMarkdown,
     listToMarkdown,
     escapeInline,
+    splitTableRow,
+    tableAlignments,
+    serializeTable,
+    tableElementToMarkdown,
+    parseFence,
+    serializeFence,
     RICH_TYPES
   };
 })(typeof window === "undefined" ? globalThis : window);

@@ -32,6 +32,30 @@ function roundTrips(markdown) {
   return VE.joinBlocks(VE.splitBlocks(markdown)) === markdown;
 }
 
+// Every document actually on this machine. Fixtures cover what someone thought
+// of; this covers what is there.
+function walkDocuments(dir) {
+  let out = [];
+  let entries = [];
+
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out = out.concat(walkDocuments(full));
+    } else if (/\.(md|markdown|mmd|mermaid)$/i.test(entry.name)) {
+      out.push(full);
+    }
+  }
+
+  return out;
+}
+
 console.log("=== splitting and rejoining is the identity ===");
 {
   const shapes = {
@@ -86,23 +110,7 @@ console.log("=== ...for every document in the real library ===");
   // Fixtures cover what someone thought of. The library covers what is
   // actually there, which is the set that matters.
   const docsDir = path.join(ROOT, "docs");
-  const walk = (dir) => {
-    let out = [];
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return out;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) out = out.concat(walk(full));
-      else if (/\.(md|markdown|mmd|mermaid)$/i.test(entry.name)) out.push(full);
-    }
-    return out;
-  };
-
-  const files = walk(docsDir);
+  const files = walkDocuments(docsDir);
   if (files.length === 0) {
     console.log("  (no documents on this machine; fixtures above still ran)");
   } else {
@@ -230,6 +238,124 @@ console.log("=== rendered HTML becomes markdown again ===");
   check("underscores in identifiers are left alone", md("<p>snake_case_name</p>"), "snake_case_name");
 
   check("an emptied block serializes to nothing", VE.serializeEditedBlock(doc.createElement("div")), "");
+}
+
+console.log("=== a table is edited as a table ===");
+{
+  const dom = new JSDOM("<!doctype html><body></body>");
+  const doc = dom.window.document;
+  global.document = doc;
+
+  // Reading a row. The outer pipes are optional in GFM, so an empty cell that
+  // came from one is not a cell.
+  check("a row with outer pipes", VE.splitTableRow("| a | b |"), ["a", "b"]);
+  check("a row without them", VE.splitTableRow("a | b"), ["a", "b"]);
+  check("an escaped pipe stays in its cell", VE.splitTableRow("| a \\| b | c |"), ["a \\| b", "c"]);
+  check("a genuinely empty cell survives", VE.splitTableRow("| a |  | c |"), ["a", "", "c"]);
+
+  // Alignment is declared in the delimiter row and is the one thing about a
+  // table that formatted text cannot show back.
+  check("alignments are read from the delimiter row",
+    VE.tableAlignments("| a | b | c | d |\n| --- | :-- | :-: | --: |\n"),
+    ["", "left", "center", "right"]);
+
+  // Writing one back.
+  const table = VE.serializeTable([["h1", "h2"], ["a", "bbbb"]], ["", "center"]);
+  check("columns are padded to a consistent width",
+    table, "| h1  | h2   |\n| --- | :--: |\n| a   | bbbb |\n");
+  check("...and it parses back to the same grid",
+    VE.splitTableRow(table.split("\n")[2]), ["a", "bbbb"]);
+  check("...with the alignment intact", VE.tableAlignments(table), ["", "center"]);
+  check("a column narrower than its rule is still legible",
+    VE.serializeTable([["a"], ["b"]], ["right"]), "| a   |\n| ---: |\n| b   |\n".replace("---:", "--:"));
+
+  // And from the DOM, which is what editing a cell actually produces.
+  const host = doc.createElement("div");
+  host.innerHTML = "<table><thead><tr><th>step</th><th>who</th></tr></thead>"
+    + "<tbody><tr><td>one</td><td><strong>me</strong></td></tr></tbody></table>";
+  check("a rendered table serializes back to markdown",
+    VE.tableElementToMarkdown(host.querySelector("table"), ["", "right"]),
+    "| step | who    |\n| ---- | -----: |\n| one  | **me** |\n");
+
+  // A pipe typed into a cell would otherwise end the cell.
+  const piped = doc.createElement("div");
+  piped.innerHTML = "<table><tr><th>a|b</th></tr><tr><td>c</td></tr></table>";
+  check("a pipe typed into a cell is escaped",
+    VE.tableElementToMarkdown(piped.querySelector("table"), []).includes("a\\|b"), true);
+
+  // Rows of different lengths are the normal result of adding a column.
+  check("a short row is padded out",
+    VE.serializeTable([["a", "b"], ["c"]], []), "| a   | b   |\n| --- | --- |\n| c   |     |\n");
+}
+
+console.log("=== a fence is edited as code ===");
+{
+  const fence = VE.parseFence("```js\nconst x = 1;\n```\n");
+  check("the language is read", fence.info, "js");
+  check("the body is the code and nothing else", fence.body, "const x = 1;");
+  check("...and the fence knows it was closed", fence.closed, true);
+
+  check("a tilde fence keeps its marker", VE.parseFence("~~~py\nx\n~~~\n").marker, "~~~");
+  check("a longer fence keeps its length", VE.parseFence("````\na\n````\n").marker, "````");
+  check("an unclosed fence is known to be unclosed", VE.parseFence("```js\nx\n").closed, false);
+  check("...and its body is not eaten by the missing close", VE.parseFence("```js\nx\n").body, "x");
+  check("an indented fence keeps its indent", VE.parseFence("  ```\n  x\n  ```\n").indent, "  ");
+
+  // Writing back: the shape of the fence is preserved, only the code changes.
+  check("editing the code keeps the fence",
+    VE.serializeFence({ ...VE.parseFence("~~~py\nx = 1\n~~~\n"), body: "x = 2" }),
+    "~~~py\nx = 2\n~~~\n");
+  check("changing the language keeps the code",
+    VE.serializeFence({ ...VE.parseFence("```\nx\n```\n"), info: "sh" }),
+    "```sh\nx\n```\n");
+  check("an unclosed fence is not quietly closed",
+    VE.serializeFence(VE.parseFence("```js\nx\n")), "```js\nx\n");
+  check("an emptied fence is still a fence",
+    VE.serializeFence({ ...VE.parseFence("```js\nx\n```\n"), body: "" }), "```js\n```\n");
+
+  // A blank line at the end of a shell script is a line, and stripping it would
+  // rewrite fences nobody edited.
+  check("a trailing blank line inside the fence is kept",
+    VE.parseFence("```sh\nrun\n\n```\n").body, "run\n");
+  check("...and written back", VE.serializeFence(VE.parseFence("```sh\nrun\n\n```\n")), "```sh\nrun\n\n```\n");
+
+  // An indented fence's indentation belongs to the fence, not to the code: it
+  // is stripped before the code is shown and put back around it afterwards.
+  check("the indent is not counted as code", VE.parseFence("  ```\n  x\n  ```\n").body, "x");
+  check("...and comes back on the way out",
+    VE.serializeFence(VE.parseFence("  ```\n  x\n  ```\n")), "  ```\n  x\n  ```\n");
+
+  // Round trip through both halves, for a fence nobody touched the shape of.
+  for (const source of ["```js\nconst x = 1;\n```\n", "~~~~text\na\n\nb\n~~~~\n", "```\n```\n"]) {
+    check(`parse then serialize is the identity for ${JSON.stringify(source)}`,
+      VE.serializeFence(VE.parseFence(source)), source);
+  }
+}
+
+console.log("=== every fence in the real library survives being parsed and written back ===");
+{
+  const docsDir = path.join(ROOT, "docs");
+  const files = walkDocuments(docsDir);
+
+  let fences = 0;
+  const broken = [];
+
+  for (const name of files) {
+    const source = fs.readFileSync(name, "utf8");
+    for (const block of VE.splitBlocks(source)) {
+      if (block.type !== "fence") {
+        continue;
+      }
+
+      fences += 1;
+      if (VE.serializeFence(VE.parseFence(block.source)) !== block.source) {
+        broken.push(`${path.relative(docsDir, name)}: ${JSON.stringify(block.source.slice(0, 40))}`);
+      }
+    }
+  }
+
+  console.log(`  (${fences} fences in ${files.length} documents)`);
+  check("an untouched fence comes back exactly as it was", broken.slice(0, 5), []);
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

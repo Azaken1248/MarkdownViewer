@@ -10,8 +10,9 @@ Live at **<https://md.azaken.com>**.
 - Notebook code cells run Python in the browser via Pyodide, on request.
 - A Links section for the docs sites you keep coming back to, saved as cards
   carrying each page's own title and description, filed into groups.
-- Documents are edited in place, on the page you read them on, rewriting only
-  the blocks you actually touch — or as markdown source, one button away.
+- Documents are edited in place, on the page you read them on — tables as
+  tables, code as code — rewriting only the blocks you actually touch, or as
+  markdown source, one button away.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -360,18 +361,29 @@ byte, which is asserted against every markdown document in the library on every
 test run, not just against fixtures. Editing a block replaces that block and
 nothing else. Fix a typo in one paragraph and the diff is that paragraph.
 
-Blocks that markdown expresses more precisely than formatted text can — **code
-fences, tables, math, raw HTML and front matter** — are never typed into
-directly. They stay rendered, so the page still looks like the document, and
-**Edit table** or **Edit code** on the block opens its markdown when you want
-it. Pretending to WYSIWYG a table and then rewriting its alignment is exactly
-the damage this design exists to avoid.
+**Tables** are edited as tables. The cells are typed into where they sit, and
+controls on the block add or delete a row or a column and set a column's
+alignment — the one thing about a table its rendering cannot show back to you.
+The header row cannot be deleted, because what is left would not be a markdown
+table. A table you edit is written out tidily: columns padded to a common width,
+delimiter row rebuilt, alignment preserved. A table you do not touch keeps
+whatever spacing it was typed with, to the byte.
 
-A block with no rendered form at all — a paragraph of nothing but link
-definitions — is marked rather than left as an invisible thing you could delete
-without seeing it happen. Definitions from the bottom of the file are handed to
-every block while it renders, so a `[reference][link]` halfway up still resolves
-even though each block is rendered on its own.
+**Code fences** are edited as code. You type into the highlighted block itself,
+and the language sits in a field on the block rather than buried in the source,
+so changing it rewrites the fence and not a character of the code. Highlighting
+is redone when you leave the block. Indented fences, tilde fences, unclosed
+fences and fences with no trailing newline all come back exactly as they were —
+asserted against every fence in the library on every test run.
+
+Blocks with no editable rendering at all — **math, raw HTML, front matter,
+mermaid diagrams**, and paragraphs of nothing but link definitions — stay
+rendered and offer their markdown in a box on request, with the rendering
+redrawn as you type. A link-definition paragraph, which renders to nothing, is
+marked rather than left as an invisible thing you could delete without seeing it
+happen. Definitions from the bottom of the file are handed to every block while
+it renders, so a `[reference][link]` halfway up still resolves even though each
+block is rendered on its own.
 
 The toolbar covers bold, italic, inline code, links, headings, lists, quotes and
 dividers, with `Ctrl+B`, `Ctrl+I` and `Ctrl+K`. Pasting inserts plain text: the

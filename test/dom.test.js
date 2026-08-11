@@ -80,9 +80,36 @@ async function run(server) {
   const { window } = dom;
 
   // Third-party globals the app expects to already be on the page.
+  //
+  // A stand-in for marked. It only has to produce the shapes the editor works
+  // on — a table, a code block, a paragraph — because what is under test in
+  // this suite is what the editor does with a rendering, not how markdown is
+  // parsed. The parsing itself is marked's, and the serializers that read these
+  // shapes back are checked against the real library in the visual suite.
+  const escape = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   window.marked = {
     setOptions() {},
-    parse: (md) => `<p>${String(md).replace(/[<>]/g, "")}</p>`
+    parse(md) {
+      const text = String(md);
+
+      const fence = text.match(/^ {0,3}(?:```|~~~)(\S*)[^\n]*\n([\s\S]*?)(?:\n)?(?:```|~~~)\s*$/);
+      if (fence) {
+        return `<pre><code class="language-${escape(fence[1])}">${escape(fence[2])}\n</code></pre>`;
+      }
+
+      const lines = text.split("\n").filter((line) => line.trim() !== "");
+      const isTable = lines.length >= 2 && lines[0].includes("|") && /^[\s|:-]*-[\s|:-]*$/.test(lines[1]);
+      if (isTable) {
+        const cells = (line) => line.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+        const head = cells(lines[0]).map((c) => `<th>${escape(c)}</th>`).join("");
+        const body = lines.slice(2)
+          .map((line) => `<tr>${cells(line).map((c) => `<td>${escape(c)}</td>`).join("")}</tr>`)
+          .join("");
+        return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      }
+
+      return `<p>${text.replace(/[<>]/g, "")}</p>`;
+    }
   };
   window.DOMPurify = { sanitize: (html) => html };
   window.mermaid = { initialize() {}, render: async () => ({ svg: "<svg></svg>" }) };
@@ -988,23 +1015,34 @@ async function run(server) {
     check("prose is editable where it sits",
       blocks.filter((b) => b.getAttribute("contenteditable") === "true").length, 2);
 
-    // The point of the whole exercise: the page still looks like the document.
-    // marked is stubbed in this suite, so what is checked here is that these
-    // blocks go through the renderer at all rather than being replaced by a
-    // source box — whether the renderer makes a <table> out of a table is the
-    // renderer's business, and the reading view already proves it.
+    // The point of the whole exercise: the page still looks like the document,
+    // and every part of it is typed into where it sits.
+    const table = doc.querySelector("#docContent .ve-table");
+    const codeBlock = doc.querySelector("#docContent .ve-code");
     const embeds = blocks.filter((b) => b.classList.contains("ve-embed"));
-    check("the table, the fence and the definitions are not typed into", embeds.length, 3);
-    check("each is rendered, not swapped for a textarea",
-      embeds.every((b) => b.querySelector(".ve-embed-view") && !b.querySelector("textarea")), true);
-    check("the table's rendering is of the table",
-      embeds[0].querySelector(".ve-embed-view").textContent.includes("| 1  | 2  |"), true);
-    check("each offers its source", embeds.map((b) => b.querySelector(".ve-embed-edit").textContent.trim()),
-      ["Edit table", "Edit code (js)", "Edit link definitions"]);
-    check("none is typed into directly",
-      embeds.every((b) => b.getAttribute("contenteditable") === "false"), true);
-    check("a block that renders to nothing is marked rather than left invisible",
-      embeds[2].querySelector(".ve-embed-note").textContent, "link definitions");
+
+    check("the table is a table, not a box of markdown", Boolean(table?.querySelector("table")), true);
+    check("...and has no source box", table.querySelectorAll("textarea").length, 0);
+    check("every cell is editable where it is",
+      [...table.querySelectorAll("th, td")].every((c) => c.getAttribute("contenteditable") === "true"), true);
+    check("...and there are the right number of them", table.querySelectorAll("th, td").length, 4);
+    check("the table carries controls for rows, columns and alignment",
+      table.querySelectorAll(".ve-table-tool").length, 7);
+
+    check("the code block is a code block", Boolean(codeBlock?.querySelector("pre code")), true);
+    check("...and the code itself is editable",
+      ["true", "plaintext-only"].includes(codeBlock.querySelector("pre code").getAttribute("contenteditable")), true);
+    check("...holding exactly the code, without the fence",
+      codeBlock.querySelector("pre code").textContent, "const x = 1;");
+    check("...with the language in a field rather than buried in the source",
+      codeBlock.querySelector(".ve-code-language").value, "js");
+
+    // What is left as source is what has no rendering to type into.
+    check("only what cannot be typed into stays as source", embeds.length, 1);
+    check("...and it is marked rather than left invisible",
+      embeds[0].querySelector(".ve-embed-note").textContent, "link definitions");
+    check("...and offers its markdown",
+      embeds[0].querySelector(".ve-embed-edit").textContent.trim(), "Edit link definitions");
 
     // Definitions live at the bottom of the file and are used halfway up it, so
     // they are handed to every block that gets rendered on its own.
@@ -1026,33 +1064,92 @@ async function run(server) {
     const edited = window.eval("window.__t.collectPageMarkdown()");
     check("the edited paragraph is rewritten", edited.includes("Some **text** here."), true);
     check("the heading is untouched", edited.startsWith("# Title\n"), true);
-    // The irregular padding is the tell: a whole-document rewrite would have
-    // realigned this table.
-    check("the table keeps its own alignment", edited.includes("| 1  | 2  |"), true);
+    // The irregular padding is the tell: a table nobody touched is emitted
+    // exactly as it was found, however it was typed.
+    check("the untouched table keeps its own spacing", edited.includes("| 1  | 2  |"), true);
     check("...and its delimiter row", edited.includes("|----|----|"), true);
-    check("the fence is untouched", edited.includes("```js\nconst x = 1;\n```"), true);
+    check("the untouched fence is untouched", edited.includes("```js\nconst x = 1;\n```"), true);
     check("the link definition is still at the bottom",
       edited.trimEnd().endsWith("[docs]: https://example.com/docs"), true);
 
-    // Asking for a fence's source swaps that one block, and only that block.
-    embeds[1].querySelector(".ve-embed-edit").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    const fence = embeds[1].querySelector("textarea");
-    check("the fence hands over its own markdown", fence.value, "```js\nconst x = 1;\n```");
-    check("...labelled with what it is", embeds[1].querySelector(".ve-embed-head").textContent, "code (js)");
-    check("the table beside it is still rendered", Boolean(embeds[0].querySelector(".ve-embed-view")), true);
-    check("...and was not opened along with it", embeds[0].querySelectorAll("textarea").length, 0);
+    // Typing into a cell. Focus first, exactly as clicking into it would: the
+    // controls below act on the cell the cursor is in.
+    const cell = table.querySelectorAll("td")[1];
+    cell.focus();
+    cell.textContent = "two";
+    cell.dispatchEvent(new window.Event("input", { bubbles: true }));
+    cell.dispatchEvent(new window.Event("focusin", { bubbles: true }));
 
-    fence.value = "```js\nconst x = 2;\n```";
-    fence.dispatchEvent(new window.Event("input", { bubbles: true }));
-    check("a source block is kept as typed",
-      window.eval("window.__t.collectPageMarkdown()").includes("const x = 2;"), true);
+    const afterCell = window.eval("window.__t.collectPageMarkdown()");
+    check("a cell is written back into the table", afterCell.includes("| 1   | two |"), true);
+    check("...and the table is a well-formed table again",
+      afterCell.includes("| a   | b   |\n| --- | --- |"), true);
+    check("...while the fence beside it is still untouched",
+      afterCell.includes("```js\nconst x = 1;\n```"), true);
 
-    embeds[1].querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 100));
-    check("Done puts the rendering back", Boolean(embeds[1].querySelector(".ve-embed-view")), true);
-    check("...and takes the source box away", embeds[1].querySelectorAll("textarea").length, 0);
-    check("...showing what was typed",
-      embeds[1].querySelector(".ve-embed-view").textContent.includes("const x = 2;"), true);
+    // Rows and columns, from the controls on the table itself.
+    const tool = (label) => table.querySelector(`.ve-table-tool[aria-label="${label}"]`);
+    tool("Add row below").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a row can be added", table.querySelectorAll("tr").length, 3);
+    check("...with a cell per column", table.querySelectorAll("tr")[2].children.length, 2);
+
+    tool("Add column to the right").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a column can be added", table.querySelectorAll("tr")[0].children.length, 3);
+    check("...in every row", [...table.querySelectorAll("tr")].every((r) => r.children.length === 3), true);
+    check("...and the new cells are editable too",
+      [...table.querySelectorAll("th, td")].every((c) => c.getAttribute("contenteditable") === "true"), true);
+
+    const grown = window.eval("window.__t.collectPageMarkdown()");
+    check("the grown table is still a table", grown.includes("| a   | b   |     |"), true);
+    check("...with a delimiter cell for the new column",
+      grown.includes("| --- | --- | --- |"), true);
+    check("...and the row that was added is in it", grown.includes("\n|     |     |     |\n"), true);
+
+    // Deleting acts on the cell the cursor is in, and leaves the cursor in
+    // whatever took its place — so the next control still means "here".
+    const headerCells = () => [...table.querySelectorAll("tr")[0].children];
+    headerCells()[headerCells().length - 1].focus();
+    tool("Delete this column").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a column can be removed", table.querySelectorAll("tr")[0].children.length, 2);
+    check("...the one the cursor was in", headerCells().map((c) => c.textContent).join(","), "a,b");
+    check("...and the cursor is still in the table",
+      Boolean(doc.activeElement?.closest?.(".ve-table")), true);
+
+    const blankRow = [...table.querySelectorAll("tr")]
+      .find((r) => [...r.children].every((c) => c.textContent === ""));
+    blankRow.children[0].focus();
+    tool("Delete this row").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a row can be removed", table.querySelectorAll("tr").length, 2);
+    check("...the one the cursor was in",
+      [...table.querySelectorAll("td")].map((c) => c.textContent).join(","), "1,two");
+
+    // The header row is the table's column names; deleting it would leave
+    // something that is not a markdown table at all.
+    const header = table.querySelector("th");
+    header.focus();
+    tool("Delete this row").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the header row cannot be deleted", table.querySelectorAll("tr").length, 2);
+
+    // Alignment is the one thing about a table a rendering cannot show back, so
+    // it is set explicitly and written into the delimiter row.
+    table.querySelectorAll("th")[1].focus();
+    tool("Centre this column").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const aligned = window.eval("window.__t.collectPageMarkdown()");
+    check("alignment reaches the delimiter row", aligned.includes("| --- | :-: |"), true);
+    check("...and the cells are drawn with it",
+      table.querySelectorAll("td")[1].style.textAlign, "center");
+
+    // Typing into the code block.
+    const codeText = codeBlock.querySelector("pre code");
+    codeText.textContent = "const x = 2;";
+    codeText.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("code is written back inside its own fence",
+      window.eval("window.__t.collectPageMarkdown()").includes("```js\nconst x = 2;\n```"), true);
+
+    codeBlock.querySelector(".ve-code-language").value = "ts";
+    codeBlock.querySelector(".ve-code-language").dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("changing the language rewrites the fence, not the code",
+      window.eval("window.__t.collectPageMarkdown()").includes("```ts\nconst x = 2;\n```"), true);
 
     // Saving writes what is on screen and goes back to reading.
     await window.eval("window.__t.savePageEdit()");
@@ -1069,8 +1166,11 @@ async function run(server) {
     const savedText = JSON.parse(saved.body).content;
     check("the paragraph reached the file", savedText.includes("Some **text** here."), true);
     check("the fence reached the file", savedText.includes("const x = 2;"), true);
-    check("the table survived the round trip byte for byte",
-      savedText.includes("| a  | b  |\n|----|----|\n| 1  | 2  |"), true);
+    // This table was edited, so it was rewritten — as a well-formed table with
+    // the alignment that was set on it, rather than as whatever the cells
+    // happened to serialize to.
+    check("the edited table reached the file as a table",
+      savedText.includes("| a   | b   |\n| --- | :-: |\n| 1   | two |"), true);
     check("and so did the heading", savedText.startsWith("# Title\n"), true);
 
     // Cancelling with edits asks first, and restores what is on disk.

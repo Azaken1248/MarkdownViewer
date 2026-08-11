@@ -2851,10 +2851,134 @@ body.page-editing #dockEdit {
   color: var(--fg-subtle);
 }
 
-/* Code, tables, math, diagrams, raw HTML, front matter: markdown says these
-   more precisely than formatted text can, so they stay rendered and are edited
-   as their source on request. Rewriting a table from its rendering is exactly
-   how column alignment disappears. */
+/* A table is typed into as a table. The cells are editable where they are and
+   the controls act on the cell the cursor is in, so the alignment row and the
+   pipes never have to be thought about. */
+.markdown-body.doc-editing .ve-table {
+  position: relative;
+}
+
+.markdown-body.doc-editing .ve-table th,
+.markdown-body.doc-editing .ve-table td {
+  /* The cell being typed in has to be findable without the table jumping, so
+     the mark is an inset shadow rather than a border. */
+  transition: box-shadow 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-table th:focus,
+.markdown-body.doc-editing .ve-table td:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ve-table-tools {
+  position: absolute;
+  top: -14px;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-table:hover .ve-table-tools,
+.markdown-body.doc-editing .ve-table:focus-within .ve-table-tools {
+  opacity: 1;
+}
+
+.ve-table-tool {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  min-height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.ve-table-tool:hover {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.ve-table-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ve-table-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+/* Code is typed into as code: same box, same font, same colours. The language
+   is a field rather than something to go and find in the source. */
+.markdown-body.doc-editing .ve-code {
+  position: relative;
+}
+
+.markdown-body.doc-editing .ve-code pre code:focus {
+  outline: none;
+}
+
+.markdown-body.doc-editing .ve-code pre:focus-within {
+  box-shadow: inset 0 0 0 2px var(--accent-muted);
+}
+
+.ve-code-language {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 96px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-code:hover .ve-code-language,
+.markdown-body.doc-editing .ve-code:focus-within .ve-code-language {
+  opacity: 1;
+}
+
+.ve-code-language:focus {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+@media (hover: none) {
+
+  .ve-table-tools,
+  .ve-code-language {
+    opacity: 1;
+  }
+}
+
+/* Math, diagrams, raw HTML, front matter: there is nothing in the rendering to
+   type into — an equation is a picture of an equation. These stay rendered and
+   hand over their markdown on request, with a preview so the result is visible
+   while it is being written. */
 .markdown-body.doc-editing .ve-embed {
   position: relative;
 }
@@ -2945,6 +3069,20 @@ body.page-editing #dockEdit {
 .ve-embed-source:focus {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--accent-muted);
+}
+
+/* What the source above it comes out as, redrawn as it is typed. Writing an
+   equation blind and pressing Done to find out is what makes source editing
+   feel like a punishment. */
+.ve-embed-preview {
+  padding: 10px;
+  border-top: 1px dashed var(--border-muted);
+  background: var(--canvas);
+  overflow-x: auto;
+}
+
+.ve-embed-preview:empty {
+  display: none;
 }
 
 .ve-embed-done {

@@ -212,6 +212,8 @@ const state = {
     title: "",
     initial: ""
   },
+  // Redraw of the preview under an open source box, debounced.
+  embedPreviewTimer: null,
   editorFile: null,
   editorOpen: false,
   editorInitialContent: "",
@@ -5784,11 +5786,6 @@ function isDefinitionsBlock(block) {
   return lines.length > 0 && lines.every((line) => REFERENCE_DEFINITION_RE.test(line));
 }
 
-// Whether a block is written back from its own source rather than from the DOM.
-function isSourceBlock(block) {
-  return !VisualEditor.isRich(block) || isDefinitionsBlock(block);
-}
-
 function pageEditActive() {
   return state.pageEdit.active;
 }
@@ -5852,22 +5849,324 @@ function renderRichBlock(block, index) {
     markPageEditDirty();
   });
 
+  block.serialize = () => VisualEditor.serializeEditedBlock(node);
   return node;
 }
 
-/* Everything markdown says more precisely than formatted text can: code fences,
- * tables, math, raw HTML, front matter.
+/* --- Tables ---------------------------------------------------------------
  *
- * These stay rendered — a table is still a table, a diagram is still a diagram —
- * because the page is supposed to look like the document. They are simply not
- * typed into directly. Asking for one opens its source, which is the only
- * honest way to edit a table without silently rewriting its alignment.
+ * A table is a grid of text with an alignment per column, and both of those
+ * survive being edited as a grid. So the table is not shown as markdown: the
+ * cells are typed into where they are, and rows, columns and alignment are
+ * changed with controls on the table itself.
+ *
+ * What does not survive the trip is the spacing of the source. That is why a
+ * table is only rewritten once it has actually been edited — an untouched table
+ * is emitted exactly as it was found, however irregularly it was typed.
+ */
+function renderTableBlock(block, index) {
+  const node = document.createElement("div");
+  node.className = "ve-block ve-table";
+  node.dataset.index = String(index);
+  node.setAttribute("contenteditable", "false");
+  // The declared alignment of each column, which the cells are drawn with and
+  // the serializer writes back. Read from the source rather than from the
+  // rendered table: the renderer expresses it in a way sanitizing may drop.
+  block.align = VisualEditor.tableAlignments(block.source);
+  node.innerHTML = MarkdownCore.renderMarkdown(block.source);
+
+  const table = node.querySelector("table");
+  if (!table) {
+    // Not a table after all once rendered. Fall back to source editing rather
+    // than putting controls on something that is not there.
+    return renderEmbedBlock(block, index);
+  }
+
+  const touched = () => {
+    block.dirty = true;
+    markPageEditDirty();
+  };
+
+  const paint = () => paintTable(node, block);
+  paint();
+
+  node.append(buildTableTools(node, block, paint, touched));
+
+  node.addEventListener("input", (event) => {
+    if (event.target.closest("th, td")) {
+      touched();
+    }
+  });
+
+  node.addEventListener("focusin", (event) => {
+    const cell = event.target.closest?.("th, td");
+    if (cell) {
+      block.lastCell = cell;
+    }
+  });
+
+  block.serialize = () => VisualEditor.tableElementToMarkdown(node.querySelector("table"), block.align);
+  return node;
+}
+
+// Every cell editable, and every cell drawn with its column's alignment.
+function paintTable(node, block) {
+  const table = node.querySelector("table");
+  if (!table) {
+    return;
+  }
+
+  for (const row of table.querySelectorAll("tr")) {
+    [...row.children].forEach((cell, column) => {
+      cell.setAttribute("contenteditable", "true");
+      cell.style.textAlign = block.align[column] || "";
+    });
+  }
+}
+
+/* Which cell the controls act on.
+ *
+ * The cursor is the answer while it is in the table, and the last cell it was
+ * in once it is not — clicking a control is not a reason for "this column" to
+ * stop meaning the column you were just typing in.
+ */
+function focusedCell(node, block) {
+  const active = document.activeElement;
+  const current = active && node.contains(active) ? active.closest("th, td") : null;
+  if (current) {
+    return current;
+  }
+
+  return block.lastCell && node.contains(block.lastCell) ? block.lastCell : null;
+}
+
+function cellPosition(cell) {
+  const row = cell.closest("tr");
+  const table = row.closest("table");
+  return {
+    row: [...table.querySelectorAll("tr")].indexOf(row),
+    column: [...row.children].indexOf(cell)
+  };
+}
+
+function buildTableTools(node, block, paint, touched) {
+  const tools = document.createElement("div");
+  tools.className = "ve-table-tools";
+  tools.setAttribute("contenteditable", "false");
+
+  const button = (icon, label, run) => {
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = "ve-table-tool";
+    control.title = label;
+    control.setAttribute("aria-label", label);
+    control.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+    // The cell has to keep the focus, because every one of these acts on the
+    // cell the cursor is in.
+    control.addEventListener("mousedown", (event) => event.preventDefault());
+    control.addEventListener("click", () => {
+      const table = node.querySelector("table");
+      const cell = focusedCell(node, block) || table.querySelector("th, td");
+      const at = cell ? cellPosition(cell) : { row: 0, column: 0 };
+      run(table, at);
+      paint();
+      touched();
+
+      // Whatever the cursor was in may have just been deleted. Put it in the
+      // cell that took its place, so the next control still means "here".
+      const rows = [...table.querySelectorAll("tr")];
+      const row = rows[Math.min(at.row, rows.length - 1)];
+      row?.children[Math.min(at.column, row.children.length - 1)]?.focus();
+    });
+    return control;
+  };
+
+  const separator = () => {
+    const line = document.createElement("span");
+    line.className = "ve-table-sep";
+    line.setAttribute("aria-hidden", "true");
+    return line;
+  };
+
+  tools.append(
+    button("ph-rows-plus-bottom", "Add row below", (table, at) => insertTableRow(table, at.row)),
+    button("ph-rows", "Delete this row", (table, at) => deleteTableRow(table, at.row)),
+    button("ph-columns-plus-right", "Add column to the right", (table, at) => {
+      insertTableColumn(table, at.column);
+      block.align.splice(at.column + 1, 0, "");
+    }),
+    button("ph-columns", "Delete this column", (table, at) => {
+      deleteTableColumn(table, at.column);
+      block.align.splice(at.column, 1);
+    }),
+    separator(),
+    button("ph-text-align-left", "Align this column left", (table, at) => {
+      block.align[at.column] = "left";
+    }),
+    button("ph-text-align-center", "Centre this column", (table, at) => {
+      block.align[at.column] = "center";
+    }),
+    button("ph-text-align-right", "Align this column right", (table, at) => {
+      block.align[at.column] = "right";
+    })
+  );
+
+  return tools;
+}
+
+function insertTableRow(table, afterIndex) {
+  const rows = [...table.querySelectorAll("tr")];
+  const reference = rows[Math.max(1, afterIndex)] || rows[rows.length - 1];
+  if (!reference) {
+    return;
+  }
+
+  const fresh = document.createElement("tr");
+  for (let i = 0; i < reference.children.length; i += 1) {
+    fresh.appendChild(document.createElement("td"));
+  }
+
+  reference.parentNode.insertBefore(fresh, reference.nextSibling);
+}
+
+function deleteTableRow(table, index) {
+  const rows = [...table.querySelectorAll("tr")];
+  // The header row is the table's column names; a table without one is not a
+  // markdown table at all.
+  if (index <= 0 || rows.length <= 2) {
+    return;
+  }
+
+  rows[index].remove();
+}
+
+function insertTableColumn(table, afterIndex) {
+  for (const row of table.querySelectorAll("tr")) {
+    const isHeader = Boolean(row.querySelector("th"));
+    const cell = document.createElement(isHeader ? "th" : "td");
+    const reference = row.children[afterIndex];
+
+    if (reference) {
+      row.insertBefore(cell, reference.nextSibling);
+    } else {
+      row.appendChild(cell);
+    }
+  }
+}
+
+function deleteTableColumn(table, index) {
+  const rows = [...table.querySelectorAll("tr")];
+  if (rows.length === 0 || rows[0].children.length <= 1) {
+    return;
+  }
+
+  for (const row of rows) {
+    row.children[index]?.remove();
+  }
+}
+
+/* --- Code -----------------------------------------------------------------
+ *
+ * The text inside a fence is literal, so it is exactly the kind of thing that
+ * can be typed into as itself. The code block stays a code block — same font,
+ * same colours, same box — and the caret goes in it. Highlighting is left alone
+ * while you type, because re-highlighting on every keystroke rebuilds the
+ * markup the caret is standing in, and comes back when you leave.
+ *
+ * The language is an input rather than something to go and find in the source,
+ * since it is the one part of a fence that is not the code.
+ */
+function renderCodeBlock(block, index) {
+  const fence = VisualEditor.parseFence(block.source);
+
+  // A mermaid fence renders to a diagram. There is nothing to type into in an
+  // SVG, so those keep the rendering and open their source on request.
+  if (/^mermaid\b/i.test(fence.info)) {
+    return renderEmbedBlock(block, index);
+  }
+
+  const node = document.createElement("div");
+  node.className = "ve-block ve-code";
+  node.dataset.index = String(index);
+  node.setAttribute("contenteditable", "false");
+  node.innerHTML = MarkdownCore.renderMarkdown(block.source);
+
+  const code = node.querySelector("pre code");
+  if (!code) {
+    return renderEmbedBlock(block, index);
+  }
+
+  // The renderer adds a trailing newline of its own. Setting the text from the
+  // parsed fence means what is on screen is exactly the code, so what comes
+  // back out of the element needs no interpretation.
+  code.textContent = fence.body;
+
+  // plaintext-only keeps Enter as a newline and paste as text, which is what
+  // code is. Browsers without it get the ordinary editable behaviour and the
+  // paste handler on the document.
+  code.setAttribute("contenteditable", "plaintext-only");
+  if (code.contentEditable !== "plaintext-only") {
+    code.setAttribute("contenteditable", "true");
+  }
+  code.spellcheck = false;
+
+  const language = document.createElement("input");
+  language.className = "ve-code-language";
+  language.value = fence.info;
+  language.placeholder = "language";
+  language.spellcheck = false;
+  language.setAttribute("aria-label", "Code language");
+
+  const fenceState = { info: fence.info };
+
+  const touched = () => {
+    block.dirty = true;
+    markPageEditDirty();
+  };
+
+  language.addEventListener("input", () => {
+    fenceState.info = language.value.trim();
+    touched();
+  });
+
+  code.addEventListener("input", touched);
+
+  // Highlighting is rebuilt from the text once the caret has left, so the
+  // colours come back without the markup moving under the cursor.
+  code.addEventListener("blur", () => {
+    const text = code.textContent;
+    code.textContent = text;
+    delete code.dataset.highlighted;
+    code.className = fenceState.info ? `language-${fenceState.info}` : "";
+    MarkdownCore.highlightCodeBlocks(node);
+  });
+
+  node.appendChild(language);
+
+  block.serialize = () => VisualEditor.serializeFence({
+    ...fence,
+    info: fenceState.info,
+    body: code.textContent
+  });
+
+  return node;
+}
+
+/* --- Everything else ------------------------------------------------------
+ *
+ * Math, raw HTML, front matter, link definitions and mermaid diagrams. What
+ * these have in common is that there is nothing in the rendering to type into:
+ * an equation is a picture of an equation, a diagram is a picture of a diagram,
+ * and front matter has no rendering at all. They stay rendered and hand over
+ * their markdown on request — with a live preview, so the result is visible
+ * while it is being written rather than only afterwards.
  */
 function renderEmbedBlock(block, index) {
   const node = document.createElement("div");
   node.className = "ve-block ve-embed";
   node.dataset.index = String(index);
   node.setAttribute("contenteditable", "false");
+  block.serialize = () => blockSource(block);
   paintEmbedBlock(node, block);
   return node;
 }
@@ -5917,16 +6216,32 @@ function openEmbedSource(node, block) {
   area.spellcheck = false;
   area.setAttribute("aria-label", `${embedLabel(block)} source`);
 
+  const preview = document.createElement("div");
+  preview.className = "ve-embed-preview markdown-body";
+
   const fit = () => {
     area.rows = Math.min(24, Math.max(2, area.value.split("\n").length));
   };
+
+  // Writing an equation or a diagram blind and pressing Done to find out is
+  // the thing that makes source editing feel like a punishment.
+  const drawPreview = () => {
+    destroyPanZoomInstances(preview);
+    preview.innerHTML = MarkdownCore.renderMarkdown(blockSource(block) + pageLinkReferences);
+    void renderMermaidBlocks(preview);
+  };
+
   fit();
+  drawPreview();
 
   area.addEventListener("input", () => {
     block.dirty = true;
     block.sourceOverride = area.value;
     fit();
     markPageEditDirty();
+
+    window.clearTimeout(state.embedPreviewTimer);
+    state.embedPreviewTimer = window.setTimeout(drawPreview, 250);
   });
 
   const done = document.createElement("button");
@@ -5935,8 +6250,29 @@ function openEmbedSource(node, block) {
   done.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i><span>Done</span>';
   done.addEventListener("click", () => paintEmbedBlock(node, block));
 
-  node.append(head, area, done);
+  node.append(head, area, preview, done);
   area.focus();
+}
+
+// Which of the four ways a block is drawn and written back.
+function renderBlock(block, index) {
+  if (isDefinitionsBlock(block)) {
+    return renderEmbedBlock(block, index);
+  }
+
+  if (VisualEditor.isRich(block)) {
+    return renderRichBlock(block, index);
+  }
+
+  if (block.type === "table") {
+    return renderTableBlock(block, index);
+  }
+
+  if (block.type === "fence") {
+    return renderCodeBlock(block, index);
+  }
+
+  return renderEmbedBlock(block, index);
 }
 
 function renderPageEditor(markdown) {
@@ -5954,15 +6290,13 @@ function renderPageEditor(markdown) {
       continue;
     }
 
-    elements.docContent.appendChild(isSourceBlock(block)
-      ? renderEmbedBlock(block, index)
-      : renderRichBlock(block, index));
+    elements.docContent.appendChild(renderBlock(block, index));
   }
 
-  // An empty document, or one made entirely of code and tables, would have
-  // nowhere to put the cursor. Give it a paragraph to start in; it contributes
-  // nothing to the file until something is typed into it.
-  if (!elements.docContent.querySelector('[contenteditable="true"]')) {
+  // An empty document would have nowhere to put the cursor. Give it a paragraph
+  // to start in; it contributes nothing to the file until something is typed
+  // into it.
+  if (!elements.docContent.querySelector('.ve-block[contenteditable="true"]')) {
     const index = pageBlocks.length;
     pageBlocks.push({ type: "paragraph", source: "" });
     const node = renderRichBlock(pageBlocks[index], index);
@@ -5978,25 +6312,20 @@ function renderPageEditor(markdown) {
 
 /* Back to markdown.
  *
- * Only dirty blocks are re-serialized. That is the whole safety property, and
- * the reason this can be pointed at a library written elsewhere.
+ * Only dirty blocks are re-serialized, each by the function the renderer gave
+ * it. That is the whole safety property, and the reason this can be pointed at
+ * a library written elsewhere.
  */
 function collectPageMarkdown() {
   const out = [];
 
-  for (const [index, block] of pageBlocks.entries()) {
-    if (!block.dirty) {
+  for (const block of pageBlocks) {
+    if (!block.dirty || typeof block.serialize !== "function") {
       out.push(block.source);
       continue;
     }
 
-    if (isSourceBlock(block)) {
-      out.push(blockSource(block));
-      continue;
-    }
-
-    const node = elements.docContent.querySelector(`.ve-block[data-index="${index}"]`);
-    out.push(node ? VisualEditor.serializeEditedBlock(node) : block.source);
+    out.push(block.serialize());
   }
 
   return out.join("");
@@ -6098,6 +6427,11 @@ async function startPageEdit() {
 }
 
 function exitPageEdit() {
+  // A queued preview must not fire into a document that has gone back to
+  // being read.
+  window.clearTimeout(state.embedPreviewTimer);
+  state.embedPreviewTimer = null;
+
   state.pageEdit = { active: false, file: null, title: "", initial: "" };
   pageBlocks = [];
   pageLinkReferences = "";
