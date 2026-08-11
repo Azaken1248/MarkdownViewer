@@ -79,6 +79,12 @@ async function run(server) {
 
   const { window } = dom;
 
+  // Browsers put these on window; jsdom does not. markdown-core stashes the TeX
+  // of a maths block as base64 through TextEncoder, so without them rendering
+  // any document containing maths throws and the open silently gives up.
+  window.TextEncoder = TextEncoder;
+  window.TextDecoder = TextDecoder;
+
   // Third-party globals the app expects to already be on the page.
   //
   // A stand-in for marked. It only has to produce the shapes the editor works
@@ -108,13 +114,25 @@ async function run(server) {
         return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
       }
 
+      // Real marked passes block-level raw HTML straight through. markdown-core
+      // depends on that: it rewrites a maths block into a placeholder div
+      // carrying the TeX, and expects the renderer to hand it back untouched.
+      if (/^<[a-z]/i.test(text.trim())) {
+        return text.trim();
+      }
+
       return `<p>${text.replace(/[<>]/g, "")}</p>`;
     }
   };
   window.DOMPurify = { sanitize: (html) => html };
   window.mermaid = { initialize() {}, render: async () => ({ svg: "<svg></svg>" }) };
   window.hljs = { getLanguage: () => null, highlightAuto: (s) => ({ value: s }), highlight: (s) => ({ value: s }) };
-  window.katex = { renderToString: (t) => t };
+  // KaTeX replaces the placeholder's contents with typeset maths and leaves the
+  // TeX attribute alone; that is all this suite needs it to do.
+  window.katex = {
+    renderToString: (t) => t,
+    render: (tex, node) => { node.textContent = tex; }
+  };
   window.renderMathInElement = () => {};
   window.svgPanZoom = () => ({ destroy() {} });
 
@@ -1227,6 +1245,95 @@ async function run(server) {
       doc.querySelectorAll("#docContent .ve-block, #docContent .ve-embed-edit").length, 0);
     check("...and nothing in it is editable",
       doc.querySelectorAll('#docContent [contenteditable="true"]').length, 0);
+  }
+
+  console.log("=== what has no editable rendering shows its source and its result ===");
+  {
+    // Maths has no rendering you can type into — an equation is not its own
+    // markup. So it keeps a source box, and the point of this section is that
+    // the box is not a blindfold: what you type is drawn back at you.
+    const source = [
+      "# Sums",
+      "",
+      "$$",
+      "E = mc^2",
+      "$$",
+      "",
+      "After.",
+      ""
+    ].join("\n");
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "sums.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("sums.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+    check("the maths document is open", window.eval("window.__t.state.activeFile"), "sums.md");
+
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const embed = doc.querySelector("#docContent .ve-embed");
+    check("maths is a block that keeps its source", Boolean(embed), true);
+    check("...shown rendered to begin with, not as markup",
+      embed.querySelectorAll(".ve-embed-source").length, 0);
+    check("...and it says what it is",
+      embed.querySelector(".ve-embed-edit").textContent.trim(), "Edit math");
+
+    embed.querySelector(".ve-embed-edit").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    const area = embed.querySelector(".ve-embed-source");
+    const preview = embed.querySelector(".ve-embed-preview");
+    // KaTeX is not present here, so what a rendering of maths leaves behind is
+    // the placeholder the real markdown-core writes — the TeX, base64 in an
+    // attribute, waiting to be typeset. Reading it back is reading the actual
+    // render output rather than anything this suite invented.
+    const drawnTex = (root) => {
+      const node = root.querySelector(".math-block");
+      return node ? Buffer.from(node.getAttribute("data-math-tex"), "base64").toString("utf8").trim() : null;
+    };
+
+    check("asking for the markdown gives you the markdown", area.value, "$$\nE = mc^2\n$$");
+    check("...with the block named above it",
+      embed.querySelector(".ve-embed-head").textContent, "math");
+    check("...and a preview beside it from the moment it opens", drawnTex(preview), "E = mc^2");
+
+    // The preview is debounced, so it is the wait that proves it redraws
+    // rather than the keystroke.
+    area.value = "$$\na^2 + b^2 = c^2\n$$";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("the edit counts immediately", doc.getElementById("pageEditState").textContent, "Unsaved changes");
+    check("...and reaches the document immediately",
+      window.eval("window.__t.collectPageMarkdown()").includes("a^2 + b^2 = c^2"), true);
+
+    check("the preview waits rather than redrawing on every keystroke",
+      drawnTex(preview), "E = mc^2");
+
+    await new Promise((r) => setTimeout(r, 400));
+    check("...then catches up with what was typed", drawnTex(preview), "a^2 + b^2 = c^2");
+
+    // Done puts the rendering back where the source box was.
+    embed.querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("Done returns the block to its rendering",
+      embed.querySelectorAll(".ve-embed-source").length, 0);
+    check("...showing the new maths, not the old",
+      drawnTex(embed.querySelector(".ve-embed-view")), "a^2 + b^2 = c^2");
+    check("...and offers the source again",
+      Boolean(embed.querySelector(".ve-embed-edit")), true);
+    check("the edit survives closing the box",
+      window.eval("window.__t.collectPageMarkdown()").includes("a^2 + b^2 = c^2"), true);
+    check("...and the prose around it is untouched",
+      window.eval("window.__t.collectPageMarkdown()").endsWith("After.\n"), true);
+
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+    const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
+    check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
+    check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
   }
 
   console.log("=== the editor tabs show one pane at a time ===");
