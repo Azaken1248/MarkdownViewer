@@ -16,7 +16,11 @@ function makeClient(origin) {
   const jar = new Map();
   let csrfToken = "";
 
-  async function request(method, pathname, body, extraHeaders = {}) {
+  // `raw` sends the path exactly as given. Normally the path goes through
+  // `new URL()`, which resolves "/api/docs/../../x" to "/x" before it is ever
+  // sent — fine for ordinary calls, useless for checking that the server
+  // refuses traversal, because the traversal never reaches it.
+  async function request(method, pathname, body, extraHeaders = {}, raw = false) {
     const url = new URL(pathname, origin);
     const payload = body === undefined ? null : JSON.stringify(body);
     const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
@@ -32,7 +36,7 @@ function makeClient(origin) {
       const req = http.request({
         host: url.hostname,
         port: url.port,
-        path: url.pathname + url.search,
+        path: raw ? pathname : url.pathname + url.search,
         method,
         headers
       }, (res) => {
@@ -40,8 +44,8 @@ function makeClient(origin) {
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           const setCookies = res.headers["set-cookie"] || [];
-          for (const raw of setCookies) {
-            const [pair] = raw.split(";");
+          for (const cookie of setCookies) {
+            const [pair] = cookie.split(";");
             const index = pair.indexOf("=");
             const name = pair.slice(0, index).trim();
             const value = pair.slice(index + 1).trim();
@@ -168,6 +172,8 @@ function makeClient(origin) {
     postMultipart,
     getBytes,
     get: (p, h) => request("GET", p, undefined, h),
+    // The same GET with the path left exactly as written.
+    getRaw: (p, h) => request("GET", p, undefined, h, true),
     post: (p, b, h) => request("POST", p, b === undefined ? {} : b, h),
     put: (p, b) => request("PUT", p, b),
     patch: (p, b) => request("PATCH", p, b),

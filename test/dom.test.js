@@ -357,6 +357,7 @@ async function run(server) {
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
         startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
+        documentPath, fileFromLocation, showDocumentInUrl,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
     `);
@@ -1428,6 +1429,89 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== a document has a real address, without leaving the page ===");
+  {
+    const nested = server.docPaths["alpha.md"] || "alpha.md";
+    const path = () => window.location.pathname;
+
+    check("a document's address is its path",
+      window.eval(`window.__t.documentPath(${JSON.stringify(nested)})`),
+      `/${nested.split("/").map(encodeURIComponent).join("/")}`);
+    check("...and reading it back gives the document again",
+      window.eval(`(function () {
+        window.history.replaceState(null, "", window.__t.documentPath(${JSON.stringify(nested)}));
+        return window.__t.fileFromLocation();
+      })()`),
+      nested);
+
+    // The page itself must never be replaced: this is one page, and opening a
+    // document changes the address without going anywhere.
+    window.eval('window.__marker = "same-page";');
+    const article = doc.getElementById("docContent");
+
+    await window.eval('window.__t.openDocument("beta.md", true)');
+    await new Promise((r) => setTimeout(r, 500));
+    check("opening a document puts it in the address bar", path(), "/beta.md");
+    check("...with no fragment left behind", window.location.hash, "");
+    check("...and the page was never reloaded", window.eval("window.__marker"), "same-page");
+    check("...it is still the same article element",
+      doc.getElementById("docContent") === article, true);
+
+    await window.eval(`window.__t.openDocument(${JSON.stringify(nested)}, true)`);
+    await new Promise((r) => setTimeout(r, 500));
+    check("a document in folders gets the whole path",
+      decodeURIComponent(path()), `/${nested}`);
+    check("...and the app agrees that is what is open",
+      window.eval("window.__t.state.activeFile"), nested);
+
+    // Back and forward are the browser's, and they have to work.
+    window.history.back();
+    await new Promise((r) => setTimeout(r, 600));
+    check("back returns to the previous document", path(), "/beta.md");
+    check("...and actually opens it", window.eval("window.__t.state.activeFile"), "beta.md");
+    check("...still without reloading", window.eval("window.__marker"), "same-page");
+
+    window.history.forward();
+    await new Promise((r) => setTimeout(r, 600));
+    check("forward goes to the next one again",
+      window.eval("window.__t.state.activeFile"), nested);
+
+    // Landing on the app without asking for anything should not invent a
+    // history entry for whatever it happened to open.
+    const depth = window.history.length;
+    await window.eval('window.__t.openDocument("beta.md", false)');
+    await new Promise((r) => setTimeout(r, 500));
+    check("a document opened without being asked for still shows in the address",
+      path(), "/beta.md");
+    check("...but adds no history entry to go back through",
+      window.history.length, depth);
+
+    // Links from before this existed.
+    check("an old fragment link still names its document",
+      window.eval(`(function () {
+        window.history.replaceState(null, "", "/#" + encodeURIComponent(${JSON.stringify(nested)}));
+        return window.__t.fileFromLocation();
+      })()`),
+      nested);
+    check("...and is turned into the real address",
+      window.eval(`(function () {
+        window.__t.showDocumentInUrl(${JSON.stringify(nested)}, { replace: true });
+        return window.location.pathname;
+      })()`),
+      `/${nested.split("/").map(encodeURIComponent).join("/")}`);
+
+    // A path that names no document is the app's own root, not a document
+    // called "settings".
+    for (const junk of ["/", "/img/embed-card.png", "/some/page"]) {
+      check(`${junk} names no document`, window.eval(`(function () {
+        window.history.replaceState(null, "", ${JSON.stringify(junk)});
+        return window.__t.fileFromLocation();
+      })()`), null);
+    }
+
+    window.eval('window.history.replaceState(null, "", "/");');
   }
 
   console.log("=== the bar can put a new block into the document ===");

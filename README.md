@@ -19,6 +19,8 @@ Live at **<https://md.azaken.com>**.
   content hash so the same picture is only ever kept once.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
+- Every document has a real address — `/Azalea/Roadmap/day-008.md` — that can
+  be typed, refreshed and shared, with all navigation staying on one page.
 - Private by default: accounts with roles, and individual documents can be
   published as standalone share links.
 
@@ -633,6 +635,48 @@ The declared `og:image:width` / `og:image:height` are checked against the PNG's
 actual header too, since a crawler that lays out a card from the tags and then
 receives a different size draws a broken one. `/oembed` hands out the raster
 icon for the same reason.
+
+## Addresses
+
+A document's address is its path:
+
+```
+https://md.azaken.com/Azalea/Roadmap/day-008.md
+```
+
+It used to be a fragment — `/#Azalea/Roadmap/day-008.md` — which no server ever
+sees. The address bar was really just a note the client left itself, and a link
+sent to someone else worked only because the client read that note back on the
+other end.
+
+Navigating is still entirely in-page. Opening a document changes the address
+with `pushState` and fetches nothing but the document; **Back** and **Forward**
+move between documents without reloading anything. The address is pushed when
+you ask for a document and replaced when the app simply lands on one, so the
+address always names what is on screen without inventing history entries nobody
+navigated to. Old `#name.md` links still work and quietly become real addresses
+when they land.
+
+The matching server route exists only for when that address is typed,
+refreshed, or opened from a link somewhere else. It sits after the static
+files, so a real file always wins, and it answers with the app shell rather
+than the document: which documents exist and what is in them stays behind the
+session.
+
+It deliberately **does not check whether the document exists.** Serving a shell
+for a real path and a 404 for an imaginary one would tell anyone who asked —
+signed in or not — exactly which documents are in the library, which is the one
+thing the read guard exists to prevent. So every document-shaped path gets a
+byte-identical answer, and the client says "not found" only after asking the
+API as itself. The `auth` suite compares the two responses to make sure they
+stay indistinguishable.
+
+A path only gets the shell if it could name a document: the right extension,
+and a name `sanitizeDocPath` accepts. Anything else — a typo, a directory, a
+path with traversal in it — gets the ordinary error page, and `/api/*` still
+answers in JSON.
+
+---
 
 ## API
 

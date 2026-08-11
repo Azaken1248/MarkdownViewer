@@ -625,7 +625,10 @@ async function run(server) {
 
     for (const [label, attempt] of attempts) {
       const encoded = attempt.split("/").map(encodeURIComponent).join("/");
-      const res = await admin.get(`/api/docs/${encoded}`);
+      // getRaw, not get: `new URL()` resolves "../.." away before the request
+      // is sent, so an ordinary call would test the client's normalisation
+      // rather than the server's refusal.
+      const res = await admin.getRaw(`/api/docs/${encoded}`);
       const refused = res.status === 400 || res.status === 404;
       if (!refused) {
         failures++;
@@ -1052,6 +1055,55 @@ async function run(server) {
       const ok = res.status === 404 && /text\/html/.test(res.headers["content-type"]);
       if (!ok) failures++;
       console.log(`  ${ok ? "PASS" : "FAIL"}  ${label} renders the 404 page`);
+    }
+
+    console.log("=== a document has a real address ===");
+    {
+      const asBrowserHtml = { Accept: "text/html,application/xhtml+xml" };
+
+      // The point of the route: typing, refreshing or opening a pasted
+      // /Notes/delta.md loads the app rather than 404ing, and the app then
+      // asks for the document as itself.
+      const nested = await stranger.get("/Notes/delta.md", asBrowserHtml);
+      check("a nested document path serves the app", nested.status, 200);
+      check("...as HTML", /text\/html/.test(nested.headers["content-type"]), true);
+      check("...which really is the app shell", nested.raw.includes('id="docContent"'), true);
+      check("...with no placeholder left in it", /__EMBED_[A-Z_]+__/.test(nested.raw), false);
+
+      const spaced = await stranger.get(`/${encodeURIComponent("Notes")}/${encodeURIComponent("delta.md")}`, asBrowserHtml);
+      check("an encoded path works the same", spaced.status, 200);
+
+      for (const name of ["/top.md", "/a/b/c/deep.markdown", "/x.ipynb", "/y.mmd"]) {
+        const res = await stranger.get(name, asBrowserHtml);
+        check(`${name} serves the app`, res.status, 200);
+      }
+
+      // The security property. Answering 404 for a document that is not there
+      // and 200 for one that is would let anyone, signed in or not, enumerate
+      // the library by asking — which is the one thing the read guard exists
+      // to stop. Both answers have to be identical.
+      const missing = await stranger.get("/Notes/no-such-document.md", asBrowserHtml);
+      check("a document that does not exist answers the same way", missing.status, nested.status);
+      check("...byte for byte, so nothing can be told apart",
+        missing.raw.length === nested.raw.length, true);
+
+      // And it must not have become a catch-all.
+      check("a typo still gets the error page",
+        (await stranger.get("/nonsense", asBrowserHtml)).status, 404);
+      check("...and so does a directory that is not a document",
+        (await stranger.get("/Notes", asBrowserHtml)).status, 404);
+      check("the API still answers in JSON",
+        /application\/json/.test((await stranger.get("/api/nope", asBrowserHtml)).headers["content-type"]), true);
+      check("...and a real API route is untouched",
+        (await stranger.get("/api/docs")).status, 401);
+      check("a static file still wins over the shell",
+        /javascript/.test((await stranger.get("/js/app.js", asBrowserHtml)).headers["content-type"]), true);
+      check("the raw documents directory is still refused",
+        (await stranger.get("/docs/anything.md", asBrowserHtml)).status, 404);
+
+      // A crawler asking for JSON should not be handed a page.
+      check("something that wants JSON does not get the shell",
+        (await stranger.get("/Notes/delta.md", { Accept: "application/json" })).status, 404);
     }
 
     console.log("=== a dead share link uses the same page ===");

@@ -2166,6 +2166,69 @@ function docUrl(file) {
   return String(file).split("/").map(encodeURIComponent).join("/");
 }
 
+/* --- The address bar ------------------------------------------------------
+ *
+ * A document's address is its path: /Notes/day-one.md. It used to be a
+ * fragment, /#Notes/day-one.md, which no server ever sees — so the URL was
+ * really just a note the client left itself, and the page it named only
+ * appeared because the client read it back.
+ *
+ * Navigation is still entirely in-page. pushState changes the address without
+ * fetching anything; the server route of the same name exists only for when
+ * that address is typed, refreshed or opened from a link somewhere else.
+ */
+function documentPath(file) {
+  return `/${docUrl(file)}`;
+}
+
+// The document a URL names, or null for the app's own root.
+function fileFromLocation() {
+  const fromPath = decodePathFile(window.location.pathname);
+  if (fromPath) {
+    return fromPath;
+  }
+
+  // Links from before this existed, and anything that still points at one.
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(hash) || null;
+  } catch {
+    return null;
+  }
+}
+
+function decodePathFile(pathname) {
+  const raw = String(pathname || "").replace(/^\/+/, "");
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const file = raw.split("/").map(decodeURIComponent).join("/");
+    // A path is only a document if it could name one. Anything else is the
+    // app's own root by another name.
+    const lower = file.toLowerCase();
+    return UPLOADABLE_EXTENSIONS.some((extension) => lower.endsWith(extension)) ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+// Called when the open document changes, not when the URL does.
+function showDocumentInUrl(file, { replace = false } = {}) {
+  const next = file ? documentPath(file) : "/";
+  if (next === window.location.pathname && !window.location.hash) {
+    return;
+  }
+
+  // The hash goes with it: an address cannot be half in each place.
+  window.history[replace ? "replaceState" : "pushState"]({ file: file || null }, "", next);
+}
+
 async function requestJson(url, options = {}) {
   const requestOptions = { ...options, credentials: "same-origin" };
   const method = String(options.method || "GET").toUpperCase();
@@ -5558,9 +5621,10 @@ async function openDocument(file, pushHash, options = {}) {
       }
 
       document.title = `${doc.title} | AzaDocs`;
-      if (pushHash) {
-        window.location.hash = encodeURIComponent(file);
-      }
+      // Push when someone asked for this document, replace when the app
+      // simply landed on it, so the address always names what is on screen
+      // without inventing history entries nobody navigated to.
+      showDocumentInUrl(file, { replace: !pushHash });
 
       if (hasJumpQuery) {
         if (jumpResult.found) {
@@ -5598,9 +5662,7 @@ async function openDocument(file, pushHash, options = {}) {
     updateActiveRowHighlight();
     updateActiveDocUI(file);
     document.title = `${doc.title} | AzaDocs`;
-    if (pushHash) {
-      window.location.hash = encodeURIComponent(file);
-    }
+    showDocumentInUrl(file, { replace: !pushHash });
 
     await waitForNextFrame();
 
@@ -5722,6 +5784,7 @@ async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {
 
   if (!target) {
     state.activeFile = null;
+    showDocumentInUrl(null, { replace: true });
     updateActiveDocUI(null);
     // No toast here: the empty state on screen already says this, and a toast
     // that fires on every refresh is what teaches people to ignore toasts.
@@ -7245,6 +7308,7 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
 
   if (state.docs.length === 0) {
     state.activeFile = null;
+    showDocumentInUrl(null, { replace: true });
     updateActiveDocUI(null);
     showEmptyState("No markdowns yet", "Upload a markdown or create one in the live editor.", "ph-file-plus");
     setStatus("No documents yet. Create or upload one to get started.", "neutral");
@@ -7736,8 +7800,15 @@ async function initialize() {
   }
 
   try {
-    const hashFile = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-    await refreshDocs({ openFile: hashFile || null, preserveSearch: true });
+    const wanted = fileFromLocation();
+
+    // An old /#Notes/day-one.md link still works, and becomes the real address
+    // as soon as it lands rather than staying half in the fragment.
+    if (wanted && window.location.hash) {
+      showDocumentInUrl(wanted, { replace: true });
+    }
+
+    await refreshDocs({ openFile: wanted, preserveSearch: true });
   } catch (error) {
     console.error(error);
     setMeta("Failed to load documents");
@@ -8772,10 +8843,26 @@ elements.dockEdit.addEventListener("click", () => {
   void startPageEdit();
 });
 
+// Back and forward. pushState does not fire this — only the buttons do — so
+// this is where the browser's own navigation is honoured, and the false says
+// "do not push what we are already standing on".
+window.addEventListener("popstate", () => {
+  const file = fileFromLocation();
+
+  if (!file) {
+    return;
+  }
+
+  if (file !== state.activeFile && state.docs.some((doc) => doc.file === file)) {
+    void openDocument(file, false);
+  }
+});
+
+// Anything still pointing at the old fragment form.
 window.addEventListener("hashchange", () => {
-  const hashFile = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-  if (hashFile && hashFile !== state.activeFile && state.docs.some((doc) => doc.file === hashFile)) {
-    openDocument(hashFile, false);
+  const file = fileFromLocation();
+  if (file && file !== state.activeFile && state.docs.some((doc) => doc.file === file)) {
+    void openDocument(file, true);
   }
 });
 

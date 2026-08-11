@@ -4002,6 +4002,79 @@ app.get(["/share.html", "/error.html"], (req, res, next) => {
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
+/* A document has a real address.
+ *
+ * Opening one used to put it in the fragment — /#Notes/day-one.md — which meant
+ * the address bar showed something no server ever saw, and a link pasted to
+ * someone else worked only because the client picked the fragment back up. Now
+ * the URL is the path: /Notes/day-one.md, pushed as you navigate and served
+ * here when it is typed, refreshed or opened from a link.
+ *
+ * This sits after express.static so a real file always wins, and it answers
+ * with the app shell rather than the document: which documents exist, and what
+ * is in them, is the API's business and stays behind the session.
+ *
+ * It deliberately does NOT check whether the document exists. Serving the shell
+ * for a real path and a 404 for an imaginary one would tell anyone who asked —
+ * signed in or not — exactly which documents are in the library, which is the
+ * one thing the whole read guard exists to prevent. So every document-shaped
+ * path gets the same answer, and the client says "not found" after it asks the
+ * API as itself.
+ */
+const SHELL_RESERVED_PREFIXES = ["/api", "/s/", "/docs", "/oembed", "/graphql", "/healthz"];
+
+function wantsDocumentShell(req) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return false;
+  }
+
+  // An unfurler or a fetch() asking for JSON should not be handed a page.
+  if (!req.accepts("html")) {
+    return false;
+  }
+
+  const pathname = req.path;
+  if (SHELL_RESERVED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix))) {
+    return false;
+  }
+
+  let decoded = "";
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A malformed escape is not a document name.
+    return false;
+  }
+
+  const wanted = decoded.replace(/^\/+/, "");
+
+  // Only what this app could actually be holding. Anything else is a typo and
+  // deserves the error page rather than an app shell that will not find it.
+  if (!ALLOWED_DOC_EXTENSIONS.has(path.extname(wanted).toLowerCase())) {
+    return false;
+  }
+
+  // And only a name the API could serve. A path with traversal, an empty
+  // segment or a hidden directory in it is not a document this app will ever
+  // open, so it should not get a shell that goes looking for one — one rule
+  // for what a document path is, not two.
+  return sanitizeDocPath(wanted) === wanted;
+}
+
+app.use(async (req, res, next) => {
+  if (!wantsDocumentShell(req)) {
+    next();
+    return;
+  }
+
+  try {
+    const htmlTemplate = await getIndexTemplate();
+    res.type("html").send(renderIndexWithEmbedMeta(htmlTemplate, buildEmbedMeta(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Nothing matched. Without this, Express answers a mistyped URL with a bare
 // "Cannot GET /nope" in the browser's default serif.
 app.use((req, res, next) => {
