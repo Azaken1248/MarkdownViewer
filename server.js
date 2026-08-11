@@ -530,9 +530,9 @@ app.get("/api/shares", requirePermission("share:manage"), (req, res) => {
 
 // Creating a share for a document that already has one rotates the token, which
 // is the only way to revoke a URL that has leaked.
-app.post("/api/docs/:file/share", requirePermission("share:manage"), async (req, res, next) => {
+app.post("/api/docs/*file/share", requirePermission("share:manage"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     if (!fileName) {
       res.status(400).json({ error: "Invalid markdown file name" });
       return;
@@ -561,9 +561,9 @@ app.post("/api/docs/:file/share", requirePermission("share:manage"), async (req,
   }
 });
 
-app.delete("/api/docs/:file/share", requirePermission("share:manage"), async (req, res, next) => {
+app.delete("/api/docs/*file/share", requirePermission("share:manage"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     if (!fileName) {
       res.status(400).json({ error: "Invalid markdown file name" });
       return;
@@ -840,6 +840,82 @@ async function ensureStorageDirs() {
   await fsp.mkdir(DELETED_SOFT_DIR, { recursive: true });
   await fsp.mkdir(DELETED_HARD_DIR, { recursive: true });
   await fsp.mkdir(DATA_DIR, { recursive: true });
+}
+
+/* Move a flat library into directories.
+ *
+ * Documents used to be a single directory with a filename→folder map. Folders
+ * are real directories now, so every file the map placed in a folder has to be
+ * moved into it, once, at boot.
+ *
+ * Written to be safe to run repeatedly and safe to interrupt: it only ever
+ * moves a file that is at the top level and is mapped somewhere else, so a
+ * half-finished run resumes on the next boot. Nothing is deleted, and a file
+ * whose destination is somehow occupied is left exactly where it is and
+ * reported rather than renamed — a migration that quietly invents README-1.md
+ * would be repeating the very bug this is here to remove.
+ */
+async function migrateFlatLibraryToDirectories() {
+  const organizer = await readOrganizerState();
+  const mapping = organizer.fileFolders || {};
+
+  if (Object.keys(mapping).length === 0) {
+    return { moved: 0, folders: 0, skipped: [] };
+  }
+
+  let moved = 0;
+  const skipped = [];
+
+  // Every folder gets its directory, including empty ones — a folder that
+  // exists in the tree but nowhere on disk would vanish on the next boot.
+  const folderDirs = new Set();
+  for (const folder of organizer.folders) {
+    const dir = folderDirFor(organizer, folder.id);
+    if (dir) {
+      folderDirs.add(dir);
+    }
+  }
+
+  for (const dir of folderDirs) {
+    await fsp.mkdir(path.join(MARKDOWN_DIR, dir), { recursive: true });
+  }
+
+  for (const [fileName, folderId] of Object.entries(mapping)) {
+    // Only a bare filename can be a leftover from the flat layout; anything
+    // with a directory in it has already been moved.
+    if (fileName.includes("/") || !sanitizeFilename(fileName)) {
+      continue;
+    }
+
+    const dir = folderDirFor(organizer, folderId);
+    if (!dir) {
+      continue;   // folder is gone; the file stays at the top level, unfiled
+    }
+
+    const from = path.join(MARKDOWN_DIR, fileName);
+    const to = path.join(MARKDOWN_DIR, dir, fileName);
+
+    if (!(await fileExists(from))) {
+      continue;
+    }
+
+    if (await fileExists(to)) {
+      skipped.push(`${fileName} -> ${dir}/ (destination already exists)`);
+      continue;
+    }
+
+    await moveFile(from, to);
+    moved += 1;
+  }
+
+  // The map was the old source of truth and is now a stale copy of what the
+  // directory layout says. Dropping it is what makes the migration finished.
+  await mutateOrganizerState((state) => {
+    state.fileFolders = {};
+    return state;
+  });
+
+  return { moved, folders: folderDirs.size, skipped };
 }
 
 // v1 folders were a flat list. v2 adds `parentId`, and a v1 file loads cleanly
@@ -1216,8 +1292,14 @@ function getFolderRecordById(organizerState, folderId) {
   return organizerState.folders.find((folder) => folder.id === normalizedFolderId) || null;
 }
 
-function resolveFolderInfo(organizerState, fileName) {
-  const folderId = organizerState.fileFolders[fileName] || null;
+/* Which folder a document is in.
+ *
+ * Read off the path now, not out of a map. The directory a file sits in *is*
+ * the answer, so the two can no longer disagree — the old fileFolders map was a
+ * second source of truth that a rename outside the app silently invalidated.
+ */
+function resolveFolderInfo(organizerState, filePath) {
+  const folderId = folderIdForDir(organizerState, docDirOf(filePath));
   if (!folderId) {
     return {
       folderId: null,
@@ -1587,8 +1669,191 @@ function sanitizeNewFilename(rawName) {
   return sanitizeFilename(hasKnownExtension ? trimmed : `${trimmed}.md`);
 }
 
+/* Documents live in real directories, and a document is identified by its path
+ * relative to MARKDOWN_DIR — "docs/README.md", POSIX separators, always.
+ *
+ * They used to be a single flat directory with folders existing only as a
+ * filename→folder map in the organizer, which meant the filename was the
+ * identity and had to be unique across the whole library. Two READMEs in two
+ * folders was not expressible: the second became README-1.md.
+ *
+ * Everything below exists because that path arrives from outside. A path is
+ * only ever accepted after sanitizeDocPath has rebuilt it segment by segment
+ * from characters known to be safe, and resolveDocPath then confirms the result
+ * is still inside the documents directory — belt and braces, because the cost
+ * of being wrong here is reading and writing arbitrary files.
+ */
+
+// One segment of a path: a directory name, or the filename before its own
+// checks. Rejects rather than repairs — a lookup that quietly turns
+// "../../etc" into "etc" is a surprising success.
+function sanitizePathSegment(rawSegment) {
+  const value = String(rawSegment || "").normalize("NFC").trim();
+
+  if (!value || value.length > MAX_FILENAME_LENGTH) {
+    return null;
+  }
+
+  // "." and ".." are the traversal primitives; anything containing ".." is
+  // refused outright rather than reasoned about.
+  if (value === "." || value === ".." || value.includes("..")) {
+    return null;
+  }
+
+  if (UNSAFE_FILENAME_CHARS.test(value)) {
+    return null;
+  }
+
+  // A leading dot hides the entry; a trailing dot or space is silently trimmed
+  // by some filesystems, so the name stored would differ from the name asked
+  // for, and the two would never match again.
+  if (value.startsWith(".") || /[. ]$/.test(value)) {
+    return null;
+  }
+
+  if (RESERVED_DEVICE_NAMES.test(path.basename(value, path.extname(value)))) {
+    return null;
+  }
+
+  return value;
+}
+
+/* A document path: zero or more directory segments, then a filename.
+ *
+ * Backslashes are normalised to "/" first, so a Windows-style path is
+ * understood rather than treated as a filename containing backslashes — which
+ * sanitizeFilename would refuse and which would be a confusing failure.
+ */
+function sanitizeDocPath(rawPath) {
+  const value = String(rawPath || "").normalize("NFC").replace(/\\/g, "/").trim();
+
+  if (!value || value.startsWith("/")) {
+    return null;
+  }
+
+  const segments = value.split("/");
+  // An empty segment means "//" or a trailing slash. Neither is a document.
+  if (segments.some((segment) => segment.trim() === "")) {
+    return null;
+  }
+
+  // A path deeper than the folder limit cannot correspond to a real folder, and
+  // unbounded depth is a way to make the tree unusable.
+  if (segments.length > MAX_FOLDER_DEPTH + 1) {
+    return null;
+  }
+
+  const fileName = sanitizeFilename(segments.pop());
+  if (!fileName) {
+    return null;
+  }
+
+  const dirs = [];
+  for (const segment of segments) {
+    const safe = sanitizePathSegment(segment);
+    if (!safe) {
+      return null;
+    }
+    dirs.push(safe);
+  }
+
+  return [...dirs, fileName].join("/");
+}
+
+/* The absolute path, or null.
+ *
+ * sanitizeDocPath has already rebuilt the path from safe segments, so this
+ * should never be the thing that catches an attack — but it is the check that
+ * does not depend on having enumerated every trick, so it stays.
+ */
+function resolveDocPath(relativePath, baseDir = MARKDOWN_DIR) {
+  const safe = sanitizeDocPath(relativePath);
+  if (!safe) {
+    return null;
+  }
+
+  const resolved = path.resolve(baseDir, safe);
+  if (resolved !== baseDir && !resolved.startsWith(baseDir + path.sep)) {
+    return null;
+  }
+
+  return resolved;
+}
+
+/* The document path out of a request.
+ *
+ * The routes use a wildcard (`/api/docs/*file`) rather than `:file` with the
+ * path percent-encoded into one segment. Both work in Express, but %2F is the
+ * kind of thing a reverse proxy normalises on the way through — and a library
+ * that stops resolving its own URLs depending on what is in front of it is not
+ * worth the tidier route pattern.
+ */
+function paramDocPath(req) {
+  const raw = req.params.file;
+  const joined = Array.isArray(raw) ? raw.join("/") : String(raw || "");
+  return sanitizeDocPath(joined);
+}
+
+// Same wildcard treatment for recycle-bin and archive entries, which carry the
+// folder they were deleted from.
+function paramEntryPath(req) {
+  const raw = req.params.entry;
+  const joined = Array.isArray(raw) ? raw.join("/") : String(raw || "");
+  return sanitizeRecycleEntryName(joined);
+}
+
+function docDirOf(relativePath) {
+  const index = String(relativePath).lastIndexOf("/");
+  return index === -1 ? "" : relativePath.slice(0, index);
+}
+
+function docBaseOf(relativePath) {
+  const index = String(relativePath).lastIndexOf("/");
+  return index === -1 ? String(relativePath) : relativePath.slice(index + 1);
+}
+
+function joinDocPath(dir, name) {
+  return dir ? `${dir}/${name}` : name;
+}
+
+// The directory a folder's documents live in, relative to MARKDOWN_DIR. The
+// folder tree in the organizer is still what carries ordering and stable ids
+// across a rename; the directory is derived from it rather than the other way
+// round, so renaming a folder is one rename on disk and no rewriting of paths
+// in any other file.
+function folderDirFor(organizerState, folderId) {
+  if (!folderId) {
+    return "";
+  }
+
+  const ancestry = getFolderAncestry(organizerState.folders, folderId);
+  if (ancestry.length === 0) {
+    return "";
+  }
+
+  return ancestry.map((folder) => folder.name).join("/");
+}
+
+// The reverse: which folder, if any, owns a directory. Matched on the path the
+// folder tree implies, so a directory created by hand outside the app shows its
+// documents as unfiled rather than inventing a folder.
+function folderIdForDir(organizerState, dirPath) {
+  if (!dirPath) {
+    return null;
+  }
+
+  for (const folder of organizerState.folders) {
+    if (folderDirFor(organizerState, folder.id) === dirPath) {
+      return folder.id;
+    }
+  }
+
+  return null;
+}
+
+// The title shown for a document is about the file, not where it sits.
 function toDocTitle(fileName) {
-  return fileName
+  return docBaseOf(fileName)
     .replace(/\.(md|markdown|mmd|mermaid|ipynb)$/i, "")
     .replace(/[-_]+/g, " ")
     .replace(/\s+/g, " ")
@@ -1618,17 +1883,34 @@ async function ensureUniqueFilenameInDir(dirPath, fileName) {
   return candidate;
 }
 
-async function ensureUniqueFilename(fileName) {
-  return ensureUniqueFilenameInDir(MARKDOWN_DIR, fileName);
+// Unique within the document's own directory, which is the only place a name
+// has to be unique now. Two folders may each hold a README.md.
+async function ensureUniqueFilename(filePath) {
+  const dir = docDirOf(filePath);
+  const unique = await ensureUniqueFilenameInDir(path.join(MARKDOWN_DIR, dir), docBaseOf(filePath));
+  return joinDocPath(dir, unique);
 }
 
+/* A recycle-bin entry, which is now a path too.
+ *
+ * The bin mirrors the folder tree, so a document deleted from "Azalea" is at
+ * "Azalea/<stamp>--README.md" inside it. That is what lets Restore put it back
+ * where it came from without a side table recording where each file used to
+ * live — the bin describes itself, the way the library does.
+ */
 function sanitizeRecycleEntryName(rawName) {
-  const baseName = path.basename(String(rawName || "").trim());
-  if (!baseName) {
+  const value = String(rawName || "").normalize("NFC").replace(/\\/g, "/").trim();
+  if (!value || value.startsWith("/")) {
     return null;
   }
 
-  if (baseName.includes("..")) {
+  const segments = value.split("/");
+  if (segments.some((segment) => segment.trim() === "") || segments.length > MAX_FOLDER_DEPTH + 1) {
+    return null;
+  }
+
+  const baseName = segments.pop();
+  if (!baseName || baseName.includes("..")) {
     return null;
   }
 
@@ -1637,22 +1919,49 @@ function sanitizeRecycleEntryName(rawName) {
     return null;
   }
 
+  // The stamped name this app generates, and nothing else.
   if (!/^[A-Za-z0-9 _.-]+$/i.test(baseName)) {
     return null;
   }
 
-  return baseName;
+  const dirs = [];
+  for (const segment of segments) {
+    const safe = sanitizePathSegment(segment);
+    if (!safe) {
+      return null;
+    }
+    dirs.push(safe);
+  }
+
+  return [...dirs, baseName].join("/");
+}
+
+function resolveRecyclePath(entryPath, baseDir) {
+  const safe = sanitizeRecycleEntryName(entryPath);
+  if (!safe) {
+    return null;
+  }
+
+  const resolved = path.resolve(baseDir, safe);
+  if (!resolved.startsWith(baseDir + path.sep)) {
+    return null;
+  }
+
+  return resolved;
 }
 
 function parseOriginalFilenameFromRecycleEntry(entryName) {
   const value = String(entryName || "");
-  const delimiterIndex = value.indexOf("--");
-  const maybeOriginal = delimiterIndex >= 0
-    ? value.slice(delimiterIndex + 2)
-    : value;
+  const dir = docDirOf(value);
+  const base = docBaseOf(value);
 
-  const sanitized = sanitizeFilename(maybeOriginal);
-  return sanitized || maybeOriginal;
+  const delimiterIndex = base.indexOf("--");
+  const maybeOriginal = delimiterIndex >= 0
+    ? base.slice(delimiterIndex + 2)
+    : base;
+
+  const sanitized = sanitizeFilename(maybeOriginal) || maybeOriginal;
+  return joinDocPath(dir, sanitized);
 }
 
 function createRecycleEntryFilename(fileName) {
@@ -1678,8 +1987,13 @@ async function moveDocToRecycle(fileName, mode) {
   const sourcePath = path.join(MARKDOWN_DIR, fileName);
   const recycleDir = mode === "hard" ? DELETED_HARD_DIR : DELETED_SOFT_DIR;
 
-  const baseEntryName = createRecycleEntryFilename(fileName);
-  const entryName = await ensureUniqueFilenameInDir(recycleDir, baseEntryName);
+  // Same folder path inside the bin, so Restore knows where it came from.
+  const relativeDir = docDirOf(fileName);
+  const targetDir = path.join(recycleDir, relativeDir);
+  await fsp.mkdir(targetDir, { recursive: true });
+
+  const baseEntryName = createRecycleEntryFilename(docBaseOf(fileName));
+  const entryName = joinDocPath(relativeDir, await ensureUniqueFilenameInDir(targetDir, baseEntryName));
   const targetPath = path.join(recycleDir, entryName);
   await moveFile(sourcePath, targetPath);
   invalidateCachedContent(sourcePath);
@@ -1696,15 +2010,7 @@ async function moveDocToRecycle(fileName, mode) {
 
 async function getRecycleDocs(organizerState = null, sourceDir = DELETED_SOFT_DIR) {
   const organizer = organizerState || await readOrganizerState();
-  const dirEntries = await fsp.readdir(sourceDir, { withFileTypes: true });
-  const recycleEntries = dirEntries.filter((entry) => {
-    if (!entry.isFile()) {
-      return false;
-    }
-
-    const ext = path.extname(entry.name).toLowerCase();
-    return ALLOWED_DOC_EXTENSIONS.has(ext);
-  });
+  const recycleEntries = (await walkDocs(sourceDir)).map((relative) => ({ name: relative }));
 
   const docs = await Promise.all(
     recycleEntries.map(async (entry) => {
@@ -1730,17 +2036,59 @@ async function getRecycleDocs(organizerState = null, sourceDir = DELETED_SOFT_DI
   return docs;
 }
 
-async function getDocs(organizerState = null) {
-  const organizer = organizerState || await readOrganizerState();
-  const dirEntries = await fsp.readdir(MARKDOWN_DIR, { withFileTypes: true });
-  const markdownEntries = dirEntries.filter((entry) => {
-    if (!entry.isFile()) {
-      return false;
+/* Every document under a directory, as paths relative to it.
+ *
+ * Depth-limited to the folder limit, and symlinked directories are not
+ * followed: withFileTypes reports a symlink as neither a file nor a directory,
+ * so a link pointing at / is simply not descended into. That matters because
+ * this walk decides what the API will serve.
+ */
+async function walkDocs(baseDir, relativeDir = "", depth = 0) {
+  if (depth > MAX_FOLDER_DEPTH) {
+    return [];
+  }
+
+  let entries;
+  try {
+    entries = await fsp.readdir(path.join(baseDir, relativeDir), { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const found = [];
+
+  for (const entry of entries) {
+    // Anything the app would refuse to create, it also refuses to list, so a
+    // document can never appear that cannot then be addressed.
+    if (entry.name.startsWith(".") || !sanitizePathSegment(entry.name)) {
+      continue;
     }
 
-    const ext = path.extname(entry.name).toLowerCase();
-    return ALLOWED_DOC_EXTENSIONS.has(ext);
-  });
+    const relative = joinDocPath(relativeDir, entry.name);
+
+    if (entry.isDirectory()) {
+      found.push(...await walkDocs(baseDir, relative, depth + 1));
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    if (ALLOWED_DOC_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      found.push(relative);
+    }
+  }
+
+  return found;
+}
+
+async function getDocs(organizerState = null) {
+  const organizer = organizerState || await readOrganizerState();
+  const markdownEntries = (await walkDocs(MARKDOWN_DIR)).map((relative) => ({ name: relative }));
 
   // Sorting on a folder's depth-first position keeps the flat list in the same
   // order the nested tree draws it; a bare `order` would interleave levels.
@@ -2301,9 +2649,9 @@ app.get("/api/docs/search", requireRead, async (req, res, next) => {
   }
 });
 
-app.get("/api/docs/:file", requireRead, async (req, res, next) => {
+app.get("/api/docs/*file", requireRead, async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     if (!fileName) {
       res.status(400).json({ error: "Invalid markdown file name" });
       return;
@@ -2332,9 +2680,9 @@ app.get("/api/docs/:file", requireRead, async (req, res, next) => {
   }
 });
 
-app.put("/api/docs/:file/folder", requirePermission("doc:write"), async (req, res, next) => {
+app.put("/api/docs/*file/folder", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     if (!fileName) {
       res.status(400).json({ error: "Invalid markdown file name" });
       return;
@@ -2354,22 +2702,52 @@ app.put("/api/docs/:file/folder", requirePermission("doc:write"), async (req, re
       return;
     }
 
-    const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
-      if (normalizedFolderId && !getFolderRecordById(organizer, normalizedFolderId)) {
-        throw new HttpError(404, "Folder not found");
-      }
+    // Moving a document is now a move on disk. The organizer is only consulted
+    // for where the target folder lives.
+    const organizer = await readOrganizerState();
+    if (normalizedFolderId && !getFolderRecordById(organizer, normalizedFolderId)) {
+      res.status(404).json({ error: "Folder not found" });
+      return;
+    }
 
-      if (normalizedFolderId) {
-        organizer.fileFolders[fileName] = normalizedFolderId;
-      } else {
-        delete organizer.fileFolders[fileName];
-      }
-    });
+    const targetDir = normalizedFolderId ? folderDirFor(organizer, normalizedFolderId) : "";
+    const targetFile = joinDocPath(targetDir, docBaseOf(fileName));
 
-    const folderInfo = resolveFolderInfo(savedOrganizer, fileName);
+    if (targetFile === fileName) {
+      const unchanged = resolveFolderInfo(organizer, fileName);
+      res.json({ file: fileName, folderId: unchanged.folderId, folderName: unchanged.folderName });
+      return;
+    }
+
+    const targetPath = resolveDocPath(targetFile);
+    if (!targetPath) {
+      res.status(400).json({ error: "That folder cannot hold a file with this name." });
+      return;
+    }
+
+    // Same name already in the destination. Refused rather than renamed: the
+    // whole point of directories is that you keep the name you chose, and a
+    // silent README-1.md here would be the old behaviour creeping back.
+    if (await fileExists(targetPath)) {
+      res.status(409).json({
+        error: `"${docBaseOf(fileName)}" already exists in that folder. Rename one of them first.`
+      });
+      return;
+    }
+
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+    await moveFile(fullPath, targetPath);
+    invalidateCachedContent(fullPath);
+
+    // The share link is keyed by path, so it has to follow the document or the
+    // link 404s with no explanation.
+    await shareStore.withLock(() => shareStore.rename(fileName, targetFile));
+
+    const folderInfo = resolveFolderInfo(organizer, targetFile);
 
     res.json({
-      file: fileName,
+      file: targetFile,
+      previousFile: fileName,
       folderId: folderInfo.folderId,
       folderName: folderInfo.folderName
     });
@@ -2381,7 +2759,9 @@ app.put("/api/docs/:file/folder", requirePermission("doc:write"), async (req, re
 app.post("/api/folders", requirePermission("doc:write"), async (req, res, next) => {
   try {
     const folderName = normalizeFolderName(req.body?.name);
-    if (!folderName) {
+    if (!folderName || !sanitizePathSegment(folderName)) {
+      // A folder is a directory now, so its name has to survive being one:
+      // no leading dot, no trailing dot or space, not a reserved device name.
       res.status(400).json({ error: "Invalid folder name" });
       return;
     }
@@ -2428,6 +2808,10 @@ app.post("/api/folders", requirePermission("doc:write"), async (req, res, next) 
       organizer.folders.push(created);
       return created;
     });
+
+    // The directory is the folder. Created here rather than lazily on first
+    // upload, so an empty folder still exists on disk and survives a restart.
+    await fsp.mkdir(path.join(MARKDOWN_DIR, folderDirFor(savedOrganizer, folder.id)), { recursive: true });
 
     res.status(201).json({
       folder: serializeFolders([folder], savedOrganizer.folders)[0],
@@ -2520,7 +2904,7 @@ app.put("/api/folders/:folderId", requirePermission("doc:write"), async (req, re
     }
 
     const folderName = wantsRename ? normalizeFolderName(req.body.name) : null;
-    if (wantsRename && !folderName) {
+    if (wantsRename && (!folderName || !sanitizePathSegment(folderName))) {
       res.status(400).json({ error: "Invalid folder name" });
       return;
     }
@@ -2533,6 +2917,11 @@ app.put("/api/folders/:folderId", requirePermission("doc:write"), async (req, re
       res.status(400).json({ error: "Invalid parent folder id" });
       return;
     }
+
+    // Captured before the mutation: once the tree changes, the old directory
+    // path can no longer be derived from it.
+    const beforeOrganizer = await readOrganizerState();
+    const previousDir = folderDirFor(beforeOrganizer, normalizedFolderId);
 
     const { organizer: savedOrganizer, result: folder } = await mutateOrganizerState((organizer) => {
       const target = organizer.folders.find((entry) => entry.id === normalizedFolderId);
@@ -2582,6 +2971,27 @@ app.put("/api/folders/:folderId", requirePermission("doc:write"), async (req, re
       return target;
     });
 
+    // Renaming or reparenting a folder moves its directory, and every document
+    // inside it comes along without any of their paths being rewritten
+    // anywhere — which is the reason the tree, not the path, is what the
+    // organizer stores.
+    const nextDir = folderDirFor(savedOrganizer, folder.id);
+    if (nextDir !== previousDir && previousDir) {
+      const from = path.join(MARKDOWN_DIR, previousDir);
+      const to = path.join(MARKDOWN_DIR, nextDir);
+
+      if (await fileExists(from)) {
+        await fsp.mkdir(path.dirname(to), { recursive: true });
+        await fsp.rename(from, to);
+      } else {
+        await fsp.mkdir(to, { recursive: true });
+      }
+
+      // Share links are keyed by path, so every published document under the
+      // folder has to be re-keyed or its link stops resolving.
+      await shareStore.withLock(() => shareStore.renamePrefix(`${previousDir}/`, `${nextDir}/`));
+    }
+
     res.json({
       folder: serializeFolders([folder], savedOrganizer.folders)[0],
       folders: serializeFolders(savedOrganizer.folders)
@@ -2600,25 +3010,44 @@ app.delete("/api/folders/:folderId", requirePermission("doc:write"), async (req,
     }
 
     // Deleting a folder deletes its subfolders too, the way a filesystem does.
-    // Documents are never deleted — they fall back to Ungrouped, and the files
-    // on disk are not touched at all.
+    // Documents are never deleted — they move back to the top level, which is
+    // what Ungrouped shows.
+    const beforeOrganizer = await readOrganizerState();
+    if (!beforeOrganizer.folders.some((entry) => entry.id === normalizedFolderId)) {
+      res.status(404).json({ error: "Folder not found" });
+      return;
+    }
+
+    const removedIds = collectFolderSubtreeIds(beforeOrganizer.folders, normalizedFolderId);
+    const rootDir = folderDirFor(beforeOrganizer, normalizedFolderId);
+
+    // Rescued before the directory goes, and one at a time rather than moving
+    // the directory itself: they are being flattened to the top level, and two
+    // documents from different subfolders can share a name. A collision keeps
+    // the document safe under a suffixed name rather than losing it — this is
+    // the one place a rename is better than a refusal, because the alternative
+    // is refusing to delete a folder at all.
+    const rescued = [];
+    // walkDocs returns paths relative to the directory it was given as its
+    // base, which is MARKDOWN_DIR here — so these already carry the folder.
+    for (const from of await walkDocs(MARKDOWN_DIR, rootDir)) {
+      const wanted = docBaseOf(from);
+      const targetName = await ensureUniqueFilenameInDir(MARKDOWN_DIR, wanted);
+
+      await moveFile(path.join(MARKDOWN_DIR, from), path.join(MARKDOWN_DIR, targetName));
+      invalidateCachedContent(path.join(MARKDOWN_DIR, from));
+      await shareStore.withLock(() => shareStore.rename(from, targetName));
+      rescued.push(targetName);
+    }
+
+    if (rootDir) {
+      await fsp.rm(path.join(MARKDOWN_DIR, rootDir), { recursive: true, force: true });
+    }
+
     const { organizer: savedOrganizer, result: summary } = await mutateOrganizerState((organizer) => {
-      if (!organizer.folders.some((entry) => entry.id === normalizedFolderId)) {
-        throw new HttpError(404, "Folder not found");
-      }
-
-      const removedIds = new Set(collectFolderSubtreeIds(organizer.folders, normalizedFolderId));
-      organizer.folders = organizer.folders.filter((entry) => !removedIds.has(entry.id));
-
-      let unfiledCount = 0;
-      for (const [fileName, assignedFolderId] of Object.entries(organizer.fileFolders)) {
-        if (removedIds.has(assignedFolderId)) {
-          delete organizer.fileFolders[fileName];
-          unfiledCount += 1;
-        }
-      }
-
-      return { removedFolders: removedIds.size, unfiledDocuments: unfiledCount };
+      const ids = new Set(removedIds);
+      organizer.folders = organizer.folders.filter((entry) => !ids.has(entry.id));
+      return { removedFolders: ids.size, unfiledDocuments: rescued.length };
     });
 
     res.json({
@@ -2632,9 +3061,9 @@ app.delete("/api/folders/:folderId", requirePermission("doc:write"), async (req,
   }
 });
 
-app.post("/api/docs/:file/delete", requirePermission("doc:write"), async (req, res, next) => {
+app.post("/api/docs/*file/delete", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     if (!fileName) {
       res.status(400).json({ error: "Invalid markdown file name" });
       return;
@@ -2679,9 +3108,9 @@ app.get("/api/recycle-bin", requireRead, async (req, res, next) => {
   }
 });
 
-app.get("/api/recycle-bin/:entry/content", requireRead, async (req, res, next) => {
+app.get("/api/recycle-bin/*entry/content", requireRead, async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid recycle bin entry" });
       return;
@@ -2701,61 +3130,73 @@ app.get("/api/recycle-bin/:entry/content", requireRead, async (req, res, next) =
   }
 });
 
-app.post("/api/recycle-bin/:entry/restore", requirePermission("doc:write"), async (req, res, next) => {
+/* Put a document back where it was deleted from.
+ *
+ * The folder comes from the entry's own path inside the bin, so nothing has to
+ * be recorded anywhere and a folder deleted in the meantime is simply
+ * recreated. The name only has to be free within that folder — the point of
+ * the whole change — so a restore collides far less often than it used to.
+ */
+async function restoreFromBin(sourceDir, entryName) {
+  const sourcePath = resolveRecyclePath(entryName, sourceDir);
+  if (!sourcePath || !(await fileExists(sourcePath))) {
+    return null;
+  }
+
+  const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
+  const targetDir = path.join(MARKDOWN_DIR, docDirOf(originalFile));
+  await fsp.mkdir(targetDir, { recursive: true });
+
+  const restoreFileName = await ensureUniqueFilename(originalFile);
+  const targetPath = resolveDocPath(restoreFileName);
+  if (!targetPath) {
+    return null;
+  }
+
+  await moveFile(sourcePath, targetPath);
+  invalidateCachedContent(sourcePath);
+  invalidateCachedContent(targetPath);
+
+  const organizer = await readOrganizerState();
+  const folderInfo = resolveFolderInfo(organizer, restoreFileName);
+  const stat = await fsp.stat(targetPath);
+
+  return {
+    file: restoreFileName,
+    title: toDocTitle(restoreFileName),
+    size: stat.size,
+    updatedAt: stat.mtime.toISOString(),
+    restoredFrom: entryName,
+    folderId: folderInfo.folderId,
+    folderName: folderInfo.folderName
+  };
+}
+
+app.post("/api/recycle-bin/*entry/restore", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid recycle bin entry" });
       return;
     }
 
-    const sourcePath = path.join(DELETED_SOFT_DIR, entryName);
-    if (!(await fileExists(sourcePath))) {
+    const restored = await restoreFromBin(DELETED_SOFT_DIR, entryName);
+    if (!restored) {
       res.status(404).json({ error: "Recycle bin document not found" });
       return;
     }
 
-    const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
-    const restoreFileName = await ensureUniqueFilename(originalFile);
-    const targetPath = path.join(MARKDOWN_DIR, restoreFileName);
-
-    const folderInfo = resolveFolderInfo(await readOrganizerState(), originalFile);
-
-    await moveFile(sourcePath, targetPath);
-    invalidateCachedContent(sourcePath);
-    invalidateCachedContent(targetPath);
-
-    if (restoreFileName !== originalFile) {
-      // Re-read inside the lock so a concurrent folder edit is not clobbered.
-      await mutateOrganizerState((organizer) => {
-        const currentFolderId = organizer.fileFolders[originalFile] || null;
-        if (currentFolderId) {
-          organizer.fileFolders[restoreFileName] = currentFolderId;
-        }
-
-        delete organizer.fileFolders[originalFile];
-      });
-    }
-
-    const stat = await fsp.stat(targetPath);
-
     res.json({
-      file: restoreFileName,
-      title: toDocTitle(restoreFileName),
-      size: stat.size,
-      updatedAt: stat.mtime.toISOString(),
-      restoredFrom: entryName,
-      folderId: folderInfo.folderId,
-      folderName: folderInfo.folderName
+      ...restored
     });
   } catch (error) {
     next(error);
   }
 });
 
-app.post("/api/recycle-bin/:entry/hard-delete", requirePermission("doc:write"), async (req, res, next) => {
+app.post("/api/recycle-bin/*entry/hard-delete", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid recycle bin entry" });
       return;
@@ -2801,9 +3242,9 @@ app.get("/api/archive", requireRead, async (req, res, next) => {
   }
 });
 
-app.get("/api/archive/:entry/content", requireRead, async (req, res, next) => {
+app.get("/api/archive/*entry/content", requireRead, async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid archive entry" });
       return;
@@ -2823,60 +3264,29 @@ app.get("/api/archive/:entry/content", requireRead, async (req, res, next) => {
   }
 });
 
-app.post("/api/archive/:entry/restore", requirePermission("doc:write"), async (req, res, next) => {
+app.post("/api/archive/*entry/restore", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid archive entry" });
       return;
     }
 
-    const sourcePath = path.join(DELETED_HARD_DIR, entryName);
-    if (!(await fileExists(sourcePath))) {
+    const restored = await restoreFromBin(DELETED_HARD_DIR, entryName);
+    if (!restored) {
       res.status(404).json({ error: "Archived document not found" });
       return;
     }
 
-    const originalFile = parseOriginalFilenameFromRecycleEntry(entryName);
-    const restoreFileName = await ensureUniqueFilename(originalFile);
-    const targetPath = path.join(MARKDOWN_DIR, restoreFileName);
-
-    await moveFile(sourcePath, targetPath);
-    invalidateCachedContent(sourcePath);
-    invalidateCachedContent(targetPath);
-
-    if (restoreFileName !== originalFile) {
-      await mutateOrganizerState((organizer) => {
-        const currentFolderId = organizer.fileFolders[originalFile] || null;
-        if (currentFolderId) {
-          organizer.fileFolders[restoreFileName] = currentFolderId;
-        }
-
-        delete organizer.fileFolders[originalFile];
-      });
-    }
-
-    const organizer = await readOrganizerState();
-    const folderInfo = resolveFolderInfo(organizer, restoreFileName);
-    const stat = await fsp.stat(targetPath);
-
-    res.json({
-      file: restoreFileName,
-      title: toDocTitle(restoreFileName),
-      size: stat.size,
-      updatedAt: stat.mtime.toISOString(),
-      restoredFrom: entryName,
-      folderId: folderInfo.folderId,
-      folderName: folderInfo.folderName
-    });
+    res.json(restored);
   } catch (error) {
     next(error);
   }
 });
 
-app.delete("/api/archive/:entry", requirePermission("doc:erase"), async (req, res, next) => {
+app.delete("/api/archive/*entry", requirePermission("doc:erase"), async (req, res, next) => {
   try {
-    const entryName = sanitizeRecycleEntryName(req.params.entry);
+    const entryName = paramEntryPath(req);
     if (!entryName) {
       res.status(400).json({ error: "Invalid archive entry" });
       return;
@@ -2903,11 +3313,6 @@ app.delete("/api/archive/:entry", requirePermission("doc:erase"), async (req, re
     await fsp.unlink(fullPath);
     invalidateCachedContent(fullPath);
 
-    // Drop the folder mapping too; nothing will ever restore this file again.
-    await mutateOrganizerState((organizer) => {
-      delete organizer.fileFolders[originalFile];
-    });
-
     console.log(`Permanently deleted archived document: ${entryName}`);
 
     res.json({
@@ -2923,23 +3328,22 @@ app.delete("/api/archive/:entry", requirePermission("doc:erase"), async (req, re
 // Both creation paths accept an optional folderId so a new document can land
 // where it belongs instead of always appearing in Ungrouped and needing a
 // second Move action. Returns the resolved folder info for the response.
-async function fileNewDocumentIntoFolder(fileName, rawFolderId) {
+// Where a newly created document should be written. An unknown or absent
+// folder means the top level, which is what Ungrouped shows.
+async function resolveNewDocumentPath(fileName, rawFolderId) {
   const folderId = normalizeFolderId(rawFolderId);
   if (!folderId) {
-    return { folderId: null, folderName: null };
+    return { file: fileName, folderId: null, folderName: null };
   }
 
-  const { result } = await mutateOrganizerState((organizer) => {
-    const folder = organizer.folders.find((entry) => entry.id === folderId);
-    if (!folder) {
-      throw new HttpError(404, "Folder not found");
-    }
+  const organizer = await readOrganizerState();
+  const folder = organizer.folders.find((entry) => entry.id === folderId);
+  if (!folder) {
+    throw new HttpError(404, "Folder not found");
+  }
 
-    organizer.fileFolders[fileName] = folder.id;
-    return { folderId: folder.id, folderName: folder.name };
-  });
-
-  return result;
+  const dir = folderDirFor(organizer, folder.id);
+  return { file: joinDocPath(dir, fileName), folderId: folder.id, folderName: folder.name };
 }
 
 app.post("/api/docs", requirePermission("doc:write"), async (req, res, next) => {
@@ -2958,20 +3362,28 @@ app.post("/api/docs", requirePermission("doc:write"), async (req, res, next) => 
       return;
     }
 
-    const fullPath = path.join(MARKDOWN_DIR, fileName);
-    if (!overwrite && (await fileExists(fullPath))) {
-      res.status(409).json({ error: "A document with that name already exists" });
+    const placement = await resolveNewDocumentPath(fileName, req.body.folderId);
+    const fullPath = resolveDocPath(placement.file);
+    if (!fullPath) {
+      res.status(400).json({ error: "Invalid document file name" });
       return;
     }
 
+    // Unique within its folder, not across the library.
+    if (!overwrite && (await fileExists(fullPath))) {
+      res.status(409).json({ error: "A document with that name already exists in this folder" });
+      return;
+    }
+
+    await fsp.mkdir(path.dirname(fullPath), { recursive: true });
     await fsp.writeFile(fullPath, content, "utf8");
     invalidateCachedContent(fullPath);
     const stat = await fsp.stat(fullPath);
-    const folderInfo = await fileNewDocumentIntoFolder(fileName, req.body.folderId);
+    const folderInfo = { folderId: placement.folderId, folderName: placement.folderName };
 
     res.status(201).json({
-      file: fileName,
-      title: toDocTitle(fileName),
+      file: placement.file,
+      title: toDocTitle(placement.file),
       size: stat.size,
       updatedAt: stat.mtime.toISOString(),
       folderId: folderInfo.folderId,
@@ -2982,9 +3394,9 @@ app.post("/api/docs", requirePermission("doc:write"), async (req, res, next) => 
   }
 });
 
-app.put("/api/docs/:file", requirePermission("doc:write"), async (req, res, next) => {
+app.put("/api/docs/*file", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     const content = String(req.body.content || "");
 
     if (!fileName) {
@@ -3018,9 +3430,9 @@ app.put("/api/docs/:file", requirePermission("doc:write"), async (req, res, next
   }
 });
 
-app.post("/api/docs/:file/rename", requirePermission("doc:write"), async (req, res, next) => {
+app.post("/api/docs/*file/rename", requirePermission("doc:write"), async (req, res, next) => {
   try {
-    const fileName = sanitizeFilename(req.params.file);
+    const fileName = paramDocPath(req);
     const targetName = sanitizeNewFilename(req.body?.fileName);
 
     if (!fileName || !targetName) {
@@ -3034,7 +3446,12 @@ app.post("/api/docs/:file/rename", requirePermission("doc:write"), async (req, r
       return;
     }
 
-    if (targetName === fileName) {
+    // A rename changes the name, never the folder: the new name is resolved
+    // inside the directory the document already sits in. Moving between folders
+    // is a different endpoint.
+    const targetFile = joinDocPath(docDirOf(fileName), targetName);
+
+    if (targetFile === fileName) {
       const unchanged = await fsp.stat(sourcePath);
       const folderInfo = resolveFolderInfo(await readOrganizerState(), fileName);
       res.json({
@@ -3049,9 +3466,14 @@ app.post("/api/docs/:file/rename", requirePermission("doc:write"), async (req, r
       return;
     }
 
-    const targetPath = path.join(MARKDOWN_DIR, targetName);
+    const targetPath = resolveDocPath(targetFile);
+    if (!targetPath) {
+      res.status(400).json({ error: "Invalid document file name" });
+      return;
+    }
+
     if (await fileExists(targetPath)) {
-      res.status(409).json({ error: "A document with that name already exists" });
+      res.status(409).json({ error: "A document with that name already exists in this folder" });
       return;
     }
 
@@ -3059,26 +3481,15 @@ app.post("/api/docs/:file/rename", requirePermission("doc:write"), async (req, r
     invalidateCachedContent(sourcePath);
     invalidateCachedContent(targetPath);
 
-    // The organizer is keyed by filename, so the folder assignment has to follow
-    // the rename or the document silently falls back into Ungrouped.
-    const { result: folderInfo } = await mutateOrganizerState((organizer) => {
-      const folderId = organizer.fileFolders[fileName] || null;
-      delete organizer.fileFolders[fileName];
+    // Nothing to re-file: the document has not left its directory, so its
+    // folder is the same one the path already said it was.
+    const folderInfo = resolveFolderInfo(await readOrganizerState(), targetFile);
 
-      if (!folderId) {
-        return { folderId: null, folderName: null };
-      }
-
-      organizer.fileFolders[targetName] = folderId;
-      const folder = organizer.folders.find((entry) => entry.id === folderId);
-      return { folderId, folderName: folder?.name || null };
-    });
-
-    await shareStore.withLock(() => shareStore.rename(fileName, targetName));
+    await shareStore.withLock(() => shareStore.rename(fileName, targetFile));
 
     const stat = await fsp.stat(targetPath);
     res.json({
-      file: targetName,
+      file: targetFile,
       previousFile: fileName,
       title: toDocTitle(targetName),
       size: stat.size,
@@ -3105,13 +3516,22 @@ app.post("/api/docs/upload", requirePermission("doc:write"), upload.single("mark
       return;
     }
 
-    const finalName = await ensureUniqueFilename(sanitizedName);
-    const fullPath = path.join(MARKDOWN_DIR, finalName);
+    // Single-file upload lands in the chosen folder's directory, and only has
+    // to avoid names already in that one folder.
+    const placement = await resolveNewDocumentPath(sanitizedName, req.body.folderId);
+    const finalName = await ensureUniqueFilename(placement.file);
+    const fullPath = resolveDocPath(finalName);
+    if (!fullPath) {
+      res.status(400).json({ error: "Invalid document file name" });
+      return;
+    }
+
+    await fsp.mkdir(path.dirname(fullPath), { recursive: true });
     await fsp.writeFile(fullPath, req.file.buffer);
     invalidateCachedContent(fullPath);
 
     const stat = await fsp.stat(fullPath);
-    const folderInfo = await fileNewDocumentIntoFolder(finalName, req.body.folderId);
+    const folderInfo = { folderId: placement.folderId, folderName: placement.folderName };
 
     res.status(201).json({
       file: finalName,
@@ -3309,22 +3729,9 @@ app.post(
         return;
       }
 
-      // Write first, so a name collision is resolved against the real directory,
-      // then record every mapping in a single organizer mutation.
-      const written = [];
-      for (const entry of planned) {
-        const finalName = await ensureUniqueFilename(entry.fileName);
-        const fullPath = path.join(MARKDOWN_DIR, finalName);
-        await fsp.writeFile(fullPath, entry.file.buffer);
-        invalidateCachedContent(fullPath);
-
-        written.push({
-          file: finalName,
-          renamedFrom: finalName === entry.fileName ? null : entry.fileName,
-          folderNames: entry.folderNames
-        });
-      }
-
+      // Folders first now, then the files into them. The order is reversed from
+      // how this used to work because a file's directory decides where it is,
+      // so the directory has to exist before there is anywhere to write.
       const createdFolderPaths = [];
 
       const { organizer: savedOrganizer } = await mutateOrganizerState((organizer) => {
@@ -3363,16 +3770,38 @@ app.post(
           return currentParent;
         };
 
-        for (const entry of written) {
-          const folderId = resolveFolder(entry.folderNames);
-          if (folderId) {
-            organizer.fileFolders[entry.file] = folderId;
-          }
-          entry.folderId = folderId;
+        for (const entry of planned) {
+          entry.folderId = resolveFolder(entry.folderNames);
         }
 
         return null;
       });
+
+      const written = [];
+      for (const entry of planned) {
+        const dir = entry.folderId ? folderDirFor(savedOrganizer, entry.folderId) : "";
+        const targetDir = path.join(MARKDOWN_DIR, dir);
+        await fsp.mkdir(targetDir, { recursive: true });
+
+        // Unique within its own folder. Two READMEs from two uploaded folders
+        // both keep their names — which is the point of the whole layout.
+        const finalName = joinDocPath(dir, await ensureUniqueFilenameInDir(targetDir, entry.fileName));
+        const fullPath = resolveDocPath(finalName);
+        if (!fullPath) {
+          skipped.push({ name: entry.fileName, reason: "unsafe path" });
+          continue;
+        }
+
+        await fsp.writeFile(fullPath, entry.file.buffer);
+        invalidateCachedContent(fullPath);
+
+        written.push({
+          file: finalName,
+          renamedFrom: docBaseOf(finalName) === entry.fileName ? null : entry.fileName,
+          folderNames: entry.folderNames,
+          folderId: entry.folderId
+        });
+      }
 
       res.status(201).json({
         uploaded: written.map((entry) => ({
@@ -3500,6 +3929,15 @@ function attachGracefulShutdown(server) {
 
 async function bootstrap() {
   await ensureStorageDirs();
+
+  const migration = await migrateFlatLibraryToDirectories();
+  if (migration.moved > 0 || migration.skipped.length > 0) {
+    console.log(`  Moved ${migration.moved} document(s) into ${migration.folders} folder director${migration.folders === 1 ? "y" : "ies"}.`);
+    for (const note of migration.skipped) {
+      console.log(`  Left in place: ${note}`);
+    }
+  }
+
   await authStore.load();
   await shareStore.load();
   await linkStore.load();

@@ -139,6 +139,7 @@ function makeClient(origin) {
     postMultipart,
     get: (p, h) => request("GET", p, undefined, h),
     post: (p, b, h) => request("POST", p, b === undefined ? {} : b, h),
+    put: (p, b) => request("PUT", p, b),
     patch: (p, b) => request("PATCH", p, b),
     del: (p, b) => request("DELETE", p, b),
     jar,

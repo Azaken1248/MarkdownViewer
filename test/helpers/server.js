@@ -150,26 +150,54 @@ async function seedOnDisk(stateDir) {
     }))
   ];
 
-  const fileFolders = {};
-  for (const document of documents) {
-    await fs.writeFile(path.join(docsDir, document.file), document.body, "utf8");
-    if (document.folder) {
-      fileFolders[document.file] = folderIds.get(document.folder);
+  // Folders are real directories, so the fixture writes documents where they
+  // actually live. The organizer carries the tree (ids, order, nesting); a
+  // document's folder is read off its path.
+  const dirFor = (name) => {
+    const parts = [];
+    let current = folders.find((entry) => entry.name === name);
+    while (current) {
+      parts.unshift(current.name);
+      current = current.parentId ? folders.find((entry) => entry.id === current.parentId) : null;
     }
+    return parts.join("/");
+  };
+
+  const docPaths = {};
+  for (const document of documents) {
+    const dir = document.folder ? dirFor(document.folder) : "";
+    const relative = dir ? `${dir}/${document.file}` : document.file;
+    await fs.mkdir(path.join(docsDir, dir), { recursive: true });
+    await fs.writeFile(path.join(docsDir, relative), document.body, "utf8");
+    docPaths[document.file] = relative;
+  }
+
+  // Empty of files but present in the tree, so a folder with no documents is
+  // exercised too.
+  for (const folder of FOLDERS) {
+    await fs.mkdir(path.join(docsDir, dirFor(folder.name)), { recursive: true });
   }
 
   await fs.writeFile(
     path.join(dataDir, "document-organizer.json"),
-    JSON.stringify({ version: 2, folders, fileFolders }, null, 2),
+    JSON.stringify({ version: 2, folders, fileFolders: {} }, null, 2),
     "utf8"
   );
 
-  return folderIds;
+  return { folderIds, docPaths };
 }
 
-async function startTestServer() {
-  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "azadocs-test-"));
-  const folderIds = await seedOnDisk(stateDir);
+/* Spawn a server.
+ *
+ * `stateDir` lets a caller supply a directory it has already laid out, which is
+ * how the migration is tested: an old flat library is written to disk and a
+ * fresh server is pointed at it, exactly as the real data was.
+ */
+async function startTestServer({ stateDir: existingStateDir = null } = {}) {
+  const stateDir = existingStateDir || await fs.mkdtemp(path.join(os.tmpdir(), "azadocs-test-"));
+  const { folderIds, docPaths } = existingStateDir
+    ? { folderIds: new Map(), docPaths: {} }
+    : await seedOnDisk(stateDir);
   const port = await findFreePort();
   const origin = `http://127.0.0.1:${port}`;
 
@@ -210,15 +238,16 @@ async function startTestServer() {
       });
     }
 
-    // Guard against ever deleting something outside the temp directory.
-    if (stateDir.startsWith(os.tmpdir()) && fsSync.existsSync(stateDir)) {
+    // Guard against ever deleting something outside the temp directory, and
+    // never delete a directory the caller made and still owns.
+    if (!existingStateDir && stateDir.startsWith(os.tmpdir()) && fsSync.existsSync(stateDir)) {
       await fs.rm(stateDir, { recursive: true, force: true });
     }
   }
 
   try {
     await Promise.race([waitForHealth(origin), exitedEarly]);
-    return { origin, stateDir, folderIds, stop, request: (m, p, b, h) => request(origin, m, p, b, h) };
+    return { origin, stateDir, folderIds, docPaths, stop, request: (m, p, b, h) => request(origin, m, p, b, h) };
   } catch (error) {
     await stop();
     throw error;

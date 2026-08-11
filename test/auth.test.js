@@ -46,6 +46,11 @@ function check(label, actual, expected) {
 async function run(server) {
   const anon = makeClient(server.origin);
 
+  // Documents are identified by their path now, so the fixture reports where it
+  // actually put each one. alpha.md sits six folders deep; beta.md is unfiled
+  // and stays at the top level.
+  const ALPHA = server.docPaths["alpha.md"];
+
   console.log("=== password hashing ===");
   {
     const hash = await passwords.hashPassword("correct horse battery");
@@ -76,7 +81,7 @@ async function run(server) {
     check("an anonymous session is not authenticated", (await anon.get("/api/session")).body.authenticated, false);
     check("...and says reads are not public", (await anon.get("/api/session")).body.publicReads, false);
     check("listing documents is refused", (await anon.get("/api/docs")).status, 401);
-    check("reading one is refused", (await anon.get("/api/docs/alpha.md")).status, 401);
+    check("reading one is refused", (await anon.get(`/api/docs/${ALPHA}`)).status, 401);
     check("searching is refused", (await anon.get("/api/docs/search?q=alpha")).status, 401);
     check("the recycle bin is refused", (await anon.get("/api/recycle-bin")).status, 401);
     check("writing is refused", (await anon.post("/api/docs", { fileName: "x.md", content: "x" })).status, 401);
@@ -228,11 +233,11 @@ async function run(server) {
     check("a viewer cannot create a document",
       (await viewer.post("/api/docs", { fileName: "nope.md", content: "x" })).status, 403);
     check("a viewer cannot delete one",
-      (await viewer.post("/api/docs/alpha.md/delete", { mode: "soft" })).status, 403);
+      (await viewer.post(`/api/docs/${ALPHA}/delete`, { mode: "soft" })).status, 403);
     check("a viewer cannot make folders",
       (await viewer.post("/api/folders", { name: "Nope" })).status, 403);
     check("a viewer cannot share",
-      (await viewer.post("/api/docs/alpha.md/share")).status, 403);
+      (await viewer.post(`/api/docs/${ALPHA}/share`)).status, 403);
     check("a viewer cannot list accounts", (await viewer.get("/api/users")).status, 403);
     check("...and the refusal is 403, not 401", (await viewer.get("/api/users")).body.code, "forbidden");
 
@@ -241,7 +246,7 @@ async function run(server) {
     await admin.patch(`/api/users/${viewerId}`, { role: "editor" });
     check("promotion to editor is immediate",
       (await viewer.post("/api/docs", { fileName: "editor-made.md", content: "x" })).status, 201);
-    check("an editor can share", (await viewer.post("/api/docs/alpha.md/share")).status, 201);
+    check("an editor can share", (await viewer.post(`/api/docs/${ALPHA}/share`)).status, 201);
     check("an editor still cannot manage accounts", (await viewer.get("/api/users")).status, 403);
     // Account management is admin-only end to end, not just hidden in the UI.
     check("an editor cannot create an account",
@@ -345,7 +350,7 @@ async function run(server) {
       (await stranger.get(`/api/share/${token}`)).status, 200);
     check("...and gets the content", (await stranger.get(`/api/share/${token}`)).body.file, "beta.md");
     check("but still cannot list the library", (await stranger.get("/api/docs")).status, 401);
-    check("...or read a different document", (await stranger.get("/api/docs/alpha.md")).status, 401);
+    check("...or read a different document", (await stranger.get(`/api/docs/${ALPHA}`)).status, 401);
     check("a made-up token is refused", (await stranger.get("/api/share/not-a-real-token")).status, 404);
 
     const page = await stranger.get(`/s/${token}`);
@@ -505,18 +510,178 @@ async function run(server) {
 
   console.log("=== a share follows its document, and dies with it ===");
   {
-    const share = await admin.post("/api/docs/alpha.md/share");
+    const share = await admin.post(`/api/docs/${ALPHA}/share`);
     const token = share.body.url.split("/s/")[1];
     const stranger = makeClient(server.origin);
 
-    const renamed = await admin.post("/api/docs/alpha.md/rename", { fileName: "alpha-renamed.md" });
+    const renamed = await admin.post(`/api/docs/${ALPHA}/rename`, { fileName: "alpha-renamed.md" });
     check("renaming the document succeeds", renamed.status, 200);
     check("the share link still resolves", (await stranger.get(`/api/share/${token}`)).status, 200);
-    check("...to the new filename", (await stranger.get(`/api/share/${token}`)).body.file, "alpha-renamed.md");
+    // The rename kept it in its folder, so the share now points at the same
+    // directory with a new name on the end.
+    const renamedPath = renamed.body.file;
+    check("...to the new path", (await stranger.get(`/api/share/${token}`)).body.file, renamedPath);
+    check("...which stayed in the same folder",
+      renamedPath, `${ALPHA.slice(0, ALPHA.lastIndexOf("/") + 1)}alpha-renamed.md`);
 
-    await admin.post("/api/docs/alpha-renamed.md/delete", { mode: "soft" });
+    await admin.post(`/api/docs/${renamedPath}/delete`, { mode: "soft" });
     check("deleting the document revokes the share",
       (await stranger.get(`/api/share/${token}`)).status, 404);
+  }
+
+  console.log("=== the same name in two folders ===");
+  {
+    // The reason for the whole directory layout. Before this, the filename was
+    // the identity and had to be unique across the library, so the second
+    // README became README-1.md.
+    await admin.post("/api/folders", { name: "Alpha" });
+    await admin.post("/api/folders", { name: "Beta" });
+    const folders = (await admin.get("/api/docs")).body.folders;
+    const alphaId = folders.find((f) => f.name === "Alpha").id;
+    const betaId = folders.find((f) => f.name === "Beta").id;
+
+    const one = await admin.post("/api/docs", { fileName: "README.md", content: "# In Alpha\n", folderId: alphaId });
+    const two = await admin.post("/api/docs", { fileName: "README.md", content: "# In Beta\n", folderId: betaId });
+    const top = await admin.post("/api/docs", { fileName: "README.md", content: "# At the top\n" });
+
+    check("a README in Alpha", one.body.file, "Alpha/README.md");
+    check("...another in Beta", two.body.file, "Beta/README.md");
+    check("...and one at the top level", top.body.file, "README.md");
+    check("all three kept the name", [one, two, top].every((r) => r.status === 201), true);
+
+    check("each reads back its own content",
+      [(await admin.get("/api/docs/Alpha/README.md")).body.content.trim(),
+        (await admin.get("/api/docs/Beta/README.md")).body.content.trim(),
+        (await admin.get("/api/docs/README.md")).body.content.trim()],
+      ["# In Alpha", "# In Beta", "# At the top"]);
+
+    // Within one folder the name still has to be free.
+    check("a second README in Alpha is refused",
+      (await admin.post("/api/docs", { fileName: "README.md", content: "x", folderId: alphaId })).status, 409);
+
+    // Moving one onto another is refused rather than silently suffixed.
+    check("moving Beta's README into Alpha is refused",
+      (await admin.put("/api/docs/Beta/README.md/folder", { folderId: alphaId })).status, 409);
+
+    // Renaming a folder moves its directory and every document under it.
+    await admin.put(`/api/folders/${alphaId}`, { name: "Alpha Renamed" });
+    check("the document moved with its folder",
+      (await admin.get("/api/docs/Alpha%20Renamed/README.md")).status, 200);
+    check("...and is gone from the old path",
+      (await admin.get("/api/docs/Alpha/README.md")).status, 404);
+
+    // Deleting a folder rescues its documents to the top level rather than
+    // deleting them, and a name already taken there gets a suffix.
+    const before = (await admin.get("/api/docs")).body.docs.length;
+    check("the folder is deleted", (await admin.del(`/api/folders/${betaId}`)).status, 200);
+    const after = (await admin.get("/api/docs")).body.docs;
+    check("deleting a folder keeps its documents", after.length, before);
+    check("...moved to the top level, suffixed past the one already there",
+      after.some((d) => d.file === "README-1.md"), true);
+  }
+
+  console.log("=== a path from a request cannot leave the documents directory ===");
+  {
+    // sanitizeDocPath rebuilds the path from safe segments, and resolveDocPath
+    // then checks the result is still inside. Each of these has to fail.
+    const attempts = [
+      ["parent traversal", "../../../etc/passwd.md"],
+      ["traversal in the middle", "Notes/../../../etc/passwd.md"],
+      ["a single dot segment", "./secrets.md"],
+      ["a double dot segment", "Notes/../secrets.md"],
+      ["an absolute path", "/etc/passwd.md"],
+      ["a hidden file", ".env.md"],
+      ["a hidden directory", ".ssh/id_rsa.md"],
+      ["an empty segment", "Notes//secrets.md"],
+      ["a trailing slash", "Notes/"],
+      ["a name with no allowed extension", "Notes/passwd"],
+      ["a null byte", "Notes/evil\u0000.md"],
+      ["a Windows separator", "..\\..\\windows\\evil.md"]
+    ];
+
+    for (const [label, attempt] of attempts) {
+      const encoded = attempt.split("/").map(encodeURIComponent).join("/");
+      const res = await admin.get(`/api/docs/${encoded}`);
+      const refused = res.status === 400 || res.status === 404;
+      if (!refused) {
+        failures++;
+      }
+      console.log(`  ${refused ? "PASS" : "FAIL"}  ${label} is refused (${res.status})`);
+    }
+
+    // Percent-encoded traversal decodes before routing, so it is the same
+    // attempt wearing a disguise and must fail the same way.
+    const encodedDots = await admin.get("/api/docs/%2e%2e%2f%2e%2e%2fetc%2fpasswd.md");
+    check("percent-encoded traversal is refused too",
+      encodedDots.status === 400 || encodedDots.status === 404, true);
+
+    check("nothing outside the documents directory was created",
+      (await fsp.readdir(server.stateDir)).sort().join(","), "data,deleted_markdowns,docs");
+  }
+
+  console.log("=== an old flat library migrates itself ===");
+  {
+    // What the live library looked like before this change: every document in
+    // one directory, with a filename to folder map beside it. Written straight
+    // to disk and picked up by a fresh server, which is exactly the path the
+    // real data took.
+    const { startTestServer: startAnother } = require("./helpers/server");
+    const os = require("os");
+    const fs = require("fs/promises");
+
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "azadocs-migrate-"));
+    await fs.mkdir(path.join(stateDir, "docs"), { recursive: true });
+    await fs.mkdir(path.join(stateDir, "data"), { recursive: true });
+
+    for (const name of ["top.md", "filed.md", "deep.md", "orphan.md"]) {
+      await fs.writeFile(path.join(stateDir, "docs", name), `# ${name}\n`, "utf8");
+    }
+
+    await fs.writeFile(path.join(stateDir, "data", "document-organizer.json"), JSON.stringify({
+      version: 2,
+      folders: [
+        { id: "f_notes", name: "Notes", parentId: null, order: 0 },
+        { id: "f_deep", name: "Archive", parentId: "f_notes", order: 0 },
+        { id: "f_empty", name: "Empty", parentId: null, order: 1 }
+      ],
+      fileFolders: {
+        "filed.md": "f_notes",
+        "deep.md": "f_deep",
+        // A mapping to a folder that no longer exists: the file must survive.
+        "orphan.md": "f_gone"
+      }
+    }, null, 2), "utf8");
+
+    const migrated = await startAnother({ stateDir });
+    try {
+      const docsDir = path.join(stateDir, "docs");
+      const exists = async (rel) => {
+        try { await fs.access(path.join(docsDir, rel)); return true; } catch { return false; }
+      };
+
+      check("a filed document moved into its folder", await exists("Notes/filed.md"), true);
+      check("...and is gone from the top level", await exists("filed.md"), false);
+      check("a nested folder is rebuilt in full", await exists("Notes/Archive/deep.md"), true);
+      check("an unfiled document stays put", await exists("top.md"), true);
+      check("a mapping to a missing folder leaves the file alone", await exists("orphan.md"), true);
+      check("an empty folder still gets its directory", await exists("Empty"), true);
+
+      const organizer = JSON.parse(await fs.readFile(path.join(stateDir, "data", "document-organizer.json"), "utf8"));
+      check("the old map is dropped once it has been acted on", organizer.fileFolders, {});
+      check("...and the folder tree is untouched", organizer.folders.length, 3);
+
+      // Running again must be a no-op rather than a second round of moves.
+      await migrated.stop();
+      const again = await startAnother({ stateDir });
+      try {
+        check("a second boot moves nothing", await exists("Notes/filed.md"), true);
+        check("...and does not re-file the unfiled one", await exists("top.md"), true);
+      } finally {
+        await again.stop();
+      }
+    } finally {
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
   }
 
   console.log("=== the store survives a restart ===");
@@ -550,9 +715,12 @@ async function run(server) {
     check("the nesting is rebuilt", res.body.counts.foldersCreated, 3);
 
     const placed = Object.fromEntries(res.body.uploaded.map((u) => [u.file, u.folderPath]));
-    check("a top-level file goes in the root folder", placed["readme.md"], "Handbook");
-    check("a nested one goes three deep", placed["goals.md"], "Handbook / 2026 / q1");
-    check("...and a sibling shares the middle folder", placed["retro.md"], "Handbook / 2026");
+    check("a top-level file goes in the root folder", placed["Handbook/readme.md"], "Handbook");
+    check("a nested one goes three deep", placed["Handbook/2026/q1/goals.md"], "Handbook / 2026 / q1");
+    check("...and a sibling shares the middle folder", placed["Handbook/2026/retro.md"], "Handbook / 2026");
+    // The uploaded path is the identity now, and it mirrors the folder exactly.
+    check("the path on disk is the path that was uploaded", Object.keys(placed).sort(),
+      ["Handbook/2026/q1/goals.md", "Handbook/2026/retro.md", "Handbook/readme.md"]);
 
     // Uploading into an existing tree must join it, not duplicate it.
     const second = await upload([{ path: "Handbook/2026/q1/notes.md" }]);
@@ -564,12 +732,26 @@ async function run(server) {
     check("no duplicate folder was created",
       folders.filter((f) => f.path === "Handbook / 2026 / q1").length, 1);
 
-    console.log("=== a name clash is resolved, not overwritten ===");
+    console.log("=== the same name in two folders is two documents ===");
     const clash = await upload([{ path: "Other/readme.md", content: "# Different\n" }]);
-    check("the second readme is renamed", clash.body.uploaded[0].renamedFrom, "readme.md");
-    check("...to something else", clash.body.uploaded[0].file === "readme.md", false);
-    const original = await admin.get("/api/docs/readme.md");
-    check("the first one is untouched", original.body.content.includes("Handbook/readme.md"), true);
+    // This is what the directory layout is for: both keep the name they were
+    // given, nothing is renamed and nothing is overwritten.
+    check("the second readme keeps its name", clash.body.uploaded[0].file, "Other/readme.md");
+    check("...and was not renamed", clash.body.uploaded[0].renamedFrom, null);
+
+    const first = await admin.get("/api/docs/Handbook/readme.md");
+    check("the first one still reads", first.status, 200);
+    check("...with its own content", first.body.content.includes("Handbook/readme.md"), true);
+
+    const other = await admin.get("/api/docs/Other/readme.md");
+    check("the second one reads too", other.status, 200);
+    check("...with different content", other.body.content.includes("Different"), true);
+
+    // Within one folder the name still has to be free, and that is now the only
+    // place a suffix is ever added.
+    const sameFolder = await upload([{ path: "Other/readme.md", content: "# Third\n" }]);
+    check("a repeat in the same folder is suffixed", sameFolder.body.uploaded[0].renamedFrom, "readme.md");
+    check("...rather than overwriting", sameFolder.body.uploaded[0].file === "Other/readme.md", false);
 
     console.log("=== paths from the client are not trusted ===");
     for (const [label, badPath] of [
@@ -593,12 +775,27 @@ async function run(server) {
 
     // Whatever the paths claimed, nothing may exist outside the documents dir.
     const docsDir = path.join(server.stateDir, "docs");
-    const onDisk = await fsp.readdir(docsDir);
-    check("every uploaded file is flat in the documents directory",
-      onDisk.every((name) => !name.includes("/") && !name.includes("..")), true);
-    check("no stray directory was created",
-      (await Promise.all(onDisk.map(async (n) => (await fsp.stat(path.join(docsDir, n))).isDirectory())))
-        .every((isDir) => isDir === false), true);
+    // Directories are the point now, so "nothing nested" is no longer the
+    // invariant. What still has to hold is that nothing escaped: every entry
+    // resolves inside the documents directory and no name carries a traversal.
+    const walk = async (dir, prefix = "") => {
+      const entries = await fsp.readdir(path.join(dir, prefix), { withFileTypes: true });
+      const out = [];
+      for (const entry of entries) {
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        out.push(rel);
+        if (entry.isDirectory()) {
+          out.push(...await walk(dir, rel));
+        }
+      }
+      return out;
+    };
+
+    const everything = await walk(docsDir);
+    check("no entry anywhere carries a traversal",
+      everything.every((name) => !name.split("/").includes("..")), true);
+    check("every entry resolves inside the documents directory",
+      everything.every((name) => path.resolve(docsDir, name).startsWith(docsDir + path.sep)), true);
     check("nothing was written to the state root",
       (await fsp.readdir(server.stateDir)).sort().join(","), "data,deleted_markdowns,docs");
 

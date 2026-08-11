@@ -307,6 +307,9 @@ async function run(server) {
   // Explorer behaviour, against the seeded hierarchy.
   {
     const click = (node, init = {}) => node.dispatchEvent(new window.MouseEvent("click", { bubbles: true, ...init }));
+    // A document is identified by its path now; the fixture reports where it
+    // actually wrote each one, so the tests do not hardcode the tree.
+    const D = (name) => server.docPaths[name] || name;
     const rowFor = (file) => doc.querySelector(`.tree-row-doc[data-file="${file}"]`);
     const btnFor = (file) => rowFor(file)?.querySelector(".tree-row-btn");
 
@@ -332,20 +335,20 @@ async function run(server) {
       parentGroup.querySelector(".tree-count").textContent, String(expectedDeep));
 
     console.log("=== multi-select ===");
-    click(btnFor("delta.md"));
-    check("plain click selects one", [...window.eval("window.__t.state.selection")], ["delta.md"]);
+    click(btnFor(D("delta.md")));
+    check("plain click selects one", [...window.eval("window.__t.state.selection")], [D("delta.md")]);
 
-    click(btnFor("epsilon.md"), { ctrlKey: true });
-    check("ctrl+click adds", [...window.eval("window.__t.state.selection")].sort(), ["delta.md", "epsilon.md"]);
+    click(btnFor(D("epsilon.md")), { ctrlKey: true });
+    check("ctrl+click adds", [...window.eval("window.__t.state.selection")].sort(), [D("delta.md"), D("epsilon.md")].sort());
 
-    click(btnFor("epsilon.md"), { ctrlKey: true });
-    check("ctrl+click again removes", [...window.eval("window.__t.state.selection")], ["delta.md"]);
+    click(btnFor(D("epsilon.md")), { ctrlKey: true });
+    check("ctrl+click again removes", [...window.eval("window.__t.state.selection")], [D("delta.md")]);
 
-    window.eval('window.__t.setSelection(["delta.md"], { anchor: "delta.md" })');
-    click(btnFor("epsilon.md"), { shiftKey: true });
+    window.eval(`window.__t.setSelection([${JSON.stringify(D("delta.md"))}], { anchor: ${JSON.stringify(D("delta.md"))} })`);
+    click(btnFor(D("epsilon.md")), { shiftKey: true });
     const range = [...window.eval("window.__t.state.selection")];
     check("shift+click selects a range", range.length >= 2, true);
-    check("range includes both ends", range.includes("delta.md") && range.includes("epsilon.md"), true);
+    check("range includes both ends", range.includes(D("delta.md")) && range.includes(D("epsilon.md")), true);
 
     window.eval("window.__t.setSelection(window.__t.visibleFileOrder)");
     check("select-all covers every visible file", window.eval("window.__t.state.selection.size") === window.eval("window.__t.visibleFileOrder.length"), true);
@@ -357,7 +360,7 @@ async function run(server) {
     check("and unmarks the rows", doc.querySelectorAll(".tree-row-doc.is-selected").length, 0);
 
     console.log("=== cut marks files in flight ===");
-    window.eval('window.__t.setSelection(["delta.md","epsilon.md"])');
+    window.eval(`window.__t.setSelection([${JSON.stringify(D("delta.md"))},${JSON.stringify(D("epsilon.md"))}])`);
     window.eval("window.__t.cutFiles([...window.__t.state.selection])");
     check("clipboard holds both", window.eval("window.__t.state.clipboard.files.length"), 2);
     check("mode is cut", window.eval("window.__t.state.clipboard.mode"), "cut");
@@ -368,16 +371,16 @@ async function run(server) {
     await window.eval(`window.__t.pasteIntoFolder(${JSON.stringify(notesId)})`);
     await new Promise((r) => setTimeout(r, 600));
     const movedInto = window.eval(`window.__t.state.docs.filter(d => d.folderId === ${JSON.stringify(notesId)}).map(d => d.file).sort()`);
-    check("both files landed in the target folder", [...movedInto], ["delta.md", "epsilon.md"]);
+    check("both files landed in the target folder", [...movedInto].map((f) => f.split("/").pop()).sort(), ["delta.md", "epsilon.md"]);
     check("clipboard is emptied after paste", window.eval("window.__t.state.clipboard.files.length"), 0);
 
     console.log("=== context menu ===");
-    rowFor("alpha.md").dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 40 }));
+    rowFor(D("alpha.md")).dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 40 }));
     const menu = doc.getElementById("contextMenu");
     check("menu opens on right-click", menu.hidden, false);
     const labels = [...menu.querySelectorAll(".context-item span")].map((s) => s.textContent);
     check("it offers the file operations", ["Open", "Cut", "Rename"].every((l) => labels.includes(l)), true);
-    check("right-clicking a row selects it", [...window.eval("window.__t.state.selection")], ["alpha.md"]);
+    check("right-clicking a row selects it", [...window.eval("window.__t.state.selection")], [D("alpha.md")]);
     window.eval("window.__t.closeContextMenu()");
     check("menu closes", menu.hidden, true);
 
@@ -390,21 +393,22 @@ async function run(server) {
     window.eval("window.__t.closeContextMenu()");
 
     console.log("=== F2 inline rename ===");
-    window.eval('window.__t.beginInlineRename("alpha.md")');
-    const input = rowFor("alpha.md")?.querySelector(".tree-rename-input");
+    window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+    const input = rowFor(D("alpha.md"))?.querySelector(".tree-rename-input");
     check("an input replaces the label", Boolean(input), true);
+    // Seeded with the name, not the path: renaming does not move anything.
     check("it is seeded with the filename", input.value, "alpha.md");
     check("the extension is left out of the preselection", input.selectionEnd, "alpha".length);
     input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await new Promise((r) => setTimeout(r, 100));
-    check("escape restores the row", Boolean(rowFor("alpha.md")?.querySelector(".tree-rename-input")), false);
+    check("escape restores the row", Boolean(rowFor(D("alpha.md"))?.querySelector(".tree-rename-input")), false);
 
     console.log("=== breadcrumbs ===");
     const nav = doc.getElementById("breadcrumbs");
     check("the breadcrumb nav exists", Boolean(nav), true);
     check("it is labelled for assistive tech", nav.getAttribute("aria-label"), "Location of the open file");
 
-    await window.eval('window.__t.openDocument("alpha.md", false)');
+    await window.eval(`window.__t.openDocument(${JSON.stringify(D("alpha.md"))}, false)`);
     await new Promise((r) => setTimeout(r, 500));
 
     const crumbText = [...nav.querySelectorAll(".crumb")].map((c) => c.textContent.trim() || "…");
@@ -439,7 +443,7 @@ async function run(server) {
     check("and the folder row is rendered", Boolean([...doc.querySelectorAll(".tree-row-folder")].find((r) => r.dataset.folderId === tokensId)), true);
 
     console.log("=== a top-level file gets a two-crumb trail ===");
-    await window.eval('window.__t.openDocument("beta.md", false)');
+    await window.eval(`window.__t.openDocument(${JSON.stringify(D("beta.md"))}, false)`);
     await new Promise((r) => setTimeout(r, 400));
     const shortTrail = [...nav.querySelectorAll(".crumb")].map((c) => c.textContent.trim());
     console.log(`  (trail: ${shortTrail.join(" > ")})`);
@@ -454,9 +458,9 @@ async function run(server) {
     check("a top-level folder is not offered a top-level drop", window.eval("window.__t.canDropOnFolder(null)"), false);
     window.eval(`window.__t.state.dragPayload = { type: "folder", folderId: ${JSON.stringify(cartId)} }`);
     check("a nested folder can be dropped at the top level", window.eval("window.__t.canDropOnFolder(null)"), true);
-    window.eval(`window.__t.state.dragPayload = { type: "files", files: ["alpha.md"] }`);
+    window.eval(`window.__t.state.dragPayload = { type: "files", files: [${JSON.stringify(D("alpha.md"))}] }`);
     // Ask the model where the file actually is rather than assuming a fixture.
-    const alphaFolder = window.eval('window.__t.state.docs.find(d => d.file === "alpha.md").folderId');
+    const alphaFolder = window.eval(`window.__t.state.docs.find(d => d.file === ${JSON.stringify(D("alpha.md"))}).folderId`);
     check("a file cannot be dropped where it already lives", window.eval(`window.__t.canDropOnFolder(${JSON.stringify(alphaFolder)})`), false);
     check("but can move elsewhere", window.eval(`window.__t.canDropOnFolder(${JSON.stringify(projectsId)})`), true);
     window.eval("window.__t.state.dragPayload = null");
@@ -653,7 +657,7 @@ async function run(server) {
     // Delete exactly one document, from a folder several levels deep. The
     // delete asks for confirmation, so answer it the way a click would —
     // awaiting it without that hangs forever.
-    const deleting = window.eval('window.__t.deleteFiles(["paged-000.md"], "soft")');
+    const deleting = window.eval(`window.__t.deleteFiles([${JSON.stringify(server.docPaths["paged-000.md"])}], "soft")`);
     await new Promise((r) => setTimeout(r, 150));
     window.eval("window.__t.resolveConfirmDialog(true)");
     await deleting;

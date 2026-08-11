@@ -100,7 +100,7 @@ proxy hop rather than the client's scheme.
 │   │   ├── share.js          # The share page
 │   │   └── theme-boot.js     # Applies the stored theme before first paint
 │   ├── favicon.svg
-│   └── docs/                 # Your documents (gitignored)
+│   └── docs/                 # Your documents, in folders (gitignored)
 ├── lib/
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
 │   ├── excerpt.js            # Title and summary for link previews
@@ -109,7 +109,7 @@ proxy hop rather than the client's scheme.
 │   ├── passwords.js          # scrypt hashing and the password policy
 │   └── shares.js             # Per-document share links
 ├── data/                     # All gitignored
-│   ├── document-organizer.json   # Folder tree + file→folder mappings
+│   ├── document-organizer.json   # The folder tree (ids, names, nesting, order)
 │   ├── users.json            # Accounts and password hashes
 │   ├── sessions.json         # Live sessions, ids stored hashed
 │   ├── shares.json           # Share links, tokens stored hashed
@@ -133,20 +133,42 @@ documents and your runtime state, not part of the project. The server recreates
 them on boot.
 
 > **The organizer file has no backup.** `data/document-organizer.json` holds
-> every folder and every file→folder mapping, and it is gitignored, so nothing
-> version-controls it. If you care about the folder structure, back that file up
-> somewhere.
+> the folder tree and its ordering, and it is gitignored, so nothing
+> version-controls it. Losing it no longer loses which documents are in which
+> folder — the directories say that — but it does lose the folders' ids,
+> ordering and any empty ones. Back it up if you care about those.
 
 ---
 
 ## Storage model
 
-Documents are plain files in `public/docs/`. Nothing is in a database, and the
-files are readable and editable without this app.
+Documents are plain files in `public/docs/`, in real directories that mirror the
+folders you see. Nothing is in a database, and the library is readable,
+editable and re-organisable with any tool — `mv` a file between directories and
+the app agrees on the next load.
 
-Folders exist only in `data/document-organizer.json`, which maps folder IDs to
-names, parents and ordering, plus a filename → folder ID table. Folders nest up
-to 8 levels.
+A document is identified by its path: `Azalea/Roadmap/README.md`. That is what
+makes two documents with the same name in different folders possible, which a
+flat directory could not express — the second used to become `README-1.md`.
+Names have to be unique within a folder, which is the filesystem's own rule
+rather than one this app adds.
+
+`data/document-organizer.json` still holds the folder tree — ids, names,
+parents and ordering — because a folder needs a stable identity that survives
+being renamed, and an ordering the alphabet does not provide. But it no longer
+records where any document lives: the directory a file sits in *is* the answer,
+so the two can never disagree. Folders nest up to 8 levels.
+
+Renaming or moving a folder is one `rename` on disk and no paths rewritten
+anywhere. Deleting one moves its documents back to the top level rather than
+deleting them, and only there does a name ever get a `-1` suffix, because two
+documents from two subfolders can arrive with the same name.
+
+> **Upgrading from a flat library?** The first boot moves every document into
+> its folder's directory and clears the old filename → folder map, reporting
+> what it did. It is safe to run repeatedly and safe to interrupt, and it never
+> renames or deletes anything: a file whose destination is somehow occupied is
+> left where it is and named in the log.
 
 Deleting is two-stage and never destroys anything by accident:
 
@@ -433,16 +455,20 @@ with the right role, plus the `X-CSRF-Token` header.
 | --- | --- | --- |
 | `GET` | `/api/docs` | List all documents with their folder assignments |
 | `GET` | `/api/docs/search?q=` | Full-text search across contents, filenames and titles |
-| `GET` | `/api/docs/:file` | Document content |
+| `GET` | `/api/docs/*file` | Document content |
 | `POST` | `/api/docs` | Create. Accepts `fileName`, `content`, `folderId` |
-| `PUT` | `/api/docs/:file` | Update content |
-| `POST` | `/api/docs/:file/rename` | Rename on disk, carrying the folder assignment |
+| `PUT` | `/api/docs/*file` | Update content |
+| `POST` | `/api/docs/*file/rename` | Rename within its folder |
 | `POST` | `/api/docs/upload` | Multipart upload of one file. Accepts `folderId` |
 | `POST` | `/api/upload/folder` | Multipart upload of a whole folder. See below |
-| `PUT` | `/api/docs/:file/folder` | Move to a folder |
-| `POST` | `/api/docs/:file/delete` | `mode: "soft" \| "hard"` |
+| `PUT` | `/api/docs/*file/folder` | Move to a folder. `409` if the name is taken there |
+| `POST` | `/api/docs/*file/delete` | `mode: "soft" \| "hard"` |
 
-`:file` needs its extension — `/api/docs/notes.md`, not `/api/docs/notes`.
+`*file` is the document's path within the library, with its extension:
+`/api/docs/Azalea/notes.md`, not `/api/docs/notes`. A wildcard rather than one
+percent-encoded segment, because `%2F` is the kind of thing a reverse proxy
+rewrites on the way through, and a library that stops resolving its own URLs
+depending on what sits in front of it is not worth a tidier route pattern.
 
 ### Folders
 
@@ -458,13 +484,13 @@ with the right role, plus the `X-CSRF-Token` header.
 | Method | Path | |
 | --- | --- | --- |
 | `GET` | `/api/recycle-bin` | List soft-deleted documents |
-| `GET` | `/api/recycle-bin/:entry/content` | Read one |
-| `POST` | `/api/recycle-bin/:entry/restore` | Restore to `public/docs/` |
-| `POST` | `/api/recycle-bin/:entry/hard-delete` | Move to the archive |
+| `GET` | `/api/recycle-bin/*entry/content` | Read one |
+| `POST` | `/api/recycle-bin/*entry/restore` | Restore to `public/docs/` |
+| `POST` | `/api/recycle-bin/*entry/hard-delete` | Move to the archive |
 | `GET` | `/api/archive` | List archived documents |
-| `GET` | `/api/archive/:entry/content` | Read one |
-| `POST` | `/api/archive/:entry/restore` | Restore |
-| `DELETE` | `/api/archive/:entry` | **Erase from disk.** Requires a `confirmFile` echo of the original name |
+| `GET` | `/api/archive/*entry/content` | Read one |
+| `POST` | `/api/archive/*entry/restore` | Restore |
+| `DELETE` | `/api/archive/*entry` | **Erase from disk.** Requires a `confirmFile` echo of the original name |
 
 ### Other
 
@@ -484,8 +510,8 @@ with the right role, plus the `X-CSRF-Token` header.
 | `PATCH` | `/api/links/:id` | Edit a card or its groups, or `{"refresh":true}` to re-read the page (editor) |
 | `DELETE` | `/api/links/:id` | Remove a saved link (editor) |
 | `GET` | `/api/shares` | List published documents (editor) |
-| `POST` | `/api/docs/:file/share` | Publish or rotate a share link (editor) |
-| `DELETE` | `/api/docs/:file/share` | Revoke a share link (editor) |
+| `POST` | `/api/docs/*file/share` | Publish or rotate a share link (editor) |
+| `DELETE` | `/api/docs/*file/share` | Revoke a share link (editor) |
 | `GET` | `/api/share/:token` | **Public.** The shared document |
 | `GET` | `/s/:token` | **Public.** The standalone share page |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |

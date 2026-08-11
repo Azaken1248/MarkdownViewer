@@ -1947,7 +1947,9 @@ function updateActiveDocUI(fileName) {
   const notebookFile = isNotebookFile(fileName);
   const doc = getDocByFile(fileName);
   // The folder is in the breadcrumb trail now, so it is not repeated here.
-  setViewerHeading(notebookFile ? "ph-file-code" : "ph-file-text", fileName, [
+  // The trail already names every folder above it, so the last crumb is the
+  // document's name rather than its whole path.
+  setViewerHeading(notebookFile ? "ph-file-code" : "ph-file-text", docName(fileName), [
     doc ? formatBytes(doc.size) : "",
     doc?.updatedAt ? `updated ${formatDate(doc.updatedAt)}` : ""
   ], doc?.folderId || null);
@@ -2146,6 +2148,26 @@ function requestConfirmation({
    -------------------------------------------------------------------------- */
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/* A document path in a URL.
+ *
+ * encodeURIComponent on the whole path would turn "docs/README.md" into
+ * "docs%2FREADME.md" — one segment as far as routing is concerned, which the
+ * wildcard routes do not match, and which a reverse proxy may rewrite anyway.
+ * Each segment is encoded on its own and the separators stay separators.
+ */
+// The name of a document, without the folder it sits in. A document's identity
+// is its path now ("docs/README.md"), and a row in a tree that already shows
+// the folder should say "README.md".
+function docName(file) {
+  const value = String(file || "");
+  const index = value.lastIndexOf("/");
+  return index === -1 ? value : value.slice(index + 1);
+}
+
+function docUrl(file) {
+  return String(file).split("/").map(encodeURIComponent).join("/");
+}
 
 async function requestJson(url, options = {}) {
   const requestOptions = { ...options, credentials: "same-origin" };
@@ -2729,7 +2751,7 @@ async function createShareLink() {
   }
 
   try {
-    const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/share`, { method: "POST" });
+    const payload = await requestJson(`/api/docs/${docUrl(file)}/share`, { method: "POST" });
     await refreshShares();
     renderShareDialog();
 
@@ -2759,7 +2781,7 @@ async function revokeShareLink() {
   }
 
   try {
-    await requestJson(`/api/docs/${encodeURIComponent(file)}/share`, { method: "DELETE" });
+    await requestJson(`/api/docs/${docUrl(file)}/share`, { method: "DELETE" });
     await refreshShares();
     renderShareDialog();
     elements.shareUrlField.hidden = true;
@@ -3013,7 +3035,7 @@ async function loadDocContent(file, { forceReload = false } = {}) {
     return cached.content;
   }
 
-  const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}`, { cache: "no-store" });
+  const payload = await requestJson(`/api/docs/${docUrl(file)}`, { cache: "no-store" });
   const content = String(payload.content || "");
   const version = String(payload.updatedAt || cacheVersion || "");
   state.contentCache.set(file, {
@@ -3374,7 +3396,7 @@ async function moveFilesToFolder(files, folderId, { silent = false } = {}) {
     }
 
     try {
-      await requestJson(`/api/docs/${encodeURIComponent(file)}/folder`, {
+      await requestJson(`/api/docs/${docUrl(file)}/folder`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folderId: folderId || null })
@@ -4305,7 +4327,7 @@ async function deleteFiles(files, mode) {
 
   for (const file of list) {
     try {
-      await requestJson(`/api/docs/${encodeURIComponent(file)}/delete`, {
+      await requestJson(`/api/docs/${docUrl(file)}/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode })
@@ -4410,9 +4432,11 @@ function beginInlineRename(file) {
     return;
   }
 
-  beginInlineEdit(label, file, async (nextName) => {
+  // Seeded with the name, not the path: renaming is renaming, and typing a
+  // path here would be a move the endpoint refuses.
+  beginInlineEdit(label, docName(file), async (nextName) => {
     try {
-      const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/rename`, {
+      const payload = await requestJson(`/api/docs/${docUrl(file)}/rename`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: nextName })
@@ -4420,7 +4444,7 @@ function beginInlineRename(file) {
       state.contentCache.delete(file);
       const openedFile = state.activeFile === file ? payload.file : state.activeFile;
       await refreshDocs({ openFile: openedFile, preserveSearch: true });
-      notify(`Renamed to ${payload.file}.`, "success");
+      notify(`Renamed to ${docName(payload.file)}.`, "success");
     } catch (error) {
       notify(error.message, "error");
       renderDocList();
@@ -4795,7 +4819,7 @@ function buildDocRow(doc, depth) {
   button.className = "tree-row-btn";
   button.style.setProperty("--depth", String(depth));
 
-  const displayName = state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file;
+  const displayName = docName(state.isRecycleBinMode ? (doc.originalFile || doc.file) : doc.file);
   const timeLabel = state.isRecycleBinMode
     ? `deleted ${formatDate(doc.deletedAt || doc.updatedAt)}`
     : `updated ${formatDate(doc.updatedAt)}`;
@@ -5243,14 +5267,14 @@ async function openDocument(file, pushHash, options = {}) {
 
       if (hasJumpQuery) {
         if (jumpResult.found) {
-          setStatus(`Viewing ${doc.file}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
+          setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
         } else {
-          setStatus(`Viewing ${doc.file}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
+          setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
         }
         return;
       }
 
-      setStatus(`Viewing ${doc.file}`, "neutral");
+      setStatus(`Viewing ${docName(doc.file)}`, "neutral");
       return;
     }
 
@@ -5308,14 +5332,14 @@ async function openDocument(file, pushHash, options = {}) {
 
     if (hasJumpQuery) {
       if (jumpResult.found) {
-        setStatus(`Viewing ${doc.file}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
+        setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
       } else {
-        setStatus(`Viewing ${doc.file}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
+        setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
       }
       return;
     }
 
-    setStatus(`Viewing ${doc.file}`, "neutral");
+    setStatus(`Viewing ${docName(doc.file)}`, "neutral");
   } catch (error) {
     if (requestId !== state.openDocumentRequestId) {
       return;
@@ -5432,7 +5456,7 @@ async function deleteCurrentDocument(mode) {
   }
 
   try {
-    const payload = await requestJson(`/api/docs/${encodeURIComponent(targetFile)}/delete`, {
+    const payload = await requestJson(`/api/docs/${docUrl(targetFile)}/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -5495,7 +5519,7 @@ async function hardDeleteCurrentDeletedDocument() {
   }
 
   try {
-    await requestJson(`/api/recycle-bin/${encodeURIComponent(entryFile)}/hard-delete`, {
+    await requestJson(`/api/recycle-bin/${docUrl(entryFile)}/hard-delete`, {
       method: "POST"
     });
 
@@ -5528,7 +5552,7 @@ async function renameFolderOnServer(folderId, folderName) {
 }
 
 async function moveDocumentToFolder(file, folderId) {
-  const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/folder`, {
+  const payload = await requestJson(`/api/docs/${docUrl(file)}/folder`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json"
@@ -5778,7 +5802,9 @@ function openEditor({ mode, fileName, content, folderId = null }) {
   syncEditorTabs();
   syncEditorFolderPicker(mode, folderId);
 
-  elements.editorFileName.value = fileName || "";
+  // The name only. The folder is the picker beside it, or the path it is
+  // already in — a path typed here would be a move the endpoint refuses.
+  elements.editorFileName.value = docName(fileName || "");
   // Editing the name is how you rename: saving renames the file first, then writes
   // the content. It used to be disabled here with no explanation and no other way
   // to rename a document anywhere in the app.
@@ -6047,8 +6073,8 @@ async function saveEditorDocument() {
       // A changed name is a rename. Do it before the content write so the PUT
       // targets the new path and the folder assignment moves with the file.
       let targetFile = state.editorFile;
-      if (fileName !== state.editorFile) {
-        const renamed = await requestJson(`/api/docs/${encodeURIComponent(state.editorFile)}/rename`, {
+      if (fileName !== docName(state.editorFile)) {
+        const renamed = await requestJson(`/api/docs/${docUrl(state.editorFile)}/rename`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -6061,7 +6087,7 @@ async function saveEditorDocument() {
         state.editorFile = targetFile;
       }
 
-      payload = await requestJson(`/api/docs/${encodeURIComponent(targetFile)}`, {
+      payload = await requestJson(`/api/docs/${docUrl(targetFile)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
@@ -6100,7 +6126,7 @@ async function saveEditorDocument() {
           return;
         }
 
-        payload = await requestJson(`/api/docs/${encodeURIComponent(fileName)}`, {
+        payload = await requestJson(`/api/docs/${docUrl(fileName)}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json"
@@ -6187,7 +6213,7 @@ async function deleteDocumentByFile(file, mode) {
   }
 
   try {
-    const payload = await requestJson(`/api/docs/${encodeURIComponent(file)}/delete`, {
+    const payload = await requestJson(`/api/docs/${docUrl(file)}/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -6215,7 +6241,7 @@ async function restoreDeletedDocumentByFile(file) {
   }
 
   try {
-    const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(file)}/restore`, {
+    const payload = await requestJson(`/api/recycle-bin/${docUrl(file)}/restore`, {
       method: "POST"
     });
 
@@ -6237,7 +6263,7 @@ async function restoreArchivedDocumentByFile(file) {
   }
 
   try {
-    const payload = await requestJson(`/api/archive/${encodeURIComponent(file)}/restore`, {
+    const payload = await requestJson(`/api/archive/${docUrl(file)}/restore`, {
       method: "POST"
     });
 
@@ -6274,7 +6300,7 @@ async function permanentlyDeleteArchivedDocument(file) {
   }
 
   try {
-    const payload = await requestJson(`/api/archive/${encodeURIComponent(file)}`, {
+    const payload = await requestJson(`/api/archive/${docUrl(file)}`, {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json"
@@ -6315,7 +6341,7 @@ async function hardDeleteDeletedDocumentByFile(file) {
   }
 
   try {
-    const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(file)}/hard-delete`, {
+    const payload = await requestJson(`/api/recycle-bin/${docUrl(file)}/hard-delete`, {
       method: "POST"
     });
 
