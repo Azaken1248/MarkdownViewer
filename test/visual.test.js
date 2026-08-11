@@ -358,6 +358,37 @@ console.log("=== every fence in the real library survives being parsed and writt
   check("an untouched fence comes back exactly as it was", broken.slice(0, 5), []);
 }
 
+console.log("=== an image survives being pasted into a block ===");
+{
+  const dom = new JSDOM("<!doctype html><body></body>");
+  const block = (html) => {
+    const node = dom.window.document.createElement("div");
+    node.innerHTML = html;
+    return node;
+  };
+
+  check("an image inside a paragraph is written back",
+    VE.serializeEditedBlock(block('<p>See <img src="/api/assets/a.png" alt="a shot"> here.</p>')),
+    "See ![a shot](/api/assets/a.png) here.\n");
+
+  // Pasting at the end of a block drops the image in beside the paragraph
+  // rather than inside it. Serializing only the children of that node would
+  // lose the picture silently, which is the worst way to lose one.
+  check("...and so is one left beside the paragraph",
+    VE.serializeEditedBlock(block('<p>Before.</p><img src="/api/assets/b.png" alt="b">')),
+    "Before.\n\n![b](/api/assets/b.png)\n");
+
+  check("an image on its own is a block of its own",
+    VE.serializeEditedBlock(block('<img src="/api/assets/c.png" alt="">')),
+    "![](/api/assets/c.png)\n");
+
+  // The same rule must not resurrect elements that genuinely hold nothing.
+  check("an empty paragraph is still nothing",
+    VE.serializeEditedBlock(block("<p></p>")), "");
+  check("...and an empty block is still empty",
+    VE.serializeEditedBlock(block("<p></p><div></div>")), "");
+}
+
 console.log("=== a checkbox is one character in the file ===");
 {
   const doc = [

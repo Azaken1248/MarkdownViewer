@@ -3321,6 +3321,185 @@ async function toggleTaskCheckbox(box) {
   }
 }
 
+// --- Pasted images ---------------------------------------------------------
+//
+// Paste a screenshot into a document and it should just be in the document, the
+// way it is everywhere people already paste screenshots. The picture is
+// uploaded, and what lands in the markdown is an ordinary image link.
+//
+// The upload takes as long as it takes, so a placeholder goes in at the cursor
+// straight away and is swapped for the real link when the bytes are up. Typing
+// carries on around it, which is why the placeholder is found again by text
+// rather than held as a position.
+
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+
+function imagesFromTransfer(transfer) {
+  if (!transfer) {
+    return [];
+  }
+
+  const files = [...(transfer.files || [])];
+  // A clipboard image arrives as an item with no file list on some browsers.
+  const fromItems = [...(transfer.items || [])]
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+
+  const all = files.length > 0 ? files : fromItems;
+  return all.filter((file) => IMAGE_TYPES.has(String(file.type || "").toLowerCase()));
+}
+
+function uploadPlaceholder(file) {
+  return `![Uploading ${imageName(file)}...]()`;
+}
+
+function imageName(file) {
+  const name = String(file?.name || "").trim();
+  return name || "image";
+}
+
+async function uploadImage(file) {
+  const body = new FormData();
+  body.append("image", file, imageName(file));
+
+  const payload = await requestJson("/api/assets", { method: "POST", body });
+  return String(payload.url || "");
+}
+
+// The alt text is the file's name without its extension, which is what a
+// screenshot tool's name gives you and better than nothing for a reader who
+// cannot see the picture.
+function imageMarkdown(file, url) {
+  const alt = imageName(file).replace(/\.[^.]+$/, "");
+  return `![${alt}](${url})`;
+}
+
+// --- Into the source editor ------------------------------------------------
+
+function insertIntoTextarea(area, text) {
+  const at = area.selectionStart ?? area.value.length;
+  const end = area.selectionEnd ?? at;
+
+  area.value = `${area.value.slice(0, at)}${text}${area.value.slice(end)}`;
+  area.selectionStart = at + text.length;
+  area.selectionEnd = area.selectionStart;
+}
+
+// Found by text rather than by the offset it went in at, because the upload is
+// away for a while and nothing stops the author typing above it in the meantime.
+function replaceInTextarea(area, find, text) {
+  const at = area.value.indexOf(find);
+  if (at === -1) {
+    return false;
+  }
+
+  const caret = area.selectionStart ?? 0;
+  area.value = `${area.value.slice(0, at)}${text}${area.value.slice(at + find.length)}`;
+
+  // Keep the cursor where the typing was, allowing for the length change.
+  const shift = text.length - find.length;
+  const next = caret > at ? Math.max(at, caret + shift) : caret;
+  area.selectionStart = next;
+  area.selectionEnd = next;
+  return true;
+}
+
+async function attachImagesToSource(files) {
+  for (const file of files) {
+    const placeholder = uploadPlaceholder(file);
+    insertIntoTextarea(elements.editorInput, placeholder);
+    scheduleEditorPreview();
+
+    try {
+      const url = await uploadImage(file);
+      replaceInTextarea(elements.editorInput, placeholder, imageMarkdown(file, url));
+      setStatus(`Attached ${imageName(file)}.`, "success");
+    } catch (error) {
+      // Leaving "Uploading..." in the text would be a lie that saves to the file.
+      replaceInTextarea(elements.editorInput, placeholder, "");
+      setStatus(error.message, "error");
+    }
+
+    scheduleEditorPreview();
+  }
+}
+
+// --- Into the document being edited on the page ----------------------------
+
+// An image in a rich block goes in as a real img element, so the picture is
+// where it will be rather than a line of markup standing in for it. The
+// serializer already writes an img back out as ![alt](src).
+function insertNodeAtCaret(node) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+// Inserting a node is a change to the block, but the browser only fires input
+// for changes a person made. Saying so explicitly is what marks the block dirty
+// and updates the bar, through exactly the path typing already uses.
+function announceEdit(host) {
+  host?.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function attachImagesToPage(files) {
+  for (const file of files) {
+    const image = document.createElement("img");
+    // A local preview means the picture is on the page before the upload
+    // finishes, which is the whole feel of pasting one. Guarded because losing
+    // the preview should cost the preview, not the paste.
+    const preview = window.URL?.createObjectURL ? URL.createObjectURL(file) : "";
+    if (preview) {
+      image.src = preview;
+    }
+    image.alt = imageName(file).replace(/\.[^.]+$/, "");
+    image.dataset.uploading = "true";
+
+    const release = () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+
+    if (!insertNodeAtCaret(image)) {
+      release();
+      return;
+    }
+
+    // Held now, because a failed upload takes the image back out of the
+    // document and there would be nothing left to ask.
+    const host = image.closest('[contenteditable="true"]');
+    announceEdit(host);
+
+    try {
+      const url = await uploadImage(file);
+      image.src = url;
+      delete image.dataset.uploading;
+      announceEdit(host);
+      setStatus(`Attached ${imageName(file)}.`, "success");
+    } catch (error) {
+      // The picture never made it, so it must not be left sitting in the
+      // document looking as though it did.
+      image.remove();
+      announceEdit(host);
+      setStatus(error.message, "error");
+    } finally {
+      release();
+    }
+  }
+}
+
 function renderMermaidBlocks(root) {
   return MarkdownCore.renderMermaidBlocks(root);
 }
@@ -8252,6 +8431,15 @@ elements.docContent.addEventListener("paste", (event) => {
     return;
   }
 
+  // A screenshot on the clipboard is not text, and is the thing being pasted
+  // rather than something alongside it.
+  const images = imagesFromTransfer(event.clipboardData);
+  if (images.length > 0 && can("doc:write")) {
+    event.preventDefault();
+    void attachImagesToPage(images);
+    return;
+  }
+
   const text = event.clipboardData?.getData("text/plain");
   if (typeof text !== "string") {
     return;
@@ -8259,6 +8447,37 @@ elements.docContent.addEventListener("paste", (event) => {
 
   event.preventDefault();
   document.execCommand("insertText", false, text);
+});
+
+// Dropping a picture onto the page is the same act as pasting one. Without
+// this the browser navigates away from the app to display the file.
+elements.docContent.addEventListener("dragover", (event) => {
+  if (pageEditActive() && imagesFromTransfer(event.dataTransfer).length > 0) {
+    event.preventDefault();
+  }
+});
+
+elements.docContent.addEventListener("drop", (event) => {
+  if (!pageEditActive() || !can("doc:write")) {
+    return;
+  }
+
+  const images = imagesFromTransfer(event.dataTransfer);
+  if (images.length === 0) {
+    return;
+  }
+
+  event.preventDefault();
+
+  // Drop where it was dropped, not where the cursor happened to be.
+  const at = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+  if (at && at.startContainer?.parentElement?.closest?.('[contenteditable="true"]')) {
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(at);
+  }
+
+  void attachImagesToPage(images);
 });
 
 elements.editorTabWrite.addEventListener("click", () => selectEditorTab("write"));
@@ -8284,6 +8503,32 @@ window.matchMedia?.(EDITOR_TABS_QUERY).addEventListener?.("change", syncEditorTa
 
 elements.editorInput.addEventListener("input", () => {
   scheduleEditorPreview();
+});
+
+elements.editorInput.addEventListener("paste", (event) => {
+  const images = imagesFromTransfer(event.clipboardData);
+  if (images.length === 0 || !can("doc:write")) {
+    return;
+  }
+
+  event.preventDefault();
+  void attachImagesToSource(images);
+});
+
+elements.editorInput.addEventListener("dragover", (event) => {
+  if (imagesFromTransfer(event.dataTransfer).length > 0) {
+    event.preventDefault();
+  }
+});
+
+elements.editorInput.addEventListener("drop", (event) => {
+  const images = imagesFromTransfer(event.dataTransfer);
+  if (images.length === 0 || !can("doc:write")) {
+    return;
+  }
+
+  event.preventDefault();
+  void attachImagesToSource(images);
 });
 
 elements.editorInput.addEventListener("scroll", () => {

@@ -15,6 +15,7 @@ const SUITES = [
   ["diagrams", "diagrams.test.js", "Mermaid sizing and the per-theme diagram palettes"],
   ["auth", "auth.test.js", "Passwords, sessions, CSRF, RBAC and share links"],
   ["links", "links.test.js", "Saved links: SSRF refusals, metadata parsing, storage and RBAC"],
+  ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"]
 ];

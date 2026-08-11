@@ -15,6 +15,8 @@ Live at **<https://md.azaken.com>**.
   markdown source, one button away.
 - Task list checkboxes are live while you read: click one and that single
   character changes in the file, with no editor to open and nothing to save.
+- Screenshots can be pasted or dropped straight into a document, stored by
+  content hash so the same picture is only ever kept once.
 - Express 5 on the server, with the documents themselves as the source of truth
   and JSON files for folder structure, accounts and sessions.
 - Private by default: accounts with roles, and individual documents can be
@@ -56,7 +58,7 @@ already known to everyone.
 | --- | --- |
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `visual`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `assets`, `visual`, `dom` |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 
@@ -123,10 +125,11 @@ proxy hop rather than the client's scheme.
 ├── deleted_markdowns/
 │   ├── soft/                 # Recycle bin (gitignored)
 │   └── hard/                 # Archive (gitignored)
+├── assets/                   # Pasted images, named by content hash (gitignored)
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The eight suites
+│   └── *.test.js             # The nine suites
 ├── server.js                 # Express app, ~2,400 lines
 ├── eslint.config.js
 ├── package.json
@@ -134,9 +137,9 @@ proxy hop rather than the client's scheme.
 └── .github/workflows/ci.yml
 ```
 
-`public/docs/`, `data/` and `deleted_markdowns/` are gitignored: they are your
-documents and your runtime state, not part of the project. The server recreates
-them on boot.
+`public/docs/`, `data/`, `deleted_markdowns/` and `assets/` are gitignored: they
+are your documents and your runtime state, not part of the project. The server
+recreates them on boot.
 
 > **The organizer file has no backup.** `data/document-organizer.json` holds
 > the folder tree and its ordering, and it is gitignored, so nothing
@@ -345,6 +348,34 @@ and **Preview** tabs, so each gets the whole pane. Edits made on the page come
 with you.
 
 `Ctrl+S` saves, `Escape` leaves, and both ask before losing anything.
+
+### Pasting a picture
+
+Paste a screenshot into a document and it is in the document — in the source
+editor and on the page you read it on, and dropping a file works the same way.
+The picture appears at the cursor straight away, from a local copy, while the
+bytes go up behind it; what lands in the markdown is an ordinary
+`![alt](/api/assets/…)` image. In the source editor the stand-in is a visible
+`![Uploading …]()`, found again by text when the upload returns, so typing
+around it while it uploads does not strand it. An upload that fails takes its
+own placeholder back out rather than leaving a lie in the file.
+
+Images are stored **outside the documents and outside the static root**, and
+named by the SHA-256 of their bytes. So the same screenshot pasted into four
+documents is stored once, re-uploading is idempotent, and the name says nothing
+about who uploaded it or what it was called on their disk. The bytes behind a
+URL can never change, which is what lets them be cached permanently.
+
+Only PNG, JPEG, GIF, WebP and AVIF are accepted, up to 10MB. **SVG is refused**:
+it is a document format that can carry script, and serving one inline from this
+origin would hand an author a way to run code in every reader's session.
+
+Attaching needs `doc:write`; reading an image needs whatever reading a document
+needs. A picture inside a *shared* document is the exception worth stating —
+whoever opens a share link has no account, so those images are served through a
+share-scoped address instead. That route checks the image actually appears in
+the document that was shared, so a link to one document is not a key to every
+picture in the library.
 
 ### Task lists tick without opening anything
 
@@ -651,7 +682,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Eight suites, ~600 checks, under a minute. No browser required, and no
+Nine suites, ~650 checks, under a minute. No browser required, and no
 network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
@@ -662,6 +693,7 @@ network: the suite is deterministic on a runner with no egress.
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `links` | What the link fetcher refuses to reach, metadata parsing, grouping, storage, RBAC |
+| `assets` | Pasted images: what may be uploaded, size and type refusals, deduplication, RBAC, share scoping |
 | `visual` | The block round trip, over fixtures and over every real document |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 

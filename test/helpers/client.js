@@ -75,8 +75,9 @@ function makeClient(origin) {
     });
   }
 
-  // Folder upload is the only multipart endpoint, so the client needs to be
-  // able to build one.
+  // Folder upload and image attachment are the multipart endpoints, so the
+  // client needs to be able to build one. A file may name its own form field
+  // and content type; both default to what the folder upload sends.
   async function postMultipart(pathname, files, fields = {}) {
     const boundary = `----azadocs${Math.random().toString(16).slice(2)}`;
     const chunks = [];
@@ -90,8 +91,8 @@ function makeClient(origin) {
     for (const file of files) {
       chunks.push(Buffer.from(
         `--${boundary}\r\n`
-        + `Content-Disposition: form-data; name="files"; filename="${file.name}"\r\n`
-        + "Content-Type: text/markdown\r\n\r\n"
+        + `Content-Disposition: form-data; name="${file.field || "files"}"; filename="${file.name}"\r\n`
+        + `Content-Type: ${file.type || "text/markdown"}\r\n\r\n`
       ));
       chunks.push(Buffer.from(file.content));
       chunks.push(Buffer.from("\r\n"));
@@ -135,8 +136,37 @@ function makeClient(origin) {
     });
   }
 
+  // Images come back as bytes, not as text that survives a round trip through
+  // a string, so this is the one read that keeps the buffer.
+  async function getBytes(pathname) {
+    const url = new URL(pathname, origin);
+    const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        host: url.hostname,
+        port: url.port,
+        path: url.pathname + url.search,
+        method: "GET",
+        headers: cookieHeader ? { Cookie: cookieHeader } : {}
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks)
+        }));
+      });
+
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
   return {
     postMultipart,
+    getBytes,
     get: (p, h) => request("GET", p, undefined, h),
     post: (p, b, h) => request("POST", p, b === undefined ? {} : b, h),
     put: (p, b) => request("PUT", p, b),

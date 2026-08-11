@@ -392,7 +392,15 @@
         continue;
       }
 
-      const text = childrenToMarkdown(node).trim();
+      // Anything else is treated as a wrapper around inline content — except
+      // when it carries no children of its own and is itself the content. An
+      // img pasted at the end of a block lands as a sibling of the paragraph
+      // rather than inside it, and serializing only its children would drop
+      // the picture without a word.
+      const text = (node.children.length === 0 && node.childNodes.length === 0
+        ? inlineToMarkdown(node)
+        : childrenToMarkdown(node)).trim();
+
       if (text) {
         parts.push(text);
       }

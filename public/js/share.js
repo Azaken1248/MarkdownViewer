@@ -109,6 +109,14 @@
       payload.content,
       payload.title
     );
+    // Whoever opened this link has no session, so /api/assets would refuse
+    // them. The share-scoped route serves the same image on the strength of
+    // the token, but only for images that are actually in this document.
+    for (const image of elements.content.querySelectorAll('img[src^="/api/assets/"]')) {
+      const name = image.getAttribute("src").slice("/api/assets/".length);
+      image.setAttribute("src", `/api/share/${encodeURIComponent(token)}/assets/${name}`);
+    }
+
     elements.content.classList.add("visible");
     elements.loading.hidden = true;
 

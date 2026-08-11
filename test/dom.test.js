@@ -85,6 +85,12 @@ async function run(server) {
   window.TextEncoder = TextEncoder;
   window.TextDecoder = TextDecoder;
 
+  // Nor does it implement object URLs, which is how a pasted picture is shown
+  // on the page before its upload finishes.
+  let objectUrls = 0;
+  window.URL.createObjectURL = () => `blob:${ORIGIN}/${++objectUrls}`;
+  window.URL.revokeObjectURL = () => {};
+
   // Third-party globals the app expects to already be on the page.
   //
   // A stand-in for marked. It only has to produce the shapes the editor works
@@ -139,7 +145,13 @@ async function run(server) {
         return `<ul>${items}</ul>`;
       }
 
-      return `<p>${text.replace(/[<>]/g, "")}</p>`;
+      // Inline images, because a document that has had one pasted into it has
+      // to render as a picture and serialize back out of one.
+      const inline = text.replace(/[<>]/g, "")
+        .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g,
+          (_, alt, src) => `<img src="${escape(src)}" alt="${escape(alt)}">`);
+
+      return `<p>${inline}</p>`;
   };
 
   window.marked = {
@@ -195,6 +207,15 @@ async function run(server) {
     }
   }
 
+  // jsdom's Blob has no arrayBuffer(), so the bytes come out through the one
+  // reader it does implement.
+  const blobBytes = (blob) => new Promise((resolve, reject) => {
+    const reader = new window.FileReader();
+    reader.onload = () => resolve(Buffer.from(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Could not read blob"));
+    reader.readAsArrayBuffer(blob);
+  });
+
   // Proxy fetch to the spawned server so the app sees a real corpus.
   window.fetch = async (url, options = {}) => {
     const target = String(url).startsWith("http") ? String(url) : `${ORIGIN}${url}`;
@@ -206,6 +227,40 @@ async function run(server) {
       async json() { return JSON.parse(body); },
       async text() { return body; }
     });
+
+    // A FormData body is what the browser turns into a multipart request. The
+    // app sends one when attaching an image, so the proxy has to encode it the
+    // same way rather than writing "[object FormData]" down the socket.
+    let payload = options.body;
+    let extraHeaders = {};
+
+    if (payload && typeof payload !== "string" && typeof payload.entries === "function") {
+      const boundary = `----domsuite${Math.random().toString(16).slice(2)}`;
+      const chunks = [];
+
+      for (const [name, value] of payload.entries()) {
+        if (value instanceof window.Blob) {
+          chunks.push(Buffer.from(
+            `--${boundary}\r\n`
+            + `Content-Disposition: form-data; name="${name}"; filename="${value.name || "file"}"\r\n`
+            + `Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`
+          ));
+          chunks.push(await blobBytes(value));
+          chunks.push(Buffer.from("\r\n"));
+        } else {
+          chunks.push(Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
+          ));
+        }
+      }
+
+      chunks.push(Buffer.from(`--${boundary}--\r\n`));
+      payload = Buffer.concat(chunks);
+      extraHeaders = {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": payload.length
+      };
+    }
 
     if (method !== "GET") {
       const body = await new Promise((resolve, reject) => {
@@ -222,6 +277,7 @@ async function run(server) {
           // empty req.body and complained about a missing field.
           headers: {
             ...(options.headers || {}),
+            ...extraHeaders,
             ...(cookieHeader() ? { Cookie: cookieHeader() } : {})
           }
         }, (res) => {
@@ -233,7 +289,7 @@ async function run(server) {
           });
         });
         req.on("error", reject);
-        if (options.body) req.write(options.body);
+        if (payload) req.write(payload);
         req.end();
       });
       return makeResponse(body.status, body.body);
@@ -295,7 +351,7 @@ async function run(server) {
         deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
-        syncEditorTabs, selectEditorTab, openEditor,
+        syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
         startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
@@ -1368,6 +1424,121 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== a pasted picture becomes an image in the document ===");
+  {
+    // A real PNG signature, so what goes up is an image rather than the word.
+    const png = (tail) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...tail]);
+    const pngFile = (name = "Screenshot 2026-08-12.png", tail = [1, 2, 3, 4]) =>
+      new window.File([png(tail)], name, { type: "image/png" });
+
+    // jsdom builds no clipboard, so the transfer object is handed over
+    // directly. It is read exactly as a real one is: files first, items after.
+    const pasteEvent = (target, files) => {
+      const event = new window.Event("paste", { bubbles: true, cancelable: true });
+      event.clipboardData = { files, items: [], getData: () => "" };
+      target.dispatchEvent(event);
+      return event;
+    };
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "pictures.md", content: "# Pictures\n\nBefore.\n" }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("pictures.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+
+    console.log("  -- into the markdown editor --");
+    await window.eval("window.__t.openEditorForCurrentDoc()");
+    await new Promise((r) => setTimeout(r, 500));
+
+    const input = doc.getElementById("editorInput");
+    check("the editor opens on the document", input.value, "# Pictures\n\nBefore.\n");
+    input.selectionStart = input.value.length;
+    input.selectionEnd = input.value.length;
+
+    const pasted = pasteEvent(input, [pngFile()]);
+    check("the paste is taken over from the browser", pasted.defaultPrevented, true);
+    check("...and something stands in for the picture straight away",
+      input.value.includes("![Uploading Screenshot 2026-08-12.png...]()"), true);
+
+    await new Promise((r) => setTimeout(r, 900));
+
+    check("the placeholder is replaced once the bytes are up",
+      input.value.includes("Uploading"), false);
+    const link = input.value.match(/!\[([^\]]*)\]\((\/api\/assets\/[0-9a-f]{64}\.png)\)/);
+    check("...by an ordinary markdown image", Boolean(link), true);
+    check("...with the file's name as the alt text", link[1], "Screenshot 2026-08-12");
+    check("...and the text that was already there is untouched",
+      input.value.startsWith("# Pictures\n\nBefore.\n"), true);
+
+    // The link has to be real: the image must actually be fetchable.
+    const served = await get(link[2]);
+    check("the image is really there at that address", served.status, 200);
+
+    await window.eval("window.__t.saveEditorDocument()");
+    await new Promise((r) => setTimeout(r, 900));
+    const saved = JSON.parse((await get("/api/docs/pictures.md")).body).content;
+    check("the image link reached the file", saved.includes(link[2]), true);
+
+    console.log("  -- into the document being edited on the page --");
+    await window.eval('window.__t.openDocument("pictures.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 500));
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const target = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')][1];
+    target.focus();
+    const range = doc.createRange();
+    // Inside the paragraph, which is where a caret actually sits.
+    range.selectNodeContents(target.querySelector("p"));
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    check("nothing is dirty before the paste", window.eval("window.__t.isPageEditDirty()"), false);
+    pasteEvent(target, [pngFile("diagram.png", [9, 9, 9, 9])]);
+
+    // The block already holds the image pasted into the source editor, so the
+    // new one is the last, not the first.
+    const inserted = [...target.querySelectorAll("img")].at(-1);
+    check("the picture is on the page immediately", Boolean(inserted), true);
+    check("...shown from the local copy while it uploads",
+      inserted.getAttribute("src").startsWith("blob:"), true);
+    check("...and marked as still going up", inserted.dataset.uploading, "true");
+    check("...and it counts as an edit", window.eval("window.__t.isPageEditDirty()"), true);
+
+    await new Promise((r) => setTimeout(r, 900));
+
+    check("the picture swaps to the uploaded copy",
+      /^\/api\/assets\/[0-9a-f]{64}\.png$/.test(inserted.getAttribute("src")), true);
+    check("...and is no longer marked as uploading", "uploading" in inserted.dataset, false);
+    check("the block writes it back as markdown",
+      /!\[diagram\]\(\/api\/assets\/[0-9a-f]{64}\.png\)/.test(window.eval("window.__t.collectPageMarkdown()")), true);
+
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+    const withBoth = JSON.parse((await get("/api/docs/pictures.md")).body).content;
+    check("both pictures are in the file now",
+      (withBoth.match(/!\[[^\]]*\]\(\/api\/assets\//g) || []).length, 2);
+
+    console.log("  -- what is not a picture --");
+    await window.eval("window.__t.openEditorForCurrentDoc()");
+    await new Promise((r) => setTimeout(r, 500));
+    const before = doc.getElementById("editorInput").value;
+
+    const text = new window.Event("paste", { bubbles: true, cancelable: true });
+    text.clipboardData = { files: [new window.File(["x"], "notes.txt", { type: "text/plain" })], items: [], getData: () => "" };
+    doc.getElementById("editorInput").dispatchEvent(text);
+    check("pasting a text file is left to the browser", text.defaultPrevented, false);
+    check("...and nothing is uploaded",
+      doc.getElementById("editorInput").value, before);
+    window.eval("window.__t.closeEditor()");
   }
 
   console.log("=== a checkbox on the page ticks the box in the file ===");
