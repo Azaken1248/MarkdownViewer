@@ -444,15 +444,39 @@ async function run(server) {
     check("twitter mirrors it", meta("twitter:title"), "Quarterly Planning");
     check("no placeholder survived", /__SHARE_[A-Z_]+__/.test(page), false);
 
-    // The preview is text only. The SVG card that used to be here was not
-    // rendered by Slack, Discord or X — which is most of where a link gets
-    // pasted — so it cost a route and a renderer to show nothing.
-    console.log("=== the preview claims no image ===");
-    check("no og:image", /property="og:image"/.test(page), false);
-    check("...and no twitter:image", /name="twitter:image"/.test(page), false);
-    check("twitter falls back to the text card", meta("twitter:card"), "summary");
-    check("the card route is gone",
-      (await stranger.get(`/s/${token}/card.svg`)).status, 404);
+    // There was an SVG card here once, generated per document, and Slack,
+    // Discord and X all showed nothing for it — so it was removed rather than
+    // fixed, and the preview went out with no picture at all. What those
+    // services do render is a PNG, so that is what this points at now.
+    console.log("=== the preview carries a picture a crawler can actually show ===");
+    {
+      const imageUrl = meta("og:image");
+      check("there is an og:image", typeof imageUrl === "string" && imageUrl.length > 0, true);
+      check("...and it is a PNG, which is the whole point", imageUrl.endsWith(".png"), true);
+      check("...declared as one", meta("og:image:type"), "image/png");
+      // A crawler resolves this against nothing, so a relative URL is a blank
+      // card just as surely as an SVG is.
+      check("...at an absolute URL", /^https?:\/\//.test(imageUrl), true);
+      check("...with dimensions, so the card is laid out before it loads",
+        [meta("og:image:width"), meta("og:image:height")], ["1200", "630"]);
+      check("...and alt text", typeof meta("og:image:alt") === "string", true);
+
+      check("twitter has the image too", meta("twitter:image"), imageUrl);
+      check("...and asks for the large card", meta("twitter:card"), "summary_large_image");
+
+      // The one that actually decides whether a picture appears: an unfurler
+      // has no session, and this used to be the step everything else fell at.
+      const asCrawler = makeClient(server.origin);
+      const fetched = await asCrawler.getBytes(new URL(imageUrl).pathname);
+      check("a crawler with no session can fetch it", fetched.status, 200);
+      check("...and is served an image", fetched.headers["content-type"], "image/png");
+      check("...that really is a PNG",
+        fetched.body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), true);
+      check("...and is not empty", fetched.body.length > 1000, true);
+
+      check("the old per-document SVG route is still gone",
+        (await stranger.get(`/s/${token}/card.svg`)).status, 404);
+    }
 
     console.log("=== a revoked link stops describing what was behind it ===");
     await admin.del("/api/docs/preview-fixture.md/share");
@@ -941,6 +965,51 @@ async function run(server) {
     check("the worker is served", worker.status, 200);
     check("...from this origin, so worker-src 'self' covers it",
       worker.headers["content-type"].includes("javascript"), true);
+  }
+
+  console.log("=== the app's own link preview ===");
+  {
+    // Everything here is checked as an unfurler sees it: no session, no
+    // cookies, one GET of the front page and one of whatever it points at.
+    const crawler = makeClient(server.origin);
+    const page = (await crawler.get("/")).raw;
+    const meta = (property) => {
+      const match = page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`));
+      return match ? match[1] : null;
+    };
+
+    const imageUrl = meta("og:image");
+    check("the front page offers an image", typeof imageUrl === "string" && imageUrl.length > 0, true);
+    check("...as a PNG", imageUrl.endsWith(".png"), true);
+    check("...absolute", /^https?:\/\//.test(imageUrl), true);
+    check("...and twitter agrees", meta("twitter:image"), imageUrl);
+    check("no placeholder survived", /__EMBED_[A-Z_]+__/.test(page), false);
+
+    const card = await crawler.getBytes(new URL(imageUrl).pathname);
+    check("the card is there for anyone who asks", card.status, 200);
+    check("...as an image", card.headers["content-type"], "image/png");
+    check("...and really is a PNG",
+      card.body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), true);
+    // 1200x630 is what the tags promise; a crawler that lays the card out from
+    // them and then gets something else shows a broken one.
+    check("...at the size the tags claim",
+      [card.body.readUInt32BE(16), card.body.readUInt32BE(20)], [1200, 630]);
+
+    // iOS will not take an SVG here. It quietly screenshots the page instead,
+    // which is how this went unnoticed.
+    const touchIcon = page.match(/<link rel="apple-touch-icon" href="([^"]*)"/)?.[1] || "";
+    check("the touch icon is a PNG too", touchIcon.endsWith(".png"), true);
+    check("...and is served", (await crawler.getBytes(new URL(touchIcon).pathname)).status, 200);
+
+    // Discord reads oEmbed as well, and this used to hand it the SVG.
+    const oembed = await crawler.get(`/oembed?url=${encodeURIComponent(`${server.origin}/`)}`);
+    check("oEmbed answers", oembed.status, 200);
+    check("...with a raster thumbnail", String(oembed.body.thumbnail_url).endsWith(".png"), true);
+    const thumb = await crawler.getBytes(new URL(oembed.body.thumbnail_url).pathname);
+    check("...that can be fetched", thumb.status, 200);
+    check("...at the size it claims",
+      [thumb.body.readUInt32BE(16), thumb.body.readUInt32BE(20)],
+      [oembed.body.thumbnail_width, oembed.body.thumbnail_height]);
   }
 
   console.log("=== error pages ===");

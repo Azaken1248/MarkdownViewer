@@ -81,6 +81,21 @@ const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit 
 // blue, left over from a palette the app no longer uses.
 const EMBED_THEME_COLOR = "#06090a";
 const FAVICON_PATH = "/favicon.svg";
+// The picture a link preview shows. It is a PNG, and that is the whole point:
+// the app's only image used to be favicon.svg, and no embed crawler renders
+// SVG — not Discord, not Slack, not X — so every link to this app came out with
+// an empty space where the picture should be. iOS will not take an SVG for
+// apple-touch-icon either, hence the raster icon beside it.
+//
+// 1200x630 is the size the crawlers document, and the one that earns a
+// full-width card rather than a thumbnail. Both are built by
+// tools/make-embed-images.js from the same shapes as the favicon.
+const EMBED_IMAGE_PATH = "/img/embed-card.png";
+const EMBED_IMAGE_WIDTH = "1200";
+const EMBED_IMAGE_HEIGHT = "630";
+const EMBED_IMAGE_ALT = "AzaDocs";
+const APPLE_TOUCH_ICON_PATH = "/img/icon-180.png";
+const ICON_PATH = "/img/icon-512.png";
 const EMBED_AUTHOR_NAME = "Azaken1248";
 // Where this actually lives. Canonical, og:*, and oEmbed URLs are built from
 // this rather than from the request, so a spoofed Host header cannot redirect
@@ -2382,6 +2397,13 @@ function buildEmbedMeta(req, requestedUrl) {
     siteName: SITE_NAME,
     canonicalUrl,
     faviconUrl: toAbsoluteUrl(baseUrl, FAVICON_PATH),
+    appleTouchIconUrl: toAbsoluteUrl(baseUrl, APPLE_TOUCH_ICON_PATH),
+    iconUrl: toAbsoluteUrl(baseUrl, ICON_PATH),
+    // Absolute, because a crawler resolves og:image against nothing.
+    imageUrl: toAbsoluteUrl(baseUrl, EMBED_IMAGE_PATH),
+    imageWidth: EMBED_IMAGE_WIDTH,
+    imageHeight: EMBED_IMAGE_HEIGHT,
+    imageAlt: EMBED_IMAGE_ALT,
     themeColor: EMBED_THEME_COLOR,
     oEmbedUrl: `${toAbsoluteUrl(baseUrl, "/oembed")}?url=${encodeURIComponent(canonicalUrl)}`,
     baseUrl
@@ -2395,6 +2417,11 @@ function renderIndexWithEmbedMeta(htmlTemplate, embedMeta) {
     __EMBED_CANONICAL_URL__: embedMeta.canonicalUrl,
     __EMBED_SITE_NAME__: embedMeta.siteName,
     __EMBED_FAVICON_URL__: embedMeta.faviconUrl,
+    __EMBED_APPLE_TOUCH_ICON_URL__: embedMeta.appleTouchIconUrl,
+    __EMBED_IMAGE_URL__: embedMeta.imageUrl,
+    __EMBED_IMAGE_WIDTH__: embedMeta.imageWidth,
+    __EMBED_IMAGE_HEIGHT__: embedMeta.imageHeight,
+    __EMBED_IMAGE_ALT__: embedMeta.imageAlt,
     __EMBED_THEME_COLOR__: embedMeta.themeColor,
     __EMBED_OEMBED_URL__: embedMeta.oEmbedUrl
   };
@@ -2564,6 +2591,11 @@ function renderShareHtml(template, {
     __SHARE_AUTHOR__: EMBED_AUTHOR_NAME,
     __SHARE_MODIFIED__: modifiedAt,
     __SHARE_FAVICON_URL__: toAbsoluteUrl(baseUrl, FAVICON_PATH),
+    __SHARE_APPLE_TOUCH_ICON_URL__: toAbsoluteUrl(baseUrl, APPLE_TOUCH_ICON_PATH),
+    __SHARE_IMAGE_URL__: toAbsoluteUrl(baseUrl, EMBED_IMAGE_PATH),
+    __SHARE_IMAGE_WIDTH__: EMBED_IMAGE_WIDTH,
+    __SHARE_IMAGE_HEIGHT__: EMBED_IMAGE_HEIGHT,
+    __SHARE_IMAGE_ALT__: EMBED_IMAGE_ALT,
     __SHARE_THEME_COLOR__: EMBED_THEME_COLOR
   };
 
@@ -2653,9 +2685,11 @@ app.get("/oembed", (req, res) => {
     author_url: embedMeta.baseUrl,
     title: embedMeta.title,
     url: embedMeta.canonicalUrl,
-    thumbnail_url: embedMeta.faviconUrl,
-    thumbnail_width: 256,
-    thumbnail_height: 256,
+    // The raster icon, not the favicon: a consumer of this is an unfurler, and
+    // an unfurler that is handed an SVG shows nothing.
+    thumbnail_url: embedMeta.iconUrl,
+    thumbnail_width: 512,
+    thumbnail_height: 512,
     cache_age: 3600
   });
 });

@@ -11,6 +11,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node test/run.js",
+    "images": "node tools/make-embed-images.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

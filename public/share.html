@@ -17,6 +17,7 @@
 
 <link rel="canonical" href="__SHARE_URL__" />
 <link rel="icon" type="image/svg+xml" href="__SHARE_FAVICON_URL__" />
+<link rel="apple-touch-icon" href="__SHARE_APPLE_TOUCH_ICON_URL__" />
 
 <!-- The preview describes the shared document, not the app. Title and summary
      are derived from the document's own content; see lib/excerpt.js. -->
@@ -26,10 +27,21 @@
 <meta property="og:url" content="__SHARE_URL__" />
 <meta property="og:site_name" content="__SHARE_SITE_NAME__" />
 <meta property="article:modified_time" content="__SHARE_MODIFIED__" />
+<!-- The app's card rather than anything from the document: a shared link is
+     often the first thing someone sees of this, and the document's own
+     pictures are not public. A PNG, and absolute — crawlers render no SVG and
+     resolve no relative URLs. -->
+<meta property="og:image" content="__SHARE_IMAGE_URL__" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="__SHARE_IMAGE_WIDTH__" />
+<meta property="og:image:height" content="__SHARE_IMAGE_HEIGHT__" />
+<meta property="og:image:alt" content="__SHARE_IMAGE_ALT__" />
 
-<meta name="twitter:card" content="summary" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="__SHARE_OG_TITLE__" />
 <meta name="twitter:description" content="__SHARE_DESCRIPTION__" />
+<meta name="twitter:image" content="__SHARE_IMAGE_URL__" />
+<meta name="twitter:image:alt" content="__SHARE_IMAGE_ALT__" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -45,8 +57,8 @@
 
 <!-- Absolute, not relative: this page is served from /s/<token>, so "js/..."
      would resolve to /s/js/... and 404, leaving a blank page. -->
-<script src="/js/theme-boot.js?v=53"></script>
-<link rel="stylesheet" href="/css/app.css?v=53" />
+<script src="/js/theme-boot.js?v=58"></script>
+<link rel="stylesheet" href="/css/app.css?v=58" />
 
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
   integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
@@ -69,8 +81,8 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
   integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
   defer></script>
-<script src="/js/markdown-core.js?v=53" defer></script>
-<script src="/js/share.js?v=53" defer></script>
+<script src="/js/markdown-core.js?v=58" defer></script>
+<script src="/js/share.js?v=58" defer></script>
 
 <div class="share-page">
   <header class="share-header">

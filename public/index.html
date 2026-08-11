@@ -11,17 +11,27 @@
   <link rel="canonical" href="__EMBED_CANONICAL_URL__" />
   <link rel="alternate" type="application/json+oembed" href="__EMBED_OEMBED_URL__" title="__EMBED_TITLE__" />
   <link rel="icon" type="image/svg+xml" href="__EMBED_FAVICON_URL__" />
-  <link rel="apple-touch-icon" href="__EMBED_FAVICON_URL__" />
+  <!-- iOS does not accept an SVG here; it silently shows a screenshot instead. -->
+  <link rel="apple-touch-icon" href="__EMBED_APPLE_TOUCH_ICON_URL__" />
 
   <meta property="og:type" content="website" />
   <meta property="og:title" content="__EMBED_TITLE__" />
   <meta property="og:description" content="__EMBED_DESCRIPTION__" />
   <meta property="og:url" content="__EMBED_CANONICAL_URL__" />
   <meta property="og:site_name" content="__EMBED_SITE_NAME__" />
+  <!-- A PNG, and absolute. Crawlers do not render SVG and do not resolve
+       relative URLs, which is why this used to come out blank. -->
+  <meta property="og:image" content="__EMBED_IMAGE_URL__" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="__EMBED_IMAGE_WIDTH__" />
+  <meta property="og:image:height" content="__EMBED_IMAGE_HEIGHT__" />
+  <meta property="og:image:alt" content="__EMBED_IMAGE_ALT__" />
 
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="__EMBED_TITLE__" />
   <meta name="twitter:description" content="__EMBED_DESCRIPTION__" />
+  <meta name="twitter:image" content="__EMBED_IMAGE_URL__" />
+  <meta name="twitter:image:alt" content="__EMBED_IMAGE_ALT__" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -41,8 +51,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=57"></script>
-  <link rel="stylesheet" href="css/app.css?v=57" />
+  <script src="js/theme-boot.js?v=58"></script>
+  <link rel="stylesheet" href="css/app.css?v=58" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -64,13 +74,13 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=57" defer></script>
+  <script src="js/markdown-core.js?v=58" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="js/visual-editor.js?v=57" defer></script>
+  <script src="js/visual-editor.js?v=58" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=57" defer></script>
-  <script src="js/app.js?v=57" defer></script>
+  <script src="js/notebook-runtime.js?v=58" defer></script>
+  <script src="js/app.js?v=58" defer></script>
 </head>
 
 <body>

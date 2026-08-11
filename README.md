@@ -59,6 +59,7 @@ already known to everyone.
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
 | `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `assets`, `visual`, `dom` |
+| `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 
@@ -108,6 +109,7 @@ proxy hop rather than the client's scheme.
 │   │   ├── share.js          # The share page
 │   │   └── theme-boot.js     # Applies the stored theme before first paint
 │   ├── favicon.svg
+│   ├── img/                  # PNGs for link previews (see npm run images)
 │   └── docs/                 # Your documents, in folders (gitignored)
 ├── lib/
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
@@ -130,6 +132,8 @@ proxy hop rather than the client's scheme.
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
 │   └── *.test.js             # The nine suites
+├── tools/
+│   └── make-embed-images.js  # Draws public/img/*.png. No dependencies.
 ├── server.js                 # Express app, ~2,400 lines
 ├── eslint.config.js
 ├── package.json
@@ -569,14 +573,56 @@ tables are excluded from the summary, since a preview reading `## Overview` is
 worse than none. Notebooks are summarised from their first markdown cell and
 diagram sources are labelled by type.
 
-There is no `og:image`. There was one — an SVG card generated per document —
-but this app has no image rasteriser, and Slack, Discord and X all decline to
-render an SVG `og:image`, which is most of the places a link actually gets
-pasted. It cost a route and a renderer to show nothing, so the preview is text
-only and `twitter:card` is `summary` rather than `summary_large_image`.
+`og:image` is the app's own card, not anything from the document — a shared
+link is often the first thing someone sees of this, and the document's own
+pictures are not public.
+
+There was an earlier attempt at a per-document **SVG** card, and Slack, Discord
+and X all decline to render an SVG `og:image` — which is most of the places a
+link actually gets pasted. That was resolved by removing the image, which meant
+previews went out with nothing at all. The actual fix is a raster image, so
+there is now a PNG: see [Link preview images](#link-preview-images).
 
 Revoking a link takes the preview with it: a dead token renders a generic
 "not found" page that names neither the document nor its contents.
+
+---
+
+## Link preview images
+
+Every unfurler — Discord, Slack, X, iMessage — wants a **raster** image, and
+this app's only picture was `favicon.svg`. That is why links to it came out
+with an empty space where the card should be, and why iOS showed a screenshot
+instead of an icon for `apple-touch-icon`.
+
+So the images that previews use are PNGs, drawn by a generator rather than
+committed as binaries nobody can inspect or change:
+
+```bash
+node tools/make-embed-images.js
+```
+
+It writes `public/img/embed-card.png` (1200×630, the size crawlers document and
+the one that earns a full-width card) and two square icons, from the same tile,
+page, fold and text lines as `favicon.svg`, in the same four colours. Output is
+deterministic, so regenerating after a palette change produces a clean diff or
+none at all. There are no dependencies: `zlib` is Node's, and a PNG is a
+signature, three chunks and a CRC.
+
+Three things have to hold at once or the card is blank, and all three are
+asserted in the `auth` suite against a server with no session, which is the
+only state a crawler is ever in:
+
+- the image is a **PNG** — an SVG shows nothing,
+- the URL is **absolute** — a crawler resolves it against nothing,
+- the file is **readable without signing in** — and the images live in the
+  static root rather than behind `requireRead`, unlike documents and unlike
+  pasted attachments.
+
+The declared `og:image:width` / `og:image:height` are checked against the PNG's
+actual header too, since a crawler that lays out a card from the tags and then
+receives a different size draws a broken one. `/oembed` hands out the raster
+icon for the same reason.
 
 ## API
 
