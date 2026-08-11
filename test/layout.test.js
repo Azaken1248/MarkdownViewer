@@ -171,5 +171,42 @@ console.log("=== the share page can scroll ===");
   check("no horizontal scroll", /overflow-x:\s*hidden/.test(sharePage), true);
 }
 
+console.log("=== the editor split stays even ===");
+{
+  // A grid item's automatic minimum size is its min-content width, not zero, so
+  // `1fr 1fr` is only an even split until the preview holds something that
+  // refuses to get narrower — a wide table, a long unbroken URL, a code line.
+  // That column then wins and the textarea is squeezed to a sliver, which is
+  // exactly what happened on documents with a wide table in them.
+  const grid = rule(".editor-grid");
+  check("the editor is two equal columns", /grid-template-columns:\s*1fr 1fr/.test(grid), true);
+
+  const pane = rule(".editor-pane");
+  check("...and a pane may shrink below its content", /min-width:\s*0/.test(pane), true);
+
+  const preview = rule(".editor-preview");
+  check("the preview may shrink too", /min-width:\s*0/.test(preview), true);
+  check("...and scrolls anything too wide instead of pushing",
+    /overflow-x:\s*auto/.test(preview), true);
+  check("...and breaks a long unbroken URL rather than widening",
+    /overflow-wrap:\s*anywhere/.test(preview), true);
+}
+
+console.log("=== the editor shows the characters that are there ===");
+{
+  // JetBrains Mono draws "###" as one glyph spread across the cells it
+  // replaces, so typing ### into a markdown file rendered as "  #" and looked
+  // like two characters had been swallowed. Nothing was — but a field whose
+  // content *is* the characters cannot lie about them.
+  const input = rule("#editorInput");
+  check("the editor turns ligatures off", /font-variant-ligatures:\s*none/.test(input), true);
+  check("...including contextual alternates, which is how this font ships them",
+    /font-feature-settings:[^;]*"calt"\s*0/.test(input), true);
+
+  const code = rule(".markdown-body code");
+  check("rendered code does the same", /font-variant-ligatures:\s*none/.test(code), true);
+  check("...and also turns calt off", /font-feature-settings:[^;]*"calt"\s*0/.test(code), true);
+}
+
 console.log(failures === 0 ? "\nALL LAYOUT CHECKS PASSED" : `\n${failures} LAYOUT CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

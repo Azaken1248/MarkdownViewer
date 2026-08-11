@@ -1614,6 +1614,12 @@ button.crumb:focus-visible {
   border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--fg);
+
+  /* Same reason as the editor: this font draws "!=", "===", "->" and "###" as
+     single glyphs, and in a document about code the reader should not have to
+     wonder whether what they are looking at is what is written. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
 }
 
 .markdown-body pre {
@@ -2718,6 +2724,14 @@ button.crumb:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Both of these matter, and min-width is the one that is easy to miss.
+     A grid item's automatic minimum size is its min-content width, not zero,
+     so 1fr 1fr is only an even split until something in the preview refuses to
+     get narrower — a wide table, a long unbroken URL, a code line. Then that
+     column wins and the textarea is squeezed to a sliver. min-width: 0 lets the
+     column shrink; overflow on the preview gives the wide thing somewhere to go
+     instead of pushing. */
+  min-width: 0;
   background: var(--canvas);
 }
 
@@ -2748,6 +2762,16 @@ button.crumb:focus-visible {
   font-size: 13px;
   line-height: 1.6;
   tab-size: 2;
+
+  /* No ligatures. JetBrains Mono ships a glyph for "###" (and "##", "####",
+     "#{", "#?", "->", "!=", "===" and the rest), drawn as one mark spread over
+     the cells it replaces — so typing ### in a markdown file showed "  #" and
+     looked like two characters had been eaten. Nothing was: the value is
+     untouched, which is why the preview was always right.
+     A ligature is a nice thing in a code font and the wrong thing in a field
+     where the characters themselves are the content. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
 }
 
 /* outline:none above is only safe because focus is signalled here instead. */
@@ -2758,7 +2782,13 @@ button.crumb:focus-visible {
 .editor-preview {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
+  /* Anything genuinely too wide scrolls inside the pane rather than widening
+     it. Paired with min-width: 0 on the pane above; either one alone leaves
+     the split uneven. */
+  overflow-x: auto;
+  overflow-wrap: anywhere;
   padding: 16px;
   max-width: none;
 }
