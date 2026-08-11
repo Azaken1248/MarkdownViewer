@@ -85,6 +85,8 @@ const elements = {
   pageEditCancelBtn: document.getElementById("pageEditCancelBtn"),
   pageEditSaveBtn: document.getElementById("pageEditSaveBtn"),
   visualToolbar: document.getElementById("visualToolbar"),
+  visualImageBtn: document.getElementById("visualImageBtn"),
+  imageInput: document.getElementById("imageInput"),
   editorTabWrite: document.getElementById("editorTabWrite"),
   editorTabPreview: document.getElementById("editorTabPreview"),
   editorWritePane: document.getElementById("editorWritePane"),
@@ -6575,8 +6577,19 @@ function openEmbedSource(node, block) {
   area.focus();
 }
 
+// Which block a rendered node is showing. The index on the node is only ever
+// written, and stops being true the moment a block is inserted above it, so
+// anything that needs to find a block from the page asks here instead.
+const blockOfNode = new WeakMap();
+
 // Which of the four ways a block is drawn and written back.
 function renderBlock(block, index) {
+  const node = drawBlock(block, index);
+  blockOfNode.set(node, block);
+  return node;
+}
+
+function drawBlock(block, index) {
   if (isDefinitionsBlock(block)) {
     return renderEmbedBlock(block, index);
   }
@@ -6594,6 +6607,131 @@ function renderBlock(block, index) {
   }
 
   return renderEmbedBlock(block, index);
+}
+
+/* --- Putting something new into the document -----------------------------
+ *
+ * The formatting bar could only ever change text that was already there. A
+ * code fence, a table, a formula or a diagram had to be typed as markdown in
+ * the source editor, which is an odd thing to have to do in a visual editor.
+ *
+ * Each of these is inserted as its markdown and then parsed by the same
+ * splitter the document went through, so a new block is typed and rendered by
+ * exactly the same path as one that was already in the file — there is no
+ * second idea of what a table is.
+ */
+const NEW_BLOCKS = {
+  fence: {
+    label: "code block",
+    markdown: "```\n\n```\n"
+  },
+  table: {
+    label: "table",
+    markdown: "| Column | Column |\n| --- | --- |\n|  |  |\n"
+  },
+  math: {
+    label: "formula",
+    markdown: "$$\n\\frac{a}{b}\n$$\n"
+  },
+  mermaid: {
+    label: "diagram",
+    markdown: "```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```\n"
+  }
+};
+
+// Where a new block should go: after the block the cursor is in, or at the end
+// when the cursor is nowhere.
+function currentPageBlockNode() {
+  const editing = editableBlockFromSelection();
+  if (editing) {
+    return editing;
+  }
+
+  const focused = document.activeElement?.closest?.(".ve-block");
+  if (focused) {
+    return focused;
+  }
+
+  const all = elements.docContent.querySelectorAll(".ve-block");
+  return all.length > 0 ? all[all.length - 1] : null;
+}
+
+function insertPageBlock(kind) {
+  const template = NEW_BLOCKS[kind];
+  if (!pageEditActive() || !template) {
+    return null;
+  }
+
+  const afterNode = currentPageBlockNode();
+  const afterBlock = afterNode ? blockOfNode.get(afterNode) : null;
+  const at = afterBlock ? pageBlocks.indexOf(afterBlock) : -1;
+  const insertAt = at === -1 ? pageBlocks.length : at + 1;
+
+  // A blank line first, or the new block runs straight into the previous
+  // paragraph and stops being a separate block at all.
+  const spacer = { type: "blank", source: "\n" };
+  const fresh = VisualEditor.splitBlocks(template.markdown);
+
+  pageBlocks.splice(insertAt, 0, spacer, ...fresh);
+
+  let anchor = afterNode;
+  let first = null;
+
+  for (const [offset, block] of fresh.entries()) {
+    if (block.type === "blank") {
+      continue;
+    }
+
+    const node = renderBlock(block, insertAt + 1 + offset);
+    if (anchor) {
+      anchor.after(node);
+    } else {
+      elements.docContent.appendChild(node);
+    }
+
+    anchor = node;
+    first = first || node;
+  }
+
+  if (!first) {
+    return null;
+  }
+
+  void renderMermaidBlocks(first);
+  markPageEditDirty();
+
+  // Cursor first. Scrolling is a courtesy, and a browser that cannot do it must
+  // not cost the cursor its place.
+  startTypingIn(first);
+  first.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  setStatus(`Added a ${template.label}.`, "success");
+  return first;
+}
+
+// Put the cursor where whoever pressed the button is going to type next, which
+// is a different place in each of these.
+function startTypingIn(node) {
+  const cell = node.querySelector("th, td");
+  if (cell) {
+    cell.focus();
+    return;
+  }
+
+  const code = node.querySelector("pre code");
+  if (code) {
+    code.focus();
+    return;
+  }
+
+  // Maths and diagrams have no rendering to type into, so they open on their
+  // source with the preview already beside it.
+  const source = node.querySelector(".ve-embed-edit");
+  if (source) {
+    source.click();
+    return;
+  }
+
+  node.focus?.();
 }
 
 function renderPageEditor(markdown) {
@@ -8385,11 +8523,53 @@ elements.visualToolbar.addEventListener("click", (event) => {
     return;
   }
 
-  if (tool.dataset.block) {
+  if (tool.dataset.insert) {
+    insertPageBlock(tool.dataset.insert);
+  } else if (tool.dataset.block) {
     applyVisualBlockFormat(tool.dataset.block);
   } else if (tool.dataset.command) {
     applyVisualCommand(tool.dataset.command);
   }
+});
+
+// Picking a file rather than pasting one. The upload path is the same; only
+// the way the file arrives differs.
+elements.visualImageBtn.addEventListener("click", () => {
+  if (!pageEditActive()) {
+    return;
+  }
+
+  // The caret is remembered by the browser, and the picker is modal, so the
+  // insertion point is still there when it closes.
+  elements.imageInput.click();
+});
+
+elements.imageInput.addEventListener("change", () => {
+  const files = [...(elements.imageInput.files || [])];
+  // Cleared straight away, so picking the same file twice in a row still fires.
+  elements.imageInput.value = "";
+
+  if (files.length === 0 || !pageEditActive() || !can("doc:write")) {
+    return;
+  }
+
+  const block = editableBlockFromSelection() || elements.docContent.querySelector('.ve-block[contenteditable="true"]');
+  if (!block) {
+    notify("Put the cursor in the text first.", "neutral");
+    return;
+  }
+
+  // The picker took the selection with it when it opened.
+  if (!editableBlockFromSelection()) {
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  void attachImagesToPage(files);
 });
 
 // The shortcuts people already have in their fingers. Ctrl+B and Ctrl+I are

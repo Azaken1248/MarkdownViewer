@@ -51,8 +51,8 @@
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
-  <script src="js/theme-boot.js?v=58"></script>
-  <link rel="stylesheet" href="css/app.css?v=58" />
+  <script src="js/theme-boot.js?v=59"></script>
+  <link rel="stylesheet" href="css/app.css?v=59" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -74,13 +74,13 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
     integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
     defer></script>
-  <script src="js/markdown-core.js?v=58" defer></script>
+  <script src="js/markdown-core.js?v=59" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="js/visual-editor.js?v=58" defer></script>
+  <script src="js/visual-editor.js?v=59" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="js/notebook-runtime.js?v=58" defer></script>
-  <script src="js/app.js?v=58" defer></script>
+  <script src="js/notebook-runtime.js?v=59" defer></script>
+  <script src="js/app.js?v=59" defer></script>
 </head>
 
 <body>
@@ -107,6 +107,11 @@
 
       <div class="header-actions" aria-label="Document actions">
         <input id="uploadInput" type="file" accept=".md,.markdown,.mmd,.mermaid,.ipynb,text/markdown,text/plain"
+          hidden />
+
+        <!-- For the Image button on the formatting bar, for anyone who would
+             rather pick a file than paste one. -->
+        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif" multiple
           hidden />
 
         <!-- webkitdirectory is the only way to pick a folder. Non-standard in
@@ -356,6 +361,30 @@
             </button>
             <button class="visual-tool" type="button" data-command="hr" title="Divider" aria-label="Divider">
               <i class="ph ph-minus" aria-hidden="true"></i>
+            </button>
+
+            <span class="visual-tool-sep" aria-hidden="true"></span>
+
+            <!-- The things that used to need the source editor. Each lands
+                 below the block the cursor is in. -->
+            <button class="visual-tool" type="button" data-insert="fence" title="Code block"
+              aria-label="Insert code block">
+              <i class="ph ph-code-block" aria-hidden="true"></i>
+            </button>
+            <button class="visual-tool" type="button" data-insert="table" title="Table" aria-label="Insert table">
+              <i class="ph ph-table" aria-hidden="true"></i>
+            </button>
+            <button class="visual-tool" type="button" data-insert="math" title="Formula"
+              aria-label="Insert formula">
+              <i class="ph ph-function" aria-hidden="true"></i>
+            </button>
+            <button class="visual-tool" type="button" data-insert="mermaid" title="Diagram"
+              aria-label="Insert diagram">
+              <i class="ph ph-tree-structure" aria-hidden="true"></i>
+            </button>
+            <button class="visual-tool" type="button" id="visualImageBtn" title="Image"
+              aria-label="Insert image">
+              <i class="ph ph-image" aria-hidden="true"></i>
             </button>
           </div>
 

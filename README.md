@@ -448,6 +448,16 @@ The toolbar covers bold, italic, inline code, links, headings, lists, quotes and
 dividers, with `Ctrl+B`, `Ctrl+I` and `Ctrl+K`. Pasting inserts plain text: the
 formatting from wherever you copied is not the formatting this document uses.
 
+Beside those are buttons that put something new into the document — a **code
+block**, a **table**, a **formula**, a **diagram** or an **image**. Each lands
+below the block the cursor is in, or at the end when the cursor is nowhere, and
+leaves the cursor where you are about to type: in the code, in the table's first
+cell, or in the source box for the two that have no rendering to type into. Each
+is inserted as its markdown and then parsed by the same splitter the document
+went through, so a block you add is rendered and written back by exactly the
+same path as one that was already in the file — there is no second idea of what
+a table is.
+
 The block wrappers carry no border, padding, background or overflow, which is
 what lets the children's margins collapse through them exactly as they do
 between siblings — the reason the text does not move by a pixel when editing

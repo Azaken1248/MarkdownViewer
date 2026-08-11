@@ -91,6 +91,10 @@ async function run(server) {
   window.URL.createObjectURL = () => `blob:${ORIGIN}/${++objectUrls}`;
   window.URL.revokeObjectURL = () => {};
 
+  // jsdom has no layout, so it implements no scrolling. The app only ever uses
+  // this to be polite about where it just put something.
+  window.Element.prototype.scrollIntoView = function scrollIntoView() {};
+
   // Third-party globals the app expects to already be on the page.
   //
   // A stand-in for marked. It only has to produce the shapes the editor works
@@ -180,7 +184,7 @@ async function run(server) {
     render: (tex, node) => { node.textContent = tex; }
   };
   window.renderMathInElement = () => {};
-  window.svgPanZoom = () => ({ destroy() {} });
+  window.svgPanZoom = () => ({ destroy() {}, resize() {}, fit() {}, center() {}, updateBBox() {} });
 
   // Cookie jar for the proxy below. The app's session is an httpOnly cookie, so
   // there is nothing for the page script to carry — the transport has to.
@@ -352,7 +356,7 @@ async function run(server) {
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
-        startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown,
+        startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
     `);
@@ -1424,6 +1428,113 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== the bar can put a new block into the document ===");
+  {
+    const source = ["# Notes", "", "First.", "", "Last.", ""].join("\n");
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "insert.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("insert.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const bar = doc.getElementById("visualToolbar");
+    const press = (kind) => {
+      const button = bar.querySelector(`.visual-tool[data-insert="${kind}"]`);
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      return button;
+    };
+    const editables = () => [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')];
+    const putCursorIn = (node) => {
+      node.focus();
+      const range = doc.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+
+    check("the bar offers a button for each of them",
+      [...bar.querySelectorAll(".visual-tool[data-insert]")].map((b) => b.dataset.insert),
+      ["fence", "table", "math", "mermaid"]);
+    check("...and one for a picture", Boolean(doc.getElementById("visualImageBtn")), true);
+    check("nothing is unsaved yet", window.eval("window.__t.isPageEditDirty()"), false);
+
+    // A code block, below the paragraph the cursor is in — not at the end of
+    // the document, and not on top of what is already there.
+    putCursorIn(editables()[1]);
+    press("fence");
+
+    check("a code block appears", doc.querySelectorAll("#docContent .ve-code").length, 1);
+    check("...and it counts as unsaved", window.eval("window.__t.isPageEditDirty()"), true);
+    check("...with the cursor already in the code",
+      doc.activeElement?.closest?.(".ve-code") !== null, true);
+
+    const afterFence = window.eval("window.__t.collectPageMarkdown()");
+    check("it lands under the paragraph the cursor was in",
+      afterFence, "# Notes\n\nFirst.\n\n```\n\n```\n\nLast.\n");
+
+    // A table, below the code block this time.
+    press("table");
+    check("a table appears", doc.querySelectorAll("#docContent .ve-table").length, 1);
+    check("...with a header row and a body row",
+      doc.querySelectorAll("#docContent .ve-table tr").length, 2);
+    check("...and the cursor in its first cell",
+      doc.activeElement?.tagName, "TH");
+    check("...and it is a real table in the markdown",
+      window.eval("window.__t.collectPageMarkdown()").includes("| Column | Column |\n| --- | --- |"), true);
+
+    // Maths and diagrams have nothing to type into, so they open on source.
+    putCursorIn(editables()[0]);
+    press("math");
+    const mathBlock = doc.querySelector("#docContent .ve-embed");
+    check("a formula appears", Boolean(mathBlock), true);
+    check("...opened on its source, because there is nothing else to type in",
+      Boolean(mathBlock.querySelector(".ve-embed-source")), true);
+    check("...with a preview already beside it",
+      Boolean(mathBlock.querySelector(".ve-embed-preview")), true);
+    check("...and it went under the heading, where the cursor was",
+      /^# Notes\n\n\$\$/.test(window.eval("window.__t.collectPageMarkdown()")), true);
+
+    press("mermaid");
+    const diagram = [...doc.querySelectorAll("#docContent .ve-embed")]
+      .find((n) => n.textContent.includes("flowchart"));
+    check("a diagram appears", Boolean(diagram), true);
+    check("...as a fence the renderer will draw",
+      window.eval("window.__t.collectPageMarkdown()").includes("```mermaid\nflowchart TD"), true);
+
+    // Everything that was in the file to begin with is still in it, in order.
+    const built = window.eval("window.__t.collectPageMarkdown()");
+    check("the document still starts where it did", built.startsWith("# Notes\n"), true);
+    check("...and ends where it did", built.trimEnd().endsWith("Last."), true);
+    check("...with both original paragraphs intact",
+      [built.includes("\nFirst.\n"), built.includes("\nLast.\n")], [true, true]);
+
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+    const saved = JSON.parse((await get("/api/docs/insert.md")).body).content;
+    check("what was on screen is what reached the file", saved, built);
+    check("...and it reopens as the same blocks", saved.includes("```mermaid"), true);
+
+    // Pressing one with the cursor nowhere should append rather than refuse.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+    window.getSelection().removeAllRanges();
+    doc.activeElement?.blur?.();
+    press("table");
+    check("with the cursor nowhere, it goes at the end",
+      window.eval("window.__t.collectPageMarkdown()").trimEnd().endsWith("|  |  |"), true);
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   console.log("=== a pasted picture becomes an image in the document ===");
