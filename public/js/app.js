@@ -3232,6 +3232,11 @@ async function hydrateDeletedSearchContent() {
 
 function showEmptyState(title, message, icon = "ph-file-dashed") {
   elements.emptyState.style.display = "grid";
+  // Whatever this is, it is a settled answer rather than a wait, so the spinner
+  // stops. The markup ships spinning, so forgetting this leaves "No file
+  // selected" turning on the spot forever.
+  elements.emptyState.classList.remove("is-loading");
+  elements.emptyState.removeAttribute("aria-busy");
   elements.docContent.classList.remove("visible");
   elements.docContent.classList.remove("notebook-viewer");
   destroyPanZoomInstances(elements.docContent);
@@ -3241,6 +3246,15 @@ function showEmptyState(title, message, icon = "ph-file-dashed") {
     <h3>${escapeHtml(title)}</h3>
     <p>${escapeHtml(message)}</p>
   `;
+}
+
+// The same panel, still spinning. Used while something is genuinely on its way,
+// so the reader is told what is being fetched instead of being shown a prompt
+// to do something they have already done.
+function showLoadingState(title, message) {
+  showEmptyState(title, message, "ph-circle-notch");
+  elements.emptyState.classList.add("is-loading");
+  elements.emptyState.setAttribute("aria-busy", "true");
 }
 
 // Nothing open: the viewer says so, the explorer highlights nothing and the
@@ -6010,7 +6024,7 @@ async function renderEditorPreview() {
   // Markdown alone is cheap and synchronous, so the text updates immediately.
   destroyPanZoomInstances(elements.editorPreview);
   elements.editorPreview.innerHTML = renderMarkdown(source);
-  highlightCodeBlocks(elements.editorPreview);
+  void highlightCodeBlocks(elements.editorPreview);
 
   const previewScrollMax = Math.max(0, elements.editorPreview.scrollHeight - elements.editorPreview.clientHeight);
   elements.editorPreview.scrollTop = previewScrollMax * inputScrollRatio;
@@ -6021,7 +6035,7 @@ async function renderEditorPreview() {
     return;
   }
 
-  highlightCodeBlocks(elements.editorPreview);
+  void highlightCodeBlocks(elements.editorPreview);
   const settledScrollMax = Math.max(0, elements.editorPreview.scrollHeight - elements.editorPreview.clientHeight);
   elements.editorPreview.scrollTop = settledScrollMax * inputScrollRatio;
 }
@@ -6062,7 +6076,7 @@ function renderEditorPreviewText() {
 
   destroyPanZoomInstances(elements.editorPreview);
   elements.editorPreview.innerHTML = renderMarkdown(source);
-  highlightCodeBlocks(elements.editorPreview);
+  void highlightCodeBlocks(elements.editorPreview);
   return generation;
 }
 
@@ -6541,7 +6555,7 @@ function renderCodeBlock(block, index) {
     code.textContent = text;
     delete code.dataset.highlighted;
     code.className = fenceState.info ? `language-${fenceState.info}` : "";
-    MarkdownCore.highlightCodeBlocks(node);
+    void MarkdownCore.highlightCodeBlocks(node);
   });
 
   node.appendChild(language);
@@ -7789,6 +7803,16 @@ async function hardDeleteDeletedDocumentByFile(file) {
 
 async function initialize() {
   setMeta("Loading documents...");
+
+  // The address already names a document, so say which one before the first
+  // request leaves. Session, library and content are three round trips, and
+  // until this the viewer spent all three showing a generic wait — on a slow
+  // connection, long enough to look like the link had failed.
+  const wantedAtBoot = fileFromLocation();
+  if (wantedAtBoot) {
+    showLoadingState(`Opening ${wantedAtBoot}`, "Fetching this document from the library.");
+  }
+
   mountMatchNavToViewportLayer();
   bindWheelZoomModifier();
   bindThemeToggle();
@@ -7820,12 +7844,17 @@ async function initialize() {
 
   if (state.mustChangePassword) {
     setMeta("Set a new password to continue.");
+    // Settles the panel behind the modal. Nothing further is being fetched, so
+    // leaving the spinner turning would promise an arrival that is not coming.
+    showEmptyState("Set a new password", "Choose a new password to finish signing in.", "ph-lock-simple");
     openPasswordModal({ forced: true });
     return;
   }
 
   try {
-    const wanted = fileFromLocation();
+    // Read once, at the top, and reused here: it is what the loading state was
+    // told to name, and the two must not be able to disagree.
+    const wanted = wantedAtBoot;
 
     // An old /#Notes/day-one.md link still works, and becomes the real address
     // as soon as it lands rather than staying half in the fragment.

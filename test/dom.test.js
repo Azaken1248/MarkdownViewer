@@ -358,6 +358,7 @@ async function run(server) {
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
         startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
         documentPath, fileFromLocation, showDocumentInUrl,
+        showEmptyState, showLoadingState,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
     `);
@@ -1429,6 +1430,30 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== a wait says what it is waiting for ===");
+  {
+    const panel = doc.getElementById("emptyState");
+
+    // The shell ships this spinning, because at /Notes/day-one.md the app is
+    // already fetching that document before any script has run. Something on
+    // every path out of initialize() has to stop it, and the app has long since
+    // finished booting by the time this suite gets here.
+    check("a settled app is not left spinning", panel.classList.contains("is-loading"), false);
+
+    window.eval('window.__t.showLoadingState("Opening Notes/day-one.md", "Fetching this document from the library.")');
+    check("a wait names the document it is fetching",
+      panel.querySelector("h3").textContent, "Opening Notes/day-one.md");
+    check("...and spins", panel.classList.contains("is-loading"), true);
+    check("...and says so to a screen reader", panel.getAttribute("aria-busy"), "true");
+
+    // Every settled state goes through showEmptyState, which is what makes this
+    // true of the ones written after today as well.
+    window.eval('window.__t.showEmptyState("No file selected", "Pick a file from the explorer.")');
+    check("a settled state stops the spinner", panel.classList.contains("is-loading"), false);
+    check("...and drops aria-busy", panel.getAttribute("aria-busy"), null);
+    check("...and says the settled thing", panel.querySelector("h3").textContent, "No file selected");
   }
 
   console.log("=== a document has a real address, without leaving the page ===");

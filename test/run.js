@@ -13,6 +13,7 @@ const SUITES = [
   ["mobile", "mobile.test.js", "Drawer behaviour, touch targets and the dark palette"],
   ["theme", "theme.test.js", "Light/dark tokens, contrast, target size and the print sheet"],
   ["diagrams", "diagrams.test.js", "Mermaid sizing and the per-theme diagram palettes"],
+  ["loading", "loading.test.js", "Critical-path budget, lazy libraries and the loading state"],
   ["auth", "auth.test.js", "Passwords, sessions, CSRF, RBAC and share links"],
   ["links", "links.test.js", "Saved links: SSRF refusals, metadata parsing, storage and RBAC"],
   ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],

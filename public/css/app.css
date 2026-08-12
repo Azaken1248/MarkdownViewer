@@ -1142,6 +1142,18 @@ button.crumb:focus-visible {
   color: var(--fg-subtle);
 }
 
+/* A wait has to look like a wait. Same spinner the share page uses, so the two
+   ways into a document agree about what loading looks like. */
+.empty-state.is-loading i {
+  animation: share-spin 1.1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state.is-loading i {
+    animation: none;
+  }
+}
+
 .empty-state h3 {
   margin: 8px 0 0;
   font-size: 15px;

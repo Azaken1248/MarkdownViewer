@@ -46,44 +46,36 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/fill/style.css"
     integrity="sha384-pPVoXE8ft+zxKtxIDDI7SfTK6y95NHm4qa+hKEg/hs8VkjW5IP+9/dGOPCbDpUPl" crossorigin="anonymous"
     referrerpolicy="no-referrer" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
-    integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
   <!-- Must run before the stylesheet paints, or the app flashes dark on the
        way to a light theme. Separate file rather than inline: the CSP has no
        'unsafe-inline' for scripts. -->
   <!-- Absolute, not relative. This same page is served for every document
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
-  <script src="/js/theme-boot.js?v=61"></script>
-  <link rel="stylesheet" href="/css/app.css?v=61" />
+  <script src="/js/theme-boot.js?v=62"></script>
+  <link rel="stylesheet" href="/css/app.css?v=62" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"
     integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"
     defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js"
-    integrity="sha384-aBQXj4hK6Jm05i7aQAsUV3bLdSUrHX1BGYfMB0166TtWt/RRaw+h0Eelme9OCOvy" crossorigin="anonymous"
-    defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"
-    integrity="sha384-yc/c2Lk1s2V2ir1rxvjo8YyVD9PlOlYTqpNr3Wm1WIuAA30GlDYNx6U5104OiavY" crossorigin="anonymous"
-    defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
-    integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous"
-    defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
-    integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"
-    defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-    integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"
-    defer></script>
-  <script src="/js/markdown-core.js?v=61" defer></script>
+  <!-- Mermaid, KaTeX, highlight.js and svg-pan-zoom are NOT loaded here, and
+       adding them back would undo the thing this page was made fast by. Between
+       them they are close to 4MB, and a defer script blocks every later defer
+       script — so app.js, which draws the whole interface, used to wait behind a
+       diagram engine on documents that had no diagram. markdown-core.js fetches
+       each one the first time a render actually needs it; the URLs and their
+       integrity hashes live in LAZY_LIBRARIES there.
+
+       marked and DOMPurify stay: nothing renders without them. -->
+  <script src="/js/markdown-core.js?v=62" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="/js/visual-editor.js?v=61" defer></script>
+  <script src="/js/visual-editor.js?v=62" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="/js/notebook-runtime.js?v=61" defer></script>
-  <script src="/js/app.js?v=61" defer></script>
+  <script src="/js/notebook-runtime.js?v=62" defer></script>
+  <script src="/js/app.js?v=62" defer></script>
 </head>
 
 <body>
@@ -310,10 +302,16 @@
           </div>
         </div>
 
-        <section id="emptyState" class="empty-state">
-          <i class="ph ph-file-dashed" aria-hidden="true"></i>
-          <h3>No file selected</h3>
-          <p>Pick a file from the explorer, or search across every document.</p>
+        <!-- Starts as a wait, not as "No file selected". At /Notes/day-one.md
+             this is the first thing on screen and the app is already fetching
+             that document, so a "pick a file" prompt is both wrong and the last
+             thing the reader wants to be told. Every path out of initialize()
+             replaces this: a document, the empty library, the sign-in wall, or
+             the genuine nothing-selected state once that is actually known. -->
+        <section id="emptyState" class="empty-state is-loading" aria-live="polite" aria-busy="true">
+          <i class="ph ph-circle-notch" aria-hidden="true"></i>
+          <h3>Loading</h3>
+          <p>Fetching your library.</p>
         </section>
 
         <!-- Editing happens on the document, so the controls for it belong

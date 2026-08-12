@@ -692,6 +692,55 @@ answers in JSON.
 
 ---
 
+## What loads, and when
+
+Opening a document by address takes three round trips — the session, the
+library, then the document — so the shell ships already saying it is waiting,
+and `initialize()` names the document as soon as it has read the address:
+
+> **Opening Notes/day-one.md**
+> Fetching this document from the library.
+
+That matters most where the static markup used to say "No file selected", which
+at `/Notes/day-one.md` is both untrue and an instruction to do the thing the
+reader has already done. The panel spins until something settles it, and
+everything settles it through `showEmptyState`, which clears the spinner — so a
+state added later cannot forget to.
+
+**The critical path is a budget, not a habit.** A `<script defer>` blocks every
+later `<script defer>`, so anything in the head sits in front of `app.js`, the
+file that draws the whole interface. Mermaid alone is 3.5MB, and with KaTeX,
+highlight.js and svg-pan-zoom beside it every visit was downloading close to 4MB
+of rendering libraries before it could show a word — including the visits to
+documents with no diagram, no equation and no code in them.
+
+All four are now fetched by `markdown-core.js` the first time a render actually
+needs one, from the `LAZY_LIBRARIES` table there. A render asks for the diagram
+engine only after finding a diagram, the highlighter only after finding a code
+block, and so on; a document that needs none of them never fetches any. What is
+left in the head is the font, the icon font, and marked and DOMPurify — because
+nothing renders at all without those two.
+
+Two details are load-bearing. The engine is settled **before** any Mermaid block
+is promoted, because promoting rewrites a fenced block into a bare `<div>` and
+doing it first would leave the diagram's source as loose body text on a page
+that turned out not to be able to draw it. And a library that is already loaded
+is used synchronously rather than a microtask later, because the editor preview
+repaints on every keystroke and measures its own scroll height immediately
+afterwards.
+
+A dynamically created `<script>` checks nothing unless told to, so the loader
+sets the same `integrity` and `crossorigin` the head tags carried; the hashes
+moved into `LAZY_LIBRARIES` and are recomputed the same way. A failed load is
+not cached — a CDN blip costs one document its syntax colours, not the session
+— and the render degrades exactly as it did when the library was simply absent.
+
+The `loading` suite holds all of this: it asserts the critical path against an
+allow-list rather than a list of forbidden libraries, so the fifth thing someone
+adds next year fails too.
+
+---
+
 ## API
 
 Reads require a session unless `PUBLIC_READS=true`. Writes require a session
@@ -796,7 +845,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Nine suites, ~650 checks, under a minute. No browser required, and no
+Ten suites, ~700 checks, under a minute. No browser required, and no
 network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
@@ -805,6 +854,7 @@ network: the suite is deterministic on a runner with no egress.
 | `mobile` | Drawer behaviour, touch target sizes, the dark palette |
 | `theme` | Light and dark tokens, contrast ratios (including syntax highlighting), target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
+| `loading` | What the first paint is allowed to fetch, the lazy libraries and their SRI hashes, the loading state |
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `links` | What the link fetcher refuses to reach, metadata parsing, grouping, storage, RBAC |
 | `assets` | Pasted images: what may be uploaded, size and type refusals, deduplication, RBAC, share scoping |
@@ -854,7 +904,10 @@ wipe every folder assignment.
 **Diagrams do not render.** Check the browser console for Mermaid parse errors —
 a block that fails to parse falls back to showing its source. If nothing renders
 at all, the CDN is likely unreachable; every third-party asset is pinned with an
-SRI hash, so a hash mismatch also blocks the script.
+SRI hash, so a hash mismatch also blocks the script. The engine is fetched on
+demand rather than up front, so this shows up as a toast when a document with a
+diagram is opened, not as a failure at startup — and the same goes for maths and
+syntax highlighting.
 
 **A notebook does not render.** It has to be valid `.ipynb` JSON. Very large
 outputs are worth trimming before upload.
