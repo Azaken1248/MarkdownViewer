@@ -1511,6 +1511,50 @@ async function run(server) {
       })()`), null);
     }
 
+    // Back as far as the library itself. The address says nothing is open, so
+    // nothing may be: an address and a screen that disagree is how a refresh
+    // ends up somewhere the last click never went.
+    window.eval('window.history.replaceState(null, "", "/");');
+    await window.eval('window.__t.openDocument("beta.md", true)');
+    await new Promise((r) => setTimeout(r, 500));
+    check("the library is the entry behind an open document", path(), "/beta.md");
+
+    window.history.back();
+    await new Promise((r) => setTimeout(r, 600));
+    check("back to the library closes the document", path(), "/");
+    check("...and the app agrees nothing is open",
+      window.eval("window.__t.state.activeFile"), null);
+    check("...and the document is off the screen, not just out of the address",
+      doc.getElementById("docContent").classList.contains("visible"), false);
+    check("...with the empty state in its place",
+      doc.getElementById("emptyState").textContent.includes("No file selected"), true);
+    check("...still without reloading", window.eval("window.__marker"), "same-page");
+
+    window.history.forward();
+    await new Promise((r) => setTimeout(r, 600));
+    check("forward opens it again",
+      window.eval("window.__t.state.activeFile"), "beta.md");
+
+    // Unsaved work is not a thing to lose to a stray Back: beforeunload never
+    // fires for a history move within one page, so the address is put back
+    // rather than the document being torn down under the edit.
+    await window.eval('window.__t.startPageEdit()');
+    await new Promise((r) => setTimeout(r, 400));
+    check("the page edit is running", window.eval("window.__t.pageEditActive()"), true);
+    const leaving = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    leaving.innerHTML = "<p>Edited on the way out.</p>";
+    leaving.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("...and it is dirty", window.eval("window.__t.isPageEditDirty()"), true);
+
+    window.history.back();
+    await new Promise((r) => setTimeout(r, 600));
+    check("back does not walk out on unsaved changes", path(), "/beta.md");
+    check("...the document is still open", window.eval("window.__t.state.activeFile"), "beta.md");
+    check("...and the edit is still running", window.eval("window.__t.pageEditActive()"), true);
+
+    await window.eval('window.__t.cancelPageEdit({ confirm: false })');
+    await new Promise((r) => setTimeout(r, 300));
+
     window.eval('window.history.replaceState(null, "", "/");');
   }
 

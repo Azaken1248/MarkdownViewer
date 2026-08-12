@@ -132,7 +132,10 @@ check("color-scheme is declared for both", /color-scheme: dark/.test(css) && /co
 console.log("=== auto is resolved before paint, not duplicated in CSS ===");
 check("no second copy of the palette in a media query", /prefers-color-scheme: light\)\s*\{\s*:root/.test(css), false);
 check("a pre-paint boot script exists", boot.includes("document.documentElement.dataset.theme"), true);
-check("it runs before the stylesheet", html.indexOf("theme-boot.js") < html.indexOf("css/app.css"), true);
+// The tags, not the bare paths: a comment mentioning either file would
+// otherwise decide the order for it.
+check("it runs before the stylesheet",
+  html.indexOf('src="/js/theme-boot.js') < html.indexOf('href="/css/app.css'), true);
 check("it is not inline (CSP has no unsafe-inline for scripts)", /<script>[\s\S]*dataset\.theme/.test(html), false);
 check("it defaults to dark, not to the system", boot.includes('stored = "dark"'), true);
 check("only auto consults the system", /if \(stored === "auto"\)/.test(boot), true);

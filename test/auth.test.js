@@ -1073,6 +1073,22 @@ async function run(server) {
       const spaced = await stranger.get(`/${encodeURIComponent("Notes")}/${encodeURIComponent("delta.md")}`, asBrowserHtml);
       check("an encoded path works the same", spaced.status, 200);
 
+      // The same page is served at every document address, so anything it asks
+      // for relatively is asked for relative to that address: "css/app.css"
+      // becomes /Notes/css/app.css and 404s. That shipped once, and the app
+      // arrived unstyled with none of its scripts.
+      const referenced = [...nested.raw.matchAll(/(?:href|src)="([^"]+)"/g)]
+        .map((match) => match[1])
+        .filter((value) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#|data:)/i.test(value));
+      check("the shell asks this server for its own stylesheet and scripts",
+        referenced.length >= 6, true);
+
+      for (const reference of referenced) {
+        const resolved = new URL(reference, "http://localhost/Notes/delta.md");
+        const asked = await stranger.getRaw(`${resolved.pathname}${resolved.search}`);
+        check(`${reference} still loads from a document address`, asked.status, 200);
+      }
+
       for (const name of ["/top.md", "/a/b/c/deep.markdown", "/x.ipynb", "/y.mmd"]) {
         const res = await stranger.get(name, asBrowserHtml);
         check(`${name} serves the app`, res.status, 200);

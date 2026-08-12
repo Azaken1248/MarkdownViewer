@@ -3243,6 +3243,19 @@ function showEmptyState(title, message, icon = "ph-file-dashed") {
   `;
 }
 
+// Nothing open: the viewer says so, the explorer highlights nothing and the
+// buttons that need a document go quiet. One place, so the wording cannot
+// drift between the ways of getting here.
+function showNoDocumentOpen() {
+  state.activeFile = null;
+  // The address goes back to the library too. Leaving it pointing at a
+  // document that is no longer on screen is how a refresh ends up somewhere
+  // the last click did not.
+  showDocumentInUrl(null, { replace: true });
+  updateActiveDocUI(null);
+  showEmptyState("No file selected", "Pick a file from the explorer, or search across every document.", "ph-file-dashed");
+}
+
 /* --------------------------------------------------------------------------
    Document rendering
 
@@ -5922,7 +5935,11 @@ async function moveDocumentToFolder(file, folderId) {
   });
 
   state.contentCache.delete(file);
-  await refreshDocs({ openFile: file, preserveSearch: true });
+  // A move is a move on disk, so the document that comes back has the
+  // destination's path. Asking for the old one would find nothing there —
+  // and only the document actually being read should follow the move.
+  const stillOpen = state.activeFile === file ? payload.file : state.activeFile;
+  await refreshDocs({ openFile: stillOpen, preserveSearch: true });
   setStatus(`Moved ${payload.file} to ${payload.folderName || state.rootFolderLabel || "Ungrouped"}.`, "success");
   return payload;
 }
@@ -7320,9 +7337,17 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
     || null;
 
   if (!target) {
-    state.activeFile = null;
-    updateActiveDocUI(null);
-    showEmptyState("No file selected", "Pick a file from the explorer, or search across every document.", "ph-file-dashed");
+    showNoDocumentOpen();
+
+    // A document was asked for by name — typed, refreshed, or opened from a
+    // link someone pasted — and the library does not have it. The address bar
+    // is now the only place that still believes in it, so say what happened
+    // and put the address back rather than leaving a bare "nothing selected".
+    if (openFile) {
+      showEmptyState("Document not found", `There is nothing called “${openFile}” in this library.`, "ph-file-dashed");
+      setMeta("Document not found");
+    }
+
     return;
   }
 
@@ -8849,7 +8874,21 @@ elements.dockEdit.addEventListener("click", () => {
 window.addEventListener("popstate", () => {
   const file = fileFromLocation();
 
+  // Back is not an unload, so the beforeunload guard never sees it and unsaved
+  // work would go without a word. The address moves back to where the screen
+  // is rather than the screen following the address.
+  if (isEditorDirty() || isPageEditDirty()) {
+    showDocumentInUrl(state.activeFile, { replace: true });
+    setStatus("Save or discard your changes before leaving this document.", "warning");
+    return;
+  }
+
+  // Back as far as the library itself. The address says nothing is open, so
+  // nothing should be — going forward again opens it once more.
   if (!file) {
+    if (state.activeFile) {
+      showNoDocumentOpen();
+    }
     return;
   }
 

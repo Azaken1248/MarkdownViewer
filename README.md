@@ -657,6 +657,20 @@ address always names what is on screen without inventing history entries nobody
 navigated to. Old `#name.md` links still work and quietly become real addresses
 when they land.
 
+**Back** as far as the library closes the document, because an address saying
+nothing is open while a document is still on screen is how a refresh lands
+somewhere the last click never went. The one exception is unsaved work: a
+history move within one page never triggers `beforeunload`, so a stray Back
+during an edit puts the address back rather than tearing the document down
+underneath it.
+
+Because that one page is now served at every document address, everything it
+asks for is asked for **absolutely**. A relative `css/app.css` in `index.html`
+is `/Azalea/Roadmap/css/app.css` when the page is served at a document, which
+404s — the app arrives unstyled with none of its scripts. The `auth` suite
+fetches the shell at a nested address, resolves every local `href` and `src`
+against it, and insists each one still answers 200.
+
 The matching server route exists only for when that address is typed,
 refreshed, or opened from a link somewhere else. It sits after the static
 files, so a real file always wins, and it answers with the app shell rather
