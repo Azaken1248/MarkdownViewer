@@ -176,7 +176,14 @@ async function run(server) {
   };
   window.DOMPurify = { sanitize: (html) => html };
   window.mermaid = { initialize() {}, render: async () => ({ svg: "<svg></svg>" }) };
-  window.hljs = { getLanguage: () => null, highlightAuto: (s) => ({ value: s }), highlight: (s) => ({ value: s }) };
+  // Knows one language and genuinely rewrites the markup for it, so the
+  // live-highlighting checks below are moving the DOM the caret stands in
+  // rather than watching a stub hand the source straight back.
+  window.hljs = {
+    getLanguage: (name) => (name === "javascript" ? { name } : null),
+    highlightAuto: (s) => ({ value: s }),
+    highlight: (s) => ({ value: String(s).replace(/\b(const|return)\b/g, '<span class="hljs-keyword">$1</span>') })
+  };
   // KaTeX replaces the placeholder's contents with typeset maths and leaves the
   // TeX attribute alone; that is all this suite needs it to do.
   window.katex = {
@@ -185,6 +192,15 @@ async function run(server) {
   };
   window.renderMathInElement = () => {};
   window.svgPanZoom = () => ({ destroy() {}, resize() {}, fit() {}, center() {}, updateBBox() {} });
+
+  // jsdom builds neither a clipboard nor a secure context, and the app checks
+  // for both before it will use the modern path.
+  const clipboardWrites = [];
+  window.isSecureContext = true;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: (text) => { clipboardWrites.push(String(text)); return Promise.resolve(); } }
+  });
 
   // Cookie jar for the proxy below. The app's session is an httpOnly cookie, so
   // there is nothing for the page script to carry — the transport has to.
@@ -358,7 +374,7 @@ async function run(server) {
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
         startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
         documentPath, fileFromLocation, showDocumentInUrl,
-        showEmptyState, showLoadingState,
+        showEmptyState, showLoadingState, updateActiveDocUI,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
     `);
@@ -1454,6 +1470,88 @@ async function run(server) {
     check("a settled state stops the spinner", panel.classList.contains("is-loading"), false);
     check("...and drops aria-busy", panel.getAttribute("aria-busy"), null);
     check("...and says the settled thing", panel.querySelector("h3").textContent, "No file selected");
+  }
+
+  console.log("=== a code block hands itself over ===");
+  {
+    const source = [
+      "# Snippet",
+      "",
+      "```js",
+      "const answer = 42;",
+      "console.log(answer);",
+      "```",
+      ""
+    ].join("\n");
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "snippet.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("snippet.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+
+    const button = doc.querySelector("#docContent .code-copy");
+    check("the rendered block has a copy button", Boolean(button), true);
+    // Inside the <pre> it would scroll off the side of any block with one long
+    // line in it, so it belongs to a wrapper around the block instead.
+    check("...pinned to a wrapper rather than to the scrolling block",
+      button.parentElement.className, "code-block");
+
+    clipboardWrites.length = 0;
+    button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    check("clicking it copies the code and nothing around it",
+      clipboardWrites, ["const answer = 42;\nconsole.log(answer);\n"]);
+
+    console.log("=== so does the whole document ===");
+    const copyDoc = doc.getElementById("copyDocBtn");
+    check("the toolbar offers it", Boolean(copyDoc), true);
+    check("...and it is live while a document is open", copyDoc.disabled, false);
+
+    clipboardWrites.length = 0;
+    copyDoc.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 120));
+    // Markdown, not the rendering: this is a markdown library, and the source
+    // is the thing that pastes into another document and comes back the same.
+    check("what lands on the clipboard is the source", clipboardWrites, [source]);
+
+    window.eval('window.__t.updateActiveDocUI("")');
+    check("with nothing open there is nothing to copy", copyDoc.disabled, true);
+    window.eval('window.__t.updateActiveDocUI("snippet.md")');
+
+    console.log("=== code being typed into is left to be typed into ===");
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const editable = doc.querySelector("#docContent .ve-code pre code");
+    check("the fence is a code block the caret goes into", Boolean(editable), true);
+    check("...and is not given a copy button over its language field",
+      Boolean(doc.querySelector("#docContent .ve-code .code-copy")), false);
+
+    console.log("=== ...and stays coloured while it is ===");
+    const typed = "const answer = 43;\nreturn answer;";
+    editable.textContent = typed;
+    editable.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    check("nothing is repainted mid-keystroke",
+      editable.querySelectorAll("span.hljs-keyword").length, 0);
+
+    // Past the debounce, which is what "as you type" actually means here.
+    await new Promise((r) => setTimeout(r, 400));
+    check("a pause repaints the block", editable.querySelectorAll("span.hljs-keyword").length, 2);
+    check("...without changing a character of the code", editable.textContent, typed);
+    // The serializer reads textContent, so colouring must be invisible to it.
+    check("...and the markdown written back is the code, not the colours",
+      window.eval("window.__t.collectPageMarkdown()").includes("```js\nconst answer = 43;\nreturn answer;\n```"), true);
+
+    // The block was typed into, so an ordinary cancel would stop for the
+    // discard dialog. That dialog has its own checks elsewhere.
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   console.log("=== a document has a real address, without leaving the page ===");

@@ -52,8 +52,8 @@
   <!-- Absolute, not relative. This same page is served for every document
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
-  <script src="/js/theme-boot.js?v=62"></script>
-  <link rel="stylesheet" href="/css/app.css?v=62" />
+  <script src="/js/theme-boot.js?v=63"></script>
+  <link rel="stylesheet" href="/css/app.css?v=63" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -69,13 +69,13 @@
        integrity hashes live in LAZY_LIBRARIES there.
 
        marked and DOMPurify stay: nothing renders without them. -->
-  <script src="/js/markdown-core.js?v=62" defer></script>
+  <script src="/js/markdown-core.js?v=63" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="/js/visual-editor.js?v=62" defer></script>
+  <script src="/js/visual-editor.js?v=63" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="/js/notebook-runtime.js?v=62" defer></script>
-  <script src="/js/app.js?v=62" defer></script>
+  <script src="/js/notebook-runtime.js?v=63" defer></script>
+  <script src="/js/app.js?v=63" defer></script>
 </head>
 
 <body>
@@ -275,6 +275,14 @@
           </div>
 
           <div class="viewer-actions">
+            <!-- Markdown, not the rendered text. This is a markdown library, so
+                 what is worth carrying out of it is the source: it pastes into
+                 another document and comes back the same. -->
+            <button class="icon-btn" id="copyDocBtn" type="button" aria-label="Copy this document as markdown"
+              title="Copy this document as markdown">
+              <i class="ph ph-clipboard-text" aria-hidden="true"></i>
+            </button>
+
             <button class="icon-btn" id="editCurrentDocBtn" type="button" aria-label="Edit this document"
               title="Edit this document">
               <i class="ph ph-pencil-simple" aria-hidden="true"></i>

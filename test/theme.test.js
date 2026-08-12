@@ -158,8 +158,15 @@ function size(selector) {
   const h = m[1].match(/(?:min-)?height:\s*(\d+)px/);
   return { w: w ? Number(w[1]) : null, h: h ? Number(h[1]) : null };
 }
-for (const sel of [".tree-action", ".icon-btn", ".icon-btn.icon-btn-sm", ".search-clear", ".crumb", ".filter-clear", ".supersearch-more"]) {
+for (const sel of [".tree-action", ".icon-btn", ".icon-btn.icon-btn-sm", ".search-clear", ".crumb", ".filter-clear", ".supersearch-more", ".code-copy"]) {
   const s = size(sel);
+  // A rule that has been renamed or deleted is a target that no longer meets
+  // anything, and should read as a failed check rather than as a crashed suite.
+  if (!s) {
+    failures++;
+    console.log(`  FAIL  ${sel}: no rule found`);
+    continue;
+  }
   const smallest = Math.min(s.w ?? 999, s.h ?? 999);
   const ok = smallest >= 24;
   if (!ok) failures++;

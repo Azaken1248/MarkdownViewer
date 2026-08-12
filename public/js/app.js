@@ -142,6 +142,7 @@ const elements = {
   kernelStatus: document.getElementById("kernelStatus"),
   restartKernelBtn: document.getElementById("restartKernelBtn"),
 
+  copyDocBtn: document.getElementById("copyDocBtn"),
   shareDocBtn: document.getElementById("shareDocBtn"),
   shareModal: document.getElementById("shareModal"),
   shareBackdrop: document.getElementById("shareBackdrop"),
@@ -1902,6 +1903,11 @@ function applyPermissionGating() {
 }
 
 function updateActiveDocUI(fileName) {
+  // Copying is reading. It needs a document open and nothing else — not a
+  // write permission, and not a document that still exists in the library,
+  // since a deleted one is exactly the thing you want to take a copy of.
+  elements.copyDocBtn.disabled = !fileName;
+
   if (!fileName) {
     setViewerHeading("ph-file-text", "No file selected", []);
     elements.editDocBtn.disabled = true;
@@ -3290,8 +3296,11 @@ function renderMarkdown(markdown) {
   return MarkdownCore.renderMarkdown(markdown);
 }
 
+// The colours and the copy button, both of which belong to a code block once it
+// has been rendered. The editor preview calls this on every keystroke, so the
+// copy pass has to be as cheap as the highlighting one: see addCopyButtons.
 function highlightCodeBlocks(root) {
-  return MarkdownCore.highlightCodeBlocks(root);
+  return MarkdownCore.decorateCodeBlocks(root);
 }
 
 function renderDocumentContent(fileName, rawContent, title) {
@@ -6486,13 +6495,26 @@ function deleteTableColumn(table, index) {
  *
  * The text inside a fence is literal, so it is exactly the kind of thing that
  * can be typed into as itself. The code block stays a code block — same font,
- * same colours, same box — and the caret goes in it. Highlighting is left alone
- * while you type, because re-highlighting on every keystroke rebuilds the
- * markup the caret is standing in, and comes back when you leave.
+ * same colours, same box — and the caret goes in it. It stays coloured while
+ * you type, too: MarkdownCore.liveHighlightCode puts the caret back after it
+ * rebuilds the markup, which is what used to make that impossible.
+ *
+ * What is owned here is the timing, and the timing is the whole cost:
+ *
+ *  - a pause, not a keystroke. Highlighting mid-word would be work thrown away
+ *    by the next letter;
+ *  - never during IME composition. Replacing the markup under a composition
+ *    cancels the word being composed;
+ *  - not once the block has been thrown away. A pending pass on a re-rendered
+ *    document is a highlight nobody will ever see.
  *
  * The language is an input rather than something to go and find in the source,
  * since it is the one part of a fence that is not the code.
  */
+// Long enough that it never fires inside a run of typing, short enough that it
+// reads as "as you type" rather than as an afterthought.
+const LIVE_HIGHLIGHT_DELAY = 140;
+
 function renderCodeBlock(block, index) {
   const fence = VisualEditor.parseFence(block.source);
 
@@ -6541,16 +6563,63 @@ function renderCodeBlock(block, index) {
     markPageEditDirty();
   };
 
+  let paintTimer = 0;
+  let composing = false;
+
+  const paintNow = () => {
+    window.clearTimeout(paintTimer);
+    paintTimer = 0;
+
+    if (composing || !code.isConnected) {
+      return false;
+    }
+
+    return MarkdownCore.liveHighlightCode(code, fenceState.info);
+  };
+
+  const schedulePaint = () => {
+    window.clearTimeout(paintTimer);
+    paintTimer = window.setTimeout(paintNow, LIVE_HIGHLIGHT_DELAY);
+  };
+
   language.addEventListener("input", () => {
     fenceState.info = language.value.trim();
     touched();
+    // Naming the language is the one edit that recolours a block without
+    // changing a character of it.
+    schedulePaint();
   });
 
-  code.addEventListener("input", touched);
+  code.addEventListener("input", () => {
+    touched();
+    schedulePaint();
+  });
 
-  // Highlighting is rebuilt from the text once the caret has left, so the
-  // colours come back without the markup moving under the cursor.
+  // The highlighter is a lazy 60KB download. Asking for it when the caret
+  // arrives means it is there by the time the first pause is.
+  code.addEventListener("focus", () => {
+    void MarkdownCore.loadHighlighter();
+  });
+
+  code.addEventListener("compositionstart", () => {
+    composing = true;
+    window.clearTimeout(paintTimer);
+    paintTimer = 0;
+  });
+
+  code.addEventListener("compositionend", () => {
+    composing = false;
+    schedulePaint();
+  });
+
+  // Leaving the block is the one moment a full pass is affordable, so a block
+  // the live pass will not touch — no language named and nothing it could work
+  // out from too little text — gets the auto-detector's answer here.
   code.addEventListener("blur", () => {
+    if (paintNow()) {
+      return;
+    }
+
     const text = code.textContent;
     code.textContent = text;
     delete code.dataset.highlighted;
@@ -8148,11 +8217,11 @@ elements.copyShareUrlBtn.addEventListener("click", async () => {
   elements.shareUrlInput.select();
 
   try {
-    await navigator.clipboard.writeText(elements.shareUrlInput.value);
+    await MarkdownCore.copyText(elements.shareUrlInput.value);
     notify("Share link copied.", "success");
   } catch {
-    // Clipboard access needs a secure context and can be refused; the text is
-    // already selected, so Ctrl+C still works.
+    // Both clipboard paths were refused; the text is already selected, so
+    // Ctrl+C still works.
     notify("Press Ctrl+C to copy the selected link.", "info");
   }
 });
@@ -8613,6 +8682,45 @@ elements.newDocBtn.addEventListener("click", () => {
 
 elements.editDocBtn.addEventListener("click", () => {
   openEditorForCurrentDoc();
+});
+
+/* The whole document, as markdown.
+ *
+ * Reads the same cache the renderer read, so the copy is the source the page
+ * on screen was made from rather than a second fetch that could disagree with
+ * it. If the cache has gone the document is fetched again — which is also the
+ * path a document opened before a reload takes.
+ */
+async function copyActiveDocument() {
+  const file = state.activeFile;
+  if (!file) {
+    notify("Open a document first.", "info");
+    return;
+  }
+
+  let markdown = state.contentCache.get(file)?.content ?? "";
+
+  if (!markdown) {
+    try {
+      markdown = state.isRecycleBinMode
+        ? await loadDeletedDocContent(file)
+        : await loadDocContent(file);
+    } catch {
+      notify("Could not read this document.", "error");
+      return;
+    }
+  }
+
+  try {
+    await MarkdownCore.copyText(markdown);
+    notify(`Copied ${docName(file)} as markdown.`, "success");
+  } catch {
+    notify("Your browser would not let this page use the clipboard.", "error");
+  }
+}
+
+elements.copyDocBtn.addEventListener("click", () => {
+  void copyActiveDocument();
 });
 
 // The pencil edits the document where it is. The source editor is one button

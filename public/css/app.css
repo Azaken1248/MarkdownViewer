@@ -1653,6 +1653,78 @@ button.crumb:focus-visible {
   white-space: pre;
 }
 
+/* Taking the code away.
+   The button sits in a wrapper around the <pre>, not inside it. A <pre> scrolls
+   sideways, and anything positioned against a scroll container scrolls away
+   with its content — inside, the button would slide off the edge of any block
+   with one long line in it. The wrapper carries no margin of its own, so
+   wrapping a block changes nothing about where it sits: the <pre> keeps the
+   margin it already had, including the zero a notebook cell gives it. */
+.code-block {
+  position: relative;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  /* Hidden until wanted, but never removed from the page: a display:none
+     button is not reachable by keyboard, and this is the only way to take a
+     code block without dragging a selection through it. */
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.is-copied,
+.code-copy.is-failed {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.code-copy.is-copied {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.code-copy.is-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Nothing hovers on a touch screen, so a button that appears on hover is a
+   button that never appears. */
+@media (hover: none) {
+  .code-copy {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-copy {
+    transition: none;
+  }
+}
+
 .markdown-body table {
   display: block;
   width: max-content;
@@ -3633,6 +3705,8 @@ body.page-editing #dockEdit {
   .match-nav,
   .modal,
   .context-menu,
+  /* A button that puts something on the clipboard is nothing on paper. */
+  .code-copy,
   .empty-state {
     display: none !important;
   }

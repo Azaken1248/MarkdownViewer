@@ -60,7 +60,7 @@ already known to everyone.
 | --- | --- |
 | `npm start` | Run the server |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `auth`, `links`, `assets`, `visual`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `visual`, `dom` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -432,8 +432,9 @@ whatever spacing it was typed with, to the byte.
 
 **Code fences** are edited as code. You type into the highlighted block itself,
 and the language sits in a field on the block rather than buried in the source,
-so changing it rewrites the fence and not a character of the code. Highlighting
-is redone when you leave the block. Indented fences, tilde fences, unclosed
+so changing it rewrites the fence and not a character of the code. The colours
+keep up as you type — see [Code blocks](#code-blocks) for what that costs and
+why it costs so little. Indented fences, tilde fences, unclosed
 fences and fences with no trailing newline all come back exactly as they were —
 asserted against every fence in the library on every test run.
 
@@ -741,6 +742,68 @@ adds next year fails too.
 
 ---
 
+## Code blocks
+
+### Taking the code away
+
+Every rendered code block carries a copy button, and the toolbar carries one for
+the whole document. The document button copies **markdown**, not the rendered
+text: this is a markdown library, and the source is the thing that pastes into
+another document and comes back the same. It reads the cache the page was
+rendered from, so the copy always matches what is on screen.
+
+Two details that are easy to get wrong:
+
+**The clipboard is asked for twice.** `navigator.clipboard` does not exist
+outside a secure context, and this app is most often reached at
+`http://<some-lan-address>:4321`, which is not one. The deprecated
+`execCommand` path is therefore not a courtesy to old browsers — it is the path
+that actually runs for a lot of people. It is also the fallback when a secure
+origin refuses permission. Selecting the hidden textarea it uses would throw the
+reader's own selection away, so that is saved and put back.
+
+**The button lives in a wrapper around the `<pre>`, not inside it.** A `<pre>`
+scrolls sideways and an absolutely positioned child of a scroll container
+scrolls away with the content, so a button inside would slide off the edge of
+any block with one long line in it. The wrapper carries no margin of its own, so
+wrapping a block changes nothing about where it sits — including the zero margin
+a notebook cell gives it.
+
+Blocks that are not code you would paste anywhere are skipped: a notebook's
+output pane, a Mermaid fallback, and code that is currently being typed into.
+
+### Colour while it is being typed
+
+In the visual editor a code block stays highlighted as you type it, rather than
+only once you leave it. Highlighting rebuilds the markup the caret is standing
+in, which is what used to make that impossible. Three things make it affordable:
+
+- **The caret is remembered as a character offset** into the block's text and
+  put back after the swap, so rebuilding the markup no longer moves it. A
+  selection keeps both of its ends.
+- **The language is settled at most once per block, never re-guessed.**
+  `highlightAuto()` runs every grammar the library has against the text, which
+  is the expensive call — and against half-typed code it also keeps changing its
+  mind, so a block would flicker between Python and Ruby as it was written. A
+  fence that names a language uses it; one that does not is guessed once, and a
+  guess the detector is not confident about is refused rather than committed to.
+  Having failed, it does not try again until the block has really grown.
+- **Text that has not changed is not repainted.** Arrow keys, clicks and every
+  keystroke that leaves the text alone cost nothing at all.
+
+The timing is the editor's, not the renderer's: a pause rather than a keystroke,
+never during IME composition (replacing the markup under a composition cancels
+the word being composed), and never on a block belonging to a document that has
+since been re-rendered. A block past 20,000 characters is a file someone pasted
+in, and keeps the on-blur behaviour. Leaving a block still runs the full pass —
+including the auto-detector — but only when the live pass would not have painted
+it, so the colours do not change identity as the caret leaves.
+
+The highlighter is still lazy. It is fetched when the caret arrives in a code
+block, so it is there by the time the first pause is.
+
+---
+
 ## API
 
 Reads require a session unless `PUBLIC_READS=true`. Writes require a session
@@ -845,7 +908,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Ten suites, ~700 checks, under a minute. No browser required, and no
+Eleven suites, ~1,560 checks, under a minute. No browser required, and no
 network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
@@ -858,6 +921,7 @@ network: the suite is deterministic on a runner with no egress.
 | `auth` | Password hashing, sessions, CSRF, RBAC, rate limiting, share links |
 | `links` | What the link fetcher refuses to reach, metadata parsing, grouping, storage, RBAC |
 | `assets` | Pasted images: what may be uploaded, size and type refusals, deduplication, RBAC, share scoping |
+| `code` | Copy buttons, both clipboard paths, and the live-highlighting policy |
 | `visual` | The block round trip, over fixtures and over every real document |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
 
