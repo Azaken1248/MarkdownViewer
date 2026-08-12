@@ -52,8 +52,8 @@
   <!-- Absolute, not relative. This same page is served for every document
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
-  <script src="/js/theme-boot.js?v=63"></script>
-  <link rel="stylesheet" href="/css/app.css?v=63" />
+  <script src="/js/theme-boot.js?v=64"></script>
+  <link rel="stylesheet" href="/css/app.css?v=64" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -69,13 +69,13 @@
        integrity hashes live in LAZY_LIBRARIES there.
 
        marked and DOMPurify stay: nothing renders without them. -->
-  <script src="/js/markdown-core.js?v=63" defer></script>
+  <script src="/js/markdown-core.js?v=64" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="/js/visual-editor.js?v=63" defer></script>
+  <script src="/js/visual-editor.js?v=64" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="/js/notebook-runtime.js?v=63" defer></script>
-  <script src="/js/app.js?v=63" defer></script>
+  <script src="/js/notebook-runtime.js?v=64" defer></script>
+  <script src="/js/app.js?v=64" defer></script>
 </head>
 
 <body>
@@ -333,7 +333,8 @@
             <button class="visual-tool" type="button" data-command="italic" title="Italic (Ctrl+I)" aria-label="Italic">
               <i class="ph ph-text-italic" aria-hidden="true"></i>
             </button>
-            <button class="visual-tool" type="button" data-command="code" title="Inline code" aria-label="Inline code">
+            <button class="visual-tool" type="button" data-command="code" title="Inline code (Ctrl+E)"
+              aria-label="Inline code">
               <i class="ph ph-code-simple" aria-hidden="true"></i>
             </button>
             <button class="visual-tool" type="button" data-command="link" title="Link (Ctrl+K)" aria-label="Link">
@@ -405,12 +406,12 @@
               <span>Markdown</span>
             </button>
 
-            <button class="btn btn-sm" id="pageEditCancelBtn" type="button">
+            <button class="btn btn-sm" id="pageEditCancelBtn" type="button" title="Stop editing (Esc)">
               <i class="ph ph-x" aria-hidden="true"></i>
               <span>Cancel</span>
             </button>
 
-            <button class="btn btn-sm btn-primary" id="pageEditSaveBtn" type="button">
+            <button class="btn btn-sm btn-primary" id="pageEditSaveBtn" type="button" title="Save this document (Ctrl+S). Ctrl+Z undoes, Ctrl+Shift+Z redoes">
               <i class="ph ph-floppy-disk" aria-hidden="true"></i>
               <span>Save</span>
             </button>
@@ -524,12 +525,12 @@
         </label>
 
         <div class="editor-actions">
-          <button class="btn btn-primary" id="saveDocBtn" type="button">
+          <button class="btn btn-primary" id="saveDocBtn" type="button" title="Save this document (Ctrl+S)">
             <i class="ph ph-floppy-disk" aria-hidden="true"></i>
             <span>Save</span>
           </button>
 
-          <button class="icon-btn" id="closeEditorBtn" aria-label="Close editor" title="Close editor" type="button">
+          <button class="icon-btn" id="closeEditorBtn" aria-label="Close editor" title="Close editor (Esc)" type="button">
             <i class="ph ph-x" aria-hidden="true"></i>
           </button>
         </div>

@@ -133,7 +133,7 @@ proxy hop rather than the client's scheme.
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The nine suites
+│   └── *.test.js             # The eleven suites
 ├── tools/
 │   └── make-embed-images.js  # Draws public/img/*.png. No dependencies.
 ├── server.js                 # Express app, ~2,400 lines
@@ -353,7 +353,61 @@ markdown, with a live preview beside it. Below 1160px the two become **Write**
 and **Preview** tabs, so each gets the whole pane. Edits made on the page come
 with you.
 
-`Ctrl+S` saves, `Escape` leaves, and both ask before losing anything.
+### Keyboard shortcuts
+
+The same keys do the same thing in both editors, because which one is open is
+not something anyone's fingers keep track of.
+
+| Key | On the page | In the source editor |
+| --- | --- | --- |
+| `Ctrl+S` | Save | Save — from the filename field too |
+| `Esc` | Leave, asking first if there is anything to lose | Leave, asking first |
+| `Ctrl+Z` | Undo | Undo (the textarea's own) |
+| `Ctrl+Shift+Z` / `Ctrl+Y` | Redo | Redo (the textarea's own) |
+| `Ctrl+B` / `Ctrl+I` | Bold / italic | Wrap the selection in `**` / `*` |
+| `Ctrl+E` | Inline code | Wrap the selection in backticks |
+| `Ctrl+K` | Link | Link |
+
+`Ctrl+B`, `Ctrl+I` and `Ctrl+E` in the source editor **unwrap** when the
+selection is already wrapped, so pressing one twice leaves the text as it was
+found rather than as `****text****`. With nothing selected they insert a
+placeholder and select it, so it can be typed straight over.
+
+#### Undo on the page
+
+A browser's undo belongs to one editing host, and the page editor is not one:
+it is a stack of separate contenteditable blocks with table cells, source boxes
+and a language field among them. Native `Ctrl+Z` could never cross a block
+boundary, and could not see the app's own edits at all — adding a block,
+deleting a table row, dropping in an image, or the live highlighter replacing
+the markup inside a fence.
+
+So the history is the document, not the DOM. **An entry is the markdown that
+`collectPageMarkdown()` would write** — the same string the save button sends —
+so an undo can only ever produce a document this editor could have produced by
+typing. Restoring goes back through `renderPageEditor`, the same path that
+opened the editor.
+
+What that costs is a re-render, and two things follow from it. The scroll
+position is carried across, or every undo would throw you to the top of a long
+file. And the caret is put back, by the block it was in and its offset in that
+block's text — not by an offset into the markdown, because a block's rendered
+text and its source are different strings (`**bold**` is six characters on
+screen and ten in the file) and there is no mapping between them to be had.
+
+A burst of typing is one step: the history closes a step off after a pause,
+and anything structural closes one immediately so it lands on its own rather
+than folded into whatever was being typed just before it. A picture that is
+still uploading is never recorded, since a `blob:` URL will not exist in a
+minute and an undo restoring one would point at nothing.
+
+Inside a `<textarea>` or an `<input>` — a source box, the language field — `Ctrl+Z`
+is deliberately left to the browser. Their own undo is character-accurate and
+keeps the caret exactly; a whole-document step would be a downgrade. The one
+thing that was ever wrong with it in the source editor was that the app used to
+wipe it: assigning to a textarea's `.value` clears its undo history outright,
+so pasting a picture silently threw away everything typed before it. Insertions
+now go in as edits the browser knows about.
 
 ### Pasting a picture
 
@@ -908,7 +962,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Eleven suites, ~1,560 checks, under a minute. No browser required, and no
+Eleven suites, ~1,600 checks, under a minute. No browser required, and no
 network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |

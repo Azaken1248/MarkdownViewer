@@ -193,6 +193,31 @@ async function run(server) {
   window.renderMathInElement = () => {};
   window.svgPanZoom = () => ({ destroy() {}, resize() {}, fit() {}, center() {}, updateBBox() {} });
 
+  // jsdom implements no execCommand at all. Enough of insertText to be real —
+  // it is how the app inserts into a textarea without wiping the undo stack, so
+  // a suite where it always fell through to the fallback would never exercise
+  // the path a browser actually takes.
+  const execCommands = [];
+  window.document.execCommand = (name, _ui, value) => {
+    execCommands.push(name);
+
+    if (name !== "insertText") {
+      return false;
+    }
+
+    const field = window.document.activeElement;
+    if (!field || !["TEXTAREA", "INPUT"].includes(field.tagName)) {
+      return false;
+    }
+
+    const start = field.selectionStart ?? 0;
+    const end = field.selectionEnd ?? start;
+    field.value = `${field.value.slice(0, start)}${value}${field.value.slice(end)}`;
+    const at = start + String(value).length;
+    field.setSelectionRange(at, at);
+    return true;
+  };
+
   // jsdom builds neither a clipboard nor a secure context, and the app checks
   // for both before it will use the modern path.
   const clipboardWrites = [];
@@ -373,6 +398,8 @@ async function run(server) {
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
         startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
+        undoPageEdit, redoPageEdit, commitPageHistory, pageHistory,
+        insertIntoTextarea, replaceInTextarea, toggleMarkdownWrap, applySourceShortcut,
         documentPath, fileFromLocation, showDocumentInUrl,
         showEmptyState, showLoadingState, updateActiveDocUI,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
@@ -1552,6 +1579,195 @@ async function run(server) {
     // discard dialog. That dialog has its own checks elsewhere.
     await window.eval("window.__t.cancelPageEdit({ confirm: false })");
     await new Promise((r) => setTimeout(r, 300));
+  }
+
+  console.log("=== undo in the page editor is the document, not the DOM ===");
+  {
+    const source = "# Undo\n\nFirst line.\n";
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "undo.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("undo.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 600));
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const markdown = () => window.eval("window.__t.collectPageMarkdown()");
+    const paragraph = () => [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')]
+      .find((node) => node.textContent.includes("First line") || node.textContent.includes("Second"));
+
+    const type = (text) => {
+      const node = paragraph();
+      node.innerHTML = `<p>${text}</p>`;
+      node.dispatchEvent(new window.Event("input", { bubbles: true }));
+    };
+
+    check("the editor opens on the document as it stands", markdown(), source);
+
+    // A burst of typing is one step. Four keystrokes without a pause between
+    // them must not cost four presses of Ctrl+Z to take back.
+    type("Second");
+    type("Second l");
+    type("Second li");
+    type("Second line.");
+    window.eval("window.__t.commitPageHistory()");
+    check("a burst of typing is one step", window.eval("window.__t.pageHistory.past.length"), 1);
+
+    const afterFirst = markdown();
+    check("...that reached the document", afterFirst.includes("Second line."), true);
+
+    type("Third line.");
+    window.eval("window.__t.commitPageHistory()");
+    check("a second burst is a second step", window.eval("window.__t.pageHistory.past.length"), 2);
+
+    check("undo goes back one step", window.eval("window.__t.undoPageEdit()") && markdown(), afterFirst);
+    check("...and again, to the document as it was opened", window.eval("window.__t.undoPageEdit()") && markdown(), source);
+    check("...and stops there rather than inventing one", window.eval("window.__t.undoPageEdit()"), false);
+
+    check("redo comes forward again", window.eval("window.__t.redoPageEdit()") && markdown(), afterFirst);
+    check("...all the way", window.eval("window.__t.redoPageEdit()") && markdown().includes("Third line."), true);
+    check("...and stops at the newest state", window.eval("window.__t.redoPageEdit()"), false);
+
+    // Typing after an undo is a new branch; there is nothing left to redo onto.
+    window.eval("window.__t.undoPageEdit()");
+    type("A different line.");
+    window.eval("window.__t.commitPageHistory()");
+    check("typing after an undo drops the redo stack",
+      window.eval("window.__t.pageHistory.future.length"), 0);
+
+    console.log("=== ...and it puts you back where you were ===");
+    // The scroll position is checked by reading the source rather than by
+    // scrolling: jsdom runs no layout, so emptying the container does not reset
+    // scrollTop here the way a browser does, and a behavioural check would pass
+    // whether or not the app carried the position across.
+    const restoreState = appSource.slice(appSource.indexOf("function applyPageHistoryState"));
+    const body = restoreState.slice(0, restoreState.indexOf("\n}\n"));
+    check("the scroll position is read before the document is re-rendered",
+      body.indexOf("viewer.scrollTop") < body.indexOf("renderPageEditor(entry.markdown)"), true);
+    check("...and written back after it",
+      body.lastIndexOf("viewer.scrollTop = offset") > body.indexOf("renderPageEditor(entry.markdown)"), true);
+
+    window.eval("window.__t.undoPageEdit()");
+    const focused = doc.activeElement;
+    check("the caret lands back in a block of the document",
+      Boolean(focused && focused.closest("#docContent .ve-block")), true);
+
+    console.log("=== a structural edit is its own step ===");
+    window.eval("window.__t.commitPageHistory()");
+    const beforeInsert = markdown();
+    const stepsBefore = window.eval("window.__t.pageHistory.past.length");
+
+    window.eval('window.__t.insertPageBlock("table")');
+    check("adding a block reaches the document", markdown().includes("|"), true);
+    check("...as exactly one step", window.eval("window.__t.pageHistory.past.length"), stepsBefore + 1);
+    check("...which undo takes back whole", window.eval("window.__t.undoPageEdit()") && markdown(), beforeInsert);
+
+    console.log("=== Ctrl+Z is routed, not swallowed ===");
+    const press = (target, key, extra = {}) => {
+      const event = new window.KeyboardEvent("keydown", {
+        key, ctrlKey: true, bubbles: true, cancelable: true, ...extra
+      });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+
+    check("Ctrl+Z in a block is taken by the editor",
+      press(paragraph() || doc.getElementById("docContent"), "z"), true);
+    check("Ctrl+Shift+Z as well", press(doc.getElementById("docContent"), "z", { shiftKey: true }), true);
+    check("...and Ctrl+Y, which is the same request spelled differently",
+      press(doc.getElementById("docContent"), "y"), true);
+    check("Ctrl+S saves from inside the document", press(doc.getElementById("docContent"), "s"), true);
+
+    // A source box and the language field have their own undo, and it is better
+    // than a whole-document step: character-accurate, and the caret stays put.
+    const field = doc.createElement("textarea");
+    doc.getElementById("docContent").appendChild(field);
+    check("Ctrl+Z inside a form control is left to the browser", press(field, "z"), false);
+    field.remove();
+
+    console.log("=== leaving the editor leaves its history behind ===");
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 300));
+    check("nothing is left to undo into a document that is closed",
+      window.eval("window.__t.pageHistory.past.length"), 0);
+    check("...and nothing to redo either", window.eval("window.__t.pageHistory.future.length"), 0);
+  }
+
+  console.log("=== the source editor answers to the same keys ===");
+  {
+    await window.eval("window.__t.openEditorForCurrentDoc()");
+    await new Promise((r) => setTimeout(r, 400));
+    check("the source editor is open on the document", window.eval("window.__t.state.editorOpen"), true);
+
+    const area = doc.getElementById("editorInput");
+    const value = () => area.value;
+
+    area.value = "plain words here";
+    area.focus();
+    area.setSelectionRange(6, 11);
+
+    execCommands.length = 0;
+    window.eval('window.__t.toggleMarkdownWrap(document.getElementById("editorInput"), "**", "bold text")');
+    check("Ctrl+B wraps the selection", value(), "plain **words** here");
+    // Assigning to .value clears a textarea's undo history outright, so the
+    // insertion has to be one the browser knows about.
+    check("...through an insertion the undo stack can see", execCommands, ["insertText"]);
+    check("...leaving the wrapped words selected",
+      [area.selectionStart, area.selectionEnd], [8, 13]);
+
+    window.eval('window.__t.toggleMarkdownWrap(document.getElementById("editorInput"), "**", "bold text")');
+    check("pressing it again takes the markers off, not another pair", value(), "plain words here");
+
+    area.setSelectionRange(6, 6);
+    window.eval('window.__t.toggleMarkdownWrap(document.getElementById("editorInput"), "*", "italic text")');
+    check("with nothing selected it offers a placeholder to type over",
+      value(), "plain *italic text*words here");
+    check("...already selected", [area.selectionStart, area.selectionEnd], [7, 18]);
+
+    area.value = "";
+    area.setSelectionRange(0, 0);
+    execCommands.length = 0;
+    window.eval('window.__t.insertIntoTextarea(document.getElementById("editorInput"), "hello")');
+    check("an image placeholder goes in the same way", value(), "hello");
+    check("...not by assigning the whole value", execCommands, ["insertText"]);
+
+    execCommands.length = 0;
+    window.eval('window.__t.replaceInTextarea(document.getElementById("editorInput"), "hello", "goodbye")');
+    check("...and is swapped for the finished upload the same way", value(), "goodbye");
+    check("...also as a real insertion", execCommands, ["insertText"]);
+
+    // Ctrl+S is bound on the modal rather than on the textarea, so it also
+    // works from the field somebody has just typed a filename into.
+    const fromName = new window.KeyboardEvent("keydown", {
+      key: "s", ctrlKey: true, bubbles: true, cancelable: true
+    });
+    doc.getElementById("editorFileName").dispatchEvent(fromName);
+    check("Ctrl+S saves from the filename field, not only from the text",
+      fromName.defaultPrevented, true);
+
+    const written = "typed in the source editor\n";
+    area.value = written;
+    const fromText = new window.KeyboardEvent("keydown", {
+      key: "s", ctrlKey: true, bubbles: true, cancelable: true
+    });
+    area.dispatchEvent(fromText);
+    await new Promise((r) => setTimeout(r, 700));
+    check("...and it really saves", JSON.parse((await get("/api/docs/undo.md")).body).content, written);
+
+    // These belong to the text, so they are not taken off the other fields.
+    const fromNameAgain = new window.KeyboardEvent("keydown", {
+      key: "b", ctrlKey: true, bubbles: true, cancelable: true
+    });
+    doc.getElementById("editorFileName").dispatchEvent(fromNameAgain);
+    check("Ctrl+B in the filename field is not a formatting command",
+      fromNameAgain.defaultPrevented, false);
+
+    window.eval("window.__t.closeEditor()");
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   console.log("=== a document has a real address, without leaving the page ===");

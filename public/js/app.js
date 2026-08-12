@@ -3478,13 +3478,37 @@ function imageMarkdown(file, url) {
 
 // --- Into the source editor ------------------------------------------------
 
+/* Put text into a textarea in a way the browser's own undo can see.
+ *
+ * Assigning to .value clears a textarea's undo history outright in every
+ * engine, so the old version of this meant that pasting a picture — or using
+ * any of the formatting shortcuts — silently threw away everything typed before
+ * it. Ctrl+Z afterwards did nothing at all. execCommand("insertText") is
+ * deprecated and is still the only way to make an edit the undo stack knows
+ * about; where it is refused, the assignment is the fallback and the loss of
+ * history is the lesser problem than not inserting the text.
+ */
+function replaceRangeInTextarea(area, start, end, text) {
+  area.focus();
+  area.setSelectionRange(start, end);
+
+  try {
+    if (document.execCommand("insertText", false, text)) {
+      return;
+    }
+  } catch {
+    // Refused; fall through to the assignment below.
+  }
+
+  area.value = `${area.value.slice(0, start)}${text}${area.value.slice(end)}`;
+  area.selectionStart = start + text.length;
+  area.selectionEnd = area.selectionStart;
+}
+
 function insertIntoTextarea(area, text) {
   const at = area.selectionStart ?? area.value.length;
   const end = area.selectionEnd ?? at;
-
-  area.value = `${area.value.slice(0, at)}${text}${area.value.slice(end)}`;
-  area.selectionStart = at + text.length;
-  area.selectionEnd = area.selectionStart;
+  replaceRangeInTextarea(area, at, end, text);
 }
 
 // Found by text rather than by the offset it went in at, because the upload is
@@ -3496,9 +3520,11 @@ function replaceInTextarea(area, find, text) {
   }
 
   const caret = area.selectionStart ?? 0;
-  area.value = `${area.value.slice(0, at)}${text}${area.value.slice(at + find.length)}`;
+  replaceRangeInTextarea(area, at, at + find.length, text);
 
-  // Keep the cursor where the typing was, allowing for the length change.
+  // Keep the cursor where the typing was, allowing for the length change. The
+  // insertion above left it after the replacement, which is the right place
+  // only for someone whose cursor was already there.
   const shift = text.length - find.length;
   const next = caret > at ? Math.max(at, caret + shift) : caret;
   area.selectionStart = next;
@@ -3555,6 +3581,10 @@ function announceEdit(host) {
 }
 
 async function attachImagesToPage(files) {
+  // The document without the picture is worth a step of its own, since undoing
+  // a paste is one of the more likely things anyone wants back.
+  commitPageHistory();
+
   for (const file of files) {
     const image = document.createElement("img");
     // A local preview means the picture is on the page before the upload
@@ -6223,6 +6253,11 @@ function embedLabel(block) {
 
 function markPageEditDirty() {
   updatePageEditState();
+  // Every edit in the page editor comes through here, which is what makes the
+  // history complete rather than a list of the edits somebody remembered to
+  // record. A burst of typing is coalesced into one step; see
+  // schedulePageHistory.
+  schedulePageHistory();
 }
 
 function updatePageEditState() {
@@ -6394,9 +6429,13 @@ function buildTableTools(node, block, paint, touched) {
       const table = node.querySelector("table");
       const cell = focusedCell(node, block) || table.querySelector("th, td");
       const at = cell ? cellPosition(cell) : { row: 0, column: 0 };
+      // Losing a row is not typing, and undoing it should not also undo the
+      // sentence written just before it.
+      commitPageHistory();
       run(table, at);
       paint();
       touched();
+      commitPageHistory();
 
       // Whatever the cursor was in may have just been deleted. Put it in the
       // cell that took its place, so the next control still means "here".
@@ -6825,6 +6864,10 @@ function insertPageBlock(kind) {
     return null;
   }
 
+  // Adding a block is one act, so it gets one step of its own rather than
+  // being folded into whatever was being typed just before it.
+  commitPageHistory();
+
   const afterNode = currentPageBlockNode();
   const afterBlock = afterNode ? blockOfNode.get(afterNode) : null;
   const at = afterBlock ? pageBlocks.indexOf(afterBlock) : -1;
@@ -6862,6 +6905,7 @@ function insertPageBlock(kind) {
 
   void renderMermaidBlocks(first);
   markPageEditDirty();
+  commitPageHistory();
 
   // Cursor first. Scrolling is a courtesy, and a browser that cannot do it must
   // not cost the cursor its place.
@@ -6895,6 +6939,226 @@ function startTypingIn(node) {
   }
 
   node.focus?.();
+}
+
+/* --- Undo, for a document that is not one editing host ---------------------
+ *
+ * A browser's undo belongs to a single editing host, and the page editor is not
+ * one: it is a stack of separate contenteditable blocks with table cells,
+ * source boxes and a language field among them. So native Ctrl+Z could never
+ * cross a block boundary — it would undo something in whichever block the caret
+ * happened to be in, and nothing at all if the last edit had been in another
+ * one. It could not see the app's own edits either: adding a block, deleting a
+ * table row, dropping in an image, or the live highlighter replacing the markup
+ * inside a fence, all of which happen outside the browser's typing history.
+ *
+ * So the history is the document, not the DOM. An entry is the markdown that
+ * collectPageMarkdown() would write — the same string the save button sends —
+ * so an undo can only ever produce a document this editor could have produced
+ * by typing, and cannot invent one. Restoring goes back through
+ * renderPageEditor, the same path that opened the editor.
+ *
+ * Two things a naive version gets wrong and this does not: it re-renders the
+ * whole document, so the scroll position has to be carried across or every undo
+ * throws you to the top of the file; and the caret has to be put back, or you
+ * undo a typo and then have to go and find where you were.
+ *
+ * Native undo is deliberately left alone inside <textarea> and <input> — a
+ * source box and the language field are ordinary form controls whose own undo
+ * is character-accurate and keeps the caret exactly. Replacing that with a
+ * whole-document step would make them worse, not better.
+ */
+// Long enough that a burst of typing is one undo step rather than forty.
+const PAGE_HISTORY_IDLE = 450;
+// Each entry is a copy of the document. Deep history on a large file is real
+// memory, and nobody presses Ctrl+Z two hundred times.
+const PAGE_HISTORY_LIMIT = 100;
+
+const pageHistory = {
+  past: [],
+  future: [],
+  present: null,
+  timer: 0,
+  // Set while an undo is being applied, so the re-render it causes is not
+  // itself recorded as an edit.
+  restoring: false
+};
+
+// Where the caret is, as the block it is in and its offset in that block's
+// text. Not an offset into the markdown: the rendered text of a block and its
+// source are different strings — `**bold**` is six characters on screen and ten
+// in the file — and there is no mapping between them to be had.
+function pageCaretAnchor() {
+  const node = currentPageBlockNode();
+  if (!node) {
+    return null;
+  }
+
+  const index = node.dataset.index;
+  const field = document.activeElement;
+
+  if (field && node.contains(field) && (field.tagName === "TEXTAREA" || field.tagName === "INPUT")) {
+    return { index, offset: field.selectionStart ?? 0, field: true };
+  }
+
+  const host = node.getAttribute("contenteditable") === "true"
+    ? node
+    : node.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]');
+
+  if (!host) {
+    return { index, offset: 0, field: false };
+  }
+
+  const caret = MarkdownCore.selectionOffsetsWithin(host);
+  return { index, offset: caret ? caret.start : 0, field: false };
+}
+
+function restorePageCaret(anchor) {
+  if (!anchor) {
+    return;
+  }
+
+  const node = elements.docContent.querySelector(`.ve-block[data-index="${anchor.index}"]`);
+  if (!node) {
+    return;
+  }
+
+  // A block that was open on its source is re-rendered as its view, so the
+  // caret lands on the block rather than back in the box it was typed in.
+  const host = node.getAttribute("contenteditable") === "true"
+    ? node
+    : node.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]');
+
+  if (!host) {
+    node.focus?.();
+    return;
+  }
+
+  host.focus();
+  const limit = (host.textContent || "").length;
+  const at = Math.min(anchor.offset, limit);
+  MarkdownCore.placeSelectionWithin(host, at, at);
+}
+
+function pageHistoryState() {
+  return { markdown: collectPageMarkdown(), caret: pageCaretAnchor() };
+}
+
+function resetPageHistory() {
+  window.clearTimeout(pageHistory.timer);
+  pageHistory.timer = 0;
+  pageHistory.past = [];
+  pageHistory.future = [];
+  pageHistory.present = null;
+  pageHistory.restoring = false;
+}
+
+/* Close off the current step.
+ *
+ * Called on a pause in typing, and called straight away by anything structural
+ * — adding a block, deleting a table row — so that lands as its own step rather
+ * than being folded into whatever was being typed just before it.
+ */
+function commitPageHistory() {
+  window.clearTimeout(pageHistory.timer);
+  pageHistory.timer = 0;
+
+  if (!pageEditActive() || pageHistory.restoring || !pageHistory.present) {
+    return;
+  }
+
+  // A picture that is still uploading is a blob: URL which will not exist in a
+  // minute. Recording it would let an undo restore a document pointing at
+  // nothing; the upload settling announces its own edit, and that one is kept.
+  if (elements.docContent.querySelector("img[data-uploading]")) {
+    return;
+  }
+
+  const next = pageHistoryState();
+  if (next.markdown === pageHistory.present.markdown) {
+    // The caret moved and the document did not. Worth keeping, so an undo
+    // arriving later lands where the author actually is.
+    pageHistory.present.caret = next.caret;
+    return;
+  }
+
+  pageHistory.past.push(pageHistory.present);
+  if (pageHistory.past.length > PAGE_HISTORY_LIMIT) {
+    pageHistory.past.shift();
+  }
+
+  pageHistory.present = next;
+  // Typing after an undo is a new branch; there is nothing left to redo onto.
+  pageHistory.future = [];
+}
+
+function schedulePageHistory() {
+  if (!pageEditActive() || pageHistory.restoring) {
+    return;
+  }
+
+  window.clearTimeout(pageHistory.timer);
+  pageHistory.timer = window.setTimeout(commitPageHistory, PAGE_HISTORY_IDLE);
+}
+
+function applyPageHistoryState(entry) {
+  const viewer = viewerScroll();
+  const offset = viewer ? viewer.scrollTop : 0;
+
+  pageHistory.restoring = true;
+  try {
+    renderPageEditor(entry.markdown);
+    restorePageCaret(entry.caret);
+  } finally {
+    pageHistory.restoring = false;
+  }
+
+  // Re-rendering the document resets the scroll, and being thrown to the top of
+  // a long file on every undo is its own reason not to use undo.
+  if (viewer) {
+    viewer.scrollTop = offset;
+  }
+
+  updatePageEditState();
+}
+
+function undoPageEdit() {
+  if (!pageEditActive()) {
+    return false;
+  }
+
+  // Whatever is being typed right now is a step of its own, or the first Ctrl+Z
+  // would skip straight past it.
+  commitPageHistory();
+
+  if (pageHistory.past.length === 0) {
+    setStatus("Nothing left to undo.", "neutral");
+    return false;
+  }
+
+  pageHistory.future.push(pageHistory.present);
+  pageHistory.present = pageHistory.past.pop();
+  applyPageHistoryState(pageHistory.present);
+  return true;
+}
+
+function redoPageEdit() {
+  if (!pageEditActive()) {
+    return false;
+  }
+
+  window.clearTimeout(pageHistory.timer);
+  pageHistory.timer = 0;
+
+  if (pageHistory.future.length === 0) {
+    setStatus("Nothing left to redo.", "neutral");
+    return false;
+  }
+
+  pageHistory.past.push(pageHistory.present);
+  pageHistory.present = pageHistory.future.pop();
+  applyPageHistoryState(pageHistory.present);
+  return true;
 }
 
 function renderPageEditor(markdown) {
@@ -7044,6 +7308,11 @@ async function startPageEdit() {
   syncPageEditOffset();
   renderPageEditor(content);
 
+  // The document as opened is the state everything else is a change from, and
+  // the one an undo run all the way back arrives at.
+  resetPageHistory();
+  pageHistory.present = { markdown: content, caret: null };
+
   elements.docContent.querySelector('[contenteditable="true"]')?.focus();
   setStatus(`Editing ${docName(file)} on the page.`, "neutral");
 }
@@ -7053,6 +7322,10 @@ function exitPageEdit() {
   // being read.
   window.clearTimeout(state.embedPreviewTimer);
   state.embedPreviewTimer = null;
+
+  // The history belongs to this editing session. Carrying it into the next one
+  // would offer to undo edits to a document that is no longer open.
+  resetPageHistory();
 
   state.pageEdit = { active: false, file: null, title: "", initial: "" };
   pageBlocks = [];
@@ -7203,6 +7476,10 @@ function applyVisualCommand(command) {
   const selection = window.getSelection();
   const run = (name, value) => document.execCommand(name, false, value);
 
+  // Formatting is a discrete act too: Ctrl+Z after Ctrl+B should take the bold
+  // off, not unwrite the sentence.
+  commitPageHistory();
+
   switch (command) {
     case "bold": run("bold"); break;
     case "italic": run("italic"); break;
@@ -7236,6 +7513,7 @@ function applyVisualCommand(command) {
   }
 
   block.dispatchEvent(new Event("input", { bubbles: true }));
+  commitPageHistory();
 }
 
 function applyVisualBlockFormat(tag) {
@@ -7245,8 +7523,10 @@ function applyVisualBlockFormat(tag) {
     return;
   }
 
+  commitPageHistory();
   document.execCommand("formatBlock", false, tag.toUpperCase());
   block.dispatchEvent(new Event("input", { bubbles: true }));
+  commitPageHistory();
 }
 
 /* Write / Preview tabs, for when the two panes cannot sit side by side.
@@ -8824,15 +9104,40 @@ elements.docContent.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "s" || event.key === "S") {
+  const key = event.key.toLowerCase();
+
+  if (key === "s") {
     event.preventDefault();
     void savePageEdit();
     return;
   }
 
-  if (event.key === "k" || event.key === "K") {
+  // A source box and the language field are ordinary form controls, and their
+  // own undo is character-accurate and keeps the caret exactly where it was.
+  // Replacing it with a whole-document step would be a downgrade.
+  const inFormControl = ["TEXTAREA", "INPUT"].includes(event.target?.tagName);
+
+  if ((key === "z" || key === "y") && !inFormControl) {
+    event.preventDefault();
+    // Ctrl+Y and Ctrl+Shift+Z are the same request; both are in circulation and
+    // neither is worth being right about at the author's expense.
+    if (key === "y" || event.shiftKey) {
+      redoPageEdit();
+    } else {
+      undoPageEdit();
+    }
+    return;
+  }
+
+  if (key === "k") {
     event.preventDefault();
     applyVisualCommand("link");
+    return;
+  }
+
+  if (key === "e") {
+    event.preventDefault();
+    applyVisualCommand("code");
   }
 });
 
@@ -8916,6 +9221,107 @@ window.matchMedia?.(EDITOR_TABS_QUERY).addEventListener?.("change", syncEditorTa
 
 elements.editorInput.addEventListener("input", () => {
   scheduleEditorPreview();
+});
+
+/* --- The source editor's shortcuts ----------------------------------------
+ *
+ * The same keys as the page editor, doing the same things, because which of the
+ * two editors is open is not something anyone's fingers keep track of.
+ *
+ * Undo is deliberately absent: a textarea already has one, it is
+ * character-accurate and it keeps the caret exactly. All that was ever wrong
+ * with it here was that the app used to wipe it by assigning to .value — see
+ * replaceRangeInTextarea.
+ *
+ * Bold and italic wrap the selection in markdown, and unwrap it when it is
+ * already wrapped, so pressing Ctrl+B twice leaves the text as it was found
+ * rather than as `****text****`.
+ */
+function toggleMarkdownWrap(area, marker, placeholder) {
+  const start = area.selectionStart ?? 0;
+  const end = area.selectionEnd ?? start;
+  const selected = area.value.slice(start, end);
+  const width = marker.length;
+
+  // Already wrapped, either inside the selection or just outside it.
+  if (selected.length >= width * 2 && selected.startsWith(marker) && selected.endsWith(marker)) {
+    const inner = selected.slice(width, -width);
+    replaceRangeInTextarea(area, start, end, inner);
+    area.setSelectionRange(start, start + inner.length);
+    return;
+  }
+
+  if (area.value.slice(Math.max(0, start - width), start) === marker
+    && area.value.slice(end, end + width) === marker) {
+    replaceRangeInTextarea(area, start - width, end + width, selected);
+    area.setSelectionRange(start - width, start - width + selected.length);
+    return;
+  }
+
+  const text = selected || placeholder;
+  replaceRangeInTextarea(area, start, end, `${marker}${text}${marker}`);
+  // Leave the wrapped words selected so they can be typed straight over, which
+  // is what an empty selection wrapped around a placeholder wants.
+  area.setSelectionRange(start + width, start + width + text.length);
+}
+
+// Returns true when the key was one of these, so the caller knows whether to
+// take it off the browser.
+function applySourceShortcut(key) {
+  const area = elements.editorInput;
+
+  switch (key) {
+    case "b":
+      toggleMarkdownWrap(area, "**", "bold text");
+      return true;
+    case "i":
+      toggleMarkdownWrap(area, "*", "italic text");
+      return true;
+    case "e":
+      toggleMarkdownWrap(area, "`", "code");
+      return true;
+    case "k": {
+      const start = area.selectionStart ?? 0;
+      const end = area.selectionEnd ?? start;
+      const label = area.value.slice(start, end) || "link text";
+      const href = window.prompt("Link address", "https://");
+      if (!href) {
+        return true;
+      }
+      replaceRangeInTextarea(area, start, end, `[${label}](${href})`);
+      area.setSelectionRange(start + 1, start + 1 + label.length);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+// Bound on the modal rather than the textarea, so Ctrl+S saves from the
+// filename field and the folder picker too — where it is at least as likely to
+// be pressed, having just been typed in.
+elements.editorModal.addEventListener("keydown", (event) => {
+  if (!state.editorOpen || !(event.ctrlKey || event.metaKey)) {
+    return;
+  }
+
+  const key = event.key.toLowerCase();
+
+  if (key === "s") {
+    event.preventDefault();
+    saveEditorDocument();
+    return;
+  }
+
+  // The rest only mean anything in the text being written.
+  if (event.target !== elements.editorInput) {
+    return;
+  }
+
+  if (applySourceShortcut(key)) {
+    event.preventDefault();
+    scheduleEditorPreview();
+  }
 });
 
 elements.editorInput.addEventListener("paste", (event) => {

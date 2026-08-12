@@ -1742,6 +1742,12 @@
     addCopyButtons,
     copyText,
     liveHighlightCode,
+    // Caret arithmetic, exported because undo needs exactly what live
+    // highlighting needs: where the selection is in the text, and how to put it
+    // back once the markup under it has been rebuilt. A second copy of this is
+    // a second chance to get Range boundaries wrong.
+    selectionOffsetsWithin,
+    placeSelectionWithin,
     // Warms the lazy highlighter, so the first pause in typing is not also the
     // first time anyone asked the CDN for it.
     loadHighlighter: () => ensureLibrary("highlight"),
