@@ -100,6 +100,7 @@ const elements = {
   confirmMessage: document.getElementById("confirmMessage"),
   confirmCancelBtn: document.getElementById("confirmCancelBtn"),
   confirmProceedBtn: document.getElementById("confirmProceedBtn"),
+  confirmAltBtn: document.getElementById("confirmAltBtn"),
   folderModal: document.getElementById("folderModal"),
   folderBackdrop: document.getElementById("folderBackdrop"),
   folderTitle: document.getElementById("folderTitle"),
@@ -2092,14 +2093,25 @@ function resolveConfirmDialog(confirmed) {
   if (typeof state.confirmResolver === "function") {
     const resolver = state.confirmResolver;
     state.confirmResolver = null;
-    resolver(Boolean(confirmed));
+    // Every dialog but the unsaved-changes one is a yes or a no, and every
+    // caller reads it as one. "alt" is the third button and only exists when a
+    // caller asked for it, so it can never reach code that is not expecting it.
+    resolver(confirmed === "alt" ? "alt" : Boolean(confirmed));
   }
 }
 
+/* A question with two answers, or three.
+ *
+ * "Discard your edits?" has a third honest answer — don't discard them, keep
+ * them — and offering only Discard and Cancel makes the safe way out the one
+ * that looks like backing away from the question. altLabel adds that third
+ * button and resolves to "alt"; without it nothing about this dialog changes.
+ */
 function requestConfirmation({
   title,
   message,
   confirmLabel = "Continue",
+  altLabel = "",
   tone = "danger"
 }) {
   return new Promise((resolve) => {
@@ -2120,13 +2132,44 @@ function requestConfirmation({
       elements.confirmProceedBtn.classList.add("btn-danger");
     }
 
+    if (elements.confirmAltBtn) {
+      elements.confirmAltBtn.hidden = !altLabel;
+      elements.confirmAltBtn.textContent = altLabel || "Save Changes";
+    }
+
     state.confirmOpen = true;
     state.confirmResolver = resolve;
     elements.confirmModal.classList.add("open");
     elements.confirmModal.setAttribute("aria-hidden", "false");
   enterModalLayer(elements.confirmModal);
     syncBodyLock();
-    elements.confirmProceedBtn.focus();
+    // The keeping answer takes the focus when there is one, so Enter on a
+    // dialog about unsaved work never means "throw it away".
+    if (altLabel && elements.confirmAltBtn) {
+      elements.confirmAltBtn.focus();
+    } else {
+      elements.confirmProceedBtn.focus();
+    }
+  });
+}
+
+/* The question on the way out of an editor.
+ *
+ * Both editors ask it and both ask it the same way, because the answer a person
+ * leaving with unsaved work most often wants is "save it" — which a Discard or
+ * Cancel pair does not offer at all, leaving Cancel as the only way to keep the
+ * work and no way at all to keep it and still leave.
+ *
+ * Resolves "alt" to save and then leave, true to leave and lose the edits,
+ * false to stay in the editor.
+ */
+function askAboutUnsavedWork(message) {
+  return requestConfirmation({
+    title: "Save your changes?",
+    message,
+    confirmLabel: "Discard Changes",
+    altLabel: "Save Changes",
+    tone: "danger"
   });
 }
 
@@ -7345,7 +7388,60 @@ function viewerScroll() {
   return elements.docContent.closest(".viewer") || null;
 }
 
-async function savePageEdit() {
+/* Saves of a document run one after another, never at the same time.
+ *
+ * Ctrl+S is pressed more often than it needs to be, so two writes of the same
+ * document are easily in flight at once — and two requests can reach the server
+ * in either order, which would leave the file holding the older text while the
+ * editor said it was saved. Queueing them also means each save reads the
+ * document as it stands when its turn comes rather than when the key was
+ * pressed, and that the baseline they leave behind is the newest one.
+ *
+ * A failed save must not stop the next one from being attempted, which is why
+ * the rejection handler carries on rather than breaking the chain.
+ */
+let pageSaveChain = Promise.resolve();
+
+function savePageEdit(options) {
+  const run = () => runPageSave(options);
+  pageSaveChain = pageSaveChain.then(run, run);
+  return pageSaveChain;
+}
+
+/* What a save in place changes: not the screen, only what "unsaved" means and
+ * what the rest of the app believes is on disk.
+ *
+ * Its own function because it runs after an awaited request, and because the
+ * state it writes has to be read after that request too — Escape while the PUT
+ * was in flight may have ended the editing session, or started another one on
+ * a different document. The file is written either way; what must not happen is
+ * this document's baseline landing on a document that is not it.
+ */
+function settlePageSave(file, content, payload) {
+  state.contentCache.set(file, { content, version: String(payload.updatedAt || "") });
+
+  const doc = getDocByFile(file);
+  if (doc) {
+    doc.updatedAt = payload.updatedAt || doc.updatedAt;
+    doc.size = Number.isFinite(Number(payload.size)) ? Number(payload.size) : doc.size;
+  }
+
+  if (pageEditActive() && state.pageEdit.file === file) {
+    state.pageEdit.initial = content;
+    updatePageEditState();
+  }
+}
+
+/* Saving and leaving are two different things.
+ *
+ * Ctrl+S is pressed mid-sentence, out of habit, dozens of times in one sitting;
+ * it means "write this down", not "I have finished". Closing the editor on it
+ * throws away the caret, the scroll and the undo history of somebody who only
+ * wanted their work to be safe. So the keystroke saves in place and the Save
+ * button — pressed once, deliberately, when the writing is done — is the only
+ * thing that leaves.
+ */
+async function runPageSave({ exit = true } = {}) {
   if (!pageEditActive()) {
     return;
   }
@@ -7354,6 +7450,11 @@ async function savePageEdit() {
   const content = collectPageMarkdown();
 
   if (content === state.pageEdit.initial) {
+    if (!exit) {
+      setStatus(`No changes to save in ${docName(file)}.`, "neutral");
+      return;
+    }
+
     exitPageEdit();
     await restorePageView(file, content, title);
     setStatus(`No changes to save in ${docName(file)}.`, "neutral");
@@ -7373,6 +7474,16 @@ async function savePageEdit() {
       },
       body: JSON.stringify({ content })
     });
+
+    // Saving in place touches nothing on the screen. The blocks, the caret, the
+    // scroll and the undo history are all still the ones being typed into; what
+    // changes is only what "unsaved" now means, and what the rest of the app
+    // believes is on disk.
+    if (!exit) {
+      settlePageSave(file, content, payload);
+      setStatus(`Saved ${payload.file || file}.`, "success");
+      return;
+    }
 
     exitPageEdit();
     await refreshDocs({ openFile: payload.file || file, preserveSearch: true });
@@ -7395,15 +7506,20 @@ async function cancelPageEdit({ confirm = true, restore = true } = {}) {
   }
 
   if (confirm && isPageEditDirty()) {
-    const discard = await requestConfirmation({
-      title: "Discard your edits?",
-      message: `${docName(state.pageEdit.file)} has changes that have not been saved.`,
-      confirmLabel: "Discard Changes",
-      tone: "danger"
-    });
+    const answer = await askAboutUnsavedWork(
+      `${docName(state.pageEdit.file)} has changes that have not been saved.`
+    );
 
-    if (!discard) {
+    if (!answer) {
       return false;
+    }
+
+    if (answer === "alt") {
+      await savePageEdit();
+
+      // A save that failed said so and left the edits where they were. Leaving
+      // anyway would throw away the work the answer was given to keep.
+      return !pageEditActive();
     }
   }
 
@@ -7658,14 +7774,18 @@ async function requestEditorClose() {
     return;
   }
 
-  const shouldDiscard = await requestConfirmation({
-    title: "Discard unsaved changes?",
-    message: "This document has edits that have not been saved. Closing the editor will lose them.",
-    confirmLabel: "Discard Changes",
-    tone: "danger"
-  });
+  const answer = await askAboutUnsavedWork(
+    "This document has edits that have not been saved. Closing the editor will lose them."
+  );
 
-  if (shouldDiscard) {
+  if (answer === "alt") {
+    // Saves and closes on its own. A save that failed leaves the editor open
+    // with the text still in it, which is the only safe place for it to be.
+    await saveEditorDocument();
+    return;
+  }
+
+  if (answer) {
     closeEditor();
   }
 }
@@ -7854,7 +7974,37 @@ async function uploadFolder(picked, folderId = null) {
   }
 }
 
-async function saveEditorDocument() {
+// The source editor's half of the overlapping-saves problem; see pageSaveChain.
+let editorSaveChain = Promise.resolve();
+
+function saveEditorDocument(options) {
+  const run = () => runEditorSave(options);
+  editorSaveChain = editorSaveChain.then(run, run);
+  return editorSaveChain;
+}
+
+/* The same settling for the source editor, and the same reason for being a
+ * function of its own — see settlePageSave.
+ *
+ * Staying open means this is now an edit of a file that exists, whatever it was
+ * when the editor opened: without that, a second Ctrl+S on a new document would
+ * try to create it again and be told it already exists.
+ */
+function settleEditorSave(file, content) {
+  if (!state.editorOpen) {
+    return;
+  }
+
+  state.editorMode = "edit";
+  state.editorFile = file;
+  state.editorInitialContent = content;
+  state.editorInitialFileName = elements.editorFileName.value;
+  elements.saveDocBtn.innerHTML = '<i class="ph ph-floppy-disk"></i> Save Changes';
+}
+
+// As on the page: Ctrl+S writes the file and leaves you in the text, the Save
+// button finishes. See savePageEdit.
+async function runEditorSave({ close = true } = {}) {
   const fileName = ensureDocFilename(elements.editorFileName.value.trim());
   const content = elements.editorInput.value;
 
@@ -7933,8 +8083,20 @@ async function saveEditorDocument() {
       }
     }
 
-    closeEditor();
+    if (close) {
+      closeEditor();
+      await refreshDocs({ openFile: payload.file, preserveSearch: true });
+      setStatus(`Saved ${payload.file}.`, "success");
+      return;
+    }
+
+    settleEditorSave(payload.file, content);
+
+    // The library and the document under the modal are redrawn so they agree
+    // with what was just written. Neither contains the textarea, so the caret
+    // and the scroll of the text being typed are left alone by it.
     await refreshDocs({ openFile: payload.file, preserveSearch: true });
+
     setStatus(`Saved ${payload.file}.`, "success");
   } catch (error) {
     setStatus(error.message, "error");
@@ -9106,9 +9268,10 @@ elements.docContent.addEventListener("keydown", (event) => {
 
   const key = event.key.toLowerCase();
 
+  // Saves where you stand. Leaving is the Save button's job, and Escape's.
   if (key === "s") {
     event.preventDefault();
-    void savePageEdit();
+    void savePageEdit({ exit: false });
     return;
   }
 
@@ -9309,7 +9472,7 @@ elements.editorModal.addEventListener("keydown", (event) => {
 
   if (key === "s") {
     event.preventDefault();
-    saveEditorDocument();
+    void saveEditorDocument({ close: false });
     return;
   }
 
@@ -9380,6 +9543,10 @@ elements.confirmCancelBtn.addEventListener("click", () => {
 
 elements.confirmProceedBtn.addEventListener("click", () => {
   resolveConfirmDialog(true);
+});
+
+elements.confirmAltBtn.addEventListener("click", () => {
+  resolveConfirmDialog("alt");
 });
 
 elements.dockOpenDocs.addEventListener("click", () => {

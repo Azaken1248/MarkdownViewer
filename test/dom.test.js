@@ -21,6 +21,18 @@ function check(label, actual, expected) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
 }
 
+// A fixed sleep long enough for a slow machine is a slow suite everywhere else,
+// and a fixed sleep short enough to be quick is a flake. Wait for the thing
+// itself, and let the check that follows say what it found if it never happens.
+async function waitUntil(condition, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (condition()) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
+}
+
 let ORIGIN = "";
 
 let sendCookies = () => "";
@@ -393,7 +405,8 @@ async function run(server) {
         openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
         buildDocContextItems, buildFolderContextItems, canDropOnFolder,
-        deleteFiles, switchViewMode, resolveConfirmDialog, requestJson, refreshDocs,
+        deleteFiles, switchViewMode, resolveConfirmDialog, requestConfirmation,
+        requestEditorClose, isEditorDirty, requestJson, refreshDocs,
         uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
         renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
         syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
@@ -1360,6 +1373,81 @@ async function run(server) {
     check("...through the ordinary render path, with no block wrappers",
       doc.querySelectorAll("#docContent .ve-block").length, 0);
 
+    console.log("=== Ctrl+S saves where you stand ===");
+    // Pressed mid-sentence, out of habit, it means "write this down" — not "I
+    // have finished". Closing the editor on it throws away the caret, the
+    // scroll and the undo history of somebody who only wanted their work safe.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const inPlace = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    inPlace.innerHTML = "<h1>Saved In Place</h1>";
+    inPlace.dispatchEvent(new window.Event("input", { bubbles: true }));
+    window.eval("window.__t.commitPageHistory()");
+    const stepsBeforeSave = window.eval("window.__t.pageHistory.past.length");
+
+    const pressSave = () => {
+      const event = new window.KeyboardEvent("keydown", {
+        key: "s", ctrlKey: true, bubbles: true, cancelable: true
+      });
+      doc.getElementById("docContent").dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+
+    check("Ctrl+S is taken by the editor", pressSave(), true);
+    await waitUntil(() => window.eval("window.__t.isPageEditDirty()") === false);
+
+    check("...and writes the document",
+      JSON.parse((await get("/api/docs/in-place.md")).body).content.includes("# Saved In Place"), true);
+    check("...without leaving editing mode", window.eval("window.__t.pageEditActive()"), true);
+    // The same node, not a redrawn one: a re-render would take the caret and
+    // the scroll with it.
+    check("...without redrawing the block being typed into", inPlace.isConnected, true);
+    check("...and the bar stays where it was", doc.getElementById("pageEditBar").hidden, false);
+    check("nothing is left unsaved to warn about", window.eval("window.__t.isPageEditDirty()"), false);
+    check("...and the bar says so", doc.getElementById("pageEditState").textContent, "No changes yet");
+    check("undo still reaches back past the save",
+      window.eval("window.__t.pageHistory.past.length"), stepsBeforeSave);
+
+    pressSave();
+    await new Promise((r) => setTimeout(r, 400));
+    check("a second press with nothing to write leaves you editing too",
+      window.eval("window.__t.pageEditActive()"), true);
+
+    // The button is the one thing that finishes.
+    const finishing = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    finishing.innerHTML = "<h1>Saved By The Button</h1>";
+    finishing.dispatchEvent(new window.Event("input", { bubbles: true }));
+    doc.getElementById("pageEditSaveBtn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitUntil(() => window.eval("window.__t.pageEditActive()") === false);
+    await new Promise((r) => setTimeout(r, 300));
+    check("the Save button is what leaves", window.eval("window.__t.pageEditActive()"), false);
+    check("...having written the document too",
+      JSON.parse((await get("/api/docs/in-place.md")).body).content.includes("# Saved By The Button"), true);
+
+    console.log("=== leaving with unsaved work offers to keep it ===");
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+    const kept = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    kept.innerHTML = "<h1>Kept On The Way Out</h1>";
+    kept.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    const leaving = window.eval("window.__t.cancelPageEdit()");
+    await new Promise((r) => setTimeout(r, 120));
+    const altBtn = doc.getElementById("confirmAltBtn");
+    check("the way out asks", doc.getElementById("confirmModal").classList.contains("open"), true);
+    check("...and offers to save, not only to discard", altBtn.hidden, false);
+    // Enter on this dialog must not mean "throw it away".
+    check("...with the keeping answer holding the focus", doc.activeElement === altBtn, true);
+
+    window.eval('window.__t.resolveConfirmDialog("alt")');
+    const left = await leaving;
+    await waitUntil(() => window.eval("window.__t.pageEditActive()") === false);
+    check("saying save leaves the editor", left, true);
+    check("...and editing really is over", window.eval("window.__t.pageEditActive()"), false);
+    check("...having written the work it was told to keep",
+      JSON.parse((await get("/api/docs/in-place.md")).body).content.includes("# Kept On The Way Out"), true);
+
     // Handing off to the source editor carries the edits with it.
     await window.eval("window.__t.startPageEdit()");
     await new Promise((r) => setTimeout(r, 300));
@@ -1755,8 +1843,12 @@ async function run(server) {
       key: "s", ctrlKey: true, bubbles: true, cancelable: true
     });
     area.dispatchEvent(fromText);
-    await new Promise((r) => setTimeout(r, 700));
+    await waitUntil(() => window.eval("window.__t.isEditorDirty()") === false);
     check("...and it really saves", JSON.parse((await get("/api/docs/undo.md")).body).content, written);
+    check("...without closing the editor", window.eval("window.__t.state.editorOpen"), true);
+    check("...leaving nothing unsaved behind it", window.eval("window.__t.isEditorDirty()"), false);
+    // The redraw behind the modal must not reach into the text being written.
+    check("...and the caret still in the text it was in", doc.activeElement, area);
 
     // These belong to the text, so they are not taken off the other fields.
     const fromNameAgain = new window.KeyboardEvent("keydown", {
@@ -1766,7 +1858,39 @@ async function run(server) {
     check("Ctrl+B in the filename field is not a formatting command",
       fromNameAgain.defaultPrevented, false);
 
-    window.eval("window.__t.closeEditor()");
+    // Closing with something unsaved asks the same question the page editor
+    // asks, and offers the same three answers.
+    const more = `${written}and then some more\n`;
+    area.value = more;
+    const closing = window.eval("window.__t.requestEditorClose()");
+    await new Promise((r) => setTimeout(r, 150));
+    check("closing with unsaved text asks first",
+      doc.getElementById("confirmModal").classList.contains("open"), true);
+    check("...and offers to save it rather than only to lose it",
+      doc.getElementById("confirmAltBtn").hidden, false);
+
+    window.eval('window.__t.resolveConfirmDialog("alt")');
+    await closing;
+    await waitUntil(() => window.eval("window.__t.state.editorOpen") === false);
+    check("saying save closes the editor", window.eval("window.__t.state.editorOpen"), false);
+    check("...having written what was in it",
+      JSON.parse((await get("/api/docs/undo.md")).body).content, more);
+
+    // Two saves of one document must never be in flight together: they can
+    // reach the server in either order, and the loser is the one that wrote
+    // first — leaving the file holding older text than the editor claims. That
+    // they overlap at all is a matter of timing, so this is read from the
+    // source rather than raced for, for the same reason the scroll check above
+    // is: a passing race proves nothing about the run where it loses.
+    const queues = (name, chain) => {
+      const from = appSource.slice(appSource.indexOf(`function ${name}(options) {`));
+      return from.slice(0, from.indexOf("\n}\n")).includes(`${chain} = ${chain}.then(run, run)`);
+    };
+    check("saves on the page are queued behind each other, not raced",
+      queues("savePageEdit", "pageSaveChain"), true);
+    check("...and so are saves from the source editor",
+      queues("saveEditorDocument", "editorSaveChain"), true);
+
     await new Promise((r) => setTimeout(r, 200));
   }
 
@@ -2733,6 +2857,18 @@ async function run(server) {
     const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
     check("(it still sits before the share dialog in the document)",
       html.indexOf('id="confirmModal"') < html.indexOf('id="shareModal"'), true);
+
+    // The third button belongs to the unsaved-work question alone. Every other
+    // dialog here is a yes or a no, and ninety call sites read the answer as
+    // one, so it has to stay a boolean for them.
+    const asking = window.eval(`window.__t.requestConfirmation({
+      title: "Ordinary", message: "Two answers", confirmLabel: "Go"
+    })`);
+    await new Promise((r) => setTimeout(r, 60));
+    check("an ordinary confirmation has two answers, not three",
+      doc.getElementById("confirmAltBtn").hidden, true);
+    window.eval("window.__t.resolveConfirmDialog(false)");
+    check("...and answers with a plain false", await asking, false);
   }
 
   console.log("=== console output ===");

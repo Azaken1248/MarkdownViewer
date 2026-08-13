@@ -53,7 +53,7 @@
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
   <script src="/js/theme-boot.js?v=64"></script>
-  <link rel="stylesheet" href="/css/app.css?v=64" />
+  <link rel="stylesheet" href="/css/app.css?v=65" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -75,7 +75,7 @@
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
   <script src="/js/notebook-runtime.js?v=64" defer></script>
-  <script src="/js/app.js?v=64" defer></script>
+  <script src="/js/app.js?v=65" defer></script>
 </head>
 
 <body>
@@ -411,7 +411,7 @@
               <span>Cancel</span>
             </button>
 
-            <button class="btn btn-sm btn-primary" id="pageEditSaveBtn" type="button" title="Save this document (Ctrl+S). Ctrl+Z undoes, Ctrl+Shift+Z redoes">
+            <button class="btn btn-sm btn-primary" id="pageEditSaveBtn" type="button" title="Save this document and stop editing. Ctrl+S saves without leaving; Ctrl+Z undoes, Ctrl+Shift+Z redoes">
               <i class="ph ph-floppy-disk" aria-hidden="true"></i>
               <span>Save</span>
             </button>
@@ -525,7 +525,7 @@
         </label>
 
         <div class="editor-actions">
-          <button class="btn btn-primary" id="saveDocBtn" type="button" title="Save this document (Ctrl+S)">
+          <button class="btn btn-primary" id="saveDocBtn" type="button" title="Save this document and close the editor. Ctrl+S saves without closing">
             <i class="ph ph-floppy-disk" aria-hidden="true"></i>
             <span>Save</span>
           </button>
@@ -579,6 +579,7 @@
       <div class="dialog-actions">
         <button class="btn" id="confirmCancelBtn" type="button">Cancel</button>
         <button class="btn btn-danger" id="confirmProceedBtn" type="button">Continue</button>
+        <button class="btn btn-primary" id="confirmAltBtn" type="button" hidden>Save Changes</button>
       </div>
     </section>
   </div>

@@ -360,7 +360,7 @@ not something anyone's fingers keep track of.
 
 | Key | On the page | In the source editor |
 | --- | --- | --- |
-| `Ctrl+S` | Save | Save — from the filename field too |
+| `Ctrl+S` | Save without leaving | Save without closing — from the filename field too |
 | `Esc` | Leave, asking first if there is anything to lose | Leave, asking first |
 | `Ctrl+Z` | Undo | Undo (the textarea's own) |
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo | Redo (the textarea's own) |
@@ -372,6 +372,33 @@ not something anyone's fingers keep track of.
 selection is already wrapped, so pressing one twice leaves the text as it was
 found rather than as `****text****`. With nothing selected they insert a
 placeholder and select it, so it can be typed straight over.
+
+#### Saving and leaving are two different things
+
+`Ctrl+S` is pressed mid-sentence, out of habit, dozens of times in one sitting.
+It means "write this down", not "I have finished", so it **writes the file and
+leaves you exactly where you were** — same caret, same scroll, same undo
+history, no re-render. On the page nothing on screen moves at all: the save
+updates what "unsaved" means and what the rest of the app believes is on disk,
+and touches nothing else. In the source editor the modal stays open, and a
+document saved for the first time becomes an edit of the file it just created,
+so a second `Ctrl+S` writes to it instead of trying to create it again.
+
+The **Save button** — pressed once, deliberately, when the writing is done — is
+the only thing that finishes and closes.
+
+#### Every way out asks
+
+Leaving either editor with unsaved work asks first, and offers three answers
+rather than two: **Save Changes**, **Discard Changes**, or Cancel and stay. A
+Discard-or-Cancel pair leaves no way to keep the work *and* still leave, which
+is the thing most people are actually trying to do. The keeping answer holds the
+focus, so `Enter` on that dialog can never throw the work away, and a save that
+fails leaves you in the editor with your edits rather than losing them anyway.
+
+The question is asked on every exit, not just the obvious one: the Cancel
+button, `Esc`, the editor's backdrop, opening another document, and switching to
+the recycle bin or the links view.
 
 #### Undo on the page
 
