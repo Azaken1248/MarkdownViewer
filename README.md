@@ -601,10 +601,19 @@ the link is the point, and the metadata is a convenience.
 ### Icons
 
 The site's own favicon is fetched by the **server**, at the same moment and
-through the same guards as the rest of the metadata, and stored with the link
-as a data URI. The browser never goes and gets it: forty cards pointing at
-forty `https://` images would be forty requests announcing to forty sites that
+through the same guards as the rest of the metadata, and stored with the link.
+The browser never goes to the site for it: forty cards pointing at forty
+`https://` images would be forty requests announcing to forty sites that
 someone opened this page, which is the thing the snapshot exists to avoid.
+
+The bytes do not travel in the list. `GET /api/links` carries an **address**
+per icon — `/api/links/<id>/icon?v=<hash of the bytes>` — and the browser
+fetches them as ordinary images, in parallel, cached. Sending them inline
+turned a 4.5KB answer into a 192KB one that had to arrive in full before a
+single card could be drawn, and arrived again in every new tab. The hash in the
+address is what makes a long cache safe: re-read a page, get a different icon,
+get a different address. It is still this server's address, so nothing about
+opening the pane reaches the sites themselves.
 
 `<link rel="icon">` is preferred, then `shortcut icon`, then
 `apple-touch-icon`, and `/favicon.ico` is always tried last so a page whose
@@ -622,10 +631,17 @@ alone: an empty answer means the fetch did not manage it this time, not that
 the site has stopped having one.
 
 Links saved before this existed have never had an icon fetched at all. Those
-are collected once, in the background, the first time the pane is opened —
-one page at a time, because this is the same fetch adding a link makes and the
-server allows twenty of those a minute. Every answer is written back, including
-"this site has none", so it happens once and never again.
+are collected once, in the background, the first time the pane is opened, by a
+single call to `POST /api/links/icons`: the server reads the pages a few at a
+time, writes the file once, and touches nothing but the icon. Every answer is
+written back, including "this site has none", so it happens once and never
+again.
+
+It touches nothing but the icon on purpose. Re-reading a page also replaces its
+title and description, which would quietly undo a title someone had corrected
+by hand — and correcting a title is the one thing editing a card is for. The
+batch is also bounded by what the account may still fetch this minute, so a
+large library finishes over a few visits rather than half-failing on one.
 
 That distinction is the whole mechanism: a **missing** icon means nobody has
 ever looked, an **empty** one means the page was read and offered nothing
@@ -1029,6 +1045,8 @@ depending on what sits in front of it is not worth a tidier route pattern.
 | `POST` | `/api/links` | Save a link, reading the page for its metadata (editor) |
 | `PATCH` | `/api/links/:id` | Edit a card or its groups, or `{"refresh":true}` to re-read the page (editor) |
 | `DELETE` | `/api/links/:id` | Remove a saved link (editor) |
+| `GET` | `/api/links/:id/icon` | The site icon stored with a link |
+| `POST` | `/api/links/icons` | Fetch the icons of links that have never had one (editor) |
 | `GET` | `/api/shares` | List published documents (editor) |
 | `POST` | `/api/docs/*file/share` | Publish or rotate a share link (editor) |
 | `DELETE` | `/api/docs/*file/share` | Revoke a share link (editor) |

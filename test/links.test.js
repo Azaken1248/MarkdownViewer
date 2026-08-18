@@ -532,6 +532,103 @@ async function api(server) {
       (await admin.del("/api/links/nope")).status, 404);
   }
 
+  console.log("=== an icon is an address, not two hundred kilobytes of list ===");
+  {
+    // A library laid out by hand, because the only way to get a stored icon is
+    // to fetch one and this suite never touches the network. Three shapes,
+    // because the client tells them apart: an icon, a page that was read and
+    // had none, and a link nobody has ever asked about.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>';
+    const iconUri = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-icons-"));
+    fs.mkdirSync(path.join(stateDir, "data"), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(stateDir, "data", "links.json"), JSON.stringify({
+      version: 1,
+      links: [
+        { id: "has", url: "https://has.example/", title: "Has", groups: [], icon: iconUri, createdAt: "2026-01-03" },
+        { id: "none", url: "https://none.example/", title: "None", groups: [], icon: "", createdAt: "2026-01-02" },
+        { id: "never", url: "https://never.example/", title: "Never", groups: [], createdAt: "2026-01-01" }
+      ]
+    }));
+
+    const iconServer = await startTestServer({ stateDir });
+
+    try {
+      const client = makeClient(iconServer.origin);
+      await client.get("/api/session");
+      await client.post("/api/auth/login", { username: SEED_USERNAME, password: SEED_PASSWORD });
+      // A freshly seeded admin has to choose a password before it may read
+      // anything, the same as on a real first run.
+      await client.post("/api/auth/password", { currentPassword: SEED_PASSWORD, newPassword: TEST_PASSWORD });
+
+      const listed = (await client.get("/api/links")).body.links;
+      const byId = Object.fromEntries(listed.map((link) => [link.id, link]));
+
+      check("the bytes do not travel in the list",
+        listed.some((link) => String(link.icon || "").startsWith("data:")), false);
+      check("...an address does instead",
+        byId.has.icon.startsWith("/api/links/has/icon?v="), true);
+      check("...a page that was read and had none stays an empty string",
+        byId.none.icon, "");
+      check("...and one nobody has asked about still has no icon at all",
+        Object.prototype.hasOwnProperty.call(byId.never, "icon"), false);
+
+      const fetched = await client.getBytes(byId.has.icon);
+      check("the address serves the picture", fetched.status, 200);
+      check("...as the image it is",
+        String(fetched.headers["content-type"]).startsWith("image/svg+xml"), true);
+      check("...and the bytes are the ones that were stored", fetched.body.toString("utf8"), svg);
+
+      // The address ends in a hash of the bytes, which is what makes a long
+      // cache safe: a different icon is a different address. The tag on the
+      // response is that same hash rather than one derived from the body, so
+      // answering "still the same" costs nothing to work out.
+      check("...tagged with the hash its address already carries",
+        fetched.headers.etag,
+        `"${new URL(byId.has.icon, "http://x").searchParams.get("v")}"`);
+      check("...cached for a long time", /max-age=31536000/.test(fetched.headers["cache-control"]), true);
+      check("...but only by the person it belongs to",
+        /private/.test(fetched.headers["cache-control"]), true);
+
+      const again = await client.get(byId.has.icon, { "If-None-Match": fetched.headers.etag });
+      check("...and asked for twice, the second time sends nothing", again.status, 304);
+
+      check("a link with no icon has nothing to serve",
+        (await client.get("/api/links/none/icon")).status, 404);
+      check("...and neither does one that does not exist",
+        (await client.get("/api/links/nope/icon")).status, 404);
+
+      const stranger = makeClient(iconServer.origin);
+      check("the icons are behind the session like the rest of the library",
+        (await stranger.get(byId.has.icon)).status, 401);
+
+      // And the batch: one call for every link nobody has asked about. Every
+      // address here is refused before a socket opens, so what is under test
+      // is the bookkeeping, not the fetching.
+      const filled = await client.post("/api/links/icons");
+      check("the batch answers for every link that had never been asked",
+        [filled.status, filled.body.remaining], [200, 0]);
+      check("...and none of these could be fetched", filled.body.fetched, 0);
+      check("...so the one that had never been asked now has been",
+        filled.body.links.find((link) => link.id === "never").icon, "");
+      check("...and the icon that was already there is untouched",
+        filled.body.links.find((link) => link.id === "has").icon.startsWith("/api/links/has/icon?v="), true);
+
+      const second = await client.post("/api/links/icons");
+      check("a second call has nothing left to do", second.body.fetched, 0);
+
+      const viewer = makeClient(iconServer.origin);
+      await viewer.get("/api/session");
+      check("and fetching icons is a write, so a signed-out visitor cannot",
+        (await viewer.post("/api/links/icons")).status, 401);
+    } finally {
+      await iconServer.stop();
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  }
+
   console.log("=== the list carries the groups in use ===");
   {
     const list = await admin.get("/api/links");

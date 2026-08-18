@@ -415,6 +415,7 @@ async function run(server) {
         insertIntoTextarea, replaceInTextarea, toggleMarkdownWrap, applySourceShortcut,
         documentPath, fileFromLocation, showDocumentInUrl,
         goToPlace, viewFromLocation, showLinksInUrl, applySearch, linksNeedingIcons,
+        backfillLinkIcons,
         restoreDocumentView, stashSearchQuery, setPlaceBusy, hydrateSearchContent,
         showEmptyState, showLoadingState, updateActiveDocUI,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
@@ -2784,6 +2785,48 @@ async function run(server) {
     await new Promise((r) => setTimeout(r, 500));
     check("pressing Files while in the files does not redraw the document",
       standing.isConnected, true);
+
+    // The icons for links nobody has ever asked about are collected in one
+    // call. It used to be one PATCH per link, in a queue: seven round trips,
+    // seven page reads and seven whole rewrites of the file, so they trickled
+    // in over about ten seconds.
+    {
+      const calls = [];
+      const realFetch = window.fetch;
+
+      window.fetch = async (url, options = {}) => {
+        calls.push(`${(options.method || "GET").toUpperCase()} ${String(url)}`);
+        return {
+          status: 200,
+          ok: true,
+          async json() {
+            return {
+              links: [{ id: "old", url: "https://x.example/", title: "Old", groups: [], icon: "" }],
+              groups: [],
+              fetched: 1,
+              remaining: 0
+            };
+          },
+          async text() { return ""; }
+        };
+      };
+
+      try {
+        window.eval('window.__t.state.links = [{ id: "old", url: "https://x.example/", title: "Old", groups: [] }];');
+        await window.eval("window.__t.backfillLinkIcons()");
+      } finally {
+        // Restoring a stub this block installed itself; nothing else runs
+        // against this window in between.
+        // eslint-disable-next-line require-atomic-updates
+        window.fetch = realFetch;
+      }
+
+      check("the missing icons are asked for in one request", calls, ["POST /api/links/icons"]);
+      check("...and the list that comes back is the one that is kept",
+        window.eval("window.__t.state.links.map((link) => link.icon)"), [""]);
+      check("...which leaves nothing still to ask about",
+        window.eval("window.__t.linksNeedingIcons()"), []);
+    }
 
     // A switch that waits on the network has to look like it is waiting.
     window.eval('window.__t.setPlaceBusy("links", true)');

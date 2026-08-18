@@ -4648,54 +4648,59 @@ function linksNeedingIcons() {
 
 /* Go and get them.
  *
- * One page at a time rather than all at once: this is the same fetch adding a
- * link makes, and the server allows twenty of those a minute. Serially, a list
- * of a dozen finishes well inside that; in parallel, a list of thirty would hit
- * the limit and the ones at the back would come home empty for no reason.
+ * One request for the lot. It used to be one PATCH per link, in a queue: seven
+ * round trips, seven page reads and seven whole rewrites of links.json, so the
+ * icons trickled in over about ten seconds. The server reads the pages a few
+ * at a time and writes once, which is the same work done in about a fifth of
+ * the time.
  *
- * Each answer is kept as it arrives, so stopping halfway — an error, a closed
- * tab — still leaves every icon it did manage, and leaves the ones it never
- * reached still marked as never asked.
+ * The whole list comes back, so a link removed or edited in another tab
+ * arrives correct rather than being patched over from here.
  */
+/* Take the answer.
+ *
+ * Its own function because everything here is written after an await, and the
+ * list it writes is the server's own, read after the icons were saved — so it
+ * is at least as current as anything this tab was holding, whatever else
+ * happened while the request was in the air.
+ */
+function settleLinkIcons(payload = null) {
+  state.linkIconsRunning = false;
+
+  if (payload && Array.isArray(payload.links)) {
+    state.links = payload.links;
+    state.linkGroups = Array.isArray(payload.groups) ? payload.groups : state.linkGroups;
+  }
+
+  renderLinks();
+}
+
 async function backfillLinkIcons() {
-  const pending = linksNeedingIcons();
-  if (pending.length === 0 || state.linkIconsRunning) {
+  if (linksNeedingIcons().length === 0 || state.linkIconsRunning) {
     return;
   }
 
   state.linkIconsRunning = true;
-  setStatus(`Reading ${pending.length} page${pending.length === 1 ? "" : "s"} for icons...`, "neutral");
-
-  let found = 0;
 
   try {
-    for (const id of pending) {
-      const current = state.links.find((entry) => entry.id === id);
-      if (!current) {
-        continue;
-      }
+    const payload = await requestJson("/api/links/icons", { method: "POST" });
+    settleLinkIcons(payload);
 
-      const payload = await requestJson(`/api/links/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ refresh: true, groups: linkGroupsOf(current) })
-      });
-
-      state.links = state.links.map((link) => (link.id === id ? payload.link : link));
-      if (payload.link.icon) {
-        found += 1;
-      }
-
-      renderLinks();
+    if (payload.fetched > 0) {
+      setStatus(`Found ${payload.fetched} site icon${payload.fetched === 1 ? "" : "s"}.`, "success");
     }
 
-    setStatus(found === 0
-      ? "None of those pages offered an icon."
-      : `Found ${found} icon${found === 1 ? "" : "s"}.`, found === 0 ? "neutral" : "success");
+    // A library big enough to run past the minute's fetch budget finishes on
+    // the next visit rather than half-failing on this one.
+    if (payload.remaining > 0) {
+      setStatus(`${payload.remaining} more icon${payload.remaining === 1 ? "" : "s"} will be fetched next time.`,
+        "neutral");
+    }
   } catch (error) {
-    notify(error.message, "error");
-  } finally {
-    state.linkIconsRunning = false;
-    renderLinks();
+    settleLinkIcons();
+    // Decoration that did not arrive. Worth saying, not worth interrupting
+    // over — every card is on screen and readable either way.
+    setStatus(`Could not fetch the site icons: ${error.message}`, "warning");
   }
 }
 
