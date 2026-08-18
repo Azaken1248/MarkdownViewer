@@ -51,13 +51,15 @@ const elements = {
   sidebar: document.getElementById("sidebar"),
   emptyState: document.getElementById("emptyState"),
   docContent: document.getElementById("docContent"),
-  toggleLinksBtn: document.getElementById("toggleLinksBtn"),
+  placeDocsBtn: document.getElementById("placeDocsBtn"),
+  placeLinksBtn: document.getElementById("placeLinksBtn"),
+  uploadWrap: document.getElementById("uploadWrap"),
   viewerToolbar: document.getElementById("viewerToolbar"),
   linksPane: document.getElementById("linksPane"),
+  linkIconsBtn: document.getElementById("linkIconsBtn"),
   linksGrid: document.getElementById("linksGrid"),
   linksEmpty: document.getElementById("linksEmpty"),
   linksCount: document.getElementById("linksCount"),
-  linkSearchInput: document.getElementById("linkSearchInput"),
   addLinkBtn: document.getElementById("addLinkBtn"),
   linkModal: document.getElementById("linkModal"),
   linkBackdrop: document.getElementById("linkBackdrop"),
@@ -195,8 +197,15 @@ const state = {
   links: [],
   linkGroups: [],
   linkFilter: "",
+
+  // One search box serves both halves of the library, and the same words mean
+  // different things in each. Each place keeps its own query here and gets it
+  // back on the way in, so a trip to the links does not wipe the document
+  // search you were in the middle of.
+  searchQueries: { docs: "", links: "" },
   // null = every link; "" = only the ungrouped ones; otherwise a group name.
   linkGroupFilter: null,
+  linkIconsRunning: false,
   linkDragId: null,
   linkModalOpen: false,
 
@@ -1757,9 +1766,11 @@ function renderBreadcrumbs({ iconClass, label, folderId, rootLabel }) {
   nav.innerHTML = "";
 
   // Root crumb: the scope being browsed, not a folder.
-  const rootIcon = state.viewMode === "archive"
-    ? "ph-archive-box"
-    : state.viewMode === "recycle" ? "ph-trash" : "ph-house";
+  const rootIcon = state.viewMode === "links"
+    ? "ph-link-simple"
+    : state.viewMode === "archive"
+      ? "ph-archive-box"
+      : state.viewMode === "recycle" ? "ph-trash" : "ph-house";
 
   const crumbs = [
     buildCrumbButton(rootLabel, {
@@ -1834,9 +1845,11 @@ function renderBreadcrumbs({ iconClass, label, folderId, rootLabel }) {
 // The tree rows are one line each, so the size/date/folder facts they used to
 // carry as chips live here instead, next to the file they describe.
 function setViewerHeading(iconClass, label, metaParts, folderId = null) {
-  const rootLabel = state.viewMode === "archive"
-    ? "Archive"
-    : state.viewMode === "recycle" ? "Recycle bin" : "Files";
+  const rootLabel = state.viewMode === "links"
+    ? "Links"
+    : state.viewMode === "archive"
+      ? "Archive"
+      : state.viewMode === "recycle" ? "Recycle bin" : "Files";
 
   renderBreadcrumbs({ iconClass, label, folderId, rootLabel });
 
@@ -1852,13 +1865,18 @@ function setViewerHeading(iconClass, label, metaParts, folderId = null) {
 function applyPermissionGating() {
   const writable = can("doc:write");
 
+  // Two different reasons a document control should not be on screen: the
+  // account may not write, or there is no document in front of it because the
+  // links pane is up. syncModeUI writes the same set from the same rule.
+  const docTools = writable && state.viewMode !== "links";
+
   // Hidden rather than disabled: a greyed-out button that can never become
   // usable is just clutter with a tooltip.
   for (const control of [elements.newDocBtn, elements.uploadTrigger, elements.editDocBtn,
     elements.createFolderBtn, elements.editCurrentDocBtn, elements.softDeleteDocBtn,
     elements.dockNew, elements.dockUpload, elements.dockEdit]) {
     if (control) {
-      control.hidden = !writable;
+      control.hidden = !docTools;
     }
   }
 
@@ -2228,6 +2246,27 @@ function docUrl(file) {
  */
 function documentPath(file) {
   return `/${docUrl(file)}`;
+}
+
+/* The saved links are a place, so they have an address.
+ *
+ * Without one they were a mode you could only be put into by pressing a
+ * button: not linkable, not bookmarkable, gone on a refresh, and invisible to
+ * the back button — so leaving them was the one navigation in this app the
+ * browser could not undo.
+ */
+const LINKS_PATH = "/links";
+
+function viewFromLocation() {
+  return window.location.pathname.replace(/\/+$/, "").toLowerCase() === LINKS_PATH ? "links" : "docs";
+}
+
+function showLinksInUrl({ replace = false } = {}) {
+  if (window.location.pathname === LINKS_PATH && !window.location.hash) {
+    return;
+  }
+
+  window.history[replace ? "replaceState" : "pushState"]({ view: "links" }, "", LINKS_PATH);
 }
 
 // The document a URL names, or null for the app's own root.
@@ -3192,12 +3231,19 @@ function syncModeUI() {
     ? "Links"
     : inArchive ? "Archive" : inRecycleBin ? "Recycle bin" : "Files";
 
-  if (elements.toggleLinksBtn) {
-    elements.toggleLinksBtn.classList.toggle("active", inLinks);
-    elements.toggleLinksBtn.setAttribute("aria-pressed", String(inLinks));
-    elements.toggleLinksBtn.setAttribute("aria-label", inLinks ? "Exit saved links" : "Show saved links");
-    elements.toggleLinksBtn.title = inLinks ? "Exit saved links" : "Saved links";
+  // The switcher says which half of the library you are in. The archive and
+  // the recycle bin are still documents, so Files stays lit in both of them.
+  if (elements.placeDocsBtn && elements.placeLinksBtn) {
+    const here = inLinks ? elements.placeLinksBtn : elements.placeDocsBtn;
+    const there = inLinks ? elements.placeDocsBtn : elements.placeLinksBtn;
+    here.setAttribute("aria-current", "page");
+    there.removeAttribute("aria-current");
   }
+
+  // The one search box is about whatever is on screen. Saying so in the
+  // placeholder is the difference between a filter and a search that seems to
+  // have stopped finding anything.
+  elements.searchInput.placeholder = inLinks ? "Filter saved links" : "Search files and contents";
 
   // The links pane replaces the document viewer rather than sitting beside it:
   // there is no open document in this mode, so the toolbar, the empty state and
@@ -3216,6 +3262,20 @@ function syncModeUI() {
     if (elements.kernelBar) {
       elements.kernelBar.hidden = true;
     }
+
+    setSuperSearchOpen(false);
+  }
+
+  // Nothing in this pane is a document, so every control that acts on one goes
+  // with the viewer. Written in both directions rather than only hidden on the
+  // way in, since applyPermissionGating writes the same controls from the same
+  // rule and the two must not be able to disagree about which is on top.
+  const docTools = can("doc:write") && !inLinks;
+  for (const control of [elements.newDocBtn, elements.editDocBtn, elements.uploadWrap,
+    elements.dockUpload, elements.dockNew, elements.dockEdit]) {
+    if (control) {
+      control.hidden = !docTools;
+    }
   }
 
   elements.toggleRecycleBinBtn.classList.toggle("active", inRecycleBin);
@@ -3231,10 +3291,10 @@ function syncModeUI() {
   elements.softDeleteDocBtn.hidden = inTrashView;
   elements.hardDeleteDocBtn.hidden = false;
   elements.restoreDocBtn.hidden = !inTrashView;
-  elements.createFolderBtn.hidden = inTrashView;
+  elements.createFolderBtn.hidden = inTrashView || !docTools;
 
   if (elements.collapseAllBtn) {
-    elements.collapseAllBtn.hidden = inTrashView;
+    elements.collapseAllBtn.hidden = inTrashView || inLinks;
   }
 
   // The button keeps its slot in all three modes but means something different in each:
@@ -4173,10 +4233,53 @@ function beginGroupEdit(card, link) {
   input.select();
 }
 
+/* The site's own icon, or a letter standing in for it.
+ *
+ * The bytes came with the link and are drawn from disk, so this never asks the
+ * network — see lib/link-preview.js for why the server fetches them instead of
+ * the browser. A site whose icon could not be read still needs something in the
+ * slot, or a grid of cards is a ragged left edge; the first letter of the host
+ * is what it knows.
+ */
+function linkIconNode(link) {
+  const host = linkHost(link);
+
+  if (link.icon) {
+    const image = document.createElement("img");
+    image.className = "link-icon";
+    image.src = link.icon;
+    image.alt = "";
+    image.width = 18;
+    image.height = 18;
+    image.loading = "lazy";
+    // A stored icon can still fail to decode — a truncated file, a format this
+    // browser does not read. The letter takes over rather than leaving the
+    // broken-image glyph.
+    image.addEventListener("error", () => {
+      image.replaceWith(linkMonogram(host));
+    }, { once: true });
+    return image;
+  }
+
+  return linkMonogram(host);
+}
+
+function linkMonogram(host) {
+  const mark = document.createElement("span");
+  mark.className = "link-icon link-icon-mark";
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = (host.match(/[a-z0-9]/i) || ["?"])[0].toUpperCase();
+  return mark;
+}
+
 function renderLinkCard(link) {
   const card = document.createElement("article");
   card.className = "link-card";
   card.dataset.id = link.id;
+
+  const head = document.createElement("div");
+  head.className = "link-card-head";
+  head.appendChild(linkIconNode(link));
 
   const title = document.createElement("h3");
   title.className = "link-card-title";
@@ -4191,7 +4294,8 @@ function renderLinkCard(link) {
   anchor.setAttribute("referrerpolicy", "no-referrer");
   anchor.textContent = link.title || linkHost(link);
   title.appendChild(anchor);
-  card.appendChild(title);
+  head.appendChild(title);
+  card.appendChild(head);
 
   if (link.description) {
     const description = document.createElement("p");
@@ -4333,9 +4437,27 @@ function renderLinks() {
       "Paste the address of a docs site and it will be saved with the title and description the page gives for itself.";
   }
 
-  elements.linksCount.textContent = state.links.length === visible.length
+  const tally = state.links.length === visible.length
     ? `${state.links.length} link${state.links.length === 1 ? "" : "s"}`
     : `${visible.length} of ${state.links.length}`;
+
+  elements.linksCount.textContent = tally;
+
+  // The sidebar is showing these same links, so its line under the title has
+  // to count them rather than leaving a document tally under a list of URLs.
+  if (state.viewMode === "links") {
+    setMeta(tally);
+  }
+
+  if (elements.linkIconsBtn) {
+    const missing = state.links.filter((link) => !link.icon).length;
+    elements.linkIconsBtn.hidden = missing === 0 || !can("doc:write");
+    // The backfill re-renders after every page it reads, so the button has to
+    // stay pressed for the whole run rather than coming back to life between
+    // two of them and letting a second run start on top of the first.
+    elements.linkIconsBtn.disabled = state.linkIconsRunning;
+    elements.linkIconsBtn.querySelector("span").textContent = `Get icons (${missing})`;
+  }
 
   renderGroupChips();
   syncGroupDatalist();
@@ -4362,8 +4484,11 @@ function renderLinkSidebar(visible) {
     anchor.rel = "noopener noreferrer";
     anchor.setAttribute("referrerpolicy", "no-referrer");
     anchor.title = link.url;
-    anchor.innerHTML = '<i class="ph ph-link-simple" aria-hidden="true"></i><span></span>';
-    anchor.querySelector("span").textContent = link.title || linkHost(link);
+    anchor.appendChild(linkIconNode(link));
+
+    const label = document.createElement("span");
+    label.textContent = link.title || linkHost(link);
+    anchor.appendChild(label);
 
     row.appendChild(anchor);
     elements.docList.appendChild(row);
@@ -4457,6 +4582,60 @@ async function submitLink() {
     // eslint-disable-next-line require-atomic-updates
     elements.saveLinkBtn.disabled = false;
     label.textContent = original;
+  }
+}
+
+/* Icons for links saved before there were any.
+ *
+ * One page at a time rather than all at once: this is the same fetch adding a
+ * link makes, and the server allows twenty of those a minute. Serially, a list
+ * of a dozen finishes well inside that; in parallel, a list of thirty would hit
+ * the limit and the ones at the back would come home empty for no reason.
+ *
+ * Each answer is kept as it arrives, so stopping halfway — an error, a closed
+ * tab — still leaves every icon it did manage.
+ */
+async function backfillLinkIcons() {
+  const pending = state.links.filter((link) => !link.icon).map((link) => link.id);
+  if (pending.length === 0 || state.linkIconsRunning) {
+    return;
+  }
+
+  state.linkIconsRunning = true;
+  elements.linkIconsBtn.disabled = true;
+  setStatus(`Reading ${pending.length} page${pending.length === 1 ? "" : "s"} for icons...`, "neutral");
+
+  let found = 0;
+
+  try {
+    for (const id of pending) {
+      const current = state.links.find((entry) => entry.id === id);
+      if (!current) {
+        continue;
+      }
+
+      const payload = await requestJson(`/api/links/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ refresh: true, groups: linkGroupsOf(current) })
+      });
+
+      state.links = state.links.map((link) => (link.id === id ? payload.link : link));
+      if (payload.link.icon) {
+        found += 1;
+      }
+
+      renderLinks();
+    }
+
+    setStatus(found === 0
+      ? "None of those pages offered an icon."
+      : `Found ${found} icon${found === 1 ? "" : "s"}.`, found === 0 ? "warning" : "success");
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    state.linkIconsRunning = false;
+    // Whatever happened, the button reflects what is still missing.
+    renderLinks();
   }
 }
 
@@ -5594,6 +5773,17 @@ function handleTreeKeydown(event) {
 
 async function applySearch(query) {
   const rawQuery = String(query || "");
+
+  // In the links pane the search box filters links, and everything below here
+  // is about documents — the tree, the results panel, the jump navigation.
+  // None of it has anything to say about a list of URLs.
+  if (state.viewMode === "links") {
+    state.linkFilter = rawQuery;
+    setSuperSearchOpen(false);
+    renderLinks();
+    return;
+  }
+
   const q = normalize(rawQuery).trim();
   const currentDocs = getCurrentDocsCollection();
 
@@ -8373,6 +8563,16 @@ async function initialize() {
       showDocumentInUrl(wanted, { replace: true });
     }
 
+    // /links, typed or bookmarked. The documents are not fetched at all until
+    // something asks for them: this address is not about them, and the first
+    // press of Files loads the library then.
+    if (viewFromLocation() === "links") {
+      state.viewMode = "links";
+      syncModeUI();
+      await refreshLinks();
+      return;
+    }
+
     await refreshDocs({ openFile: wanted, preserveSearch: true });
   } catch (error) {
     console.error(error);
@@ -8449,6 +8649,12 @@ elements.searchInput.addEventListener("keydown", async (event) => {
 
   const query = elements.searchInput.value.trim();
   if (!query) {
+    return;
+  }
+
+  // Everything below opens a document. In the links pane the filtering has
+  // already happened as the words were typed, so Enter has nothing left to do.
+  if (state.viewMode === "links") {
     return;
   }
 
@@ -8817,7 +9023,10 @@ elements.folderNameInput.addEventListener("keydown", async (event) => {
 
 elements.refreshDocs.addEventListener("click", async () => {
   try {
-    if (state.isRecycleBinMode) {
+    if (state.viewMode === "links") {
+      await refreshLinks();
+      setStatus("Saved links refreshed.", "success");
+    } else if (state.isRecycleBinMode) {
       await refreshDeletedDocs({ preserveSearch: true });
       setStatus(state.viewMode === "archive" ? "Archive refreshed." : "Recycle bin refreshed.", "success");
     } else {
@@ -8828,6 +9037,87 @@ elements.refreshDocs.addEventListener("click", async () => {
     setStatus(error.message, "error");
   }
 });
+
+/* The one search box goes with you, and each place keeps its own query.
+ *
+ * Called on the way through, while both the place being left and the place
+ * being entered are still known — the box is read for one and written for the
+ * other in the same breath, so neither query can be lost to a half-done swap.
+ */
+function stashSearchQuery(from, to) {
+  const slot = (mode) => (mode === "links" ? "links" : "docs");
+
+  state.searchQueries[slot(from)] = elements.searchInput.value;
+  elements.searchInput.value = state.searchQueries[slot(to)] || "";
+  syncSearchInputState(elements.searchInput.value);
+}
+
+/* Move to one of the two halves of the library.
+ *
+ * Not a toggle. Pressing Links while already among the links does nothing,
+ * which is the only thing a control that also says where you are can mean. The
+ * recycle bin and the archive keep their toggles below: those are a detour
+ * from the documents, not a place you live.
+ *
+ * `push` is false when the browser did the navigating, so going back does not
+ * push the entry it just came from.
+ */
+async function goToPlace(place, { push = true, openFile = null } = {}) {
+  const target = place === "links" ? "links" : "docs";
+
+  if (state.viewMode === target) {
+    return true;
+  }
+
+  // Leaving takes the document being edited off the screen, so it has to ask
+  // the same question closing the editor would — and before anything else, so
+  // nothing is written back based on a view that moved while the question was
+  // on screen.
+  if (pageEditActive()) {
+    const left = await cancelPageEdit({ restore: false });
+    if (!left) {
+      return false;
+    }
+  }
+
+  const previousMode = state.viewMode;
+  const previousQuery = elements.searchInput.value;
+
+  try {
+    state.viewMode = target;
+    stashSearchQuery(previousMode, target);
+    syncModeUI();
+    resetJumpNavigation();
+
+    if (target === "links") {
+      if (push) {
+        showLinksInUrl();
+      }
+
+      state.linkFilter = elements.searchInput.value;
+      await refreshLinks();
+      return true;
+    }
+
+    if (push) {
+      // Back where the document was. The library reopens it below, so the
+      // address and the screen agree from the first frame rather than after
+      // the round trip.
+      showDocumentInUrl(state.activeFile);
+    }
+
+    await refreshDocs({ openFile, preserveSearch: true });
+    return true;
+  } catch (error) {
+    // Rollback to values captured before the await.
+    state.viewMode = previousMode;
+    elements.searchInput.value = previousQuery;
+    syncSearchInputState(previousQuery);
+    syncModeUI();
+    setStatus(error.message, "error");
+    return false;
+  }
+}
 
 // Both trash-view toggles flip between their own mode and "docs", so they share one handler.
 async function switchViewMode(targetMode) {
@@ -8847,18 +9137,21 @@ async function switchViewMode(targetMode) {
 
   try {
     state.viewMode = nextMode;
+
+    // The recycle bin and the archive can be opened from the links pane, which
+    // means this is also a way out of it: the search box goes back to being
+    // about documents, and the address stops claiming to be /links.
+    if (previousMode === "links") {
+      stashSearchQuery("links", "docs");
+      showDocumentInUrl(state.activeFile);
+    }
+
     syncModeUI();
     resetJumpNavigation();
 
     if (nextMode === "docs") {
       await refreshDocs({ preserveSearch: false });
       setStatus("Returned to markdowns.", "neutral");
-      return;
-    }
-
-    if (nextMode === "links") {
-      await refreshLinks();
-      setStatus("Saved links opened.", "success");
       return;
     }
 
@@ -8881,8 +9174,27 @@ elements.toggleArchiveBtn.addEventListener("click", () => {
   void switchViewMode("archive");
 });
 
-elements.toggleLinksBtn.addEventListener("click", () => {
-  void switchViewMode("links");
+/* The switcher's two halves are real links, so they can be copied, opened in a
+ * new tab and dropped in a bookmark. An ordinary click is handled in-page
+ * instead: nothing here needs a reload, and a reload would throw away the
+ * library that is already loaded. */
+function bindPlaceButton(button, place) {
+  button.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
+      || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    void goToPlace(place);
+  });
+}
+
+bindPlaceButton(elements.placeDocsBtn, "docs");
+bindPlaceButton(elements.placeLinksBtn, "links");
+
+elements.linkIconsBtn.addEventListener("click", () => {
+  void backfillLinkIcons();
 });
 
 elements.addLinkBtn.addEventListener("click", openLinkModal);
@@ -8893,11 +9205,6 @@ elements.linkBackdrop.addEventListener("click", closeLinkModal);
 elements.linkForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void submitLink();
-});
-
-elements.linkSearchInput.addEventListener("input", () => {
-  state.linkFilter = elements.linkSearchInput.value;
-  renderLinks();
 });
 
 elements.softDeleteDocBtn.addEventListener("click", () => {
@@ -9588,8 +9895,23 @@ window.addEventListener("popstate", () => {
   // work would go without a word. The address moves back to where the screen
   // is rather than the screen following the address.
   if (isEditorDirty() || isPageEditDirty()) {
-    showDocumentInUrl(state.activeFile, { replace: true });
+    if (state.viewMode === "links") {
+      showLinksInUrl({ replace: true });
+    } else {
+      showDocumentInUrl(state.activeFile, { replace: true });
+    }
+
     setStatus("Save or discard your changes before leaving this document.", "warning");
+    return;
+  }
+
+  // Into or out of the saved links. The address already says where to be, so
+  // this follows it rather than pushing another entry on top.
+  const wantsLinks = viewFromLocation() === "links";
+  if (wantsLinks !== (state.viewMode === "links")) {
+    // Coming back to a document address opens that document, not whichever one
+    // happened to be open when the links were entered.
+    void goToPlace(wantsLinks ? "links" : "docs", { push: false, openFile: file });
     return;
   }
 

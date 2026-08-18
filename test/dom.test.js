@@ -414,6 +414,7 @@ async function run(server) {
         undoPageEdit, redoPageEdit, commitPageHistory, pageHistory,
         insertIntoTextarea, replaceInTextarea, toggleMarkdownWrap, applySourceShortcut,
         documentPath, fileFromLocation, showDocumentInUrl,
+        goToPlace, viewFromLocation, showLinksInUrl, applySearch, backfillLinkIcons,
         showEmptyState, showLoadingState, updateActiveDocUI,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
@@ -1063,9 +1064,14 @@ async function run(server) {
 
   console.log("=== saved links render as cards ===");
   {
+    // A real one-pixel PNG, so the <img> the card builds has something a
+    // browser would actually decode rather than a string that happens to
+    // start with "data:".
+    const PIXEL_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
     const links = [
       { id: "a1", url: "https://pyodide.org/en/stable/", title: "Pyodide", description: "Python in the browser", siteName: "Pyodide", note: "runtime docs", fetched: true, fetchError: null },
-      { id: "b2", url: "https://expressjs.com/", title: "Express", description: "Fast, unopinionated", siteName: "Express", note: "", fetched: true, fetchError: null },
+      { id: "b2", url: "https://expressjs.com/", title: "Express", description: "Fast, unopinionated", siteName: "Express", note: "", icon: PIXEL_PNG, fetched: true, fetchError: null },
       { id: "c3", url: "https://gone.example/x", title: "gone.example", description: "", siteName: "", note: "", fetched: false, fetchError: "That site could not be read." }
     ];
 
@@ -1102,6 +1108,25 @@ async function run(server) {
       cards[2].querySelector(".link-card-warn").title, "That site could not be read.");
     check("...and a readable one is not", cards[0].querySelector(".link-card-warn"), null);
 
+    // The site's own icon, fetched by the server when the link was saved and
+    // carried with it. It has to come off disk: a card that reaches out to the
+    // site to draw its icon tells that site every time this page is opened.
+    check("a link with an icon shows it",
+      cards[1].querySelector(".link-card-head img.link-icon")?.getAttribute("src"), PIXEL_PNG);
+    check("...as decoration, not as something to read",
+      cards[1].querySelector(".link-card-head img.link-icon").alt, "");
+    check("a link without one gets a letter instead",
+      cards[0].querySelector(".link-card-head .link-icon-mark")?.textContent, "P");
+    check("...and no broken image beside it",
+      cards[0].querySelectorAll(".link-card-head img").length, 0);
+
+    // Links saved before the icons existed are the reason this exists at all.
+    // It counts what is missing, and it is the only thing that ever refetches
+    // a page nobody asked about.
+    const iconsBtn = doc.getElementById("linkIconsBtn");
+    check("the backfill is offered while icons are missing", iconsBtn.hidden, false);
+    check("...and says how many", iconsBtn.querySelector("span").textContent, "Get icons (2)");
+
     check("the count is shown", doc.getElementById("linksCount").textContent, "3 links");
     check("the empty state is hidden while there are cards",
       doc.getElementById("linksEmpty").hidden, true);
@@ -1130,6 +1155,12 @@ async function run(server) {
     check("...saying why", doc.querySelector("#linksEmpty h3").textContent, "Nothing matches");
 
     window.eval('window.__t.state.linkFilter = ""; window.__t.renderLinks();');
+
+    // Put the app back where it was found. The links are a place with an
+    // address of their own now, so an app left standing in them behaves
+    // differently — the back button in a later section navigates out of them —
+    // and a mode set by hand has to be unset the same way.
+    window.eval('window.__t.state.viewMode = "docs"; window.__t.syncModeUI();');
   }
 
   console.log("=== editing happens on the document itself ===");
@@ -2641,6 +2672,114 @@ async function run(server) {
     window.eval('window.__t.state.viewMode = "docs"; window.__t.syncModeUI();');
     check("leaving hides the pane again", doc.getElementById("linksPane").hidden, true);
     check("...and gives the toolbar back", doc.getElementById("viewerToolbar").hidden, false);
+  }
+
+  console.log("=== the links are a place you can go to, and come back from ===");
+  {
+    // They used to be a mode, reachable only from a sixth icon in the sidebar
+    // drawer and invisible to the address bar — so they could not be
+    // bookmarked, survived no refresh, and the back button could not undo the
+    // trip into them.
+    const docsBtn = doc.getElementById("placeDocsBtn");
+    const linksBtn = doc.getElementById("placeLinksBtn");
+    const search = doc.getElementById("searchInput");
+    const where = () => window.eval("window.__t.state.viewMode");
+
+    check("both halves of the library are on screen",
+      [docsBtn.textContent.trim(), linksBtn.textContent.trim()], ["Files", "Links"]);
+    check("...and the one you are in says so", docsBtn.getAttribute("aria-current"), "page");
+    check("...and the other is a real address, not a button",
+      [linksBtn.tagName, linksBtn.getAttribute("href")], ["A", "/links"]);
+
+    // A document search in progress, to prove the trip does not eat it.
+    search.value = "alpha";
+    await window.eval('window.__t.applySearch("alpha")');
+
+    await window.eval('window.__t.goToPlace("links")');
+    await waitUntil(() => where() === "links");
+
+    check("going to the links puts them in the address bar",
+      window.location.pathname, "/links");
+    check("...and reading the address back agrees",
+      window.eval("window.__t.viewFromLocation()"), "links");
+    check("...and the switcher moves with it", linksBtn.getAttribute("aria-current"), "page");
+    check("...and Files stops claiming to be where you are",
+      docsBtn.hasAttribute("aria-current"), false);
+
+    // A control that says where you are cannot also be a toggle: pressing
+    // Links while among the links has to be nothing at all — in particular not
+    // a second history entry, which Back would then have to be pressed twice
+    // to get past.
+    const entries = window.history.length;
+    await window.eval('window.__t.goToPlace("links")');
+    check("pressing Links again is not a way out", where(), "links");
+    check("...and leaves no history entry behind it", window.history.length, entries);
+
+    // Nothing in this pane is a document, so nothing that acts on one belongs
+    // on the screen with it.
+    check("there is nothing here to create", doc.getElementById("newDocBtn").hidden, true);
+    check("...nor to edit", doc.getElementById("editDocBtn").hidden, true);
+    check("...nor to upload into", doc.getElementById("uploadWrap").hidden, true);
+    check("...nor a folder to make", doc.getElementById("createFolderBtn").hidden, true);
+    check("...and the dock offers none of them either",
+      [doc.getElementById("dockNew").hidden, doc.getElementById("dockUpload").hidden,
+        doc.getElementById("dockEdit").hidden], [true, true, true]);
+
+    // One search box, and it is about whatever is on the screen.
+    check("the search box says what it filters now", search.placeholder, "Filter saved links");
+    check("...and the document search was put down, not thrown away", search.value, "");
+
+    window.eval(`window.__t.state.links = [
+      { id: "p", url: "https://pyodide.org/", title: "Pyodide", description: "", note: "", groups: [], fetched: true },
+      { id: "e", url: "https://expressjs.com/", title: "Express", description: "", note: "", groups: [], fetched: true }
+    ];`);
+    search.value = "pyo";
+    await window.eval('window.__t.applySearch("pyo")');
+    check("typing in it filters the links",
+      [...doc.querySelectorAll("#linksGrid .link-card-title a")].map((a) => a.textContent), ["Pyodide"]);
+    check("...and the sidebar counts links, not documents",
+      doc.getElementById("searchMeta").textContent, "1 of 2");
+
+    // The whole point of the address: the browser's own back button undoes it.
+    window.history.back();
+    await waitUntil(() => where() === "docs", 8000);
+    check("back comes out of the links", where(), "docs");
+    check("...and the pane goes with it", doc.getElementById("linksPane").hidden, true);
+    check("...and the document search is handed back",
+      [search.value, search.placeholder], ["alpha", "Search files and contents"]);
+    check("...and Files is lit again", docsBtn.getAttribute("aria-current"), "page");
+
+    // The same rule applies to the half you are already standing in. Pressing
+    // Files among the files used to reload the whole library and redraw the
+    // open document underneath you, which is a long way to go to arrive where
+    // you already were.
+    await window.eval(`window.__t.openDocument(${JSON.stringify(server.docPaths["alpha.md"] || "alpha.md")}, true)`);
+    await new Promise((r) => setTimeout(r, 500));
+    const standing = doc.getElementById("docContent").firstElementChild;
+    check("(a document is open to be left alone)", Boolean(standing), true);
+
+    await window.eval('window.__t.goToPlace("docs")');
+    await new Promise((r) => setTimeout(r, 500));
+    check("pressing Files while in the files does not redraw the document",
+      standing.isConnected, true);
+
+    // Typed, bookmarked or refreshed. The shell has to come back for this
+    // address the same as for the root, or /links is a 404 the moment it
+    // leaves this tab.
+    const shell = await get("/links");
+    check("/links is served as the app shell", shell.status, 200);
+    check("...the same page the root is served", shell.body.includes('id="placeLinksBtn"'), true);
+
+    // And the boot has to consult the address. This one is read off the source
+    // rather than driven: initialize() runs once, at load, and there is no way
+    // to make it run again at a different address inside a page that has
+    // already booted.
+    check("...and the boot looks at it before loading the library",
+      /viewFromLocation\(\) === "links"[\s\S]{0,240}?await refreshLinks\(\)/.test(appSource), true);
+
+    // Leave nothing behind for the sections after this one.
+    search.value = "";
+    await window.eval('window.__t.applySearch("")');
   }
 
   console.log("=== the favicon is a valid document ===");

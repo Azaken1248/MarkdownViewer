@@ -15,7 +15,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const preview = require("../lib/link-preview");
-const { LinkStore, canonicalKey, normalizeGroups, MAX_GROUPS_PER_LINK, MAX_GROUP_LENGTH } = require("../lib/links");
+const { LinkStore, canonicalKey, normalizeGroups, normalizeIcon, MAX_GROUPS_PER_LINK, MAX_GROUP_LENGTH } = require("../lib/links");
 const { makeClient } = require("./helpers/client");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
@@ -188,6 +188,90 @@ function refuses(label, url) {
     check("a runaway description is truncated", huge.description.length <= 600, true);
   }
 
+  console.log("=== the icon a page offers for itself ===");
+  {
+    const page = `<head>
+      <link rel="apple-touch-icon" sizes="180x180" href="/apple.png">
+      <link rel="icon" sizes="16x16" href="/f16.png">
+      <link rel="icon" sizes="32x32" href="/f32.png">
+      <link rel="shortcut icon" href="/old.ico">
+    </head>`;
+
+    // The card draws the icon at 18px, so the smallest thing at least 32 across
+    // is the right one to carry: big enough not to blur on a 2x screen, small
+    // enough not to store a 512px picture to make a thumbnail of.
+    check("the nearest icon at or above 32px comes first",
+      preview.iconCandidates(page, new URL("https://x.example/a/b")).slice(0, 2),
+      ["/f32.png", "/f16.png"]);
+    check("...and apple-touch-icon is a fallback, not the first choice",
+      preview.iconCandidates(page, new URL("https://x.example/")).indexOf("/apple.png") > 1, true);
+    check("a page that says nothing still has one address to try",
+      preview.iconCandidates("<head></head>", new URL("https://x.example/a/b")),
+      ["https://x.example/favicon.ico"]);
+    check("...and it is always tried, even when the page named others",
+      preview.iconCandidates(page, new URL("https://x.example/")).includes("https://x.example/favicon.ico"), true);
+
+    // The Content-Type is not worth trusting: .ico arrives as image/x-icon, as
+    // application/octet-stream and as text/plain from different servers, and a
+    // site with no icon usually answers its own HTML 404 page with a 200.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+    check("a PNG is recognised by its bytes", preview.sniffImageType(png), "image/png");
+    check("...and an .ico by its header",
+      preview.sniffImageType(Buffer.from([0, 0, 1, 0, 1, 0, 16, 16, 0, 0])), "image/x-icon");
+    check("...and an SVG by its root element",
+      preview.sniffImageType(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>')), "image/svg+xml");
+    check("an HTML 404 page served as an icon is not one",
+      preview.sniffImageType(Buffer.from("<!doctype html><html><body>Not found</body></html>")), "");
+    check("...and neither is nothing at all", preview.sniffImageType(Buffer.alloc(0)), "");
+
+    const serve = (body) => async () => ({ body });
+
+    check("an icon that answers becomes a data URI",
+      (await preview.fetchIcon(new URL("https://x.example/"), '<link rel="icon" href="/i.png">', serve(png)))
+        .startsWith("data:image/png;base64,"), true);
+
+    check("a page whose icon is not an image gets none",
+      await preview.fetchIcon(new URL("https://x.example/"), "<head></head>",
+        serve(Buffer.from("<!doctype html>404"))), "");
+
+    // The same gate the typed address goes through. An icon href is an address
+    // someone else chose too, and a page that points its icon at the metadata
+    // endpoint is the whole attack again with a smaller file at the end of it.
+    const asked = [];
+    const record = async (url) => { asked.push(url.href); return { body: png }; };
+    await preview.fetchIcon(new URL("https://x.example/"),
+      '<link rel="icon" href="http://169.254.169.254/latest/icon.png">', record);
+    check("an icon inside the private network is never fetched",
+      asked.includes("http://169.254.169.254/latest/icon.png"), false);
+    check("...and the fallback is all that was tried instead",
+      asked, ["https://x.example/favicon.ico"]);
+
+    // Some sites inline the icon in the page, which is one fetch nobody needs.
+    const inline = await preview.fetchIcon(new URL("https://x.example/"),
+      `<link rel="icon" href="data:image/png;base64,${png.toString("base64")}">`,
+      async () => { throw new Error("should not have been fetched"); });
+    check("an inlined icon is taken from the page", inline.startsWith("data:image/png;base64,"), true);
+
+    // A card is worth keeping whether or not its picture arrived, so nothing
+    // here is allowed to throw.
+    check("a site that will not answer costs no more than its icon",
+      await preview.fetchIcon(new URL("https://x.example/"), "<head></head>",
+        async () => { throw new Error("connection reset"); }), "");
+  }
+
+  console.log("=== what an icon is allowed to be, once stored ===");
+  {
+    const png = "data:image/png;base64,iVBORw0KGgoAAA==";
+    check("a data URI for an image is kept", normalizeIcon(png), png);
+    check("a URL is not an icon", normalizeIcon("https://x.example/favicon.ico"), "");
+    check("...and neither is a script", normalizeIcon("javascript:alert(1)"), "");
+    check("...nor a data URI for something that is not an image",
+      normalizeIcon("data:text/html;base64,PHNjcmlwdD4="), "");
+    check("an icon too big to carry is dropped",
+      normalizeIcon(`data:image/png;base64,${"A".repeat(200000)}`), "");
+    check("nothing at all is nothing", normalizeIcon(undefined), "");
+  }
+
   console.log("=== the store ===");
   {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-links-"));
@@ -224,7 +308,33 @@ function refuses(label, url) {
     await store.update(link.id, { title: "Express 5" });
     check("a card can be edited by hand", store.find(link.id).title, "Express 5");
 
-    console.log("=== groups ===");
+    console.log("=== an icon survives a refresh that could not read one ===");
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-icons-"));
+    const store = new LinkStore({ dataDir: dir });
+    await store.load();
+
+    const png = "data:image/png;base64,iVBORw0KGgoAAA==";
+    const link = await store.create({ url: "https://x.example/", title: "X", icon: png, fetched: true });
+    check("the icon is stored with the link", link.icon, png);
+
+    // A timeout on a re-read means the fetch did not manage one this time, not
+    // that the site has stopped having one. Stripping the picture off a card
+    // that was fine a minute ago is the wrong reading of an empty answer.
+    await store.update(link.id, { title: "X again", icon: "", fetched: true, fetchedAt: new Date().toISOString() });
+    check("a refresh that found none leaves the old one alone", store.find(link.id).icon, png);
+
+    const other = "data:image/png;base64,AAAAAAAA";
+    await store.update(link.id, { icon: other });
+    check("...but a real one replaces it", store.find(link.id).icon, other);
+
+    await store.update(link.id, { title: "renamed" });
+    check("editing the card by hand does not touch it", store.find(link.id).icon, other);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log("=== groups ===");
     // A comma-separated string is what the dialog sends; an array is what the
     // API takes. Both have to work, because both are used.
     check("a comma-separated string becomes a list",

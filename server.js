@@ -2753,7 +2753,14 @@ app.get("/s/:token", async (req, res, next) => {
   }
 });
 
-app.get(["/", "/index.html"], async (req, res, next) => {
+/* The app shell.
+ *
+ * /links is here beside the root because the saved links are a place in this
+ * app, not a mode it can be put into: typing the address, refreshing it or
+ * opening a bookmark has to land there. Documents get their own shell route
+ * further down, after the static files.
+ */
+app.get(["/", "/index.html", "/links"], async (req, res, next) => {
   try {
     const htmlTemplate = await getIndexTemplate();
     const embedMeta = buildEmbedMeta(req);

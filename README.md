@@ -552,11 +552,30 @@ checks all of that, because it is a promise a stylesheet can quietly break.
 
 ## Saved links
 
-The **Links** button in the explorer header opens a section for the pages you
-keep going back to — a framework's docs, an RFC, a GitHub repo. Paste an
-address and it is saved as a card carrying the page's own title and
-description, with an optional note of your own. Clicking the card opens the
-site.
+The library has two halves, and the **Files / Links** switch in the header is
+both the way between them and the thing that says which one you are in. Links
+is for the pages you keep going back to — a framework's docs, an RFC, a GitHub
+repo. Paste an address and it is saved as a card carrying the page's own icon,
+title and description, with an optional note of your own. Clicking the card
+opens the site.
+
+### Getting there
+
+The links live at **`/links`**. That is a real address, so it can be
+bookmarked, pasted to someone, typed, refreshed, and — the part that matters
+most day to day — walked back out of with the browser's own Back button. They
+used to be a mode you turned on from a sixth icon in the sidebar drawer, which
+made them somewhere you had to already know about rather than somewhere you
+could see, and made leaving them the one navigation in this app the browser
+could not undo.
+
+Since nothing in this pane is a document, nothing that acts on one is on screen
+with it: New, Edit, Upload and the folder controls step aside, and the header
+search filters the links instead of searching the library. Each half keeps its
+own query, so a trip to the links does not wipe a document search you were in
+the middle of.
+
+### What a card knows
 
 The page is read **once**, when you add it. The card renders from that
 snapshot, so opening this section makes no request to any of the sites in it —
@@ -569,6 +588,33 @@ ordinary `<title>` and `<meta name="description">`, then the hostname — so a
 page with no metadata still produces a usable card. A page that cannot be read
 at all is still saved, with the hostname as its title and a marker saying so:
 the link is the point, and the metadata is a convenience.
+
+### Icons
+
+The site's own favicon is fetched by the **server**, at the same moment and
+through the same guards as the rest of the metadata, and stored with the link
+as a data URI. The browser never goes and gets it: forty cards pointing at
+forty `https://` images would be forty requests announcing to forty sites that
+someone opened this page, which is the thing the snapshot exists to avoid.
+
+`<link rel="icon">` is preferred, then `shortcut icon`, then
+`apple-touch-icon`, and `/favicon.ico` is always tried last so a page whose
+head says nothing still gets one. Within a `rel`, the smallest icon at least
+32px across wins — big enough not to blur on a 2x screen, small enough that a
+512px PNG is not stored to draw an 18px thumbnail of. What comes back is
+identified **by its bytes**, not by its `Content-Type`: `.ico` is served as
+half a dozen different types by different servers, and a site with no icon
+usually answers its own HTML 404 page with a `200`. Anything that is not a
+PNG, JPEG, GIF, WebP, ICO or SVG is dropped, as is anything over 96KB. A site
+with no usable icon gets the first letter of its hostname instead.
+
+A re-read that comes back without an icon leaves the one already on the card
+alone: an empty answer means the fetch did not manage it this time, not that
+the site has stopped having one.
+
+Links saved before this existed have no icon. **Get icons** appears in the
+links toolbar while any are missing, counts them, re-reads exactly those pages
+one at a time, and goes away for good once there is nothing left to fetch.
 
 ### Grouping
 
@@ -636,6 +682,12 @@ So `lib/link-preview.js` checks the **address**, not the hostname:
   no authentication and no referrer.
 - **The response is capped** at 1MB and 8 seconds, and anything that is not
   HTML is dropped unread.
+- **The icon goes through all of it too.** An icon `href` is an address the
+  page chose, so it is resolved and then put through the same gate as the
+  address that was typed — a page pointing its icon at `169.254.169.254` is
+  the same attack with a smaller file at the end of it. It gets its own,
+  tighter budget: 96KB, 4 seconds a hop, three candidates and six seconds
+  overall, because a card is worth keeping whether or not its picture arrived.
 
 On top of that, adding is limited to 20 fetches a minute per account, so an
 account cannot use the endpoint as a general-purpose proxy.
@@ -738,6 +790,10 @@ you ask for a document and replaced when the app simply lands on one, so the
 address always names what is on screen without inventing history entries nobody
 navigated to. Old `#name.md` links still work and quietly become real addresses
 when they land.
+
+The saved links are the other place with an address of its own, `/links`, and
+it works the same way: pushed when you go there, followed when the browser goes
+back, and served as the app shell when it is typed or refreshed.
 
 **Back** as far as the library closes the document, because an address saying
 nothing is open while a document is still on screen is how a refresh lands

@@ -53,7 +53,7 @@
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
   <script src="/js/theme-boot.js?v=64"></script>
-  <link rel="stylesheet" href="/css/app.css?v=65" />
+  <link rel="stylesheet" href="/css/app.css?v=66" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -75,7 +75,7 @@
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
   <script src="/js/notebook-runtime.js?v=64" defer></script>
-  <script src="/js/app.js?v=65" defer></script>
+  <script src="/js/app.js?v=66" defer></script>
 </head>
 
 <body>
@@ -90,6 +90,22 @@
         <span class="brand-mark" aria-hidden="true"><i class="ph ph-book-open-text"></i></span>
         <span class="brand-text">AzaDocs</span>
       </a>
+
+      <!-- The two halves of the library, side by side and always on screen.
+           Real hrefs, so they can be copied, opened in a new tab and used by
+           the browser's own history; the click handler keeps the ordinary case
+           in-page. aria-current is what says which one you are standing in. -->
+      <nav class="place-switch" aria-label="Library sections">
+        <a class="place-btn" id="placeDocsBtn" href="/" aria-current="page">
+          <i class="ph ph-files" aria-hidden="true"></i>
+          <span>Files</span>
+        </a>
+
+        <a class="place-btn" id="placeLinksBtn" href="/links">
+          <i class="ph ph-link-simple" aria-hidden="true"></i>
+          <span>Links</span>
+        </a>
+      </nav>
 
       <label class="search-wrap" for="searchInput">
         <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
@@ -146,7 +162,7 @@
           </div>
         </div>
 
-        <div class="account-wrap">
+        <div class="account-wrap" id="uploadWrap">
           <button class="icon-btn" id="uploadTrigger" aria-label="Upload" title="Upload" aria-haspopup="menu"
             aria-expanded="false">
             <i class="ph ph-upload-simple" aria-hidden="true"></i>
@@ -217,11 +233,6 @@
             <button class="icon-btn icon-btn-sm" id="toggleArchiveBtn" aria-label="Show archive" aria-pressed="false"
               title="Archive">
               <i class="ph ph-archive-box" aria-hidden="true"></i>
-            </button>
-
-            <button class="icon-btn icon-btn-sm" id="toggleLinksBtn" aria-label="Show saved links"
-              aria-pressed="false" title="Saved links">
-              <i class="ph ph-link-simple" aria-hidden="true"></i>
             </button>
 
             <button class="icon-btn icon-btn-sm" id="refreshDocs" aria-label="Refresh file list" title="Refresh">
@@ -426,17 +437,23 @@
         <!-- Saved links. Its own pane rather than a kind of document: a link is
              not a file, has no content to render, and belongs to no folder. -->
         <section id="linksPane" class="links-pane" hidden>
+          <!-- No filter box of its own: in this pane the header search filters
+               links, so a second one beside it would be two controls for one
+               job. -->
           <div class="links-toolbar">
             <button class="btn btn-primary" id="addLinkBtn" type="button">
               <i class="ph ph-plus" aria-hidden="true"></i>
               <span>Add link</span>
             </button>
 
-            <div class="links-filter">
-              <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
-              <input id="linkSearchInput" type="search" placeholder="Filter links" autocomplete="off"
-                aria-label="Filter saved links" />
-            </div>
+            <!-- Only for links saved before the icons existed. It counts what
+                 is missing, re-reads exactly those pages, and then goes away
+                 for good. -->
+            <button class="btn btn-sm" id="linkIconsBtn" type="button" hidden
+              title="Fetch the missing site icons">
+              <i class="ph ph-image-square" aria-hidden="true"></i>
+              <span>Get icons</span>
+            </button>
 
             <span class="links-count" id="linksCount" aria-live="polite"></span>
           </div>
