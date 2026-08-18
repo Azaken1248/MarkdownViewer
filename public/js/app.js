@@ -51,12 +51,12 @@ const elements = {
   sidebar: document.getElementById("sidebar"),
   emptyState: document.getElementById("emptyState"),
   docContent: document.getElementById("docContent"),
+  viewer: document.querySelector(".viewer"),
   placeDocsBtn: document.getElementById("placeDocsBtn"),
   placeLinksBtn: document.getElementById("placeLinksBtn"),
   uploadWrap: document.getElementById("uploadWrap"),
   viewerToolbar: document.getElementById("viewerToolbar"),
   linksPane: document.getElementById("linksPane"),
-  linkIconsBtn: document.getElementById("linkIconsBtn"),
   linksGrid: document.getElementById("linksGrid"),
   linksEmpty: document.getElementById("linksEmpty"),
   linksCount: document.getElementById("linksCount"),
@@ -195,6 +195,7 @@ const state = {
   },
 
   links: [],
+  linksLoaded: false,
   linkGroups: [],
   linkFilter: "",
 
@@ -203,6 +204,15 @@ const state = {
   // back on the way in, so a trip to the links does not wipe the document
   // search you were in the middle of.
   searchQueries: { docs: "", links: "" },
+
+  // The line under the sidebar title belongs to the query above, so it is put
+  // down and picked up with it. Recomputing it on the way back would mean
+  // running the search again, which is the round trip this is here to avoid.
+  searchMetas: { docs: "", links: "" },
+
+  // Where the document was scrolled to when the links pane went over it. The
+  // article is display:none while it is hidden, so the browser forgets.
+  viewerScrollTop: 0,
   // null = every link; "" = only the ungrouped ones; otherwise a group name.
   linkGroupFilter: null,
   linkIconsRunning: false,
@@ -3315,16 +3325,31 @@ function syncModeUI() {
   }
 }
 
+/* Warm the content cache so the offline search fallback can match on document
+ * text rather than only on titles.
+ *
+ * A few at a time, not all of them. A browser opens six connections to a host;
+ * asking for a hundred and ten documents at once fills all six for as long as
+ * it takes to move five megabytes, and every request made in the meantime —
+ * opening a document, the saved links, a search — waits behind them. This is
+ * the least urgent work the app does and it was crowding out all the rest.
+ */
+const HYDRATE_CONCURRENCY = 3;
+
 async function hydrateSearchContent() {
-  await Promise.all(
-    state.docs.map(async (doc) => {
+  const queue = state.docs.map((doc) => doc.file);
+
+  const worker = async () => {
+    for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
       try {
-        await loadDocContent(doc.file);
+        await loadDocContent(file);
       } catch (error) {
         console.error(error);
       }
-    })
-  );
+    }
+  };
+
+  await Promise.all(Array.from({ length: HYDRATE_CONCURRENCY }, worker));
 }
 
 async function hydrateDeletedSearchContent() {
@@ -4407,10 +4432,35 @@ function renderLinkCard(link) {
   return card;
 }
 
+/* The links pane while its one request is in the air.
+ *
+ * Written into the empty state rather than as a pane of its own: "no links
+ * yet" and "not loaded yet" occupy the same space and must never both be on
+ * screen, which two elements would eventually manage.
+ */
+function showLinksLoading() {
+  if (!elements.linksGrid) {
+    return;
+  }
+
+  elements.linksGrid.innerHTML = "";
+  elements.linksEmpty.hidden = false;
+  elements.linksEmpty.classList.add("is-loading");
+  elements.linksEmpty.querySelector("i").className = "ph ph-circle-notch";
+  elements.linksEmpty.querySelector("h3").textContent = "Loading links";
+  elements.linksEmpty.querySelector("p").textContent = "Fetching the pages you have saved.";
+  elements.linksCount.textContent = "";
+  setMeta("Loading links...");
+}
+
 function renderLinks() {
   if (!elements.linksGrid) {
     return;
   }
+
+  // Whatever the answer turns out to be, the wait is over.
+  elements.linksEmpty.classList.remove("is-loading");
+  elements.linksEmpty.querySelector("i").className = "ph ph-link-simple";
 
   const visible = matchingLinks();
 
@@ -4447,16 +4497,6 @@ function renderLinks() {
   // to count them rather than leaving a document tally under a list of URLs.
   if (state.viewMode === "links") {
     setMeta(tally);
-  }
-
-  if (elements.linkIconsBtn) {
-    const missing = state.links.filter((link) => !link.icon).length;
-    elements.linkIconsBtn.hidden = missing === 0 || !can("doc:write");
-    // The backfill re-renders after every page it reads, so the button has to
-    // stay pressed for the whole run rather than coming back to life between
-    // two of them and letting a second run start on top of the first.
-    elements.linkIconsBtn.disabled = state.linkIconsRunning;
-    elements.linkIconsBtn.querySelector("span").textContent = `Get icons (${missing})`;
   }
 
   renderGroupChips();
@@ -4499,6 +4539,7 @@ async function refreshLinks() {
   const payload = await requestJson("/api/links");
   state.links = Array.isArray(payload.links) ? payload.links : [];
   state.linkGroups = Array.isArray(payload.groups) ? payload.groups : [];
+  state.linksLoaded = true;
 
   // A chip that no longer exists must not stay selected, or the grid is empty
   // with no way to see why.
@@ -4508,6 +4549,14 @@ async function refreshLinks() {
   }
 
   renderLinks();
+
+  // Anything saved before the icons existed has never had one fetched. Go and
+  // get those once, in the background, rather than leaving a grid of letters
+  // and a button nobody has a reason to look for. Every answer is written back
+  // — including "this site has none" — so it happens once and never again.
+  if (can("doc:write") && linksNeedingIcons().length > 0) {
+    void backfillLinkIcons();
+  }
 }
 
 function openLinkModal() {
@@ -4585,7 +4634,19 @@ async function submitLink() {
   }
 }
 
-/* Icons for links saved before there were any.
+/* Which links have never had an icon fetched at all.
+ *
+ * Missing, not empty. An empty string is a settled answer — the page was read
+ * and offered nothing usable — and asking again on every visit would be a
+ * request per card per visit, which is the thing the stored snapshot exists to
+ * avoid. Undefined only happens for links saved before icons existed, so this
+ * list empties permanently after one run.
+ */
+function linksNeedingIcons() {
+  return state.links.filter((link) => link.icon === undefined).map((link) => link.id);
+}
+
+/* Go and get them.
  *
  * One page at a time rather than all at once: this is the same fetch adding a
  * link makes, and the server allows twenty of those a minute. Serially, a list
@@ -4593,16 +4654,16 @@ async function submitLink() {
  * the limit and the ones at the back would come home empty for no reason.
  *
  * Each answer is kept as it arrives, so stopping halfway — an error, a closed
- * tab — still leaves every icon it did manage.
+ * tab — still leaves every icon it did manage, and leaves the ones it never
+ * reached still marked as never asked.
  */
 async function backfillLinkIcons() {
-  const pending = state.links.filter((link) => !link.icon).map((link) => link.id);
+  const pending = linksNeedingIcons();
   if (pending.length === 0 || state.linkIconsRunning) {
     return;
   }
 
   state.linkIconsRunning = true;
-  elements.linkIconsBtn.disabled = true;
   setStatus(`Reading ${pending.length} page${pending.length === 1 ? "" : "s"} for icons...`, "neutral");
 
   let found = 0;
@@ -4629,12 +4690,11 @@ async function backfillLinkIcons() {
 
     setStatus(found === 0
       ? "None of those pages offered an icon."
-      : `Found ${found} icon${found === 1 ? "" : "s"}.`, found === 0 ? "warning" : "success");
+      : `Found ${found} icon${found === 1 ? "" : "s"}.`, found === 0 ? "neutral" : "success");
   } catch (error) {
     notify(error.message, "error");
   } finally {
     state.linkIconsRunning = false;
-    // Whatever happened, the button reflects what is still missing.
     renderLinks();
   }
 }
@@ -8569,6 +8629,7 @@ async function initialize() {
     if (viewFromLocation() === "links") {
       state.viewMode = "links";
       syncModeUI();
+      showLinksLoading();
       await refreshLinks();
       return;
     }
@@ -9038,6 +9099,33 @@ elements.refreshDocs.addEventListener("click", async () => {
   }
 });
 
+/* A switch that has to wait says so.
+ *
+ * Only ever set around a real round trip: a move that is already in memory
+ * finishes in the same frame, and a spinner that appears and vanishes inside
+ * one frame is a flicker rather than an answer.
+ */
+function setPlaceBusy(place, busy) {
+  const button = place === "links" ? elements.placeLinksBtn : elements.placeDocsBtn;
+  if (!button) {
+    return;
+  }
+
+  const icon = button.querySelector("i");
+  if (icon) {
+    icon.className = busy
+      ? "ph ph-circle-notch"
+      : place === "links" ? "ph ph-link-simple" : "ph ph-files";
+  }
+
+  button.classList.toggle("is-busy", busy);
+  if (busy) {
+    button.setAttribute("aria-busy", "true");
+  } else {
+    button.removeAttribute("aria-busy");
+  }
+}
+
 /* The one search box goes with you, and each place keeps its own query.
  *
  * Called on the way through, while both the place being left and the place
@@ -9048,8 +9136,64 @@ function stashSearchQuery(from, to) {
   const slot = (mode) => (mode === "links" ? "links" : "docs");
 
   state.searchQueries[slot(from)] = elements.searchInput.value;
+  state.searchMetas[slot(from)] = elements.searchMeta.textContent;
+
   elements.searchInput.value = state.searchQueries[slot(to)] || "";
   syncSearchInputState(elements.searchInput.value);
+}
+
+/* The sidebar tree, redrawn from the list already in memory.
+ *
+ * No search runs: state.filteredDocs is exactly what it was before the links
+ * pane went over it, and the line under the title was put down together with
+ * the query it belongs to.
+ */
+function restoreDocumentList() {
+  renderDocList();
+  setMeta(state.searchMetas.docs || `${state.filteredDocs.length} document(s)`);
+}
+
+/* Put the document view back exactly as the links pane found it.
+ *
+ * Nothing was torn down to show the links: syncModeUI only takes the "visible"
+ * class off the article, so the rendered markdown, its diagrams and its
+ * pan-zoom instances are all still in the DOM. Coming back is that class going
+ * back on, the tree redrawn, and the scroll put back — no request, and nothing
+ * rendered twice.
+ *
+ * It used to refetch the library, re-read every document to warm the search
+ * cache, and force-reload and re-render the open one, which is a long way to
+ * go to arrive where you already were.
+ */
+function restoreDocumentView() {
+  restoreDocumentList();
+
+  if (!state.activeFile || !elements.docContent.innerHTML) {
+    showNoDocumentOpen();
+    return;
+  }
+
+  elements.docContent.classList.add("visible");
+  elements.emptyState.style.display = "none";
+  updateActiveDocUI(state.activeFile);
+
+  if (elements.viewer) {
+    elements.viewer.scrollTop = state.viewerScrollTop;
+  }
+}
+
+/* Undo a move that could not be made.
+ *
+ * Its own function because everything it restores was read before the await
+ * that failed. A rollback that read the state it is undoing would be putting
+ * back whatever the failed move had already written.
+ */
+function rollbackPlace(mode, query, message) {
+  state.viewMode = mode;
+  elements.searchInput.value = query;
+  syncSearchInputState(query);
+  syncModeUI();
+  setStatus(message, "error");
 }
 
 /* Move to one of the two halves of the library.
@@ -9083,6 +9227,12 @@ async function goToPlace(place, { push = true, openFile = null } = {}) {
   const previousMode = state.viewMode;
   const previousQuery = elements.searchInput.value;
 
+  // Read before syncModeUI hides the article: once it is display:none the
+  // browser has forgotten where it was scrolled to.
+  if (previousMode !== "links" && elements.viewer) {
+    state.viewerScrollTop = elements.viewer.scrollTop;
+  }
+
   try {
     state.viewMode = target;
     stashSearchQuery(previousMode, target);
@@ -9095,26 +9245,68 @@ async function goToPlace(place, { push = true, openFile = null } = {}) {
       }
 
       state.linkFilter = elements.searchInput.value;
-      await refreshLinks();
+
+      // Already in memory: render and be done. Only a first visit waits, and
+      // only a first visit says it is waiting.
+      if (state.linksLoaded) {
+        renderLinks();
+        return true;
+      }
+
+      setPlaceBusy("links", true);
+      showLinksLoading();
+
+      try {
+        await refreshLinks();
+      } finally {
+        setPlaceBusy("links", false);
+      }
+
       return true;
     }
 
     if (push) {
-      // Back where the document was. The library reopens it below, so the
-      // address and the screen agree from the first frame rather than after
-      // the round trip.
+      // Back where the document was. The address and the screen agree from
+      // the first frame rather than after a round trip.
       showDocumentInUrl(state.activeFile);
     }
 
-    await refreshDocs({ openFile, preserveSearch: true });
+    // The library is already loaded and the document is still rendered under
+    // the links pane, so there is nothing to fetch and nothing to draw twice.
+    //
+    // Only from the links. The recycle bin and the archive replaced the tree
+    // and the filtered list with deleted entries, so coming back from one of
+    // those is a real reload however much is in memory.
+    const wanted = openFile || state.activeFile;
+    if (previousMode === "links" && state.docs.length > 0) {
+      // Unless Back landed on a different document than the one that was open,
+      // which is one request at most and usually none — its content is already
+      // in the cache.
+      if (wanted && wanted !== state.activeFile && state.docs.some((doc) => doc.file === wanted)) {
+        restoreDocumentList();
+        await openDocument(wanted, false);
+        return true;
+      }
+
+      restoreDocumentView();
+      return true;
+    }
+
+    // Nothing loaded: this tab booted straight into /links, or came back to a
+    // document by name. That is a real wait, so it looks like one.
+    setPlaceBusy("docs", true);
+    setMeta("Loading documents...");
+    showLoadingState("Opening the library", "Fetching your documents.");
+
+    try {
+      await refreshDocs({ openFile, preserveSearch: true });
+    } finally {
+      setPlaceBusy("docs", false);
+    }
+
     return true;
   } catch (error) {
-    // Rollback to values captured before the await.
-    state.viewMode = previousMode;
-    elements.searchInput.value = previousQuery;
-    syncSearchInputState(previousQuery);
-    syncModeUI();
-    setStatus(error.message, "error");
+    rollbackPlace(previousMode, previousQuery, error.message);
     return false;
   }
 }
@@ -9192,10 +9384,6 @@ function bindPlaceButton(button, place) {
 
 bindPlaceButton(elements.placeDocsBtn, "docs");
 bindPlaceButton(elements.placeLinksBtn, "links");
-
-elements.linkIconsBtn.addEventListener("click", () => {
-  void backfillLinkIcons();
-});
 
 elements.addLinkBtn.addEventListener("click", openLinkModal);
 elements.closeLinkModalBtn.addEventListener("click", closeLinkModal);

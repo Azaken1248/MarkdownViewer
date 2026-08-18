@@ -575,6 +575,15 @@ search filters the links instead of searching the library. Each half keeps its
 own query, so a trip to the links does not wipe a document search you were in
 the middle of.
 
+Switching back is **free**. Nothing is torn down to show the links — the
+article is hidden, not emptied — so coming back is that one class going back
+on, the tree redrawn from the list already in memory, and the scroll put back.
+No request, and nothing rendered twice. Only a genuinely cold start waits: a
+tab that opened straight at `/links` and then pressed Files, or Back landing
+on a document other than the one that was open. When a switch does have to
+wait, it says so — the switcher's own glyph becomes the spinner, and the pane
+being entered shows what it is waiting for.
+
 ### What a card knows
 
 The page is read **once**, when you add it. The card renders from that
@@ -612,9 +621,17 @@ A re-read that comes back without an icon leaves the one already on the card
 alone: an empty answer means the fetch did not manage it this time, not that
 the site has stopped having one.
 
-Links saved before this existed have no icon. **Get icons** appears in the
-links toolbar while any are missing, counts them, re-reads exactly those pages
-one at a time, and goes away for good once there is nothing left to fetch.
+Links saved before this existed have never had an icon fetched at all. Those
+are collected once, in the background, the first time the pane is opened —
+one page at a time, because this is the same fetch adding a link makes and the
+server allows twenty of those a minute. Every answer is written back, including
+"this site has none", so it happens once and never again.
+
+That distinction is the whole mechanism: a **missing** icon means nobody has
+ever looked, an **empty** one means the page was read and offered nothing
+usable. Treating the two the same would turn a one-off migration into a request
+per card per visit, which is what the stored snapshot exists to avoid. To try a
+site again after that, **Re-read** on the card.
 
 ### Grouping
 
@@ -682,6 +699,13 @@ So `lib/link-preview.js` checks the **address**, not the hostname:
   no authentication and no referrer.
 - **The response is capped** at 1MB and 8 seconds, and anything that is not
   HTML is dropped unread.
+- **Addresses are read the way a browser reads them**, which is a correctness
+  matter and a security one: an icon `href` is resolved against `<base href>`
+  when the page has one, and an attribute's value runs to its *matching* quote
+  rather than to whichever kind comes first. Reading "up to either quote"
+  truncates `content="Python's docs"` at the apostrophe — and truncates an
+  inline `data:image/svg+xml` icon at its first `xmlns='...'`, which is
+  exactly how Cloudflare Access writes one.
 - **The icon goes through all of it too.** An icon `href` is an address the
   page chose, so it is resolved and then put through the same gate as the
   address that was typed — a page pointing its icon at `169.254.169.254` is

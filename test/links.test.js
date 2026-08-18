@@ -183,6 +183,12 @@ function refuses(label, url) {
     check("a page with no metadata still gets a usable title", bare.title, "bare.example");
     check("...and an empty description rather than a made-up one", bare.description, "");
 
+    const apostrophe = preview.extractMetadata(
+      `<meta property="og:description" content="Python's own documentation">`,
+      new URL("https://x.example/"));
+    check("a description with an apostrophe in it arrives whole",
+      apostrophe.description, "Python's own documentation");
+
     const huge = preview.extractMetadata(
       `<meta property="og:description" content="${"x".repeat(5000)}">`, new URL("https://x.example/"));
     check("a runaway description is truncated", huge.description.length <= 600, true);
@@ -202,9 +208,37 @@ function refuses(label, url) {
     // enough not to store a 512px picture to make a thumbnail of.
     check("the nearest icon at or above 32px comes first",
       preview.iconCandidates(page, new URL("https://x.example/a/b")).slice(0, 2),
-      ["/f32.png", "/f16.png"]);
+      ["https://x.example/f32.png", "https://x.example/f16.png"]);
     check("...and apple-touch-icon is a fallback, not the first choice",
-      preview.iconCandidates(page, new URL("https://x.example/")).indexOf("/apple.png") > 1, true);
+      preview.iconCandidates(page, new URL("https://x.example/"))
+        .indexOf("https://x.example/apple.png") > 1, true);
+    check("...and a relative href is resolved against the page it came from",
+      preview.iconCandidates('<link rel="icon" href="img/f.png">', new URL("https://x.example/docs/")),
+      ["https://x.example/docs/img/f.png", "https://x.example/favicon.ico"]);
+
+    // A browser resolves relative addresses against <base href>, so anything
+    // reading a page's addresses has to as well. Grafana is the case that
+    // found this: it serves `<base href="/">` and then writes its icon as
+    // `public/build/img/fav32.png` with no leading slash, which against the
+    // page is a 404 and against the base is the icon.
+    check("<base href> is what a relative icon is relative to",
+      preview.iconCandidates(
+        '<base href="/"><link rel="icon" href="public/img/fav32.png">',
+        new URL("https://x.example/dashboards/abc123"))[0],
+      "https://x.example/public/img/fav32.png");
+    check("...and /favicon.ico still comes off the origin, not the base",
+      preview.iconCandidates('<base href="/app/sub/">', new URL("https://x.example/app/sub/page")),
+      ["https://x.example/favicon.ico"]);
+
+    // An apostrophe inside a double-quoted attribute used to end the value:
+    // reading it as "up to either kind of quote" truncated Cloudflare Access's
+    // inline SVG icon at its first xmlns='...' and left a fragment behind.
+    check("an apostrophe inside a double-quoted attribute does not end it",
+      preview.attributeValue(`<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='ns' /%3E">`, "href"),
+      "data:image/svg+xml,%3Csvg xmlns='ns' /%3E");
+    check("...and a double quote inside a single-quoted one does not either",
+      preview.attributeValue(`<meta content='He said "no"' property='og:title'>`, "content"),
+      'He said "no"');
     check("a page that says nothing still has one address to try",
       preview.iconCandidates("<head></head>", new URL("https://x.example/a/b")),
       ["https://x.example/favicon.ico"]);
@@ -247,10 +281,25 @@ function refuses(label, url) {
       asked, ["https://x.example/favicon.ico"]);
 
     // Some sites inline the icon in the page, which is one fetch nobody needs.
+    const never = async () => { throw new Error("should not have been fetched"); };
     const inline = await preview.fetchIcon(new URL("https://x.example/"),
-      `<link rel="icon" href="data:image/png;base64,${png.toString("base64")}">`,
-      async () => { throw new Error("should not have been fetched"); });
+      `<link rel="icon" href="data:image/png;base64,${png.toString("base64")}">`, never);
     check("an inlined icon is taken from the page", inline.startsWith("data:image/png;base64,"), true);
+
+    // ;base64 is the spelling everyone expects, but the plain percent-encoded
+    // form is legal and shorter for text — which is why Cloudflare Access uses
+    // it for its SVG. Reading only one spelling meant a page that had already
+    // handed over its icon still ended up with none.
+    const encoded = await preview.fetchIcon(new URL("https://x.example/"),
+      `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="ns"><rect/></svg>')}">`,
+      never);
+    check("...and one written percent-encoded rather than base64 is too",
+      encoded, "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="ns"><rect/></svg>').toString("base64"));
+
+    check("a data: URI that is not an image is not taken",
+      await preview.fetchIcon(new URL("https://x.example/"),
+        '<link rel="icon" href="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">',
+        async () => ({ body: Buffer.alloc(0) })), "");
 
     // A card is worth keeping whether or not its picture arrived, so nothing
     // here is allowed to throw.

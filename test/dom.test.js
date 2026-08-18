@@ -414,7 +414,8 @@ async function run(server) {
         undoPageEdit, redoPageEdit, commitPageHistory, pageHistory,
         insertIntoTextarea, replaceInTextarea, toggleMarkdownWrap, applySourceShortcut,
         documentPath, fileFromLocation, showDocumentInUrl,
-        goToPlace, viewFromLocation, showLinksInUrl, applySearch, backfillLinkIcons,
+        goToPlace, viewFromLocation, showLinksInUrl, applySearch, linksNeedingIcons,
+        restoreDocumentView, stashSearchQuery, setPlaceBusy, hydrateSearchContent,
         showEmptyState, showLoadingState, updateActiveDocUI,
         openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
       };
@@ -1120,12 +1121,18 @@ async function run(server) {
     check("...and no broken image beside it",
       cards[0].querySelectorAll(".link-card-head img").length, 0);
 
-    // Links saved before the icons existed are the reason this exists at all.
-    // It counts what is missing, and it is the only thing that ever refetches
-    // a page nobody asked about.
-    const iconsBtn = doc.getElementById("linkIconsBtn");
-    check("the backfill is offered while icons are missing", iconsBtn.hidden, false);
-    check("...and says how many", iconsBtn.querySelector("span").textContent, "Get icons (2)");
+    // Which links get fetched once, quietly, when the pane opens. Missing and
+    // empty are different answers: missing means nobody has ever looked, empty
+    // means the page was read and had none. Confusing the two turns a one-off
+    // migration into a request per card per visit.
+    check("a link saved before icons existed has never been asked",
+      window.eval("window.__t.linksNeedingIcons()"), ["a1", "c3"]);
+
+    window.eval('window.__t.state.links = [{ id: "n", url: "https://x.example/", icon: "" }];');
+    check("...and one that was asked and had none is not asked again",
+      window.eval("window.__t.linksNeedingIcons()"), []);
+    window.eval(`window.__t.state.links = ${JSON.stringify(links)};`);
+    window.eval("window.__t.renderLinks();");
 
     check("the count is shown", doc.getElementById("linksCount").textContent, "3 links");
     check("the empty state is hidden while there are cards",
@@ -2691,7 +2698,13 @@ async function run(server) {
     check("...and the other is a real address, not a button",
       [linksBtn.tagName, linksBtn.getAttribute("href")], ["A", "/links"]);
 
-    // A document search in progress, to prove the trip does not eat it.
+    // A document open and a document search in progress, so the trip can be
+    // shown to eat neither.
+    await window.eval(`window.__t.openDocument(${JSON.stringify(server.docPaths["alpha.md"] || "alpha.md")}, true)`);
+    await new Promise((r) => setTimeout(r, 500));
+    const rendered = doc.getElementById("docContent").firstElementChild;
+    check("(a document is open before the trip)", Boolean(rendered), true);
+
     search.value = "alpha";
     await window.eval('window.__t.applySearch("alpha")');
 
@@ -2745,6 +2758,15 @@ async function run(server) {
     await waitUntil(() => where() === "docs", 8000);
     check("back comes out of the links", where(), "docs");
     check("...and the pane goes with it", doc.getElementById("linksPane").hidden, true);
+
+    // The article is only hidden while the links are up, never torn down, so
+    // coming back is that class going back on. It used to refetch the library,
+    // re-read every document to warm the search cache, and force-reload and
+    // re-render the open one — which is what made the switch take seconds.
+    check("...and the document is the one that was already rendered",
+      rendered.isConnected, true);
+    check("...shown again rather than rebuilt",
+      doc.getElementById("docContent").classList.contains("visible"), true);
     check("...and the document search is handed back",
       [search.value, search.placeholder], ["alpha", "Search files and contents"]);
     check("...and Files is lit again", docsBtn.getAttribute("aria-current"), "page");
@@ -2763,6 +2785,38 @@ async function run(server) {
     check("pressing Files while in the files does not redraw the document",
       standing.isConnected, true);
 
+    // A switch that waits on the network has to look like it is waiting.
+    window.eval('window.__t.setPlaceBusy("links", true)');
+    check("a switch that has to wait says so", linksBtn.getAttribute("aria-busy"), "true");
+    check("...with the glyph itself as the spinner",
+      linksBtn.querySelector("i").className, "ph ph-circle-notch");
+
+    window.eval('window.__t.setPlaceBusy("links", false)');
+    check("...and gives the icon back when it lands",
+      [linksBtn.hasAttribute("aria-busy"), linksBtn.querySelector("i").className],
+      [false, "ph ph-link-simple"]);
+
+    // Only around a real round trip: a move already in memory finishes in the
+    // same frame, and a spinner inside one frame is a flicker, not an answer.
+    check("a move that is already in memory never raises one",
+      /if \(state\.linksLoaded\) \{[\s\S]{0,80}?renderLinks\(\);[\s\S]{0,40}?return true;/.test(appSource), true);
+
+    // The free path back is only free from the links. The recycle bin and the
+    // archive put deleted entries in the tree and in the filtered list, so
+    // pressing Files from one of those has to reload however much is in
+    // memory — restoring what the links pane left would put deleted documents
+    // under a heading that says Files.
+    await window.eval('window.__t.switchViewMode("recycle")');
+    await waitUntil(() => where() === "recycle", 8000);
+    check("(the recycle bin is open)", where(), "recycle");
+
+    await window.eval('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs" && window.eval("window.__t.state.filteredDocs.length") > 0, 8000);
+    check("pressing Files from the recycle bin reloads the library", where(), "docs");
+    check("...with live documents in the list, not deleted ones",
+      window.eval(`window.__t.state.filteredDocs.every((entry) =>
+        window.__t.state.docs.some((doc) => doc.file === entry.file))`), true);
+
     // Typed, bookmarked or refreshed. The shell has to come back for this
     // address the same as for the root, or /links is a 404 the moment it
     // leaves this tab.
@@ -2780,6 +2834,46 @@ async function run(server) {
     // Leave nothing behind for the sections after this one.
     search.value = "";
     await window.eval('window.__t.applySearch("")');
+  }
+
+  console.log("=== warming the search cache does not take the whole connection ===");
+  {
+    // The offline search fallback matches on document text, so every document
+    // is read once in the background after the library loads. It used to ask
+    // for all of them at once: a browser opens six connections to a host, so a
+    // library of any size filled all six for as long as it took to move every
+    // byte of it, and everything asked for in the meantime — opening a
+    // document, the saved links, a search — waited behind that.
+    let inFlight = 0;
+    let peak = 0;
+    const realFetch = window.fetch;
+
+    window.fetch = async (url, options = {}) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      try {
+        return await realFetch(url, options);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+
+    try {
+      window.eval("window.__t.state.contentCache.clear();");
+      await window.eval("window.__t.hydrateSearchContent()");
+    } finally {
+      // Restoring a stub this block installed itself; nothing else runs
+      // against this window in between.
+      // eslint-disable-next-line require-atomic-updates
+      window.fetch = realFetch;
+    }
+
+    check("a few at a time, not all of them at once", peak <= 3, true);
+    check("...and there was enough of a library for that to mean something",
+      window.eval("window.__t.state.docs.length") > 10, true);
+    check("...and every document still ends up in the cache",
+      window.eval("window.__t.state.docs.every((doc) => window.__t.state.contentCache.has(doc.file))"),
+      true);
   }
 
   console.log("=== the favicon is a valid document ===");

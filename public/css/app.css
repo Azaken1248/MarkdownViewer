@@ -363,6 +363,26 @@ kbd {
   outline-offset: 1px;
 }
 
+/* The glyph itself becomes the spinner while a switch is waiting on the
+   network. A separate element would either shove the label sideways as it
+   appeared or need a slot kept empty for it the rest of the time. */
+.place-btn.is-busy i {
+  animation: share-spin 1.1s linear infinite;
+}
+
+/* The same wait, in the pane being entered. */
+.links-empty.is-loading i {
+  animation: share-spin 1.1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .place-btn.is-busy i,
+  .links-empty.is-loading i {
+    animation: none;
+  }
+}
+
 .header-actions {
   display: flex;
   align-items: center;
