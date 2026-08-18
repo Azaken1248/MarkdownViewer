@@ -198,10 +198,53 @@ console.log("=== things that sit above each other line up ===");
 
   // The edit bar hangs directly under the viewer toolbar. Two rows of controls
   // a few pixels out of step read as a mistake rather than as a hierarchy.
-  check("the edit bar starts where the toolbar above it does",
-    pad(".page-edit-bar", "left"), pad(".viewer-toolbar", "left"));
-  check("...and still does on a phone-sized screen",
-    /\.page-edit-bar \{\s*gap: 8px;\s*padding: 6px 16px;/.test(rules), true);
+  // What a rule actually resolves to at a given width, rather than what one
+  // block happens to say. There are two separate max-width: 920px blocks in
+  // this file, so "the mobile block" is not one thing and reading only the
+  // first of them makes a check that passes on two undefineds.
+  const sourcesAt = (width) => {
+    const sources = [rules];
+
+    if (width <= 920) {
+      for (let from = 0; ;) {
+        const block = mediaBlock("@media (max-width: 920px)", from);
+        if (!block) break;
+        sources.push(block);
+        from = css.indexOf(block, from) + block.length;
+      }
+    }
+
+    if (width <= 640) {
+      sources.push(phone);
+    }
+
+    return sources;
+  };
+
+  const padAt = (selector, side, width) =>
+    sourcesAt(width).reduce((won, source) => pad(selector, side, source) || won, undefined);
+
+  for (const width of [1200, 920, 640, 360]) {
+    check(`the edit bar starts where the toolbar does, at ${width}px`,
+      padAt(".page-edit-bar", "left", width), padAt(".viewer-toolbar", "left", width));
+  }
+
+  // The bar is top-heavy — a 24px crumb box over an 11px meta line, which
+  // carries almost no leading of its own — so equal padding leaves the ink
+  // sitting low against the border. And on a narrow window the actions wrap
+  // underneath, where eight pixels is not a margin but a gap to fall through.
+  for (const width of [1200, 920, 640, 360]) {
+    const px = (side) => Number(String(padAt(".viewer-toolbar", side, width)).replace("px", ""));
+    check(`the toolbar leaves more room below than above, at ${width}px`, px("bottom") > px("top"), true);
+  }
+
+  // And when the actions do wrap, the gap between the rows has to be at least
+  // what separates the first row from the top edge — otherwise the second row
+  // reads as something stuck to the bottom of the first rather than as a row.
+  const rowGap = Number((((mobile.match(/\.viewer-toolbar \{([^}]*)\}/) || [])[1] || "")
+    .match(/row-gap:\s*(\d+)px/) || [])[1] || 0);
+  check("a wrapped toolbar row is spaced at least like the edge above it",
+    rowGap >= Number(String(padAt(".viewer-toolbar", "top", 920)).replace("px", "")), true);
   check("the editor's tab strip lines up with its toolbar",
     pad(".editor-tabs", "left"), pad(".editor-toolbar", "left"));
 

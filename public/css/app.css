@@ -1078,6 +1078,18 @@ kbd {
   background: var(--canvas);
 }
 
+/* Deliberately not symmetric.
+ *
+ * The breadcrumb at the top of this bar is a 24px box around 13px text, so it
+ * brings about five pixels of its own air. The meta line under it is 11px text
+ * in a 16.5px line box and brings under three — and a descender in "updated"
+ * spends most of that. With equal padding the ink ends up sitting three or
+ * four pixels low, hard against the border, which is what it looked like.
+ *
+ * The extra also lands where a second row goes: on a narrow window the actions
+ * wrap under the heading, and eight pixels under a row of buttons is not a
+ * margin, it is a gap they have fallen through.
+ */
 .viewer-toolbar {
   position: sticky;
   top: 0;
@@ -1085,7 +1097,9 @@ kbd {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 9px 16px 12px;
+  /* What the bar measures with no file open, and so the fallback the edit bar
+     sticks below before it has measured anything. */
   min-height: 45px;
   background: var(--canvas);
   border-bottom: 1px solid var(--border);
@@ -3745,7 +3759,7 @@ body.page-editing #dockEdit {
 
   .viewer-toolbar {
     flex-wrap: wrap;
-    row-gap: 8px;
+    row-gap: 10px;
   }
 
   /* Scoped to the app shell, because three things wear .markdown-body and only
@@ -3880,7 +3894,12 @@ body.page-editing #dockEdit {
 
   .viewer-toolbar {
     gap: 8px;
-    padding: 8px 12px;
+    padding: 9px 12px 12px;
+  }
+
+  /* Still the toolbar's gutter, which just moved in. */
+  .page-edit-bar {
+    padding: 6px 12px;
   }
 
   .app-shell .markdown-body {
