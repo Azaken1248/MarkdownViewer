@@ -76,6 +76,28 @@ async function run(server) {
     check("a reasonable password is accepted", passwords.validatePassword("kettle-drum-fourteen").ok, true);
   }
 
+  console.log("=== the shell is checked for, every time ===");
+  {
+    // Every asset in the page is addressed with a ?v= that changes when the
+    // file does, which is the whole cache story here — and it only works if the
+    // page naming them is itself fresh. The shell went out with an ETag and no
+    // Cache-Control at all, which leaves it to heuristics: a browser, or
+    // anything in front of it, is entitled to hold the old page and go on
+    // asking for the old stylesheet by its old address for as long as it likes.
+    for (const address of ["/", "/links", `/${ALPHA}`]) {
+      const page = await anon.get(address);
+      check(`${address} is served as the app shell`, page.status, 200);
+      check(`...and says to revalidate before reusing it`,
+        /no-cache/.test(String(page.headers["cache-control"] || "")), true);
+    }
+
+    // no-cache means "keep it, but ask" — not "do not keep it" — so the usual
+    // answer is still a 304 rather than the page again.
+    const first = await anon.get("/");
+    const again = await anon.get("/", { "If-None-Match": first.headers.etag });
+    check("...which is a cheap question when nothing has changed", again.status, 304);
+  }
+
   console.log("=== the library is private by default ===");
   {
     check("an anonymous session is not authenticated", (await anon.get("/api/session")).body.authenticated, false);

@@ -238,6 +238,14 @@ console.log("=== things that sit above each other line up ===");
     check(`the toolbar leaves more room below than above, at ${width}px`, px("bottom") > px("top"), true);
   }
 
+  // The breadcrumb and the meta line under it are the two halves of one
+  // heading. A single pixel between them read as one squashed block rather than
+  // as a name with a note under it, which was most of why the bar looked
+  // crushed against its own bottom border however much padding went under it.
+  const metaTop = Number(((((rules.match(/\.viewer-meta \{([^}]*)\}/) || [])[1] || "")
+    .match(/margin:\s*(\d+)px/) || [])[1]) || 0);
+  check("the meta line is held off the breadcrumb above it", metaTop >= 2, true);
+
   // And when the actions do wrap, the gap between the rows has to be at least
   // what separates the first row from the top edge — otherwise the second row
   // reads as something stuck to the bottom of the first rather than as a row.

@@ -2926,7 +2926,7 @@ app.get(["/", "/index.html", "/links"], async (req, res, next) => {
     const embedMeta = buildEmbedMeta(req);
     const renderedHtml = renderIndexWithEmbedMeta(htmlTemplate, embedMeta);
 
-    res.type("html").send(renderedHtml);
+    res.set("Cache-Control", "no-cache").type("html").send(renderedHtml);
   } catch (error) {
     next(error);
   }
@@ -4236,7 +4236,9 @@ app.use(async (req, res, next) => {
 
   try {
     const htmlTemplate = await getIndexTemplate();
-    res.type("html").send(renderIndexWithEmbedMeta(htmlTemplate, buildEmbedMeta(req)));
+    res.set("Cache-Control", "no-cache")
+      .type("html")
+      .send(renderIndexWithEmbedMeta(htmlTemplate, buildEmbedMeta(req)));
   } catch (error) {
     next(error);
   }

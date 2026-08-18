@@ -1097,10 +1097,11 @@ kbd {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 16px 12px;
-  /* What the bar measures with no file open, and so the fallback the edit bar
-     sticks below before it has measured anything. */
-  min-height: 45px;
+  padding: 10px 16px 14px;
+  /* What the bar measures with no file open — the meta line under the
+     breadcrumb is empty then and takes no room — and so the fallback the edit
+     bar sticks below before it has measured anything. */
+  min-height: 48px;
   background: var(--canvas);
   border-bottom: 1px solid var(--border);
 }
@@ -1183,7 +1184,11 @@ button.crumb:focus-visible {
 }
 
 .viewer-meta {
-  margin: 1px 0 0 28px;
+  /* Three, not one. This line and the breadcrumb above it are the two halves
+     of one heading, and a single pixel between them reads as one squashed
+     block rather than as a name with a note under it — which is most of why
+     the bar looked crushed against its own bottom border. */
+  margin: 3px 0 0 28px;
   font-size: 11px;
   color: var(--fg-subtle);
   white-space: nowrap;
@@ -2989,7 +2994,7 @@ button.crumb:focus-visible {
   position: sticky;
   /* Directly under the viewer toolbar, whose height depends on what is in it
      and is measured rather than guessed. */
-  top: var(--page-edit-top, 45px);
+  top: var(--page-edit-top, 48px);
   z-index: 19;
   display: flex;
   align-items: center;
@@ -3894,7 +3899,7 @@ body.page-editing #dockEdit {
 
   .viewer-toolbar {
     gap: 8px;
-    padding: 9px 12px 12px;
+    padding: 10px 12px 14px;
   }
 
   /* Still the toolbar's gutter, which just moved in. */
