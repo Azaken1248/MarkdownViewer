@@ -60,6 +60,11 @@
   --code-meta: #e5bd94;
 
   /* Geometry */
+  /* Named because two things need to agree about it: the layout column and
+     the match navigator, which floats clear of the tree so it sits over the
+     document it is searching. */
+  --sidebar-width: 280px;
+
   --radius-lg: 12px;
   --radius-md: 6px;
   --radius-sm: 4px;
@@ -76,6 +81,11 @@
 
   --tree-row-height: 26px;
   --tree-indent: 14px;
+  /* The sidebar's left gutter. The title and the meta line were on 12px and
+     the rows on 8px, so every filename sat four pixels inside the heading
+     above it. Named because the guide line down a folder's children has to
+     land on the middle of its icon, which is this plus half of one. */
+  --tree-gutter: 12px;
 
   --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -486,7 +496,7 @@ kbd {
   border-radius: 0 0 var(--radius-md) var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-overlay);
-  max-height: min(52vh, 420px);
+  max-height: min(52dvh, 420px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -631,7 +641,7 @@ kbd {
 
 .layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -767,7 +777,7 @@ kbd {
   align-items: center;
   gap: 6px;
   height: var(--tree-row-height);
-  padding: 0 8px 0 calc(8px + var(--depth, 0) * var(--tree-indent));
+  padding: 0 8px 0 calc(var(--tree-gutter) + var(--depth, 0) * var(--tree-indent));
   border: none;
   background: transparent;
   color: var(--fg);
@@ -989,7 +999,8 @@ kbd {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(15px + var(--depth, 0) * var(--tree-indent));
+  /* +7: half of the 16px icon the row starts with, less half the line. */
+  left: calc(var(--tree-gutter) + 7px + var(--depth, 0) * var(--tree-indent));
   width: 1px;
   background: var(--border);
 }
@@ -1179,7 +1190,19 @@ button.crumb:focus-visible {
 
 /* Match navigation */
 
+/* Moved to <body> at start-up, so that a transformed or scrolling shell cannot
+   drag it around. Which means it has to place itself: as a static child of a
+   body whose only other child is a full-height shell, and which hides its own
+   overflow, it was laid out below the fold and clipped away — present, correct
+   and invisible, at every screen size.
+
+   Bottom left, because the toasts own the bottom right and these two are the
+   only things that float over the document. */
 .match-nav {
+  position: fixed;
+  left: calc(var(--sidebar-width) + 16px);
+  bottom: 16px;
+  z-index: 120;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1187,6 +1210,7 @@ button.crumb:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
+  box-shadow: var(--shadow-overlay);
   flex-shrink: 0;
 }
 
@@ -2068,7 +2092,7 @@ button.crumb:focus-visible {
   /* Low enough not to distort a genuinely small diagram; max-width (set inline
      from the viewBox) is what stops small ones being blown up. */
   min-height: 120px;
-  max-height: 78vh;
+  max-height: 78dvh;
 }
 
 /* svg-pan-zoom writes width/height inline; these match so the SVG fills the
@@ -2091,7 +2115,7 @@ button.crumb:focus-visible {
 .editor-preview .mermaid-block {
   padding: 8px;
   min-height: 160px;
-  max-height: 52vh;
+  max-height: 52dvh;
 }
 
 .mermaid-fallback-code {
@@ -2668,6 +2692,11 @@ button.crumb:focus-visible {
 .modal {
   position: fixed;
   inset: 0;
+  /* The dynamic viewport, not the largest one. A fixed element sized by inset
+     alone gets the tallest the viewport can be — the size it is with the URL
+     bar rolled away — so on a phone that is scrolled up, the bottom of a
+     dialog, which is where its buttons are, sat below the visible area. */
+  height: 100dvh;
   z-index: 100;
   display: none;
   align-items: center;
@@ -2699,7 +2728,12 @@ button.crumb:focus-visible {
 .dialog {
   position: relative;
   width: min(640px, 100%);
-  max-height: calc(100vh - 32px);
+  /* Of the modal's content box, so this follows whatever padding the modal has
+     at this size rather than restating it. The old `100vh - 32px` was the
+     desktop padding written out by hand, and on a phone — where the modal
+     pads 48px at the top and 12px at the bottom — it let the dialog stand
+     28px taller than the room it had. */
+  max-height: 100%;
   overflow-y: auto;
   display: grid;
   gap: 16px;
@@ -2773,7 +2807,7 @@ button.crumb:focus-visible {
 .folder-picker-list {
   display: grid;
   gap: 2px;
-  max-height: min(40vh, 320px);
+  max-height: min(40dvh, 320px);
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border);
@@ -2850,7 +2884,8 @@ button.crumb:focus-visible {
   display: flex;
   flex-direction: column;
   width: min(1400px, 100%);
-  height: calc(100vh - 32px);
+  /* Same reasoning as .dialog: the modal owns the padding. */
+  height: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -2933,6 +2968,9 @@ button.crumb:focus-visible {
    space.
    -------------------------------------------------------------------------- */
 
+/* Horizontal padding matches .viewer-toolbar at every size: this bar sits
+   directly under it, and two rows of controls a few pixels out of step with
+   each other read as a mistake rather than as a hierarchy. */
 .page-edit-bar {
   position: sticky;
   /* Directly under the viewer toolbar, whose height depends on what is in it
@@ -2943,7 +2981,7 @@ button.crumb:focus-visible {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 6px 12px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -3319,7 +3357,8 @@ body.page-editing #dockEdit {
 .editor-tabs {
   display: none;
   gap: 4px;
-  padding: 6px 8px;
+  /* Lined up with .editor-toolbar directly above it. */
+  padding: 6px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
@@ -3532,27 +3571,15 @@ body.page-editing #dockEdit {
 @media (max-width: 920px) {
   .app-header {
     gap: 10px;
-    padding: 8px 12px;
+    /* max(), not the inset alone: on a phone without a notch the inset is 0
+       and the header would lose its padding entirely. */
+    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
   }
 
   /* Search wraps to its own row, so the actions need to be pushed right
      explicitly — without this they clump against the brand. */
   .header-actions {
     margin-left: auto;
-  }
-
-  .brand-text {
-    display: none;
-  }
-
-  /* The switcher stays — it is the only way to the links on a phone, where the
-     dock has no room for it — but its labels go the way the brand's did. */
-  .place-btn span {
-    display: none;
-  }
-
-  .place-btn {
-    padding: 0 9px;
   }
 
   /* Search drops to its own full-width row under the brand and actions. */
@@ -3563,13 +3590,16 @@ body.page-editing #dockEdit {
     margin-left: 0;
   }
 
-  .header-actions .icon-btn,
+  /* Upload and Edit have a dock button each, so the header copies go.
+     Everything else stays.
+
+     This used to hide every icon button in the header and restore one
+     #lockToggleBtn, which is not in the markup and never has been — so on a
+     phone there was no theme switch, no account menu, and therefore no way to
+     sign out, change a password or reach the account list at all. */
+  .header-actions #uploadWrap,
   .header-actions #editDocBtn {
     display: none;
-  }
-
-  .header-actions #lockToggleBtn {
-    display: grid;
   }
 
   .supersearch-panel {
@@ -3590,11 +3620,14 @@ body.page-editing #dockEdit {
   /* The drawer is absolute inside .layout rather than fixed to the viewport, so
      it spans exactly the content area and leaves the header — and its toggle
      button — visible and tappable. No header-height constant involved. */
+  /* padding rather than a left offset: the drawer still starts at the screen
+     edge, so its backdrop reaches under the notch, but nothing readable does. */
   .sidebar {
     position: absolute;
     top: 0;
     bottom: 0;
     left: 0;
+    padding-left: env(safe-area-inset-left);
     z-index: 60;
     width: min(85vw, 340px);
     height: auto;
@@ -3674,6 +3707,10 @@ body.page-editing #dockEdit {
     visibility: visible;
   }
 
+  /* Both sizes, not just the small one. The sidebar's buttons grew for touch
+     and the header's did not, which left the two most-tapped controls on the
+     screen smaller than the ones inside a drawer. */
+  .icon-btn,
   .icon-btn.icon-btn-sm {
     width: 36px;
     height: 36px;
@@ -3711,8 +3748,12 @@ body.page-editing #dockEdit {
     row-gap: 8px;
   }
 
-  .markdown-body {
-    padding: 16px 16px 96px;
+  /* Scoped to the app shell, because three things wear .markdown-body and only
+     one of them has a floating dock over it. A shared document is a page on its
+     own; the editor's preview pane lives in a modal, and was being given 96px
+     of empty space under the last line of a preview. */
+  .app-shell .markdown-body {
+    padding: 16px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
   }
 
   .empty-state {
@@ -3746,8 +3787,8 @@ body.page-editing #dockEdit {
 
   .mobile-dock {
     position: fixed;
-    left: 8px;
-    right: 8px;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
     bottom: calc(8px + env(safe-area-inset-bottom));
     z-index: 45;
     display: grid;
@@ -3771,11 +3812,182 @@ body.page-editing #dockEdit {
     transform: translateY(8px);
   }
 
+  /* Stacked above the dock, and above the match navigator that sits above the
+     dock, so the three things that float over the bottom of a phone screen
+     each have their own band instead of landing on each other. */
+  .match-nav {
+    left: max(8px, env(safe-area-inset-left));
+    bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+
   .toast-region {
-    left: 8px;
-    right: 8px;
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(116px + env(safe-area-inset-bottom));
     max-width: none;
+  }
+
+  /* The pane the links live in gets what the viewer beside it already had:
+     the same side padding, and enough room at the bottom that the last row of
+     cards is not underneath the floating dock. */
+  .links-pane {
+    padding: 16px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
+  }
+}
+
+/* A phone, rather than a narrow window.
+ *
+ * Everything above this is one step from the desktop layout: a drawer instead
+ * of a column, a dock instead of a header full of buttons. That step used to
+ * be the only one, so a 360px phone was laid out exactly like a 900px tablet —
+ * words disappeared from buttons that had ample room for them, and the
+ * generous padding a mouse-sized window wants stayed at a size where it is a
+ * quarter of the screen.
+ */
+@media (max-width: 640px) {
+  .app-header {
+    gap: 8px;
+    padding: 8px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
+  }
+
+  /* The wordmark, the section names and the New label all go at once. Each is
+     beside an icon that says the same thing, and together they are about a
+     third of the header's width. */
+  .brand-text,
+  .place-btn span,
+  .btn-compact span {
+    display: none;
+  }
+
+  .place-btn {
+    padding: 0 9px;
+  }
+
+  .supersearch-panel {
+    margin: 0 10px;
+  }
+
+  /* A dialog opened near the top of a small screen, not a third of the way
+     down it. */
+  .modal:not(#editorModal) {
+    padding-top: 24px;
+  }
+
+  .dialog {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .viewer-toolbar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .app-shell .markdown-body {
+    padding: 14px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
+  }
+
+  .empty-state {
+    padding: 40px 14px;
+  }
+
+  .links-pane {
+    gap: 12px;
+    padding: 12px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
+  }
+
+  /* One column deliberately rather than by arithmetic: at this width the
+     260px minimum would fit exactly once anyway, and saying so keeps the gap
+     between cards from being the only thing that decides it. */
+  .links-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .link-card {
+    padding: 12px;
+  }
+
+  .editor-toolbar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .editor-tabs {
+    padding: 6px 12px;
+  }
+
+  /* The editor is the whole screen at this width, so a heading saying which
+     dialog it is costs a row of a toolbar that already needs three. */
+  .editor-toolbar h2 {
+    display: none;
+  }
+}
+
+/* A phone on its side is about 390px tall, and a third of that was chrome.
+ *
+ * Height only, so it also catches a short desktop window — and so it catches
+ * the landscape phones that are wider than 920px and therefore never see the
+ * mobile tier at all.
+ */
+@media (max-height: 560px) {
+
+  /* Centred, a dialog taller than the screen is cropped at both ends. Anchored
+     to the top it is cropped at one, and scrolls. */
+  .modal:not(#editorModal) {
+    align-items: flex-start;
+    padding-top: 12px;
+  }
+
+  .supersearch-panel {
+    max-height: min(60dvh, 220px);
+  }
+
+  .folder-picker-list {
+    max-height: min(40dvh, 160px);
+  }
+
+  .markdown-body .mermaid-block {
+    max-height: 60dvh;
+  }
+}
+
+/* The same screen, where there is also a dock to make room for. */
+@media (max-height: 560px) and (max-width: 920px) {
+  .dock-btn {
+    min-height: 38px;
+  }
+
+  /* The icons carry it. Five labels are worth about a tenth of the screen
+     here, which is a line and a half of the document. */
+  .dock-btn span {
+    display: none;
+  }
+
+  .app-shell .markdown-body,
+  .links-pane {
+    padding-bottom: 72px;
+  }
+
+  .match-nav {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .toast-region {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+}
+
+/* A control that is also the way between the two halves of the library should
+   not be the smallest thing on a touch screen.
+
+   30, not 32: the switch is this plus its own 2px of padding and 1px border a
+   side, and the icon buttons beside it are 36 on touch — as they are 32 on a
+   pointer, which is what the 26px default adds up to. The two have to keep
+   agreeing or the header has a step in it. */
+@media (hover: none) {
+  .place-btn {
+    height: 30px;
   }
 }
 
@@ -4211,7 +4423,7 @@ body.page-editing #dockEdit {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 16px;
+  padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -4249,11 +4461,27 @@ body.page-editing #dockEdit {
      explorer; a lone document has no such excuse. */
   max-width: 900px;
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
 }
 
 .share-body {
   padding: 24px 0 32px;
+}
+
+/* The same two steps the app's own document pane takes, kept here because the
+   base rule above is further down the file than the app's tiers are and would
+   otherwise win. Top and bottom only: the side padding is .share-main's, and
+   doubling it would give a phone a 32px margin either side. */
+@media (max-width: 920px) {
+  .share-body {
+    padding: 16px 0 32px;
+  }
+}
+
+@media (max-width: 640px) {
+  .share-body {
+    padding: 14px 0 32px;
+  }
 }
 
 .share-loading,
@@ -4309,11 +4537,6 @@ body.page-editing #dockEdit {
 @media (max-width: 920px) {
   .users-actions {
     justify-content: flex-start;
-  }
-
-  .account-menu {
-    right: auto;
-    left: 0;
   }
 }
 
@@ -4569,7 +4792,7 @@ body.page-editing #dockEdit {
 @media (max-width: 920px) {
   .page-edit-bar {
     gap: 8px;
-    padding: 6px 8px;
+    padding: 6px 16px;
   }
 
   .visual-toolbar {

@@ -870,6 +870,52 @@ answers in JSON.
 
 ---
 
+## Small screens
+
+Three width steps and one height step, each for a reason.
+
+| From | To | What changes |
+| --- | --- | --- |
+| — | 1160px | The editor's two panes become one with a tab strip |
+| — | 920px | The explorer becomes a drawer, a dock replaces the header's document buttons, rows become 44px |
+| — | 640px | Labels give way to the icons beside them, padding tightens, cards go to one column |
+| — | 560px tall | Dialogs anchor to the top and scroll, the dock drops its labels, panels stop being measured in fractions of the screen |
+
+That middle step used to be the only one, which meant a 360px phone was laid
+out exactly like a 900px tablet. Words disappeared from buttons that had ample
+room for them, and padding sized for a mouse stayed at a width where it was a
+quarter of the screen. The height step exists because a phone on its side is
+about 390px tall and a third of that was chrome — and because several phones
+are wider than 920px in landscape, so a width breakpoint alone never sees them.
+
+**What is on screen at each size is a separate question from what fits.**
+Upload and Edit lose their header buttons on a phone because the dock carries
+both. The theme switch and the account menu do not, and they are not anywhere
+else — so they stay. (They did not: the rule hid every icon button in the
+header and restored one `#lockToggleBtn`, which is not in the markup and never
+has been. A phone had no way to change theme, sign out, change a password or
+reach the account list.)
+
+**Things that sit above each other line up.** The edit bar takes its horizontal
+padding from the toolbar it hangs under; the editor's tab strip takes its from
+the toolbar above it; the file tree, the sidebar heading and the meta line
+share one `--tree-gutter`, which the guide line down a folder's children is
+also measured from. The switcher's height and the icon buttons beside it are
+the same seat height on a pointer and on touch, so the header has no step in it.
+
+**Under the system furniture.** The pages ask for `viewport-fit=cover`, which
+is what makes `env(safe-area-inset-*)` resolve to anything but zero — without
+it the dock's careful offset was adding nothing and it sat under the home
+indicator. Every use pairs the inset with a real value (`max(12px, env(...))`),
+because on a phone with no notch the inset *is* zero, and padding that is only
+an inset is no padding at all.
+
+**Heights are `dvh`, not `vh`.** `vh` is the viewport at its tallest — the
+size it is with the URL bar rolled away — so a panel capped at `52vh` was more
+than half the screen whenever the bar was showing. Dialogs go further and take
+their maximum height from the modal's own content box, so they follow whatever
+padding it has at that size rather than restating the desktop value by hand.
+
 ## What loads, and when
 
 Opening a document by address takes three round trips — the session, the
@@ -1093,7 +1139,7 @@ network: the suite is deterministic on a runner with no egress.
 | Suite | What it covers |
 | --- | --- |
 | `layout` | Shell geometry, which element owns each scroll, the z-index scale |
-| `mobile` | Drawer behaviour, touch target sizes, the dark palette |
+| `mobile` | Breakpoints, spacing, touch target sizes, safe areas, the dark palette |
 | `theme` | Light and dark tokens, contrast ratios (including syntax highlighting), target sizes, the print stylesheet |
 | `diagrams` | Mermaid sizing maths and the per-theme diagram palettes |
 | `loading` | What the first paint is allowed to fetch, the lazy libraries and their SRI hashes, the loading state |
