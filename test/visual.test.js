@@ -654,5 +654,40 @@ console.log("=== a new step needs an id nothing is using ===");
     DM.nextNodeId({ nodes: [{ id: "Start" }, { id: "End" }] }), "n1");
 }
 
+console.log("=== the previews are actually on the screen ===");
+{
+  // Both source previews and the builder's diagram carry .markdown-body, and
+  // they carry it deliberately: it is what makes an equation, a code block or a
+  // diagram inside them look the way it will look once it is in the document.
+  //
+  // What comes with it is the article's own rules, which are about the article.
+  // `.markdown-body { display: none }` waits for a document to be loaded, and
+  // `.app-shell .markdown-body` adds the phone tier's 96px of dock clearance at
+  // the bottom of the page. Applied to a preview a few hundred pixels up inside
+  // that page, the first makes it invisible and the second hangs an empty
+  // half-screen under it — so this is computed from the real stylesheet rather
+  // than asserted as a string, because the bug is in the cascade and a regex
+  // cannot see a cascade.
+  const stylesheet = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+  const page = new JSDOM(`<style>${stylesheet}</style>
+    <div class="app-shell"><article class="markdown-body doc-editing visible">
+      <div class="ve-embed">
+        <div class="ve-embed-preview markdown-body" id="source">x</div>
+        <div class="ve-diagram-preview markdown-body" id="diagram">y</div>
+        <div class="ve-embed-preview markdown-body" id="blank"></div>
+      </div>
+    </article></div>`);
+
+  const styleOf = (id) => page.window.getComputedStyle(page.window.document.getElementById(id));
+
+  check("a source preview is visible", styleOf("source").display, "block");
+  check("...and so is the diagram the builder draws", styleOf("diagram").display, "block");
+  check("a source preview keeps its own padding, not the document's",
+    styleOf("source").paddingBottom, "10px");
+  check("...and so does the diagram", styleOf("diagram").paddingBottom, "10px");
+  check("a preview of markdown that renders to nothing stays hidden",
+    styleOf("blank").display, "none");
+}
+
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

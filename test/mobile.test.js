@@ -302,6 +302,16 @@ console.log("=== the diagram builder fits a phone ===");
   check("a label field can be narrower than its own default width",
     /\.ve-diagram-text \{[\s\S]{0,120}?min-width: 0;/.test(rules), true);
 
+  // .app-shell .markdown-body hangs 96px of clearance under the document for
+  // the floating dock. A preview inside that document carries .markdown-body
+  // too — deliberately, for its typography and its diagram sizing — and would
+  // otherwise carry half an empty screen under it as well. The rule that puts
+  // the preview's own padding back therefore has to be nested at least as deep
+  // as the one it is overriding, which is the part a later edit can quietly
+  // undo by shortening the selector.
+  check("the document's dock clearance does not reach the previews inside it",
+    /\.app-shell \.markdown-body \.ve-embed-preview,\s*\n\.app-shell \.markdown-body \.ve-diagram-preview \{/.test(rules), true);
+
   // Mermaid sizes an SVG to the diagram, not to the box it was put in.
   check("the drawn diagram is held to the width of the panel",
     /\.ve-diagram-preview svg \{[\s\S]{0,80}?max-width: 100%;/.test(rules), true);

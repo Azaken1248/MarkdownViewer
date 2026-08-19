@@ -3371,10 +3371,6 @@ body.page-editing #dockEdit {
   overflow-x: auto;
 }
 
-.ve-embed-preview:empty {
-  display: none;
-}
-
 .ve-embed-done {
   display: inline-flex;
   align-items: center;
@@ -3444,6 +3440,26 @@ body.page-editing #dockEdit {
 .ve-diagram-preview svg {
   max-width: 100%;
   height: auto;
+}
+
+/* Both previews carry .markdown-body, and they carry it on purpose: it is what
+   gives an equation, a code block or a diagram inside them the same type and
+   the same sizing they will have once they are in the document. What comes with
+   it is the article's own two rules — display: none until a document is loaded,
+   and, on a phone, the 96px of clearance the floating dock needs at the bottom
+   of the page. Neither is about a preview a few hundred pixels up inside that
+   page. The first of them wins on source order over a bare class and the second
+   wins on specificity, so the only override that holds is one nested deeper
+   than `.app-shell .markdown-body` is. */
+.app-shell .markdown-body .ve-embed-preview,
+.app-shell .markdown-body .ve-diagram-preview {
+  display: block;
+  padding: 10px;
+}
+
+/* A preview of markdown that renders to nothing is a stripe of empty canvas. */
+.app-shell .markdown-body .ve-embed-preview:empty {
+  display: none;
 }
 
 .ve-diagram-panel {
