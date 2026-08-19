@@ -21,6 +21,11 @@ global.window = globalThis;
 require(path.join(ROOT, "js", "visual-editor.js"));
 const VE = globalThis.VisualEditor;
 
+// The flowchart builder's model, loaded the same way and tested here for the
+// same reason: it is the other half of "edit this without retyping it".
+require(path.join(ROOT, "js", "diagram-model.js"));
+const DM = globalThis.DiagramModel;
+
 let failures = 0;
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -462,6 +467,191 @@ console.log("=== every task marker in the real library round-trips ===");
 
   console.log(`  (${tasks} tasks in ${files.length} documents)`);
   check("writing a task's own state back is a no-op", broken.slice(0, 5), []);
+}
+
+console.log("=== the flowchart builder reads a diagram ===");
+{
+  // Same shape of question as the block splitter above, one level down: a
+  // diagram is opened in the builder only if the builder can account for all of
+  // it, so what matters is what it accepts and — just as much — what it will
+  // not touch.
+  const shapes = {
+    "an arrow": ["flowchart TD\n  A[Start] --> B[End]\n", 2, 1],
+    "a chain": ["graph LR\n  A-->B-->C\n", 3, 2],
+    "graph, not flowchart": ["graph TD\n  A --> B\n", 2, 1],
+    "a header with no direction": ["flowchart\n  A --> B\n", 2, 1],
+    "labels in pipes": ["flowchart TD\n  A -->|yes| B\n", 2, 1],
+    "a label inside the arrow": ["flowchart TD\n  A-- maybe -->B\n", 2, 1],
+    "dotted and thick links": ["flowchart TD\n  A-.->B\n  A==>C\n", 3, 2],
+    "a long arrow": ["flowchart TD\n  A ----> B\n", 2, 1],
+    "a long line": ["flowchart TD\n  A ---- B\n", 2, 1],
+    "every bracket shape": ["flowchart TD\n  A([a]) --> B[[b]] --> C[(c)] --> D((d)) --> E{{e}} --> F{f} --> G>g]\n", 7, 6],
+    "slanted shapes": ["flowchart TD\n  A[/a/] --> B[\\b\\] --> C[/c\\] --> D[\\d/]\n", 4, 3],
+    "hyphenated ids": ["flowchart TD\n  my-node[Text] --> other-node\n", 2, 1],
+    "quoted text with a bracket in it": ["flowchart TD\n  A[\"a [weird] label\"] --> B\n", 2, 1],
+    "trailing semicolons": ["flowchart TD\n  A --> B;\n  B --> C;\n", 3, 2],
+    "blank lines": ["flowchart TD\n\n  A --> B\n\n", 2, 1]
+  };
+
+  for (const [label, [source, nodes, edges]] of Object.entries(shapes)) {
+    const model = DM.parseFlowchart(source);
+    check(label, model.ok && [model.nodes.length, model.edges.length], [nodes, edges]);
+  }
+
+  // The one that "A-->B" gets wrong if a hyphen is simply allowed in an id:
+  // the id swallows the arrow and the diagram becomes a single node.
+  check("an arrow with no spaces around it is still an arrow",
+    DM.parseFlowchart("flowchart TD\n  A-->B\n").nodes.map((node) => node.id), ["A", "B"]);
+  check("...and so is a long one",
+    DM.parseFlowchart("flowchart TD\n  A----B\n").nodes.map((node) => node.id), ["A", "B"]);
+
+  // A node mentioned before it is declared still ends up with what it declares.
+  check("a declaration anywhere names the node",
+    DM.parseFlowchart("flowchart TD\n  A --> B\n  B[End]\n").nodes[1],
+    { id: "B", shape: "rect", text: "End" });
+  check("a node never declared is named after itself",
+    DM.parseFlowchart("flowchart TD\n  A --> B\n").nodes[1],
+    { id: "B", shape: "rect", text: "B" });
+}
+
+console.log("=== ...and refuses the ones it cannot account for ===");
+{
+  // The refusals are the safety property. Opening one of these in a builder
+  // that models only steps and arrows would write back a diagram with the rest
+  // of it deleted, which is the failure mode this whole file exists to prevent.
+  const refused = {
+    "a subgraph": "flowchart TD\n  subgraph one\n  A --> B\n  end\n",
+    "a class definition": "flowchart TD\n  A --> B\n  classDef big fill:#f00\n",
+    "a style": "flowchart TD\n  A --> B\n  style A fill:#f00\n",
+    "a link style": "flowchart TD\n  A --> B\n  linkStyle 0 stroke:#f00\n",
+    "a click handler": "flowchart TD\n  A --> B\n  click A href \"https://x\"\n",
+    "a comment": "flowchart TD\n  %% a note\n  A --> B\n",
+    "a fan-out": "flowchart TD\n  A --> B & C\n",
+    "a circle-ended link": "flowchart TD\n  A --o B\n",
+    "a sequence diagram": "sequenceDiagram\n  A->>B: hi\n",
+    "a pie chart": "pie title x\n  \"a\" : 1\n",
+    "a state diagram": "stateDiagram-v2\n  [*] --> Still\n",
+    "nothing at all": ""
+  };
+
+  for (const [label, source] of Object.entries(refused)) {
+    const model = DM.parseFlowchart(source);
+    check(label, model.ok === true, false);
+    check(`...${label} says why`, typeof model.reason === "string" && model.reason.length > 0, true);
+  }
+
+  // Too big to be worth building by hand is also a refusal, and it has to be
+  // one: every menu in the panel names every step, so the rows are quadratic in
+  // the size of the diagram.
+  const wide = ["flowchart TD"];
+  for (let n = 0; n <= DM.MAX_NODES; n += 1) {
+    wide.push(`  a${n}[Step ${n}]`);
+  }
+  check("a diagram past the row limit", DM.parseFlowchart(`${wide.join("\n")}\n`).ok, false);
+}
+
+console.log("=== a trip through the builder loses nothing it could see ===");
+{
+  // Not source to source: a diagram is rewritten properly when it is edited,
+  // the same way a table is. Model to model, though, has to be exact, or an
+  // edit to one box quietly changes another.
+  const sources = [
+    "flowchart TD\n  A[Start] --> B[End]\n",
+    "graph LR\n  A-->B-->C-->A\n",
+    "flowchart BT\n  A{Choose} -->|yes| B(Go)\n  A -->|no| C([Stop])\n",
+    "flowchart RL\n  A[[a]] -.-> B[(b)] ==> C((c)) --- D{{d}}\n",
+    "flowchart TD\n  A[/a/] --> B[\\b\\] --> C[/c\\] --> D[\\d/] --> E>e]\n",
+    "flowchart TD\n  A[\"a [weird] label\"] -->|\"a | pipe\"| B\n",
+    "flowchart TD\n  A[\"say #quot;hi#quot;\"] --> B\n",
+    "flowchart TD\n  first-step[One] --> second-step[Two]\n",
+    "flowchart TD\n  A(( )) --> B[]\n",
+    "flowchart TD\n  A-- maybe -->B-. or .-C== so ==>D\n"
+  ];
+
+  for (const source of sources) {
+    const model = DM.parseFlowchart(source);
+    if (!model.ok) {
+      check(`${JSON.stringify(source)} parses`, model.reason, "(parsed)");
+      continue;
+    }
+
+    const again = DM.parseFlowchart(DM.serializeFlowchart(model));
+    check(`${JSON.stringify(source)} survives the round trip`,
+      JSON.stringify(again), JSON.stringify(model));
+  }
+
+  // And the reason the round trip can be trusted at all: what comes out is
+  // still a flowchart, header and all.
+  const written = DM.serializeFlowchart({
+    direction: "LR",
+    nodes: [{ id: "n1", shape: "diamond", text: "Ready?" }, { id: "n2", shape: "round", text: "Ship" }],
+    edges: [{ from: "n1", to: "n2", kind: "arrow", label: "yes" }]
+  });
+  check("a model built from nothing writes a flowchart",
+    written, "flowchart LR\n    n1{Ready?}\n    n2(Ship)\n    n1 -->|yes| n2\n");
+
+  // Space around a label is invisible in a drawn diagram and is not kept, which
+  // is the one thing here that deliberately does not survive.
+  check("space around a label is dropped",
+    DM.serializeFlowchart({ direction: "TD", nodes: [{ id: "A", shape: "rect", text: "  padded  " }], edges: [] }),
+    "flowchart TD\n    A[padded]\n");
+
+  // Text that would close its own bracket, or read as a link, has to come back
+  // quoted or the diagram it writes will not parse.
+  const dangerous = ["a [b] c", "a -- b", "one | two", "x == y", "a (b)", "a#b", "a\"b"];
+  for (const text of dangerous) {
+    const model = { direction: "TD", nodes: [{ id: "A", shape: "rect", text }], edges: [] };
+    const back = DM.parseFlowchart(DM.serializeFlowchart(model));
+    check(`text "${text}" survives being written back`, back.ok && back.nodes[0].text, text);
+  }
+}
+
+console.log("=== ...for every diagram in the real library ===");
+{
+  // The same argument as the block splitter's library pass: fixtures cover what
+  // someone thought of. What is actually on this machine covers the rest — and
+  // a diagram the builder opens and then writes back differently is a diagram
+  // it has damaged, which is the only failure here that matters.
+  const files = walkDocuments(path.join(ROOT, "docs"));
+  const drifted = [];
+  let diagrams = 0;
+  let buildable = 0;
+
+  for (const file of files) {
+    for (const block of VE.splitBlocks(fs.readFileSync(file, "utf8"))) {
+      if (block.type !== "fence") {
+        continue;
+      }
+
+      const fence = VE.parseFence(block.source);
+      if (!/^mermaid\b/i.test(fence.info)) {
+        continue;
+      }
+
+      diagrams += 1;
+      const model = DM.parseFlowchart(fence.body);
+      if (!model.ok) {
+        continue;
+      }
+
+      buildable += 1;
+      if (JSON.stringify(DM.parseFlowchart(DM.serializeFlowchart(model))) !== JSON.stringify(model)) {
+        drifted.push(path.relative(ROOT, file));
+      }
+    }
+  }
+
+  console.log(`  (${diagrams} diagrams, ${buildable} of them the builder will open)`);
+  check("no diagram the builder opens comes back different", drifted.slice(0, 5), []);
+}
+
+console.log("=== a new step needs an id nothing is using ===");
+{
+  check("the first id on an empty diagram", DM.nextNodeId({ nodes: [] }), "n1");
+  check("...skips the ones already taken",
+    DM.nextNodeId({ nodes: [{ id: "n1" }, { id: "n2" }, { id: "n4" }] }), "n3");
+  check("...and does not care what else is in the diagram",
+    DM.nextNodeId({ nodes: [{ id: "Start" }, { id: "End" }] }), "n1");
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

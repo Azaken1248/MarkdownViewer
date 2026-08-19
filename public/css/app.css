@@ -3261,11 +3261,20 @@ body.page-editing #dockEdit {
   position: relative;
 }
 
-.markdown-body.doc-editing .ve-embed-edit {
+/* A flowchart has two ways in — its steps or its Mermaid — so the corner is a
+   row rather than a single button, and the two never sit on top of each other. */
+.markdown-body.doc-editing .ve-embed-tools {
   position: absolute;
   top: 6px;
   right: 6px;
   z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-embed-edit {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -3278,12 +3287,10 @@ body.page-editing #dockEdit {
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
 }
 
-.markdown-body.doc-editing .ve-embed:hover .ve-embed-edit,
-.markdown-body.doc-editing .ve-embed-edit:focus-visible {
+.markdown-body.doc-editing .ve-embed:hover .ve-embed-tools,
+.markdown-body.doc-editing .ve-embed-tools:focus-within {
   opacity: 1;
 }
 
@@ -3292,10 +3299,15 @@ body.page-editing #dockEdit {
   border-color: var(--accent-muted);
 }
 
-/* Nothing hovers on a touch screen, so the button cannot be something you have
+.markdown-body.doc-editing .ve-embed-build {
+  border-color: var(--accent-muted);
+  color: var(--fg);
+}
+
+/* Nothing hovers on a touch screen, so the buttons cannot be something you have
    to hover to find. */
 @media (hover: none) {
-  .markdown-body.doc-editing .ve-embed-edit {
+  .markdown-body.doc-editing .ve-embed-tools {
     opacity: 1;
   }
 }
@@ -3382,6 +3394,193 @@ body.page-editing #dockEdit {
 .ve-embed-done:hover {
   color: var(--fg);
   border-color: var(--accent-muted);
+}
+
+/* --- The flowchart builder ------------------------------------------------
+
+   A Mermaid flowchart has no coordinates in it — the renderer decides where
+   every box goes — so there is nothing here to drag. What there is instead is
+   the two lists the file actually holds, steps and arrows, with the diagram
+   drawn from them above and redrawn as they change. Tapping a box in it goes to
+   that box's row, which is what stops this being a form that happens to sit
+   near a picture.
+
+   The whole panel is plain flow layout on purpose: it is redrawn on every step
+   added or removed, and it has to stay cheap on a phone. */
+.markdown-body.doc-editing .ve-embed.is-builder-open {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.ve-diagram-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ve-diagram-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* The head is small caps; the control in it must not be. */
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.ve-diagram-preview {
+  padding: 10px;
+  border-bottom: 1px dashed var(--border-muted);
+  background: var(--canvas);
+  overflow-x: auto;
+}
+
+/* The diagram is a preview, not a document: it has no business setting the
+   width of the panel it is in, and on a phone it has no business being wider
+   than the screen. */
+.ve-diagram-preview svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.ve-diagram-panel {
+  padding: 10px;
+}
+
+.ve-diagram-legend {
+  margin: 2px 0 6px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ve-diagram-legend + .ve-diagram-rows:empty + .ve-diagram-add {
+  margin-top: 0;
+}
+
+.ve-diagram-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ve-diagram-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ve-diagram-text,
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-pick {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  /* The head these sit under is small caps at 600; a control in it is not. */
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.ve-diagram-text {
+  flex: 1 1 auto;
+  /* A flex item's floor is its content, and an input's content is its size
+     attribute — 20 characters — which is wider than a phone. */
+  min-width: 0;
+}
+
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-pick {
+  flex: 0 1 auto;
+  max-width: 40%;
+}
+
+.ve-diagram-text:focus,
+.ve-diagram-shape:focus,
+.ve-diagram-kind:focus,
+.ve-diagram-pick:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.ve-diagram-drop {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ve-diagram-drop:hover {
+  border-color: var(--danger);
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.ve-diagram-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 14px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-add:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+  border-style: solid;
+}
+
+.ve-diagram-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Nothing hovers on a touch screen and nothing there is a mouse-width either,
+   so every control in the panel grows to something a thumb can hit. */
+@media (hover: none) {
+  .ve-diagram-text,
+  .ve-diagram-shape,
+  .ve-diagram-kind,
+  .ve-diagram-pick {
+    min-height: 38px;
+    font-size: 13px;
+  }
+
+  .ve-diagram-drop {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ve-diagram-add {
+    min-height: 38px;
+  }
 }
 
 
@@ -3964,6 +4163,45 @@ body.page-editing #dockEdit {
      dialog it is costs a row of a toolbar that already needs three. */
   .editor-toolbar h2 {
     display: none;
+  }
+
+  /* An arrow row is five controls, which is one line on a wide pane and two on
+     a narrow one. The connection reads across the top — from, to — with how it
+     is drawn and what it says underneath. */
+  .ve-diagram-arrow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "from  to    drop"
+      "kind  label label";
+    align-items: center;
+  }
+
+  .ve-diagram-arrow > .ve-diagram-pick:first-child {
+    grid-area: from;
+  }
+
+  .ve-diagram-arrow > .ve-diagram-kind {
+    grid-area: kind;
+  }
+
+  .ve-diagram-arrow > .ve-diagram-text {
+    grid-area: label;
+  }
+
+  .ve-diagram-arrow > .ve-diagram-pick:nth-last-child(2) {
+    grid-area: to;
+  }
+
+  .ve-diagram-arrow > .ve-diagram-drop {
+    grid-area: drop;
+  }
+
+  /* In a grid the cells decide the widths, and a percentage cap on a select
+     would fight them. */
+  .ve-diagram-arrow > .ve-diagram-pick,
+  .ve-diagram-arrow > .ve-diagram-kind {
+    max-width: none;
   }
 }
 

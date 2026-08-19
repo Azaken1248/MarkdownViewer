@@ -57,7 +57,7 @@
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
   <script src="/js/theme-boot.js?v=64"></script>
-  <link rel="stylesheet" href="/css/app.css?v=73" />
+  <link rel="stylesheet" href="/css/app.css?v=74" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -73,13 +73,17 @@
        integrity hashes live in LAZY_LIBRARIES there.
 
        marked and DOMPurify stay: nothing renders without them. -->
-  <script src="/js/markdown-core.js?v=64" defer></script>
+  <script src="/js/markdown-core.js?v=74" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
   <script src="/js/visual-editor.js?v=64" defer></script>
+  <!-- Mermaid flowcharts as steps and arrows, for building one without typing
+       its syntax. A few kilobytes and no dependency on Mermaid itself, which is
+       still only downloaded when a document has a diagram in it. -->
+  <script src="/js/diagram-model.js?v=74" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
   <script src="/js/notebook-runtime.js?v=64" defer></script>
-  <script src="/js/app.js?v=68" defer></script>
+  <script src="/js/app.js?v=69" defer></script>
 </head>
 
 <body>

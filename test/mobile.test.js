@@ -282,6 +282,48 @@ console.log("=== things that sit above each other line up ===");
     /left: calc\(15px/.test(rules), false);
 }
 
+console.log("=== the diagram builder fits a phone ===");
+{
+  // The builder is a form five controls wide, a menu naming every step in the
+  // diagram, and a drawn diagram above it — three separate ways to be wider
+  // than the screen, on the one screen where that is not survivable.
+
+  // An arrow is from, style, label, to and a way to remove it. On one line
+  // that is five controls in 360px; the connection reads across the top and
+  // how it is drawn goes underneath.
+  check("an arrow row stops being one line", /\.ve-diagram-arrow \{\s*display: grid;/.test(phone), true);
+  check("...with the label given a cell of its own", /grid-area: label;/.test(phone), true);
+  check("...and the step menus no longer capped at a fraction of a row",
+    /\.ve-diagram-arrow > \.ve-diagram-pick,[\s\S]{0,80}?max-width: none;/.test(phone), true);
+
+  // A text input's content is its size attribute — twenty characters — and a
+  // flex item's floor is its content, so a label field without this is a field
+  // wider than the phone it is on.
+  check("a label field can be narrower than its own default width",
+    /\.ve-diagram-text \{[\s\S]{0,120}?min-width: 0;/.test(rules), true);
+
+  // Mermaid sizes an SVG to the diagram, not to the box it was put in.
+  check("the drawn diagram is held to the width of the panel",
+    /\.ve-diagram-preview svg \{[\s\S]{0,80}?max-width: 100%;/.test(rules), true);
+  check("...and scrolls inside it rather than widening the page",
+    /\.ve-diagram-preview \{[\s\S]{0,200}?overflow-x: auto;/.test(rules), true);
+
+  // Nothing hovers on a touch screen and nothing there is a mouse-width.
+  const touch = mediaBlock("@media (hover: none)", css.indexOf(".ve-diagram-add:disabled"));
+  const size = (selector, property) => {
+    const at = touch.indexOf(selector);
+    if (at < 0) return null;
+
+    const body = touch.slice(at, touch.indexOf("}", at));
+    const found = new RegExp(`${property}: (\\d+)px`).exec(body);
+    return found ? Number(found[1]) : null;
+  };
+
+  check("every field in the panel grows for a thumb", size(".ve-diagram-text", "min-height"), 38);
+  check("...and so does the button that removes a row", size(".ve-diagram-drop", "height"), 38);
+  check("...and the one that adds one", size(".ve-diagram-add", "min-height"), 38);
+}
+
 console.log("=== touch targets in the header ===");
 {
   // The drawer's buttons grew for touch and the header's did not, which left

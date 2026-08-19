@@ -1629,6 +1629,15 @@
         return;
       }
 
+      // A diagram that is itself a control — the flowchart builder's preview,
+      // where a box is tapped to select it — cannot also be a pan-zoom
+      // surface: svg-pan-zoom takes the pointer events and adds its own
+      // controls on top. Opting a container out is the only thing that keeps
+      // those clicks.
+      if (svg.closest("[data-pan-zoom=\"off\"]")) {
+        return;
+      }
+
       // Must happen before svg-pan-zoom takes over the SVG's own dimensions.
       sizeDiagramContainer(svg);
 

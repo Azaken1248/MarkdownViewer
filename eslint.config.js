@@ -59,6 +59,8 @@ const BROWSER_GLOBALS = {
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
   VisualEditor: "readonly",
+  // Mermaid flowcharts as steps and arrows, for the diagram builder.
+  DiagramModel: "readonly",
   // The notebook Python controller, loaded before app.js.
   NotebookRuntime: "readonly",
   Worker: "readonly"

@@ -384,6 +384,9 @@ async function run(server) {
   // loads it.
   window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
 
+  // And the flowchart model the diagram builder is made of, the same way.
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-model.js"), "utf8"));
+
   // The notebook Python controller, loaded before app.js the same way the page
   // loads it. jsdom has no Worker, but nothing here constructs one until a Run
   // button is pressed.
@@ -1600,6 +1603,162 @@ async function run(server) {
     const savedSums = JSON.parse((await get("/api/docs/sums.md")).body).content;
     check("the equation reached the file", savedSums.includes("$$\na^2 + b^2 = c^2\n$$"), true);
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
+  }
+
+  console.log("=== a flowchart is built from its steps, not typed ===");
+  {
+    // Two diagrams, and the difference between them is the whole safety story:
+    // the first is steps and arrows and nothing else, the second has a subgraph
+    // in it. A builder that models only steps and arrows must open the one and
+    // refuse the other, because writing the second one back would delete the
+    // subgraph nobody asked it to touch.
+    const source = [
+      "# Flow",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A[Start] --> B[End]",
+      "```",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  subgraph outer",
+      "  C --> D",
+      "  end",
+      "```",
+      "",
+      "After.",
+      ""
+    ].join("\n");
+
+    await window.eval(`window.__t.requestJson("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ${JSON.stringify(JSON.stringify({ fileName: "flow.md", content: source }))}
+    })`);
+
+    await window.eval('window.__t.refreshDocs({ preserveSearch: false })');
+    await window.eval('window.__t.openDocument("flow.md", false, { forceReload: true })');
+    await new Promise((r) => setTimeout(r, 700));
+    check("the diagram document is open", window.eval("window.__t.state.activeFile"), "flow.md");
+
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const embeds = [...doc.querySelectorAll("#docContent .ve-embed")];
+    check("both diagrams are blocks that keep their source", embeds.length, 2);
+    check("the one the builder understands offers to build it",
+      Boolean(embeds[0].querySelector(".ve-embed-build")), true);
+    check("...and the one with a subgraph in it does not",
+      Boolean(embeds[1].querySelector(".ve-embed-build")), false);
+    check("...which still leaves it editable as markdown",
+      embeds[1].querySelector(".ve-embed-edit").textContent.trim(), "Edit code (mermaid)");
+    check("a buildable diagram calls its source button by the shorter name",
+      embeds[0].querySelector(".ve-embed-source-open").textContent.trim(), "Markdown");
+
+    const embed = embeds[0];
+    embed.querySelector(".ve-embed-build").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    const panel = embed.querySelector(".ve-diagram-panel");
+    check("Build opens a panel rather than a text box", Boolean(panel), true);
+    check("...and no source box with it", embed.querySelectorAll(".ve-embed-source").length, 0);
+
+    const rows = () => [...panel.querySelectorAll(".ve-diagram-rows")];
+    const steps = () => [...rows()[0].children];
+    const arrows = () => [...rows()[1].children];
+
+    check("every step is a row", steps().length, 2);
+    check("...named as the diagram names it",
+      steps().map((row) => row.querySelector(".ve-diagram-text").value), ["Start", "End"]);
+    check("every arrow is a row too", arrows().length, 1);
+
+    // What a drawn diagram leaves behind depends on whether Mermaid itself has
+    // arrived: a promoted block holding the source it was drawn from, or the
+    // fenced code that is waiting to become one. Reading whichever is there is
+    // reading the real render output rather than anything this suite invented.
+    const preview = embed.querySelector(".ve-diagram-preview");
+    const drawnDiagram = (root) => {
+      const block = root.querySelector(".mermaid-block");
+      if (block) {
+        return block.getAttribute("data-mermaid-source") || block.textContent;
+      }
+
+      const code = root.querySelector("code");
+      return code ? code.textContent : root.textContent;
+    };
+
+    check("the diagram is drawn from the model, above the panel",
+      drawnDiagram(preview).includes("A[Start]"), true);
+
+    const label = steps()[0].querySelector(".ve-diagram-text");
+    label.value = "Begin";
+    label.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    check("renaming a step reaches the document immediately",
+      window.eval("window.__t.collectPageMarkdown()").includes("A[Begin]"), true);
+    check("...and the bar says there is something to save",
+      doc.getElementById("pageEditState").textContent, "Unsaved changes");
+    check("...and the arrow menus now call it by its new name",
+      arrows()[0].querySelector(".ve-diagram-pick").textContent.includes("Begin"), true);
+    check("the preview waits rather than redrawing on every keystroke",
+      drawnDiagram(preview).includes("A[Begin]"), false);
+
+    await new Promise((r) => setTimeout(r, 400));
+    check("...then catches up with what was typed",
+      drawnDiagram(preview).includes("A[Begin]"), true);
+
+    // A step nothing points at is drawn off on its own, which is never what
+    // adding one to a flowchart meant.
+    panel.querySelectorAll(".ve-diagram-add")[0]
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("adding a step adds a row", steps().length, 3);
+    check("...and joins it to what came before", arrows().length, 2);
+    check("...with an id nothing else is using",
+      window.eval("window.__t.collectPageMarkdown()").includes("n1[Step 3]"), true);
+
+    const shape = steps()[1].querySelector(".ve-diagram-shape");
+    shape.value = "diamond";
+    shape.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("a shape is a menu, not a bracket to remember",
+      window.eval("window.__t.collectPageMarkdown()").includes("B{End}"), true);
+
+    const arrowLabel = arrows()[0].querySelector(".ve-diagram-text");
+    arrowLabel.value = "yes";
+    arrowLabel.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("an arrow can be labelled without typing pipes",
+      window.eval("window.__t.collectPageMarkdown()").includes("A -->|yes| B"), true);
+
+    const flow = embed.querySelector(".ve-diagram-head select");
+    flow.value = "LR";
+    flow.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("the direction is a menu too",
+      window.eval("window.__t.collectPageMarkdown()").includes("flowchart LR"), true);
+
+    // Removing a step has to take its arrows with it: an arrow that names a
+    // step Mermaid has never heard of declares it, and the step comes back as
+    // an empty box.
+    steps()[2].querySelector(".ve-diagram-drop")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("removing a step removes it", steps().length, 2);
+    check("...and the arrow that pointed at it", arrows().length, 1);
+    check("...leaving nothing behind that names it",
+      window.eval("window.__t.collectPageMarkdown()").includes("n1"), false);
+
+    embed.querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("Done returns the block to its rendering",
+      embed.querySelectorAll(".ve-diagram-panel").length, 0);
+    check("...and offers to build it again",
+      Boolean(embed.querySelector(".ve-embed-build")), true);
+
+    await window.eval("window.__t.savePageEdit()");
+    await new Promise((r) => setTimeout(r, 900));
+    const savedFlow = JSON.parse((await get("/api/docs/flow.md")).body).content;
+    check("the built diagram reached the file",
+      savedFlow.includes("flowchart LR\n    A[Begin]\n    B{End}\n    A -->|yes| B"), true);
+    check("...still fenced as mermaid", savedFlow.includes("```mermaid"), true);
+    check("the diagram nobody opened is untouched",
+      savedFlow.includes("  subgraph outer\n  C --> D\n  end"), true);
+    check("...and so is the prose", savedFlow.endsWith("After.\n"), true);
   }
 
   console.log("=== a wait says what it is waiting for ===");

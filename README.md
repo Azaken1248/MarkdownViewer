@@ -106,6 +106,7 @@ proxy hop rather than the client's scheme.
 │   │   ├── app.js            # The client
 │   │   ├── markdown-core.js  # Render engine shared by both pages
 │   │   ├── visual-editor.js  # Block splitting + markdown serialization
+│   │   ├── diagram-model.js  # Mermaid flowcharts as steps and arrows
 │   │   ├── notebook-runtime.js   # Talks to the Python worker
 │   │   ├── pyodide-worker.js     # Python (Pyodide/WASM), isolated from the DOM
 │   │   ├── share.js          # The share page
@@ -536,8 +537,8 @@ Beside those are buttons that put something new into the document — a **code
 block**, a **table**, a **formula**, a **diagram** or an **image**. Each lands
 below the block the cursor is in, or at the end when the cursor is nowhere, and
 leaves the cursor where you are about to type: in the code, in the table's first
-cell, or in the source box for the two that have no rendering to type into. Each
-is inserted as its markdown and then parsed by the same splitter the document
+cell, in the flowchart builder, or in the source box for a block with no
+rendering to type into. Each is inserted as its markdown and then parsed by the same splitter the document
 went through, so a block you add is rendered and written back by exactly the
 same path as one that was already in the file — there is no second idea of what
 a table is.
@@ -547,6 +548,30 @@ what lets the children's margins collapse through them exactly as they do
 between siblings — the reason the text does not move by a pixel when editing
 starts. The focus mark is drawn out of the flow, in the margin. The layout suite
 checks all of that, because it is a promise a stylesheet can quietly break.
+
+### Building a flowchart
+
+A **Mermaid flowchart** gets a second way in, next to its markdown: a **Build**
+button that opens it as what it is — a list of steps and a list of arrows — with
+the diagram drawn above them and redrawn as they change. Tapping a box in the
+drawn diagram jumps to that box's row. Shapes and arrow styles are menus rather
+than brackets to remember, and a new step is joined to the one before it, since
+a step nothing points at is drawn off on its own.
+
+There is nothing to drag, and that is deliberate: Mermaid has no coordinates in
+it. A flowchart says what connects to what and the layout engine decides where
+everything goes, so a canvas of boxes you could arrange would be a canvas whose
+arrangement is discarded the moment the file is saved.
+
+The model behind it is `public/js/diagram-model.js`, and it is **deliberately
+narrow**. It reads a flowchart made of node declarations and links and nothing
+else — no subgraphs, no `classDef`, no `style`, no `click`, no comments — and
+refuses everything else outright rather than dropping it. A builder that reads
+half a diagram and writes back the half it understood would delete the styling
+off a diagram the first time anyone renamed a box. A refused diagram has no
+Build button and stays editable as source, which is where it came from. Within
+what it does accept, `parse(serialize(model))` is the identity, asserted against
+every Mermaid block in the real library on every test run.
 
 ---
 
