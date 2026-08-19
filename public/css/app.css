@@ -3462,8 +3462,106 @@ body.page-editing #dockEdit {
   display: none;
 }
 
-.ve-diagram-panel {
-  padding: 10px;
+/* The picture and the marks drawn over it. The marks are a layer rather than
+   part of the SVG because Mermaid owns that SVG and rewrites all of it on every
+   redraw — anything of ours inside it would last until the next keystroke. */
+.ve-diagram-stage {
+  position: relative;
+  /* A ring for a box that has been scrolled out of the canvas has no business
+     being drawn over the controls underneath. */
+  overflow: hidden;
+}
+
+.ve-diagram-marks {
+  position: absolute;
+  inset: 0;
+  /* The layer is a drawing, not a target: clicks belong to the diagram under
+     it. Only the handle takes them back. */
+  pointer-events: none;
+}
+
+.ve-diagram-marks[hidden] {
+  display: none;
+}
+
+.ve-diagram-ring {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+}
+
+/* The one gesture a flowchart is actually built with: the next box grows out of
+   the edge of this one, already joined to it. */
+.ve-diagram-grow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  border-radius: 50%;
+  background: var(--accent-emphasis, var(--accent));
+  color: var(--fg-on-emphasis);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ve-diagram-grow:hover {
+  filter: brightness(1.1);
+}
+
+/* A box in the canvas is a control, and has to look like one before it is
+   tapped rather than after. */
+.ve-diagram-preview g.node {
+  cursor: pointer;
+}
+
+.ve-diagram-hint {
+  margin: 0;
+  padding: 8px 10px 0;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+.ve-diagram-hint[hidden] {
+  display: none;
+}
+
+.ve-diagram-inspector {
+  padding: 8px 10px 10px;
+}
+
+.ve-diagram-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Armed: the next box tapped is the one this arrow points at. */
+.ve-diagram-connect.is-armed {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ve-diagram-all {
+  padding: 0 10px 10px;
+}
+
+.ve-diagram-all > summary {
+  padding: 4px 0;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-all > summary:hover {
+  color: var(--fg);
 }
 
 .ve-diagram-legend {

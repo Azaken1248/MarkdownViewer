@@ -7102,31 +7102,6 @@ function openEmbedSource(node, block) {
   area.focus();
 }
 
-/* --- Building a flowchart instead of writing one --------------------------
- *
- * A diagram was the one block in here you still had to know a syntax to make.
- * The source box with a preview under it took the sting out of that, but it is
- * still a text box: you write `A -->|yes| B`, wait, and look at what happened.
- *
- * What a flowchart actually is, though, is a list of steps and a list of arrows
- * between them — and that is a thing with a shape, so it can be a form. Mermaid
- * has no coordinates in it, so there is nothing to drag: a canvas of boxes you
- * could arrange would be a canvas whose arrangement is discarded on save, which
- * is a worse lie than a form is a limitation. Layout is the renderer's job and
- * this hands it the only two things it takes: what the boxes say, and what
- * points at what.
- *
- * The diagram above the form is the diagram, redrawn as you go, and tapping a
- * box in it jumps to that box's row — which is what makes it a picture you are
- * working on rather than a picture of what you typed.
- *
- * What it will not do is open a diagram it cannot fully account for. See
- * diagram-model.js: anything with a subgraph, a classDef, a style or a comment
- * in it is refused outright and stays source-only, because a builder that
- * reads half a diagram and writes back the half it understood is a builder
- * that deletes your styling the first time you rename a box.
- */
-
 // Long enough to sit out a run of typing, and the same pause the source box's
 // preview uses, so the two feel like one thing.
 const DIAGRAM_PREVIEW_DELAY = 250;
@@ -7196,6 +7171,24 @@ function diagramNodeId(group, model) {
   return hit ? hit.id : null;
 }
 
+/* Building on the diagram itself.
+ *
+ * The first version of this put the two lists beside the picture and let you
+ * type into them. It worked, and it was the wrong way round: the diagram was
+ * the output and the form was the thing you used. So the diagram is the thing
+ * you use now — tap a box to select it, and everything you can do to it appears
+ * under the drawing, on the box you tapped.
+ *
+ * There is still nothing to drag, and the reason has not changed: Mermaid has
+ * no coordinates in it. Boxes go where the layout engine puts them. What direct
+ * manipulation can honestly mean here is selection and growth — tap a box, and
+ * the plus on its edge grows the next one out of it, already joined, already
+ * ready to be named. That is the loop a flowchart is actually built in.
+ *
+ * The full lists are still underneath, folded away. They are the way to reach
+ * an arrow nobody can find on a crowded diagram, and the way to work without a
+ * pointing device.
+ */
 function openDiagramBuilder(node, block) {
   const opened = buildableDiagram(block);
 
@@ -7218,90 +7211,262 @@ function openDiagramBuilder(node, block) {
   destroyPanZoomInstances(node);
   node.innerHTML = "";
 
-  const preview = document.createElement("div");
-  preview.className = "ve-diagram-preview markdown-body";
-  // svg-pan-zoom would take the pointer events this preview exists to receive,
-  // and add its own controls over a diagram that is already a control.
-  preview.dataset.panZoom = "off";
+  // Which box is being worked on, and — when an arrow is being drawn — which
+  // box it is being drawn from. Both are ids rather than elements, because the
+  // elements are thrown away and redrawn on every change.
+  let selectedId = null;
+  let connectFrom = null;
 
-  const nodeRows = document.createElement("div");
-  nodeRows.className = "ve-diagram-rows";
+  /* --- The picture ------------------------------------------------------ */
 
-  const edgeRows = document.createElement("div");
-  edgeRows.className = "ve-diagram-rows";
+  const stage = document.createElement("div");
+  stage.className = "ve-diagram-stage";
+
+  const canvas = document.createElement("div");
+  canvas.className = "ve-diagram-preview markdown-body";
+  // svg-pan-zoom would take the pointer events this canvas exists to receive,
+  // and put its own controls over a diagram that is already a control.
+  canvas.dataset.panZoom = "off";
+
+  // Drawn over the diagram rather than into it: Mermaid owns that SVG and
+  // rewrites it completely on every redraw.
+  const marks = document.createElement("div");
+  marks.className = "ve-diagram-marks";
+  marks.hidden = true;
+
+  const ring = document.createElement("div");
+  ring.className = "ve-diagram-ring";
+
+  const grow = document.createElement("button");
+  grow.type = "button";
+  grow.className = "ve-diagram-grow";
+  grow.title = "Add a step after this one";
+  grow.setAttribute("aria-label", "Add a step after this one");
+  grow.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i>';
+
+  marks.append(ring, grow);
+  stage.append(canvas, marks);
+
+  /* --- Writing it back -------------------------------------------------- */
 
   let drawn = "";
   let previewTimer = 0;
 
-  const drawNow = () => {
+  const draw = () => {
     previewTimer = 0;
 
     // A pending redraw of a builder that has since been closed is a diagram
     // nobody will ever see, rendered into an element nobody holds.
-    if (!preview.isConnected) {
+    if (!canvas.isConnected) {
       return;
     }
 
     const source = DiagramModel.serializeFlowchart(model);
-    if (source === drawn) {
+    if (source !== drawn) {
+      drawn = source;
+      destroyPanZoomInstances(canvas);
+      // Fenced by hand rather than through toMermaidMarkdown, which indents
+      // what it wraps for the benefit of a whole-file .mmd render. Here the
+      // fence has to hold exactly what the block will hold, so that what is on
+      // screen is the diagram and not a reformatting of it.
+      canvas.innerHTML = MarkdownCore.renderMarkdown(`\`\`\`mermaid\n${source}\`\`\`\n`);
+      // The old SVG is gone, so the marks are pointing at nothing until the new
+      // one lands.
+      marks.hidden = true;
+      void renderMermaidBlocks(canvas).then(placeMarks);
       return;
     }
 
-    drawn = source;
-    destroyPanZoomInstances(preview);
-    // Fenced by hand rather than through toMermaidMarkdown, which indents what
-    // it wraps for the benefit of a whole-file .mmd render. Here the fence has
-    // to hold exactly what the block will hold, so that what is on screen is
-    // the diagram and not a reformatting of it.
-    preview.innerHTML = MarkdownCore.renderMarkdown(`\`\`\`mermaid\n${source}\`\`\`\n`);
-    void renderMermaidBlocks(preview);
+    placeMarks();
   };
 
+  // Mermaid is the expensive part of a keystroke, so typing redraws on a pause.
+  // Adding, joining and removing do not: the thing you just made has to be on
+  // screen to be selected, and there is nothing to coalesce a single tap with.
   const drawSoon = () => {
     window.clearTimeout(previewTimer);
-    previewTimer = window.setTimeout(drawNow, DIAGRAM_PREVIEW_DELAY);
+    previewTimer = window.setTimeout(draw, DIAGRAM_PREVIEW_DELAY);
   };
 
-  // Mermaid is the expensive part of every keystroke here, so the source is
-  // written back on each one and drawn on a pause.
-  const commit = () => {
+  const drawAtOnce = () => {
+    window.clearTimeout(previewTimer);
+    draw();
+  };
+
+  const write = () => {
     block.dirty = true;
     block.sourceOverride = VisualEditor.serializeFence({
       ...fence,
       body: DiagramModel.serializeFlowchart(model).replace(/\n$/, "")
     });
     markPageEditDirty();
+  };
+
+  const commit = () => {
+    write();
     drawSoon();
   };
 
-  const stepLabel = (item) => String(item.text || item.id);
+  /* --- Where the selected box is on the screen -------------------------- */
 
-  // Renaming a step renames it everywhere it is named — in both of the arrow
-  // menus that point at it — without rebuilding a single row, so the caret
-  // stays where it is being typed.
-  const renameEverywhere = (id, label) => {
-    for (const option of edgeRows.querySelectorAll("option")) {
-      if (option.value === id) {
-        option.textContent = label;
-      }
+  const groupFor = (id) => [...canvas.querySelectorAll("g.node")]
+    .find((group) => diagramNodeId(group, model) === id) || null;
+
+  function placeMarks() {
+    const group = selectedId ? groupFor(selectedId) : null;
+    if (!group) {
+      marks.hidden = true;
+      return;
     }
+
+    const box = group.getBoundingClientRect();
+    const base = stage.getBoundingClientRect();
+
+    // A box with no size is a diagram that has not been laid out yet — or a
+    // browser that does not measure SVG at all, which is not a case to draw a
+    // ring in the wrong place for.
+    if (box.width === 0 && box.height === 0) {
+      marks.hidden = true;
+      return;
+    }
+
+    marks.hidden = false;
+    ring.style.left = `${box.left - base.left - 4}px`;
+    ring.style.top = `${box.top - base.top - 4}px`;
+    ring.style.width = `${box.width + 8}px`;
+    ring.style.height = `${box.height + 8}px`;
+    grow.style.left = `${box.right - base.left - 1}px`;
+    grow.style.top = `${box.top - base.top + (box.height / 2)}px`;
+  }
+
+  // The ring is measured in viewport coordinates, so anything that moves the
+  // diagram under it moves it out of place. Both listeners take themselves off
+  // once the builder is gone, which is the only cleanup a block that can be
+  // thrown away by an undo will reliably get.
+  const reposition = () => {
+    if (!stage.isConnected) {
+      window.removeEventListener("resize", reposition);
+      return;
+    }
+
+    placeMarks();
   };
 
-  const stepSelect = (value, label) => {
-    const select = document.createElement("select");
-    select.className = "ve-diagram-pick";
-    select.setAttribute("aria-label", label);
+  window.addEventListener("resize", reposition);
+  canvas.addEventListener("scroll", reposition, { passive: true });
+
+  /* --- Selecting ---------------------------------------------------------- */
+
+  const hint = document.createElement("p");
+  hint.className = "ve-diagram-hint";
+
+  const say = (words) => {
+    hint.textContent = words;
+    hint.hidden = words === "";
+  };
+
+  const inspector = document.createElement("div");
+  inspector.className = "ve-diagram-inspector";
+
+  const selectedNode = () => model.nodes.find((item) => item.id === selectedId) || null;
+
+  function select(id, options = {}) {
+    selectedId = model.nodes.some((item) => item.id === id) ? id : null;
+    connectFrom = null;
+    paintInspector(options);
+    placeMarks();
+  }
+
+  function armConnect() {
+    if (!selectedId) {
+      return;
+    }
+
+    connectFrom = selectedId;
+    paintInspector();
+  }
+
+  canvas.addEventListener("click", (event) => {
+    const group = event.target.closest?.("g.node");
+
+    if (!group) {
+      // Tapping the paper is how you put something down.
+      select(null);
+      return;
+    }
+
+    const id = diagramNodeId(group, model);
+    if (!id) {
+      return;
+    }
+
+    if (connectFrom && connectFrom !== id) {
+      model.edges.push({ from: connectFrom, to: id, kind: "arrow", label: "" });
+      write();
+      paintLists();
+      select(connectFrom);
+      drawAtOnce();
+      return;
+    }
+
+    select(id);
+  });
+
+  grow.addEventListener("click", () => {
+    if (selectedId) {
+      addStepAfter(selectedId);
+    }
+  });
+
+  function addStepAfter(afterId) {
+    const id = DiagramModel.nextNodeId(model);
+    model.nodes.push({ id, shape: "rect", text: `Step ${model.nodes.length + 1}` });
+
+    // A step with nothing pointing at it is not in the flowchart at all — it is
+    // drawn off to one side on its own. Joining it to the box it was grown from
+    // is the whole meaning of growing it from there.
+    if (afterId) {
+      model.edges.push({ from: afterId, to: id, kind: "arrow", label: "" });
+    }
+
+    write();
+    paintLists();
+    // On screen first, then selected: the ring is placed against the drawn box
+    // and there is no box until the diagram has been redrawn.
+    select(id, { focusName: true });
+    drawAtOnce();
+  }
+
+  function removeStep(id) {
+    model.nodes = model.nodes.filter((item) => item.id !== id);
+    // An arrow to a step that is no longer there would declare it again by
+    // naming it, and the step would come back as an empty box.
+    model.edges = model.edges.filter((edge) => edge.from !== id && edge.to !== id);
+    write();
+    paintLists();
+    select(null);
+    drawAtOnce();
+  }
+
+  /* --- What you can do to what is selected ------------------------------- */
+
+  const stepSelect = (value, label, className) => {
+    const select_ = document.createElement("select");
+    select_.className = className;
+    select_.setAttribute("aria-label", label);
 
     for (const item of model.nodes) {
       const option = document.createElement("option");
       option.value = item.id;
       option.textContent = stepLabel(item);
-      select.appendChild(option);
+      select_.appendChild(option);
     }
 
-    select.value = value;
-    return select;
+    select_.value = value;
+    return select_;
   };
+
+  const stepLabel = (item) => String(item.text || item.id);
 
   const dropButton = (label) => {
     const button = document.createElement("button");
@@ -7313,18 +7478,7 @@ function openDiagramBuilder(node, block) {
     return button;
   };
 
-  function nodeRow(item) {
-    const row = document.createElement("div");
-    row.className = "ve-diagram-row";
-    row.dataset.nodeId = item.id;
-
-    const text = document.createElement("input");
-    text.type = "text";
-    text.className = "ve-diagram-text";
-    text.value = item.text;
-    text.placeholder = item.id;
-    text.setAttribute("aria-label", "Step label");
-
+  const shapeSelect = (item) => {
     const shape = document.createElement("select");
     shape.className = "ve-diagram-shape";
     shape.setAttribute("aria-label", "Step shape");
@@ -7337,38 +7491,19 @@ function openDiagramBuilder(node, block) {
     }
 
     shape.value = item.shape;
-
-    const drop = dropButton(`Remove ${stepLabel(item)}`);
-
-    text.addEventListener("input", () => {
-      item.text = text.value;
-      renameEverywhere(item.id, stepLabel(item));
-      commit();
-    });
-
     shape.addEventListener("change", () => {
       item.shape = shape.value;
       commit();
     });
 
-    drop.addEventListener("click", () => {
-      model.nodes = model.nodes.filter((other) => other !== item);
-      // An arrow to a step that is no longer there would declare it again by
-      // naming it, and the step would come back as an empty box.
-      model.edges = model.edges.filter((edge) => edge.from !== item.id && edge.to !== item.id);
-      paintRows();
-      commit();
-    });
+    return shape;
+  };
 
-    row.append(text, shape, drop);
-    return row;
-  }
-
-  function edgeRow(edge) {
+  const arrowRow = (edge) => {
     const row = document.createElement("div");
     row.className = "ve-diagram-row ve-diagram-arrow";
 
-    const from = stepSelect(edge.from, "Arrow from");
+    const from = stepSelect(edge.from, "Arrow from", "ve-diagram-pick");
     const kind = document.createElement("select");
     kind.className = "ve-diagram-kind";
     kind.setAttribute("aria-label", "Arrow style");
@@ -7382,8 +7517,6 @@ function openDiagramBuilder(node, block) {
 
     kind.value = edge.kind;
 
-    const to = stepSelect(edge.to, "Arrow to");
-
     const label = document.createElement("input");
     label.type = "text";
     label.className = "ve-diagram-text";
@@ -7391,6 +7524,7 @@ function openDiagramBuilder(node, block) {
     label.placeholder = "label";
     label.setAttribute("aria-label", "Arrow label");
 
+    const to = stepSelect(edge.to, "Arrow to", "ve-diagram-pick");
     const drop = dropButton("Remove this arrow");
 
     from.addEventListener("change", () => {
@@ -7415,97 +7549,232 @@ function openDiagramBuilder(node, block) {
 
     drop.addEventListener("click", () => {
       model.edges = model.edges.filter((other) => other !== edge);
-      paintRows();
-      commit();
+      write();
+      paintLists();
+      paintInspector();
+      drawAtOnce();
     });
 
     row.append(from, kind, label, to, drop);
     return row;
+  };
+
+  function paintInspector(options = {}) {
+    inspector.replaceChildren();
+    const item = selectedNode();
+
+    if (!item) {
+      say(model.nodes.length === 0
+        ? "Add the first step."
+        : "Tap a box in the diagram to edit it.");
+
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "ve-diagram-add";
+      add.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span>Add step</span>';
+      add.disabled = model.nodes.length >= DiagramModel.MAX_NODES;
+      add.addEventListener("click", () => addStepAfter(null));
+
+      inspector.append(add);
+      return;
+    }
+
+    say(connectFrom ? "Now tap the step this one should point at." : "");
+
+    const line = document.createElement("div");
+    line.className = "ve-diagram-row ve-diagram-selected";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "ve-diagram-text";
+    name.value = item.text;
+    name.placeholder = item.id;
+    name.setAttribute("aria-label", "Step label");
+    name.addEventListener("input", () => {
+      item.text = name.value;
+      renameEverywhere(item.id, stepLabel(item));
+      commit();
+    });
+
+    const drop = dropButton(`Remove ${stepLabel(item)}`);
+    drop.addEventListener("click", () => removeStep(item.id));
+
+    line.append(name, shapeSelect(item), drop);
+
+    const actions = document.createElement("div");
+    actions.className = "ve-diagram-actions";
+
+    const step = document.createElement("button");
+    step.type = "button";
+    step.className = "ve-diagram-add";
+    step.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span>Step after this</span>';
+    step.disabled = model.nodes.length >= DiagramModel.MAX_NODES;
+    step.addEventListener("click", () => addStepAfter(item.id));
+
+    const connect = document.createElement("button");
+    connect.type = "button";
+    connect.className = `ve-diagram-add ve-diagram-connect${connectFrom ? " is-armed" : ""}`;
+    connect.innerHTML = '<i class="ph ph-arrow-right" aria-hidden="true"></i><span>Arrow to…</span>';
+    connect.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
+    connect.addEventListener("click", () => {
+      if (connectFrom) {
+        connectFrom = null;
+        paintInspector();
+        return;
+      }
+
+      armConnect();
+    });
+
+    actions.append(step, connect);
+
+    const out = model.edges.filter((edge) => edge.from === item.id);
+    inspector.append(line, actions);
+
+    if (out.length > 0) {
+      const legend = document.createElement("div");
+      legend.className = "ve-diagram-legend";
+      legend.textContent = out.length === 1 ? "Its arrow" : "Its arrows";
+
+      const rows = document.createElement("div");
+      rows.className = "ve-diagram-rows";
+      rows.append(...out.map(arrowRow));
+      inspector.append(legend, rows);
+    }
+
+    if (options.focusName) {
+      name.focus();
+      name.select?.();
+    }
   }
 
-  const addStep = document.createElement("button");
-  addStep.type = "button";
-  addStep.className = "ve-diagram-add";
-  addStep.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span>Add step</span>';
+  const flowControl = () => {
+    const flow = document.createElement("select");
+    flow.className = "ve-diagram-kind ve-diagram-direction";
+    flow.setAttribute("aria-label", "Diagram direction");
+
+    // TB and TD mean the same thing to Mermaid and only one of them is on the
+    // menu, so a diagram written with the other keeps it rather than being
+    // silently rewritten by the act of opening this.
+    const flows = DIAGRAM_FLOWS.some(([value]) => value === model.direction)
+      ? DIAGRAM_FLOWS
+      : [[model.direction, model.direction], ...DIAGRAM_FLOWS];
+
+    for (const [value, name] of flows) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = name;
+      flow.appendChild(option);
+    }
+
+    flow.value = model.direction;
+    flow.addEventListener("change", () => {
+      model.direction = flow.value;
+      commit();
+    });
+
+    return flow;
+  };
+
+  /* --- Everything at once, for when tapping is not enough ---------------- */
+
+  const all = document.createElement("details");
+  all.className = "ve-diagram-all";
+
+  const allSummary = document.createElement("summary");
+  allSummary.textContent = "All steps and arrows";
+
+  const nodeRows = document.createElement("div");
+  nodeRows.className = "ve-diagram-rows";
+
+  const edgeRows = document.createElement("div");
+  edgeRows.className = "ve-diagram-rows";
+
+  // Renaming a step renames it everywhere it is named — in every arrow menu
+  // that points at it — without rebuilding a single row, so the caret stays
+  // where it is being typed.
+  const renameEverywhere = (id, label) => {
+    for (const option of node.querySelectorAll("option")) {
+      if (option.value === id) {
+        option.textContent = label;
+      }
+    }
+  };
+
+  function nodeRow(item) {
+    const row = document.createElement("div");
+    row.className = "ve-diagram-row";
+    row.dataset.nodeId = item.id;
+
+    const text = document.createElement("input");
+    text.type = "text";
+    text.className = "ve-diagram-text";
+    text.value = item.text;
+    text.placeholder = item.id;
+    text.setAttribute("aria-label", "Step label");
+    text.addEventListener("input", () => {
+      item.text = text.value;
+      renameEverywhere(item.id, stepLabel(item));
+      commit();
+    });
+
+    // Reaching a step from the list is the other half of reaching it from the
+    // diagram, and it has to leave the same thing selected either way.
+    text.addEventListener("focus", () => {
+      if (selectedId !== item.id) {
+        select(item.id);
+      }
+    });
+
+    const drop = dropButton(`Remove ${stepLabel(item)}`);
+    drop.addEventListener("click", () => removeStep(item.id));
+
+    row.append(text, shapeSelect(item), drop);
+    return row;
+  }
+
+  function paintLists() {
+    nodeRows.replaceChildren(...model.nodes.map(nodeRow));
+    edgeRows.replaceChildren(...model.edges.map(arrowRow));
+    addArrow.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
+  }
 
   const addArrow = document.createElement("button");
   addArrow.type = "button";
   addArrow.className = "ve-diagram-add";
   addArrow.innerHTML = '<i class="ph ph-arrow-right" aria-hidden="true"></i><span>Add arrow</span>';
-
-  // Rebuilt only when the list of steps or arrows changes, never on a
-  // keystroke: every menu here names every step, so a rebuild per letter typed
-  // would be a rebuild per letter typed and the caret would leave the field.
-  function paintRows() {
-    nodeRows.replaceChildren(...model.nodes.map(nodeRow));
-    edgeRows.replaceChildren(...model.edges.map(edgeRow));
-
-    // An arrow needs somewhere to come from and somewhere to go, and both
-    // lists stop where the model stops accepting them.
-    addStep.disabled = model.nodes.length >= DiagramModel.MAX_NODES;
-    addArrow.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
-  }
-
-  addStep.addEventListener("click", () => {
-    const id = DiagramModel.nextNodeId(model);
-    const last = model.nodes[model.nodes.length - 1];
-
-    model.nodes.push({ id, shape: "rect", text: `Step ${model.nodes.length + 1}` });
-
-    // A step with nothing pointing at it is not in the flowchart at all — it is
-    // drawn off to one side on its own. Joining it to what came before is what
-    // was meant nearly every time, and the arrow's own row is right there.
-    if (last) {
-      model.edges.push({ from: last.id, to: id, kind: "arrow", label: "" });
-    }
-
-    paintRows();
-    commit();
-
-    const row = [...nodeRows.children].find((child) => child.dataset.nodeId === id);
-    const field = row?.querySelector(".ve-diagram-text");
-    field?.focus();
-    field?.select?.();
-  });
-
   addArrow.addEventListener("click", () => {
     if (model.nodes.length < 2) {
       return;
     }
 
-    model.edges.push({
-      from: model.nodes[0].id,
-      to: model.nodes[1].id,
-      kind: "arrow",
-      label: ""
-    });
-
-    paintRows();
-    commit();
+    model.edges.push({ from: model.nodes[0].id, to: model.nodes[1].id, kind: "arrow", label: "" });
+    write();
+    paintLists();
+    paintInspector();
+    drawAtOnce();
   });
 
-  // The picture is the index. Tapping a box goes to its row, which is the whole
-  // difference between a form beside a diagram and a form for that diagram.
-  preview.addEventListener("click", (event) => {
-    const group = event.target.closest?.("g.node");
-    if (!group) {
-      return;
+  const stepsLegend = document.createElement("div");
+  stepsLegend.className = "ve-diagram-legend";
+  stepsLegend.textContent = "Steps";
+
+  const arrowsLegend = document.createElement("div");
+  arrowsLegend.className = "ve-diagram-legend";
+  arrowsLegend.textContent = "Arrows";
+
+  // The inspector and the list are two views of the same arrows, and only the
+  // one being looked at is worth keeping in step on every keystroke. Opening
+  // the list is the moment the other one starts being looked at.
+  all.addEventListener("toggle", () => {
+    if (all.open) {
+      paintLists();
     }
-
-    const id = diagramNodeId(group, model);
-    const row = id ? [...nodeRows.children].find((child) => child.dataset.nodeId === id) : null;
-    if (!row) {
-      return;
-    }
-
-    // No highlight of its own: putting the caret in the row is the thing that
-    // was wanted, and the focus ring already says which row it landed in.
-    row.scrollIntoView?.({ block: "nearest" });
-
-    const field = row.querySelector(".ve-diagram-text");
-    field?.focus();
-    field?.select?.();
   });
+
+  all.append(allSummary, stepsLegend, nodeRows, arrowsLegend, edgeRows, addArrow);
+
+  /* --- Putting it together ---------------------------------------------- */
 
   const head = document.createElement("div");
   head.className = "ve-embed-head ve-diagram-head";
@@ -7518,46 +7787,9 @@ function openDiagramBuilder(node, block) {
 
   const flowText = document.createElement("span");
   flowText.textContent = "Flow";
+  flowLabel.append(flowText, flowControl());
 
-  const flow = document.createElement("select");
-  flow.className = "ve-diagram-kind";
-  flow.setAttribute("aria-label", "Diagram direction");
-
-  // TB and TD mean the same thing to Mermaid and only one of them is on the
-  // menu, so a diagram written with the other keeps it rather than being
-  // silently rewritten by the act of opening this.
-  const flows = DIAGRAM_FLOWS.some(([value]) => value === model.direction)
-    ? DIAGRAM_FLOWS
-    : [[model.direction, model.direction], ...DIAGRAM_FLOWS];
-
-  for (const [value, name] of flows) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = name;
-    flow.appendChild(option);
-  }
-
-  flow.value = model.direction;
-  flow.addEventListener("change", () => {
-    model.direction = flow.value;
-    commit();
-  });
-
-  flowLabel.append(flowText, flow);
   head.append(title, flowLabel);
-
-  const panel = document.createElement("div");
-  panel.className = "ve-diagram-panel";
-
-  const stepsLegend = document.createElement("div");
-  stepsLegend.className = "ve-diagram-legend";
-  stepsLegend.textContent = "Steps";
-
-  const arrowsLegend = document.createElement("div");
-  arrowsLegend.className = "ve-diagram-legend";
-  arrowsLegend.textContent = "Arrows";
-
-  panel.append(stepsLegend, nodeRows, addStep, arrowsLegend, edgeRows, addArrow);
 
   const done = document.createElement("button");
   done.type = "button";
@@ -7565,14 +7797,15 @@ function openDiagramBuilder(node, block) {
   done.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i><span>Done</span>';
   done.addEventListener("click", () => {
     window.clearTimeout(previewTimer);
+    window.removeEventListener("resize", reposition);
     paintEmbedBlock(node, block);
   });
 
-  paintRows();
-  node.append(head, preview, panel, done);
-  drawNow();
+  paintLists();
+  paintInspector();
+  node.append(head, stage, hint, inspector, all, done);
+  draw();
 }
-
 // Which block a rendered node is showing. The index on the node is only ever
 // written, and stops being true the moment a block is inserted above it, so
 // anything that needs to find a block from the page asks here instead.

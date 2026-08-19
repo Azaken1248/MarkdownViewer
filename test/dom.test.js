@@ -1659,24 +1659,19 @@ async function run(server) {
     const embed = embeds[0];
     embed.querySelector(".ve-embed-build").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
-    const panel = embed.querySelector(".ve-diagram-panel");
-    check("Build opens a panel rather than a text box", Boolean(panel), true);
-    check("...and no source box with it", embed.querySelectorAll(".ve-embed-source").length, 0);
-
-    const rows = () => [...panel.querySelectorAll(".ve-diagram-rows")];
-    const steps = () => [...rows()[0].children];
-    const arrows = () => [...rows()[1].children];
-
-    check("every step is a row", steps().length, 2);
-    check("...named as the diagram names it",
-      steps().map((row) => row.querySelector(".ve-diagram-text").value), ["Start", "End"]);
-    check("every arrow is a row too", arrows().length, 1);
+    const stage = embed.querySelector(".ve-diagram-stage");
+    const canvas = embed.querySelector(".ve-diagram-preview");
+    const inspector = embed.querySelector(".ve-diagram-inspector");
+    check("Build opens the diagram, not a text box", Boolean(stage && canvas), true);
+    check("...with no source box in sight", embed.querySelectorAll(".ve-embed-source").length, 0);
+    check("...and a place for whatever is selected", Boolean(inspector), true);
+    check("nothing is selected to begin with, so it says what to do",
+      embed.querySelector(".ve-diagram-hint").textContent, "Tap a box in the diagram to edit it.");
 
     // What a drawn diagram leaves behind depends on whether Mermaid itself has
     // arrived: a promoted block holding the source it was drawn from, or the
     // fenced code that is waiting to become one. Reading whichever is there is
     // reading the real render output rather than anything this suite invented.
-    const preview = embed.querySelector(".ve-diagram-preview");
     const drawnDiagram = (root) => {
       const block = root.querySelector(".mermaid-block");
       if (block) {
@@ -1687,66 +1682,114 @@ async function run(server) {
       return code ? code.textContent : root.textContent;
     };
 
-    check("the diagram is drawn from the model, above the panel",
-      drawnDiagram(preview).includes("A[Start]"), true);
+    check("the diagram is drawn from the model", drawnDiagram(canvas).includes("A[Start]"), true);
 
-    const label = steps()[0].querySelector(".ve-diagram-text");
-    label.value = "Begin";
-    label.dispatchEvent(new window.Event("input", { bubbles: true }));
+    // The full lists are still there, folded away: the way to reach an arrow
+    // nobody can find on a crowded diagram, and the way to work without a
+    // pointing device.
+    const lists = () => [...embed.querySelectorAll(".ve-diagram-all .ve-diagram-rows")];
+    const steps = () => [...lists()[0].children];
+    const arrows = () => [...lists()[1].children];
+
+    check("every step is in the full list", steps().length, 2);
+    check("...named as the diagram names it",
+      steps().map((row) => row.querySelector(".ve-diagram-text").value), ["Start", "End"]);
+    check("every arrow is there too", arrows().length, 1);
+
+    // Tapping a box is the whole point. jsdom draws no SVG, so the tap is
+    // delivered to a stand-in shaped exactly like the one Mermaid emits — a
+    // g.node the id can be read back off.
+    const tapBox = (id, text) => {
+      const group = window.document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.setAttribute("class", "node");
+      group.setAttribute("data-id", id);
+      group.textContent = text;
+      canvas.appendChild(group);
+      group.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      return group;
+    };
+
+    tapBox("A", "Start");
+    check("tapping a box selects it", Boolean(inspector.querySelector(".ve-diagram-selected")), true);
+    check("...and offers its name straight away",
+      inspector.querySelector(".ve-diagram-text").value, "Start");
+    check("...and the arrow it already has",
+      inspector.querySelectorAll(".ve-diagram-arrow").length, 1);
+    check("...and a ring to draw over it", embed.querySelector(".ve-diagram-ring") !== null, true);
+
+    const name = inspector.querySelector(".ve-diagram-text");
+    name.value = "Begin";
+    name.dispatchEvent(new window.Event("input", { bubbles: true }));
 
     check("renaming a step reaches the document immediately",
       window.eval("window.__t.collectPageMarkdown()").includes("A[Begin]"), true);
     check("...and the bar says there is something to save",
       doc.getElementById("pageEditState").textContent, "Unsaved changes");
-    check("...and the arrow menus now call it by its new name",
+    check("...and every menu that names it says the new name",
       arrows()[0].querySelector(".ve-diagram-pick").textContent.includes("Begin"), true);
-    check("the preview waits rather than redrawing on every keystroke",
-      drawnDiagram(preview).includes("A[Begin]"), false);
+    check("the diagram waits rather than redrawing on every keystroke",
+      drawnDiagram(canvas).includes("A[Begin]"), false);
 
     await new Promise((r) => setTimeout(r, 400));
     check("...then catches up with what was typed",
-      drawnDiagram(preview).includes("A[Begin]"), true);
+      drawnDiagram(canvas).includes("A[Begin]"), true);
 
-    // A step nothing points at is drawn off on its own, which is never what
-    // adding one to a flowchart meant.
-    panel.querySelectorAll(".ve-diagram-add")[0]
-      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    check("adding a step adds a row", steps().length, 3);
-    check("...and joins it to what came before", arrows().length, 2);
+    // Growing the next box out of the edge of this one, already joined: the
+    // gesture a flowchart is actually built with.
+    embed.querySelector(".ve-diagram-grow").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the handle grows a step out of the selected box", steps().length, 3);
+    check("...joined to the box it grew from", arrows().length, 2);
     check("...with an id nothing else is using",
       window.eval("window.__t.collectPageMarkdown()").includes("n1[Step 3]"), true);
+    check("...and it is what is selected now, ready to be named",
+      inspector.querySelector(".ve-diagram-text").value, "Step 3");
+    check("...drawn at once rather than on a pause, since there is a box to select",
+      drawnDiagram(canvas).includes("n1[Step 3]"), true);
 
-    const shape = steps()[1].querySelector(".ve-diagram-shape");
+    const shape = inspector.querySelector(".ve-diagram-shape");
     shape.value = "diamond";
     shape.dispatchEvent(new window.Event("change", { bubbles: true }));
     check("a shape is a menu, not a bracket to remember",
-      window.eval("window.__t.collectPageMarkdown()").includes("B{End}"), true);
+      window.eval("window.__t.collectPageMarkdown()").includes("n1{Step 3}"), true);
 
-    const arrowLabel = arrows()[0].querySelector(".ve-diagram-text");
+    // Arrow to…: arm it, then tap the box it should point at.
+    tapBox("A", "Begin");
+    inspector.querySelector(".ve-diagram-connect").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("arming an arrow says what to do next",
+      embed.querySelector(".ve-diagram-hint").textContent, "Now tap the step this one should point at.");
+
+    tapBox("n1", "Step 3");
+    check("tapping the target draws the arrow", arrows().length, 3);
+    check("...from the box it was armed on",
+      window.eval("window.__t.collectPageMarkdown()").includes("A --> n1"), true);
+    check("...and the hint stands down", embed.querySelector(".ve-diagram-hint").hidden, true);
+
+    const arrowLabel = inspector.querySelector(".ve-diagram-arrow .ve-diagram-text");
     arrowLabel.value = "yes";
     arrowLabel.dispatchEvent(new window.Event("input", { bubbles: true }));
     check("an arrow can be labelled without typing pipes",
       window.eval("window.__t.collectPageMarkdown()").includes("A -->|yes| B"), true);
 
-    const flow = embed.querySelector(".ve-diagram-head select");
+    const flow = embed.querySelector(".ve-diagram-direction");
     flow.value = "LR";
     flow.dispatchEvent(new window.Event("change", { bubbles: true }));
-    check("the direction is a menu too",
+    check("the direction is a menu in the header, reachable with nothing selected",
       window.eval("window.__t.collectPageMarkdown()").includes("flowchart LR"), true);
 
     // Removing a step has to take its arrows with it: an arrow that names a
     // step Mermaid has never heard of declares it, and the step comes back as
     // an empty box.
-    steps()[2].querySelector(".ve-diagram-drop")
-      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    tapBox("n1", "Step 3");
+    inspector.querySelector(".ve-diagram-drop").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("removing a step removes it", steps().length, 2);
-    check("...and the arrow that pointed at it", arrows().length, 1);
+    check("...and both arrows that touched it", arrows().length, 1);
     check("...leaving nothing behind that names it",
       window.eval("window.__t.collectPageMarkdown()").includes("n1"), false);
+    check("...and nothing selected", Boolean(inspector.querySelector(".ve-diagram-selected")), false);
 
     embed.querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("Done returns the block to its rendering",
-      embed.querySelectorAll(".ve-diagram-panel").length, 0);
+      embed.querySelectorAll(".ve-diagram-stage").length, 0);
     check("...and offers to build it again",
       Boolean(embed.querySelector(".ve-embed-build")), true);
 
@@ -1754,7 +1797,7 @@ async function run(server) {
     await new Promise((r) => setTimeout(r, 900));
     const savedFlow = JSON.parse((await get("/api/docs/flow.md")).body).content;
     check("the built diagram reached the file",
-      savedFlow.includes("flowchart LR\n    A[Begin]\n    B{End}\n    A -->|yes| B"), true);
+      savedFlow.includes("flowchart LR\n    A[Begin]\n    B[End]\n    A -->|yes| B"), true);
     check("...still fenced as mermaid", savedFlow.includes("```mermaid"), true);
     check("the diagram nobody opened is untouched",
       savedFlow.includes("  subgraph outer\n  C --> D\n  end"), true);

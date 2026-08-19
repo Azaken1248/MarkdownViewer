@@ -552,11 +552,15 @@ checks all of that, because it is a promise a stylesheet can quietly break.
 ### Building a flowchart
 
 A **Mermaid flowchart** gets a second way in, next to its markdown: a **Build**
-button that opens it as what it is — a list of steps and a list of arrows — with
-the diagram drawn above them and redrawn as they change. Tapping a box in the
-drawn diagram jumps to that box's row. Shapes and arrow styles are menus rather
-than brackets to remember, and a new step is joined to the one before it, since
-a step nothing points at is drawn off on its own.
+button that opens the diagram as something you work on directly. Tap a box to
+select it; a ring is drawn over it and everything you can do to it appears
+underneath — its name, its shape, the arrows leaving it. The plus on the edge of
+the selected box **grows the next box out of it**, already joined and already
+ready to be named, which is the loop a flowchart is actually built in. **Arrow
+to…** arms a connection and the next box you tap is the one it points at. The
+full lists of steps and arrows are still there, folded away: the way to reach an
+arrow nobody can find on a crowded diagram, and the way to work without a
+pointing device.
 
 There is nothing to drag, and that is deliberate: Mermaid has no coordinates in
 it. A flowchart says what connects to what and the layout engine decides where

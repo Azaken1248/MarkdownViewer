@@ -318,6 +318,16 @@ console.log("=== the diagram builder fits a phone ===");
   check("...and scrolls inside it rather than widening the page",
     /\.ve-diagram-preview \{[\s\S]{0,200}?overflow-x: auto;/.test(rules), true);
 
+  // The handle that grows the next box out of the selected one is drawn over
+  // the diagram, so it has to be taken off the flow and given back its clicks —
+  // the layer it sits in deliberately has none.
+  check("the marks over the diagram do not eat its taps",
+    /\.ve-diagram-marks \{[\s\S]{0,240}?pointer-events: none;/.test(rules), true);
+  check("...but the handle drawn in them still takes its own",
+    /\.ve-diagram-grow \{[\s\S]{0,120}?pointer-events: auto;/.test(rules), true);
+  check("a box in the diagram looks like the control it is",
+    /\.ve-diagram-preview g\.node \{\s*cursor: pointer;/.test(rules), true);
+
   // Nothing hovers on a touch screen and nothing there is a mouse-width.
   const touch = mediaBlock("@media (hover: none)", css.indexOf(".ve-diagram-add:disabled"));
   const size = (selector, property) => {
