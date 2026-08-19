@@ -1442,8 +1442,42 @@
     return output.join("\n");
   }
 
+  /* The source a block was drawn from.
+   *
+   * Reading the node back is only right the first time. After a successful
+   * render the node holds an <svg>, and an <svg> carries its own <style>; after
+   * a failed one it holds the fallback, which is the source with a parser error
+   * appended. Either read as "the diagram source" produces nonsense, so the
+   * source is recorded the first time the node is seen and read from there
+   * afterwards. promoteMermaidCodeBlocks already records it for a fenced block;
+   * this covers a `.mermaid` div written by hand, and the theme repaint that
+   * puts the source back as the node's text.
+   */
+  function mermaidSourceOf(node) {
+    if (typeof node.dataset.mermaidSource === "string") {
+      return node.dataset.mermaidSource;
+    }
+
+    const source = node.textContent || "";
+    node.dataset.mermaidSource = source;
+    return source;
+  }
+
   async function renderSingleMermaidNode(node) {
-    const raw = normalizeMermaidSource(node.textContent || "");
+    // Already on screen. Two passes over one root is not exotic — the flowchart
+    // builder redraws its preview as it is typed into while an earlier render
+    // of the block around it is still waiting on the 3.5MB engine — and without
+    // this the second pass would redraw a diagram that is already correct, or,
+    // before the source was recorded, feed the parser the first one's stylesheet
+    // and leave a wall of CSS where the diagram was.
+    //
+    // Everything that wants a diagram redrawn takes its SVG away first: see the
+    // theme repaint, which puts the source back as the node's own text.
+    if (node.querySelector("svg")) {
+      return true;
+    }
+
+    const raw = normalizeMermaidSource(mermaidSourceOf(node));
     const attempts = [raw];
     const simplified = simplifyErDiagramSource(raw);
     if (simplified && simplified !== raw) {

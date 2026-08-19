@@ -184,5 +184,144 @@ check("stray-fill cleanup is scoped to shapes, not paths",
   themeCss.includes('["rect", "polygon", "circle", "ellipse"]'), true);
 check("no path selector in the stray-fill shape list", /"path"/.test(themeCss), false);
 
-console.log(failures === 0 ? "\nALL DIAGRAM CHECKS PASSED" : `\n${failures} DIAGRAM CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+// --- Rendering the same root twice -----------------------------------------
+//
+// Everything above reads the source. This part runs it, because the failure it
+// guards is a sequencing one and no amount of reading the file shows it.
+//
+// A rendered diagram is an <svg>, and an <svg> carries its own <style>. So a
+// second pass over a root that has already been rendered used to read that
+// stylesheet as the diagram's source, fail to parse it, and replace the diagram
+// with a wall of CSS ending in the node labels. Two passes over one root is not
+// exotic: the flowchart builder redraws its preview on every pause in typing
+// while an earlier render of the block around it is still waiting on the 3.5MB
+// engine, and both of them call renderMermaidBlocks.
+console.log("=== rendering a root twice draws the diagram, not its stylesheet ===");
+{
+  const { JSDOM } = require("jsdom");
+
+  const page = new JSDOM("<body></body>", { runScripts: "dangerously", pretendToBeVisual: true });
+  const win = page.window;
+
+  // Enough of the libraries markdown-core reaches for. The point is to run the
+  // real render path, so these are stand-ins rather than mocks of the path
+  // itself — and every lazy library is declared present so that nothing here
+  // waits on a CDN that this process has no way to reach.
+  win.marked = { setOptions() {}, parse: (text) => text };
+  win.DOMPurify = { sanitize: (html) => html };
+  win.hljs = { highlightElement() {}, highlightAuto: () => ({ value: "", language: null }), getLanguage: () => null };
+  win.katex = { render() {} };
+  win.renderMathInElement = () => {};
+  const panZoomed = [];
+  win.svgPanZoom = (selector) => {
+    panZoomed.push(selector);
+    return { destroy() {}, resize() {}, fit() {}, center() {}, enableMouseWheelZoom() {} };
+  };
+
+  // What Mermaid actually hands back: an SVG carrying the stylesheet that made
+  // this bug, and refusing anything that is not a diagram — which a stylesheet
+  // is not.
+  const drawn = [];
+  win.mermaid = {
+    initialize() {},
+    render(id, text) {
+      drawn.push(text);
+      if (!/^\s*(flowchart|graph)\b/.test(text)) {
+        throw new Error(`No diagram type detected matching given configuration for text: ${text.slice(0, 40)}`);
+      }
+
+      return {
+        svg: `<svg id="${id}"><style>.svg-pan-zoom-control { cursor: pointer; }#${id}{font-family:"Inter";}</style><g class="node">Start</g></svg>`
+      };
+    }
+  };
+
+  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8"));
+
+  const root = win.document.createElement("div");
+  win.document.body.appendChild(root);
+
+  // Written through a holder rather than by assigning root.innerHTML: the same
+  // assignment after an await is a race in every other file, and a lint rule
+  // that says so is worth more than the two characters it costs here.
+  const seed = (target, markup) => {
+    const holder = win.document.createElement("div");
+    holder.innerHTML = markup;
+    target.replaceChildren(...holder.childNodes);
+  };
+
+  seed(root, '<pre><code class="language-mermaid">flowchart TD\n  A[Start] --> B[End]</code></pre>');
+
+  const sourceOf = () => {
+    const block = root.querySelector(".mermaid-block");
+    return block ? block.getAttribute("data-mermaid-source") : null;
+  };
+
+  (async () => {
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("the first pass draws the diagram", Boolean(root.querySelector(".mermaid-block svg")), true);
+    check("...from the source it was given", drawn[0], "flowchart TD\n  A[Start] --> B[End]");
+    check("...and keeps that source on the block", sourceOf(), "flowchart TD\n  A[Start] --> B[End]");
+
+    const passes = drawn.length;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("the second pass leaves the diagram alone",
+      Boolean(root.querySelector(".mermaid-block svg")), true);
+    check("...rather than parsing the stylesheet the first one drew",
+      root.querySelectorAll(".mermaid-fallback-error").length, 0);
+    check("...and does not redraw what is already on screen", drawn.length, passes);
+
+    // And the same root rendered by two calls that overlap, which is the shape
+    // the builder actually produces.
+    seed(root, '<pre><code class="language-mermaid">flowchart LR\n  C[Go]</code></pre>');
+    await Promise.all([
+      win.MarkdownCore.renderMermaidBlocks(root),
+      win.MarkdownCore.renderMermaidBlocks(root)
+    ]);
+    check("two overlapping renders still leave a diagram",
+      Boolean(root.querySelector(".mermaid-block svg")), true);
+    check("...and no parse failure between them",
+      root.querySelectorAll(".mermaid-fallback-error").length, 0);
+
+    // The flowchart builder's preview is a control: a box in it is tapped to go
+    // to that box's row. svg-pan-zoom would take those pointer events and put
+    // its own buttons over the top, so a container can opt out — and the opting
+    // out has to survive being rendered by a call whose root is somewhere
+    // further up, which is exactly the call the builder races with.
+    const panel = win.document.createElement("div");
+    panel.setAttribute("data-pan-zoom", "off");
+    seed(panel, '<pre><code class="language-mermaid">flowchart TD\n  P[Preview]</code></pre>');
+    root.replaceChildren(panel);
+
+    panZoomed.length = 0;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a diagram the builder drew is left to take its own clicks", panZoomed, []);
+
+    seed(root, '<pre><code class="language-mermaid">flowchart TD\n  Q[Document]</code></pre>');
+    panZoomed.length = 0;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("...while a diagram in the document still gets pan and zoom", panZoomed.length, 1);
+
+    // A block whose source will not parse keeps the source, not the apology it
+    // was given — or a retry would try to draw the error message.
+    seed(root, '<pre><code class="language-mermaid">not a diagram at all</code></pre>');
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a diagram that will not parse says so", root.querySelectorAll(".mermaid-fallback-error").length, 1);
+    check("...and still remembers what it was asked to draw", sourceOf(), "not a diagram at all");
+
+    const beforeRetry = drawn.length;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("...so a retry retries the diagram, not the error message",
+      drawn.slice(beforeRetry), ["not a diagram at all"]);
+
+    console.log(failures === 0 ? "\nALL DIAGRAM CHECKS PASSED" : `\n${failures} DIAGRAM CHECK(S) FAILED`);
+    process.exit(failures === 0 ? 0 : 1);
+  })().catch((error) => {
+    // Without this a throw in here would end the process quietly with a zero
+    // status, which is a suite that passes by not running.
+    console.error(error);
+    console.log("\nDIAGRAM CHECKS DID NOT FINISH");
+    process.exit(1);
+  });
+}
+
