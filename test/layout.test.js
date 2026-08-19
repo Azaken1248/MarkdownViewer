@@ -69,6 +69,30 @@ check("the viewer can shrink below content", /min-height:\s*0/.test(rule(".viewe
 check("the sidebar clips, its tree scrolls", /overflow:\s*hidden/.test(rule(".sidebar")), true);
 check("the tree is the sidebar's scroller", /overflow-y:\s*auto/.test(rule(".tree")), true);
 
+// The same trap the header is already held out of, one level down. .viewer is
+// a column flex container with a definite height, so everything directly
+// inside it is a flex item. A flex item normally cannot be squashed below its
+// content, but an explicit min-height replaces that automatic minimum — and
+// the document below these bars cannot shrink at all, since its own minimum is
+// its content. So when a document overflowed, these bars were the only things
+// that could give, and they gave all of it: the toolbar sat at its min-height
+// with its breadcrumb and buttons hanging out past the bottom border, over the
+// text. Which is also why widening its padding changed nothing anyone could
+// see — the box was pinned, so the extra only pushed the contents further out.
+for (const selector of [".viewer-toolbar", ".page-edit-bar", ".kernel-bar"]) {
+  check(`${selector} cannot be squashed by the document below it`,
+    /flex-shrink:\s*0/.test(rule(selector)), true);
+}
+
+// And the one that made it dangerous: a min-height without that is a flex item
+// that has quietly given up its floor.
+for (const selector of [".viewer-toolbar", ".page-edit-bar", ".kernel-bar"]) {
+  const body = rule(selector) || "";
+  if (!/min-height:/.test(body)) continue;
+  check(`${selector} keeps a floor to go with its min-height`,
+    /flex-shrink:\s*0/.test(body), true);
+}
+
 console.log("=== the toolbar sticks to its own scroller, not the viewport ===");
 const toolbar = rule(".viewer-toolbar");
 check("sticky at top 0", /top:\s*0/.test(toolbar), true);
