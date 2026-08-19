@@ -1084,11 +1084,16 @@ kbd {
  * brings about five pixels of its own air. The meta line under it is 11px text
  * in a 16.5px line box and brings under three — and a descender in "updated"
  * spends most of that. With equal padding the ink ends up sitting three or
- * four pixels low, hard against the border, which is what it looked like.
+ * four pixels low, hard against the border.
  *
  * The extra also lands where a second row goes: on a narrow window the actions
  * wrap under the heading, and eight pixels under a row of buttons is not a
  * margin, it is a gap they have fallen through.
+ *
+ * Half the story, though. This padding ends at the bar's own border; the space
+ * a reader sees under the bar is this plus whatever the document keeps above
+ * its first line, and that is the half that was short — see the .markdown-body
+ * top padding in the width tiers below.
  */
 .viewer-toolbar {
   position: sticky;
@@ -1097,7 +1102,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px 14px;
+  padding: 12px 16px 18px;
   /* What the bar measures with no file open — the meta line under the
      breadcrumb is empty then and takes no room — and so the fallback the edit
      bar sticks below before it has measured anything. */
@@ -1184,11 +1189,10 @@ button.crumb:focus-visible {
 }
 
 .viewer-meta {
-  /* Three, not one. This line and the breadcrumb above it are the two halves
-     of one heading, and a single pixel between them reads as one squashed
-     block rather than as a name with a note under it — which is most of why
-     the bar looked crushed against its own bottom border. */
-  margin: 3px 0 0 28px;
+  /* This line and the breadcrumb above it are the two halves of one heading,
+     and a single pixel between them reads as one squashed block rather than as
+     a name with a note under it. */
+  margin: 4px 0 0 28px;
   font-size: 11px;
   color: var(--fg-subtle);
   white-space: nowrap;
@@ -3764,15 +3768,20 @@ body.page-editing #dockEdit {
 
   .viewer-toolbar {
     flex-wrap: wrap;
-    row-gap: 10px;
+    row-gap: 12px;
   }
 
   /* Scoped to the app shell, because three things wear .markdown-body and only
      one of them has a floating dock over it. A shared document is a page on its
      own; the editor's preview pane lives in a modal, and was being given 96px
-     of empty space under the last line of a preview. */
+     of empty space under the last line of a preview.
+
+     The top of it is the other half of the toolbar's bottom padding. This is
+     the pane that has a bar stuck over it, and the bar is taller here than on
+     a desktop, because the actions wrap under the heading — so the first line
+     of the document needs more room above it here, not less. It had less. */
   .app-shell .markdown-body {
-    padding: 16px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
+    padding: 22px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
   }
 
   .empty-state {
@@ -3899,7 +3908,7 @@ body.page-editing #dockEdit {
 
   .viewer-toolbar {
     gap: 8px;
-    padding: 10px 12px 14px;
+    padding: 12px 12px 18px;
   }
 
   /* Still the toolbar's gutter, which just moved in. */
@@ -3908,7 +3917,7 @@ body.page-editing #dockEdit {
   }
 
   .app-shell .markdown-body {
-    padding: 14px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
+    padding: 20px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
   }
 
   .empty-state {

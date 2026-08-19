@@ -167,7 +167,7 @@ console.log("=== there is a phone tier, not just a not-desktop tier ===");
   check("...and goes at phone width", /\.brand-text,/.test(phone), true);
   check("the section names go with it", /\.place-btn span,/.test(phone), true);
   check("...and the New label too", /\.btn-compact span \{\s*display: none;/.test(phone), true);
-  check("the document pane tightens up", /\.app-shell \.markdown-body \{\s*padding: 14px/.test(phone), true);
+  check("the document pane tightens its gutters", /\.app-shell \.markdown-body \{\s*padding: \d+px max\(12px/.test(phone), true);
   check("...and the cards go to one column", /\.links-grid \{\s*grid-template-columns: 1fr;/.test(phone), true);
 
   check("a short screen has its own tier", short.length > 0, true);
@@ -236,6 +236,19 @@ console.log("=== things that sit above each other line up ===");
   for (const width of [1200, 920, 640, 360]) {
     const px = (side) => Number(String(padAt(".viewer-toolbar", side, width)).replace("px", ""));
     check(`the toolbar leaves more room below than above, at ${width}px`, px("bottom") > px("top"), true);
+  }
+
+  // And that padding is only half of what a reader sees under the bar. The
+  // other half is what the document keeps above its first line, on the other
+  // side of the bar's border — which is the half that was short, and the
+  // reason three rounds of widening the bar itself changed nothing anyone
+  // could see. The document's half has to be at least the bar's, or the
+  // border stops being the middle of the gap and the text reads as stuck to
+  // the underside of the toolbar.
+  for (const width of [1200, 920, 640, 360]) {
+    const px = (value) => Number(String(value).replace("px", ""));
+    check(`the document keeps its own room under the toolbar, at ${width}px`,
+      px(padAt(".markdown-body", "top", width)) >= px(padAt(".viewer-toolbar", "bottom", width)), true);
   }
 
   // The breadcrumb and the meta line under it are the two halves of one
