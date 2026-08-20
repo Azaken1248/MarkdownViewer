@@ -2129,6 +2129,27 @@ async function run(server) {
     check("the caret lands back in a block of the document",
       Boolean(focused && focused.closest("#docContent .ve-block")), true);
 
+    /* Inserting a diagram opens the thing you make a diagram with.
+     *
+     * A diagram is a fence, and for the frame between rendering the block and
+     * drawing the diagram in it there is a <pre><code> in there holding the
+     * Mermaid source. Whatever decides where the caret goes has to know that is
+     * a diagram rather than a code block, or it focuses an element nobody can
+     * type into and the button looks like it did nothing.
+     */
+    window.eval('window.__t.insertPageBlock("mermaid")');
+    const madeDiagram = doc.querySelector("#docContent .ve-embed.is-builder-open");
+    check("inserting a diagram opens the builder", Boolean(madeDiagram), true);
+    check("...on a canvas with the new diagram's boxes on it",
+      [...(madeDiagram?.querySelectorAll(".dd-node") || [])].map((g) => g.getAttribute("data-id")),
+      ["A", "B"]);
+    check("...and the shapes to add more with",
+      (madeDiagram?.querySelectorAll(".ve-diagram-tool") || []).length > 1, true);
+    check("...rather than the diagram's own source under the caret",
+      Boolean(doc.activeElement?.closest?.("pre")), false);
+
+    window.eval("window.__t.undoPageEdit()");
+
     console.log("=== a structural edit is its own step ===");
     window.eval("window.__t.commitPageHistory()");
     const beforeInsert = markdown();
@@ -2482,9 +2503,10 @@ async function run(server) {
       /^# Notes\n\n\$\$/.test(window.eval("window.__t.collectPageMarkdown()")), true);
 
     press("mermaid");
-    const diagram = [...doc.querySelectorAll("#docContent .ve-embed")]
-      .find((n) => n.textContent.includes("flowchart"));
+    const diagram = doc.querySelector("#docContent .ve-embed.is-builder-open");
     check("a diagram appears", Boolean(diagram), true);
+    check("...opened on the canvas you make one on",
+      Boolean(diagram.querySelector(".ve-diagram-canvas .dd-node")), true);
     check("...as a fence the renderer will draw",
       window.eval("window.__t.collectPageMarkdown()").includes("```mermaid\nflowchart TD"), true);
 

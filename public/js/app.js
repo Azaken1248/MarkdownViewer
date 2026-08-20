@@ -8442,18 +8442,35 @@ function startTypingIn(node) {
     return;
   }
 
+  /* A flowchart opens on its builder, where the first thing to do is drag
+   * something.
+   *
+   * Asked before the code below it, and that order is the whole of this: a
+   * diagram is a fence, so until the renderer has turned it into a drawing
+   * there is a <pre><code> sitting in the block — and the drawing happens a
+   * frame later than this runs. Asking for the code first therefore found the
+   * diagram's own source every time and focused an element nobody can type in,
+   * which looked exactly like the button doing nothing. A diagram that already
+   * carried a layout hid it, because those are drawn on the spot rather than a
+   * frame later.
+   */
+  const build = node.querySelector(".ve-embed-build");
+  if (build) {
+    build.click();
+    return;
+  }
+
   const code = node.querySelector("pre code");
   if (code) {
     code.focus();
     return;
   }
 
-  // A flowchart opens on its builder, where the first thing to do is name the
-  // first step. Maths and everything else have no rendering to type into
-  // either, and open on their source with the preview already beside it.
-  const way = node.querySelector(".ve-embed-build") || node.querySelector(".ve-embed-edit");
-  if (way) {
-    way.click();
+  // Maths and everything else have no rendering to type into either, and open
+  // on their source with the preview already beside it.
+  const edit = node.querySelector(".ve-embed-edit");
+  if (edit) {
+    edit.click();
     return;
   }
 
