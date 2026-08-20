@@ -7146,49 +7146,50 @@ function diagramShapeChoices(current) {
   return choices.includes(current) ? choices : [current, ...choices];
 }
 
-/* Which step a box in the drawn diagram stands for.
- *
- * Mermaid's own ids are not ours — it namespaces them per render — so this
- * tries the data attribute it sets, then the id it derives from ours, then the
- * label as a last resort. A box it cannot place is a box that does nothing when
- * tapped, which is the right failure: the form underneath is still the form.
- */
-function diagramNodeId(group, model) {
-  const known = new Set(model.nodes.map((node) => node.id));
-  const raw = group.getAttribute("data-id") || group.id || "";
-
-  if (known.has(raw)) {
-    return raw;
-  }
-
-  const derived = /^flowchart-(.+?)-\d+$/.exec(raw);
-  if (derived && known.has(derived[1])) {
-    return derived[1];
-  }
-
-  const label = (group.textContent || "").trim();
-  const hit = model.nodes.find((node) => String(node.text || node.id).trim() === label);
-  return hit ? hit.id : null;
-}
-
 /* Building on the diagram itself.
  *
- * The first version of this put the two lists beside the picture and let you
- * type into them. It worked, and it was the wrong way round: the diagram was
- * the output and the form was the thing you used. So the diagram is the thing
- * you use now — tap a box to select it, and everything you can do to it appears
- * under the drawing, on the box you tapped.
+ * The first version of this put two lists beside the picture and let you type
+ * into them. The second drew the diagram from those lists and let you tap a box
+ * to select it. Both were working around the same thing: Mermaid has no
+ * coordinates in it, so there was nothing to drag.
  *
- * There is still nothing to drag, and the reason has not changed: Mermaid has
- * no coordinates in it. Boxes go where the layout engine puts them. What direct
- * manipulation can honestly mean here is selection and growth — tap a box, and
- * the plus on its edge grows the next one out of it, already joined, already
- * ready to be named. That is the loop a flowchart is actually built in.
+ * There is now. The fence carries its own layout in comments Mermaid throws
+ * away, we draw the diagram ourselves from those numbers, and a box that is
+ * dragged is a box that stays where it was put — here, and in the document, and
+ * anywhere else this app draws it. Elsewhere the same file still renders,
+ * arranged by whatever engine is reading it.
+ *
+ * So: drag a box to move it, drag its corner to resize it, drag the circle on
+ * its edge to draw an arrow to another box, or let go of that circle on empty
+ * paper — a click, really — to grow a new box already joined. Drag a shape off
+ * the palette to put one anywhere. Everything snaps to the grid it is drawn on.
  *
  * The full lists are still underneath, folded away. They are the way to reach
  * an arrow nobody can find on a crowded diagram, and the way to work without a
  * pointing device.
  */
+
+// Room to drag into. Without it the paper ends exactly where the diagram does
+// and nothing could ever be moved outwards.
+const DIAGRAM_PAPER_PAD = 200;
+// How far a press has to travel before it is a drag rather than a tap. Below
+// this, a finger that moves slightly while selecting a box does not move it.
+const DIAGRAM_DRAG_SLOP = 4;
+const DIAGRAM_MIN_BOX = 50;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// What the palette offers. A table is not a Mermaid shape — it is an ordinary
+// box whose label has rows in it and whose layout line says to rule a line
+// under the first one — so it travels with the shapes but is spelled as a kind.
+const DIAGRAM_PALETTE = [
+  { shape: "rect", kind: "box", label: "Box" },
+  { shape: "round", kind: "box", label: "Rounded" },
+  { shape: "diamond", kind: "box", label: "Decision" },
+  { shape: "stadium", kind: "box", label: "Stadium" },
+  { shape: "circle", kind: "box", label: "Circle" },
+  { shape: "rect", kind: "table", label: "Table" }
+];
+
 function openDiagramBuilder(node, block) {
   const opened = buildableDiagram(block);
 
@@ -7203,7 +7204,11 @@ function openDiagramBuilder(node, block) {
   const model = {
     direction: opened.model.direction,
     nodes: opened.model.nodes,
-    edges: opened.model.edges
+    edges: opened.model.edges,
+    // A diagram that has never been arranged is arranged on the way in, so
+    // there is something to drag. Nothing is written to the file until
+    // something is actually changed.
+    layout: DiagramModel.ensureLayout(opened.model)
   };
 
   node.classList.remove("is-source-open");
@@ -7211,85 +7216,63 @@ function openDiagramBuilder(node, block) {
   destroyPanZoomInstances(node);
   node.innerHTML = "";
 
-  // Which box is being worked on, and — when an arrow is being drawn — which
-  // box it is being drawn from. Both are ids rather than elements, because the
-  // elements are thrown away and redrawn on every change.
+  // Which box is being worked on, and — when an arrow is being drawn by tapping
+  // rather than dragging — which box it is being drawn from. Both are ids
+  // rather than elements, because the elements are redrawn constantly.
   let selectedId = null;
-  let connectFrom = null;
+  let armedFrom = null;
 
-  /* --- The picture ------------------------------------------------------ */
+  /* --- The paper -------------------------------------------------------- */
 
   const stage = document.createElement("div");
   stage.className = "ve-diagram-stage";
 
   const canvas = document.createElement("div");
-  canvas.className = "ve-diagram-preview markdown-body";
-  // svg-pan-zoom would take the pointer events this canvas exists to receive,
-  // and put its own controls over a diagram that is already a control.
-  canvas.dataset.panZoom = "off";
+  canvas.className = "ve-diagram-canvas";
+  // So the diagram can be worked without a pointing device: arrows nudge, and
+  // Delete removes.
+  canvas.tabIndex = 0;
+  canvas.setAttribute("role", "application");
+  canvas.setAttribute("aria-label", "Diagram canvas");
 
-  // Drawn over the diagram rather than into it: Mermaid owns that SVG and
-  // rewrites it completely on every redraw.
-  const marks = document.createElement("div");
-  marks.className = "ve-diagram-marks";
-  marks.hidden = true;
+  stage.append(canvas);
 
-  const ring = document.createElement("div");
-  ring.className = "ve-diagram-ring";
+  const drawing = () => canvas.querySelector("svg");
+  const boxOf = (id) => model.layout[id] || null;
+  const nodeById = (id) => model.nodes.find((item) => item.id === id) || null;
+  const stepLabel = (item) => DiagramModel.textRows(item.text || item.id)[0] || item.id;
 
-  const grow = document.createElement("button");
-  grow.type = "button";
-  grow.className = "ve-diagram-grow";
-  grow.title = "Add a step after this one";
-  grow.setAttribute("aria-label", "Add a step after this one");
-  grow.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i>';
-
-  marks.append(ring, grow);
-  stage.append(canvas, marks);
-
-  /* --- Writing it back -------------------------------------------------- */
-
-  let drawn = "";
-  let previewTimer = 0;
+  let drawTimer = 0;
 
   const draw = () => {
-    previewTimer = 0;
+    drawTimer = 0;
 
     // A pending redraw of a builder that has since been closed is a diagram
-    // nobody will ever see, rendered into an element nobody holds.
+    // nobody will ever see, drawn into an element nobody holds.
     if (!canvas.isConnected) {
       return;
     }
 
-    const source = DiagramModel.serializeFlowchart(model);
-    if (source !== drawn) {
-      drawn = source;
-      destroyPanZoomInstances(canvas);
-      // Fenced by hand rather than through toMermaidMarkdown, which indents
-      // what it wraps for the benefit of a whole-file .mmd render. Here the
-      // fence has to hold exactly what the block will hold, so that what is on
-      // screen is the diagram and not a reformatting of it.
-      canvas.innerHTML = MarkdownCore.renderMarkdown(`\`\`\`mermaid\n${source}\`\`\`\n`);
-      // The old SVG is gone, so the marks are pointing at nothing until the new
-      // one lands.
-      marks.hidden = true;
-      void renderMermaidBlocks(canvas).then(placeMarks);
-      return;
-    }
-
-    placeMarks();
+    canvas.innerHTML = DiagramDraw.render(model, {
+      layout: model.layout,
+      // Its own size, on grid paper, with the handles on whatever is selected.
+      natural: true,
+      grid: true,
+      pad: DIAGRAM_PAPER_PAD,
+      selected: selectedId,
+      label: "Diagram being edited"
+    });
   };
 
-  // Mermaid is the expensive part of a keystroke, so typing redraws on a pause.
-  // Adding, joining and removing do not: the thing you just made has to be on
-  // screen to be selected, and there is nothing to coalesce a single tap with.
+  // Typing redraws on a pause. Everything else redraws at once: the thing you
+  // just did has to be on screen before it can be worked on.
   const drawSoon = () => {
-    window.clearTimeout(previewTimer);
-    previewTimer = window.setTimeout(draw, DIAGRAM_PREVIEW_DELAY);
+    window.clearTimeout(drawTimer);
+    drawTimer = window.setTimeout(draw, DIAGRAM_PREVIEW_DELAY);
   };
 
   const drawAtOnce = () => {
-    window.clearTimeout(previewTimer);
+    window.clearTimeout(drawTimer);
     draw();
   };
 
@@ -7307,53 +7290,610 @@ function openDiagramBuilder(node, block) {
     drawSoon();
   };
 
-  /* --- Where the selected box is on the screen -------------------------- */
-
-  const groupFor = (id) => [...canvas.querySelectorAll("g.node")]
-    .find((group) => diagramNodeId(group, model) === id) || null;
-
-  function placeMarks() {
-    const group = selectedId ? groupFor(selectedId) : null;
-    if (!group) {
-      marks.hidden = true;
-      return;
+  /* --- Pointer arithmetic ------------------------------------------------
+   *
+   * The drawing is rendered at its own size, so a pixel on the screen is a unit
+   * in the diagram — until a narrow screen scales it down, which the ratio
+   * between the box it is drawn in and the box it says it is takes care of.
+   */
+  function pointIn(clientX, clientY) {
+    const svg = drawing();
+    if (!svg) {
+      return { x: 0, y: 0 };
     }
 
-    const box = group.getBoundingClientRect();
-    const base = stage.getBoundingClientRect();
+    const rect = svg.getBoundingClientRect();
+    const wide = svg.viewBox?.baseVal?.width || rect.width || 1;
+    const scale = rect.width > 0 ? wide / rect.width : 1;
 
-    // A box with no size is a diagram that has not been laid out yet — or a
-    // browser that does not measure SVG at all, which is not a case to draw a
-    // ring in the wrong place for.
-    if (box.width === 0 && box.height === 0) {
-      marks.hidden = true;
-      return;
-    }
-
-    marks.hidden = false;
-    ring.style.left = `${box.left - base.left - 4}px`;
-    ring.style.top = `${box.top - base.top - 4}px`;
-    ring.style.width = `${box.width + 8}px`;
-    ring.style.height = `${box.height + 8}px`;
-    grow.style.left = `${box.right - base.left - 1}px`;
-    grow.style.top = `${box.top - base.top + (box.height / 2)}px`;
+    return {
+      x: (clientX - rect.left) * scale,
+      y: (clientY - rect.top) * scale
+    };
   }
 
-  // The ring is measured in viewport coordinates, so anything that moves the
-  // diagram under it moves it out of place. Both listeners take themselves off
-  // once the builder is gone, which is the only cleanup a block that can be
-  // thrown away by an undo will reliably get.
-  const reposition = () => {
-    if (!stage.isConnected) {
-      window.removeEventListener("resize", reposition);
+  // Which box is under a point, asked of the model rather than of the document.
+  // Nothing here depends on hit testing an SVG, which is the one part of a
+  // drawing a browser is allowed to disagree about.
+  function boxAt(point) {
+    for (let index = model.nodes.length - 1; index >= 0; index -= 1) {
+      const item = model.nodes[index];
+      const at = boxOf(item.id);
+
+      if (at && point.x >= at.x && point.x <= at.x + at.w
+        && point.y >= at.y && point.y <= at.y + at.h) {
+        return item.id;
+      }
+    }
+
+    return null;
+  }
+
+  const snap = (value) => Math.max(0, DiagramModel.snap(value));
+
+  /* --- Moving what is already there -------------------------------------- */
+
+  // The arrows that touch one box, re-routed where they are without redrawing
+  // anything else. This is what makes dragging a box cost a handful of
+  // attribute writes instead of a whole render.
+  function reroute(id) {
+    const svg = drawing();
+    if (!svg) {
       return;
     }
 
-    placeMarks();
+    const spread = DiagramDraw.lanes(model.edges);
+    const touching = svg.querySelectorAll(`.dd-edge[data-from="${id}"], .dd-edge[data-to="${id}"]`);
+
+    for (const group of touching) {
+      const index = Number(group.getAttribute("data-edge"));
+      const edge = model.edges[index];
+      if (!edge) {
+        continue;
+      }
+
+      const route = DiagramDraw.routeEdge(model.layout, edge, spread[index]);
+      if (!route) {
+        continue;
+      }
+
+      for (const path of group.querySelectorAll("path")) {
+        path.setAttribute("d", route.d);
+      }
+
+      const label = group.querySelector(".dd-label");
+      if (label) {
+        label.setAttribute("transform", `translate(${route.mid.x},${route.mid.y})`);
+      }
+    }
+  }
+
+  function moveTo(id, x, y) {
+    const at = boxOf(id);
+    if (!at) {
+      return;
+    }
+
+    at.x = snap(x);
+    at.y = snap(y);
+
+    const svg = drawing();
+    const group = svg?.querySelector(`.dd-node[data-id="${id}"]`);
+    if (group) {
+      group.setAttribute("transform", `translate(${at.x},${at.y})`);
+    }
+
+    // The ring and its handles are drawn in the diagram's own coordinates, so
+    // one transform on the group carries all of them along — measured from
+    // where they were drawn, which is recorded when a drag begins. A move with
+    // no drag behind it (an arrow key) has no such record and no need of one:
+    // the redraw that follows puts them where they belong.
+    const marks = svg?.querySelector(".dd-marks");
+    const drawnAt = marks ? Number(marks.dataset.x) : NaN;
+    if (marks && id === selectedId && Number.isFinite(drawnAt)) {
+      marks.setAttribute("transform", `translate(${at.x - drawnAt},${at.y - Number(marks.dataset.y)})`);
+    }
+
+    reroute(id);
+  }
+
+  function resizeTo(id, w, h) {
+    const at = boxOf(id);
+    if (!at) {
+      return;
+    }
+
+    at.w = Math.max(DIAGRAM_MIN_BOX, snap(w));
+    at.h = Math.max(DIAGRAM_MIN_BOX / 2, snap(h));
+    // A shape has to be drawn again to be a different size, and the handles
+    // move with its corner, so this one is a redraw.
+    drawAtOnce();
+  }
+
+  /* --- One gesture at a time ---------------------------------------------
+   *
+   * Press, move, let go — the same three events whether what is being done is a
+   * move, a resize, a new arrow, or a shape being dragged off the palette. What
+   * kind it is, is decided by what was under the finger when it went down.
+   */
+  let gesture = null;
+  let frame = 0;
+  let latest = null;
+
+  const later = (run) => (typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame(run)
+    : window.setTimeout(run, 16));
+
+  function beginGesture(kind, id, point, event) {
+    const at = boxOf(id);
+    gesture = {
+      kind,
+      id,
+      origin: point,
+      from: at ? { x: at.x, y: at.y, w: at.w, h: at.h } : null,
+      moved: false
+    };
+
+    const marks = drawing()?.querySelector(".dd-marks");
+    if (marks && at) {
+      // Where the marks were drawn, so moving them is a difference rather than
+      // a re-render.
+      marks.dataset.x = String(at.x);
+      marks.dataset.y = String(at.y);
+    }
+
+    try {
+      canvas.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A browser without pointer capture still gets the move and up events
+      // while the pointer is over the canvas, which is most of a drag.
+    }
+  }
+
+  function applyGesture(point) {
+    if (!gesture) {
+      return;
+    }
+
+    if (gesture.kind === "move" && gesture.from) {
+      moveTo(gesture.id, gesture.from.x + (point.x - gesture.origin.x),
+        gesture.from.y + (point.y - gesture.origin.y));
+      return;
+    }
+
+    if (gesture.kind === "resize" && gesture.from) {
+      resizeTo(gesture.id, gesture.from.w + (point.x - gesture.origin.x),
+        gesture.from.h + (point.y - gesture.origin.y));
+      return;
+    }
+
+    if (gesture.kind === "connect") {
+      drawDraft(point);
+    }
+  }
+
+  // The arrow being drawn, which is not an arrow yet and so is not in the model
+  // yet either. It is one element, made once and moved.
+  function drawDraft(point) {
+    const svg = drawing();
+    const at = boxOf(gesture.id);
+    if (!svg || !at) {
+      return;
+    }
+
+    let draft = svg.querySelector(".dd-draft");
+    if (!draft) {
+      draft = document.createElementNS(SVG_NS, "path");
+      draft.setAttribute("class", "dd-draft");
+      draft.setAttribute("fill", "none");
+      svg.appendChild(draft);
+    }
+
+    draft.setAttribute("d", `M${at.x + (at.w / 2)},${at.y + (at.h / 2)} L${point.x},${point.y}`);
+
+    const over = boxAt(point);
+    for (const group of svg.querySelectorAll(".dd-node")) {
+      const id = group.getAttribute("data-id");
+      group.classList.toggle("is-target", Boolean(over) && over !== gesture.id && id === over);
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (typeof event.button === "number" && event.button > 0) {
+      return;
+    }
+
+    const svg = drawing();
+    if (!svg) {
+      return;
+    }
+
+    const point = pointIn(event.clientX, event.clientY);
+    const handle = event.target.closest?.("[data-role]");
+
+    if (handle && selectedId) {
+      beginGesture(handle.getAttribute("data-role") === "resize" ? "resize" : "connect",
+        selectedId, point, event);
+      return;
+    }
+
+    const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
+
+    if (!id) {
+      // Tapping the paper is how you put something down.
+      select(null);
+      return;
+    }
+
+    if (armedFrom && armedFrom !== id) {
+      join(armedFrom, id);
+      return;
+    }
+
+    if (id !== selectedId) {
+      select(id);
+    }
+
+    beginGesture("move", id, point, event);
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!gesture) {
+      return;
+    }
+
+    const point = pointIn(event.clientX, event.clientY);
+
+    if (!gesture.moved) {
+      const far = Math.hypot(point.x - gesture.origin.x, point.y - gesture.origin.y);
+      if (far < DIAGRAM_DRAG_SLOP) {
+        return;
+      }
+
+      gesture.moved = true;
+    }
+
+    // A drag on a touch screen would otherwise scroll the canvas as well as
+    // move the box.
+    event.preventDefault?.();
+
+    // Coalesced to one update per frame. The last position wins, and the
+    // position that is committed comes from the release rather than from here,
+    // so nothing depends on how many of these arrived.
+    latest = point;
+    if (frame) {
+      return;
+    }
+
+    frame = later(() => {
+      frame = 0;
+      applyGesture(latest);
+    });
+  });
+
+  const endGesture = (event) => {
+    if (!gesture) {
+      return;
+    }
+
+    const held = gesture;
+    const point = pointIn(event.clientX, event.clientY);
+    gesture = null;
+    frame = 0;
+
+    const svg = drawing();
+    svg?.querySelector(".dd-draft")?.remove();
+    for (const group of svg?.querySelectorAll(".dd-node.is-target") || []) {
+      group.classList.remove("is-target");
+    }
+
+    try {
+      canvas.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Nothing was captured.
+    }
+
+    if (held.kind === "connect") {
+      const over = held.moved ? boxAt(point) : null;
+
+      if (over && over !== held.id) {
+        join(held.id, over);
+        return;
+      }
+
+      if (!held.moved) {
+        // The circle, clicked rather than dragged: grow a new box out of this
+        // one, already joined, ready to be named.
+        addBox({ joinFrom: held.id });
+        return;
+      }
+
+      // Dragged to empty paper: the same thing, put down where it was let go.
+      addBox({ joinFrom: held.id, x: point.x, y: point.y });
+      return;
+    }
+
+    if (!held.moved) {
+      return;
+    }
+
+    if (held.kind === "move" && held.from) {
+      moveTo(held.id, held.from.x + (point.x - held.origin.x),
+        held.from.y + (point.y - held.origin.y));
+    }
+
+    if (held.kind === "resize" && held.from) {
+      resizeTo(held.id, held.from.w + (point.x - held.origin.x),
+        held.from.h + (point.y - held.origin.y));
+    }
+
+    write();
+    drawAtOnce();
   };
 
-  window.addEventListener("resize", reposition);
-  canvas.addEventListener("scroll", reposition, { passive: true });
+  canvas.addEventListener("pointerup", endGesture);
+  canvas.addEventListener("pointercancel", (event) => {
+    if (gesture) {
+      gesture = null;
+      frame = 0;
+      drawing()?.querySelector(".dd-draft")?.remove();
+      drawAtOnce();
+    }
+
+    try {
+      canvas.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Nothing was captured.
+    }
+  });
+
+  canvas.addEventListener("keydown", (event) => {
+    if (!selectedId) {
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      removeStep(selectedId);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      select(null);
+      return;
+    }
+
+    const step = event.shiftKey ? DiagramModel.GRID * 5 : DiagramModel.GRID;
+    const nudge = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step]
+    }[event.key];
+
+    if (!nudge) {
+      return;
+    }
+
+    event.preventDefault();
+    const at = boxOf(selectedId);
+    if (at) {
+      moveTo(selectedId, at.x + nudge[0], at.y + nudge[1]);
+      write();
+      drawSoon();
+    }
+  });
+
+  /* --- Making things ------------------------------------------------------ */
+
+  function addBox(options = {}) {
+    if (model.nodes.length >= DiagramModel.MAX_NODES) {
+      say("That is as many steps as this can hold.");
+      return;
+    }
+
+    const kind = options.kind === "table" ? "table" : "box";
+    const id = DiagramModel.nextNodeId(model);
+    const item = {
+      id,
+      shape: options.shape || "rect",
+      text: kind === "table" ? "Thing<br/>field: type" : `Step ${model.nodes.length + 1}`
+    };
+
+    model.nodes.push(item);
+
+    const size = DiagramModel.measureNode(item, kind);
+    const where = placeFor(options, size);
+    model.layout[id] = { x: where.x, y: where.y, w: size.w, h: size.h, kind };
+
+    // A step with nothing pointing at it is not in the flowchart at all — it is
+    // drawn off to one side on its own. Joining it to the box it was grown from
+    // is the whole meaning of growing it from there.
+    if (options.joinFrom && model.edges.length < DiagramModel.MAX_EDGES) {
+      model.edges.push({ from: options.joinFrom, to: id, kind: "arrow", label: "" });
+    }
+
+    write();
+    paintLists();
+    select(id, { focusName: true });
+  }
+
+  // Where a new box goes: where it was dropped, or clear of the one it was
+  // grown from, or clear of everything.
+  function placeFor(options, size) {
+    if (Number.isFinite(options.x) && Number.isFinite(options.y)) {
+      return { x: snap(options.x - (size.w / 2)), y: snap(options.y - (size.h / 2)) };
+    }
+
+    const from = options.joinFrom ? boxOf(options.joinFrom) : null;
+    if (from) {
+      const below = { x: snap(from.x + ((from.w - size.w) / 2)), y: snap(from.y + from.h + 90) };
+      return free(below, size);
+    }
+
+    const bottom = Object.values(model.layout)
+      .reduce((most, at) => Math.max(most, at.y + at.h), 0);
+
+    return { x: DiagramModel.MARGIN, y: snap(bottom === 0 ? DiagramModel.MARGIN : bottom + 60) };
+  }
+
+  // Nudged sideways until it is not on top of anything. Twelve tries, because a
+  // box that cannot find a gap is better placed overlapping than placed a
+  // screen away from the diagram it belongs to.
+  function free(where, size) {
+    const clashes = (at) => Object.values(model.layout).some((other) => at.x < other.x + other.w
+      && at.x + size.w > other.x
+      && at.y < other.y + other.h
+      && at.y + size.h > other.y);
+
+    let spot = { ...where };
+
+    for (let tries = 0; tries < 12 && clashes(spot); tries += 1) {
+      spot = { x: snap(spot.x + size.w + 40), y: spot.y };
+    }
+
+    return spot;
+  }
+
+  function join(from, to) {
+    if (model.edges.length >= DiagramModel.MAX_EDGES) {
+      say("That is as many arrows as this can hold.");
+      return;
+    }
+
+    model.edges.push({ from, to, kind: "arrow", label: "" });
+    write();
+    paintLists();
+    select(from);
+  }
+
+  function removeStep(id) {
+    model.nodes = model.nodes.filter((item) => item.id !== id);
+    // An arrow to a step that is no longer there would declare it again by
+    // naming it, and the step would come back as an empty box.
+    model.edges = model.edges.filter((edge) => edge.from !== id && edge.to !== id);
+    delete model.layout[id];
+    write();
+    paintLists();
+    select(null);
+  }
+
+  /* --- The palette --------------------------------------------------------
+   *
+   * Tap one to drop a shape into the diagram, or drag one onto the paper to put
+   * it exactly where you want it. The ghost that follows the finger is a plain
+   * element rather than anything in the drawing, because until it is let go it
+   * is not part of the diagram.
+   */
+  const palette = document.createElement("div");
+  palette.className = "ve-diagram-palette";
+
+  for (const choice of DIAGRAM_PALETTE) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ve-diagram-tool";
+    button.dataset.shape = choice.shape;
+    button.dataset.kind = choice.kind;
+    button.textContent = choice.label;
+    button.title = `Add a ${choice.label.toLowerCase()} — drag it onto the diagram`;
+
+    let ghost = null;
+    let dragging = false;
+
+    const finish = (event) => {
+      if (ghost) {
+        ghost.remove();
+        ghost = null;
+      }
+
+      try {
+        button.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Nothing was captured.
+      }
+
+      if (!dragging) {
+        addBox({ shape: choice.shape, kind: choice.kind });
+        return;
+      }
+
+      dragging = false;
+      const paper = canvas.getBoundingClientRect();
+      const inside = event.clientX >= paper.left && event.clientX <= paper.right
+        && event.clientY >= paper.top && event.clientY <= paper.bottom;
+
+      if (!inside) {
+        return;
+      }
+
+      const point = pointIn(event.clientX, event.clientY);
+      addBox({ shape: choice.shape, kind: choice.kind, x: point.x, y: point.y });
+    };
+
+    button.addEventListener("pointerdown", (event) => {
+      if (typeof event.button === "number" && event.button > 0) {
+        return;
+      }
+
+      dragging = false;
+
+      try {
+        button.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Without capture the drag still works as a click.
+      }
+    });
+
+    button.addEventListener("pointermove", (event) => {
+      if (!button.hasPointerCapture?.(event.pointerId)) {
+        return;
+      }
+
+      dragging = true;
+      event.preventDefault?.();
+
+      if (!ghost) {
+        ghost = document.createElement("div");
+        ghost.className = "ve-diagram-ghost";
+        ghost.textContent = choice.label;
+        document.body.appendChild(ghost);
+      }
+
+      ghost.style.left = `${event.clientX}px`;
+      ghost.style.top = `${event.clientY}px`;
+    });
+
+    button.addEventListener("pointerup", finish);
+    button.addEventListener("pointercancel", (event) => {
+      dragging = false;
+      if (ghost) {
+        ghost.remove();
+        ghost = null;
+      }
+
+      try {
+        button.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Nothing was captured.
+      }
+    });
+
+    palette.appendChild(button);
+  }
+
+  const tidy = document.createElement("button");
+  tidy.type = "button";
+  tidy.className = "ve-diagram-tool ve-diagram-tidy";
+  tidy.textContent = "Tidy";
+  tidy.title = "Arrange every box again, following the flow direction";
+  tidy.addEventListener("click", () => {
+    model.layout = DiagramModel.autoLayout(model);
+    write();
+    paintLists();
+    drawAtOnce();
+  });
+
+  palette.appendChild(tidy);
 
   /* --- Selecting ---------------------------------------------------------- */
 
@@ -7368,105 +7908,34 @@ function openDiagramBuilder(node, block) {
   const inspector = document.createElement("div");
   inspector.className = "ve-diagram-inspector";
 
-  const selectedNode = () => model.nodes.find((item) => item.id === selectedId) || null;
+  const selectedNode = () => nodeById(selectedId);
 
   function select(id, options = {}) {
-    selectedId = model.nodes.some((item) => item.id === id) ? id : null;
-    connectFrom = null;
+    selectedId = nodeById(id) ? id : null;
+    armedFrom = null;
     paintInspector(options);
-    placeMarks();
-  }
-
-  function armConnect() {
-    if (!selectedId) {
-      return;
-    }
-
-    connectFrom = selectedId;
-    paintInspector();
-  }
-
-  canvas.addEventListener("click", (event) => {
-    const group = event.target.closest?.("g.node");
-
-    if (!group) {
-      // Tapping the paper is how you put something down.
-      select(null);
-      return;
-    }
-
-    const id = diagramNodeId(group, model);
-    if (!id) {
-      return;
-    }
-
-    if (connectFrom && connectFrom !== id) {
-      model.edges.push({ from: connectFrom, to: id, kind: "arrow", label: "" });
-      write();
-      paintLists();
-      select(connectFrom);
-      drawAtOnce();
-      return;
-    }
-
-    select(id);
-  });
-
-  grow.addEventListener("click", () => {
-    if (selectedId) {
-      addStepAfter(selectedId);
-    }
-  });
-
-  function addStepAfter(afterId) {
-    const id = DiagramModel.nextNodeId(model);
-    model.nodes.push({ id, shape: "rect", text: `Step ${model.nodes.length + 1}` });
-
-    // A step with nothing pointing at it is not in the flowchart at all — it is
-    // drawn off to one side on its own. Joining it to the box it was grown from
-    // is the whole meaning of growing it from there.
-    if (afterId) {
-      model.edges.push({ from: afterId, to: id, kind: "arrow", label: "" });
-    }
-
-    write();
-    paintLists();
-    // On screen first, then selected: the ring is placed against the drawn box
-    // and there is no box until the diagram has been redrawn.
-    select(id, { focusName: true });
-    drawAtOnce();
-  }
-
-  function removeStep(id) {
-    model.nodes = model.nodes.filter((item) => item.id !== id);
-    // An arrow to a step that is no longer there would declare it again by
-    // naming it, and the step would come back as an empty box.
-    model.edges = model.edges.filter((edge) => edge.from !== id && edge.to !== id);
-    write();
-    paintLists();
-    select(null);
+    // The ring and its handles are part of the drawing, so selecting something
+    // is a redraw — of a picture that is a few kilobytes of string.
     drawAtOnce();
   }
 
   /* --- What you can do to what is selected ------------------------------- */
 
   const stepSelect = (value, label, className) => {
-    const select_ = document.createElement("select");
-    select_.className = className;
-    select_.setAttribute("aria-label", label);
+    const picker = document.createElement("select");
+    picker.className = className;
+    picker.setAttribute("aria-label", label);
 
     for (const item of model.nodes) {
       const option = document.createElement("option");
       option.value = item.id;
       option.textContent = stepLabel(item);
-      select_.appendChild(option);
+      picker.appendChild(option);
     }
 
-    select_.value = value;
-    return select_;
+    picker.value = value;
+    return picker;
   };
-
-  const stepLabel = (item) => String(item.text || item.id);
 
   const dropButton = (label) => {
     const button = document.createElement("button");
@@ -7478,10 +7947,13 @@ function openDiagramBuilder(node, block) {
     return button;
   };
 
+  // The shape menu, with the table on the end of it. A table is a kind rather
+  // than a shape, but from here it is one more thing a box can be.
   const shapeSelect = (item) => {
     const shape = document.createElement("select");
     shape.className = "ve-diagram-shape";
     shape.setAttribute("aria-label", "Step shape");
+    const at = boxOf(item.id);
 
     for (const name of diagramShapeChoices(item.shape)) {
       const option = document.createElement("option");
@@ -7490,13 +7962,66 @@ function openDiagramBuilder(node, block) {
       shape.appendChild(option);
     }
 
-    shape.value = item.shape;
+    const table = document.createElement("option");
+    table.value = "table";
+    table.textContent = "Table";
+    shape.appendChild(table);
+
+    shape.value = at && at.kind === "table" ? "table" : item.shape;
     shape.addEventListener("change", () => {
-      item.shape = shape.value;
+      const spot = boxOf(item.id);
+
+      if (shape.value === "table") {
+        if (spot) {
+          spot.kind = "table";
+        }
+      } else {
+        if (spot) {
+          spot.kind = "box";
+        }
+        item.shape = shape.value;
+      }
+
+      grow(item);
       commit();
+      paintInspector();
     });
 
     return shape;
+  };
+
+  // A box never shrinks on its own — a size somebody dragged to is a size they
+  // chose — but it does grow to hold what has been written in it.
+  function grow(item) {
+    const at = boxOf(item.id);
+    if (!at) {
+      return;
+    }
+
+    const size = DiagramModel.measureNode(item, at.kind);
+    at.w = Math.max(at.w, size.w);
+    at.h = Math.max(at.h, size.h);
+  }
+
+  // The label, as lines. One line for most boxes; a title and its rows for a
+  // table. Newlines here are the <br/> Mermaid understands.
+  const labelField = (item) => {
+    const at = boxOf(item.id);
+    const field = document.createElement("textarea");
+    field.className = "ve-diagram-text";
+    field.rows = at && at.kind === "table" ? 3 : 1;
+    field.value = DiagramModel.textRows(item.text).join("\n");
+    field.placeholder = item.id;
+    field.setAttribute("aria-label", at && at.kind === "table" ? "Table rows" : "Step label");
+
+    field.addEventListener("input", () => {
+      item.text = DiagramModel.joinRows(field.value.split("\n"));
+      grow(item);
+      renameEverywhere(item.id, stepLabel(item));
+      commit();
+    });
+
+    return field;
   };
 
   const arrowRow = (edge) => {
@@ -7565,37 +8090,17 @@ function openDiagramBuilder(node, block) {
 
     if (!item) {
       say(model.nodes.length === 0
-        ? "Add the first step."
-        : "Tap a box in the diagram to edit it.");
-
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "ve-diagram-add";
-      add.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span>Add step</span>';
-      add.disabled = model.nodes.length >= DiagramModel.MAX_NODES;
-      add.addEventListener("click", () => addStepAfter(null));
-
-      inspector.append(add);
+        ? "Drag a shape onto the paper to start."
+        : "Tap a box to work on it, or drag one to move it.");
       return;
     }
 
-    say(connectFrom ? "Now tap the step this one should point at." : "");
+    say(armedFrom ? "Now tap the step this one should point at." : "");
 
     const line = document.createElement("div");
     line.className = "ve-diagram-row ve-diagram-selected";
 
-    const name = document.createElement("input");
-    name.type = "text";
-    name.className = "ve-diagram-text";
-    name.value = item.text;
-    name.placeholder = item.id;
-    name.setAttribute("aria-label", "Step label");
-    name.addEventListener("input", () => {
-      item.text = name.value;
-      renameEverywhere(item.id, stepLabel(item));
-      commit();
-    });
-
+    const name = labelField(item);
     const drop = dropButton(`Remove ${stepLabel(item)}`);
     drop.addEventListener("click", () => removeStep(item.id));
 
@@ -7609,21 +8114,16 @@ function openDiagramBuilder(node, block) {
     step.className = "ve-diagram-add";
     step.innerHTML = '<i class="ph ph-plus" aria-hidden="true"></i><span>Step after this</span>';
     step.disabled = model.nodes.length >= DiagramModel.MAX_NODES;
-    step.addEventListener("click", () => addStepAfter(item.id));
+    step.addEventListener("click", () => addBox({ joinFrom: item.id }));
 
     const connect = document.createElement("button");
     connect.type = "button";
-    connect.className = `ve-diagram-add ve-diagram-connect${connectFrom ? " is-armed" : ""}`;
+    connect.className = `ve-diagram-add ve-diagram-connect${armedFrom ? " is-armed" : ""}`;
     connect.innerHTML = '<i class="ph ph-arrow-right" aria-hidden="true"></i><span>Arrow to…</span>';
     connect.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
     connect.addEventListener("click", () => {
-      if (connectFrom) {
-        connectFrom = null;
-        paintInspector();
-        return;
-      }
-
-      armConnect();
+      armedFrom = armedFrom ? null : item.id;
+      paintInspector();
     });
 
     actions.append(step, connect);
@@ -7648,6 +8148,12 @@ function openDiagramBuilder(node, block) {
     }
   }
 
+  /* --- The flow direction -------------------------------------------------
+   *
+   * It no longer decides where anything is drawn here — the layout does — but
+   * it is still what every other reader of this file lays it out by, and it is
+   * what Tidy arranges along.
+   */
   const flowControl = () => {
     const flow = document.createElement("select");
     flow.className = "ve-diagram-kind ve-diagram-direction";
@@ -7706,17 +8212,7 @@ function openDiagramBuilder(node, block) {
     row.className = "ve-diagram-row";
     row.dataset.nodeId = item.id;
 
-    const text = document.createElement("input");
-    text.type = "text";
-    text.className = "ve-diagram-text";
-    text.value = item.text;
-    text.placeholder = item.id;
-    text.setAttribute("aria-label", "Step label");
-    text.addEventListener("input", () => {
-      item.text = text.value;
-      renameEverywhere(item.id, stepLabel(item));
-      commit();
-    });
+    const text = labelField(item);
 
     // Reaching a step from the list is the other half of reaching it from the
     // diagram, and it has to leave the same thing selected either way.
@@ -7748,11 +8244,7 @@ function openDiagramBuilder(node, block) {
       return;
     }
 
-    model.edges.push({ from: model.nodes[0].id, to: model.nodes[1].id, kind: "arrow", label: "" });
-    write();
-    paintLists();
-    paintInspector();
-    drawAtOnce();
+    join(model.nodes[0].id, model.nodes[1].id);
   });
 
   const stepsLegend = document.createElement("div");
@@ -7796,14 +8288,13 @@ function openDiagramBuilder(node, block) {
   done.className = "ve-embed-done";
   done.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i><span>Done</span>';
   done.addEventListener("click", () => {
-    window.clearTimeout(previewTimer);
-    window.removeEventListener("resize", reposition);
+    window.clearTimeout(drawTimer);
     paintEmbedBlock(node, block);
   });
 
   paintLists();
   paintInspector();
-  node.append(head, stage, hint, inspector, all, done);
+  node.append(head, palette, stage, hint, inspector, all, done);
   draw();
 }
 // Which block a rendered node is showing. The index on the node is only ever

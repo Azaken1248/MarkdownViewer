@@ -2163,6 +2163,71 @@ button.crumb:focus-visible {
   color: var(--danger);
 }
 
+/* --- Diagrams we draw ourselves -----------------------------------------
+   A flowchart carrying its own layout is drawn by diagram-draw.js as ordinary
+   SVG elements with ordinary classes, which is the whole reason it is worth
+   doing: Mermaid bakes a palette into every diagram it renders and has to
+   redraw the lot when the theme changes, and this just recolours. */
+.dd {
+  font-family: "Inter", sans-serif;
+}
+
+.dd .dd-shape {
+  fill: var(--raised-hover);
+  stroke: var(--accent-emphasis);
+  stroke-width: 1.5px;
+}
+
+.dd .dd-rule {
+  stroke: var(--border-strong);
+  stroke-width: 1px;
+  fill: none;
+}
+
+.dd .dd-text {
+  fill: var(--fg);
+  font-size: 13px;
+}
+
+.dd .dd-title {
+  font-weight: 600;
+}
+
+.dd .dd-row {
+  font-size: 12.5px;
+  fill: var(--fg-muted);
+}
+
+.dd .dd-line {
+  stroke: var(--fg-muted);
+  stroke-width: 1.6px;
+}
+
+.dd .dd-head {
+  fill: var(--fg-muted);
+  stroke: none;
+}
+
+.dd .dd-edge-dotted .dd-line,
+.dd .dd-edge-dotted-open .dd-line {
+  stroke-dasharray: 6 4;
+}
+
+.dd .dd-edge-thick .dd-line,
+.dd .dd-edge-thick-open .dd-line {
+  stroke-width: 3px;
+}
+
+.dd .dd-label-back {
+  fill: var(--surface);
+  stroke: none;
+}
+
+.dd .dd-label-text {
+  fill: var(--fg-muted);
+  font-size: 12px;
+}
+
 .svg-pan-zoom-control-background {
   fill: var(--raised);
   fill-opacity: 1;
@@ -3427,32 +3492,18 @@ body.page-editing #dockEdit {
   letter-spacing: normal;
 }
 
-.ve-diagram-preview {
-  padding: 10px;
-  border-bottom: 1px dashed var(--border-muted);
-  background: var(--canvas);
-  overflow-x: auto;
-}
 
-/* The diagram is a preview, not a document: it has no business setting the
-   width of the panel it is in, and on a phone it has no business being wider
-   than the screen. */
-.ve-diagram-preview svg {
-  max-width: 100%;
-  height: auto;
-}
-
-/* Both previews carry .markdown-body, and they carry it on purpose: it is what
-   gives an equation, a code block or a diagram inside them the same type and
-   the same sizing they will have once they are in the document. What comes with
+/* The source box's preview carries .markdown-body, and it carries it on
+   purpose: it is what gives an equation, a code block or a diagram inside it
+   the same type and the same sizing they will have once they are in the
+   document. What comes with
    it is the article's own two rules — display: none until a document is loaded,
    and, on a phone, the 96px of clearance the floating dock needs at the bottom
    of the page. Neither is about a preview a few hundred pixels up inside that
    page. The first of them wins on source order over a bare class and the second
    wins on specificity, so the only override that holds is one nested deeper
    than `.app-shell .markdown-body` is. */
-.app-shell .markdown-body .ve-embed-preview,
-.app-shell .markdown-body .ve-diagram-preview {
+.app-shell .markdown-body .ve-embed-preview {
   display: block;
   padding: 10px;
 }
@@ -3462,63 +3513,141 @@ body.page-editing #dockEdit {
   display: none;
 }
 
-/* The picture and the marks drawn over it. The marks are a layer rather than
-   part of the SVG because Mermaid owns that SVG and rewrites all of it on every
-   redraw — anything of ours inside it would last until the next keystroke. */
-.ve-diagram-stage {
-  position: relative;
-  /* A ring for a box that has been scrolled out of the canvas has no business
-     being drawn over the controls underneath. */
-  overflow: hidden;
+/* The shapes to drag onto the paper, and the button that arranges everything
+   again. A row that scrolls rather than wraps: it sits directly above the
+   canvas and a second line of it would push the drawing off a phone screen. */
+.ve-diagram-palette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px dashed var(--border-muted);
+  scrollbar-width: thin;
 }
 
-.ve-diagram-marks {
-  position: absolute;
-  inset: 0;
-  /* The layer is a drawing, not a target: clicks belong to the diagram under
-     it. Only the handle takes them back. */
+.ve-diagram-tool {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: grab;
+  /* The whole point of this row is that a shape can be dragged out of it, and
+     a touch drag that scrolls the row instead is not that. */
+  touch-action: none;
+  user-select: none;
+}
+
+.ve-diagram-tool:hover {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+}
+
+.ve-diagram-tidy {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+/* What follows the finger between the palette and the paper. Fixed to the
+   viewport because it is over everything until it is let go. */
+.ve-diagram-ghost {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  border: 1px solid var(--accent-muted);
+  border-radius: var(--radius-sm);
+  background: var(--selected);
+  color: var(--fg);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.ve-diagram-stage {
+  position: relative;
+}
+
+/* The paper. Drawn at its own size and scrolled, rather than scaled to fit:
+   a pixel dragged has to be a pixel moved, and a diagram that shrank as it
+   grew would be one nobody could aim at. */
+.ve-diagram-canvas {
+  max-height: 60dvh;
+  overflow: auto;
+  background: var(--canvas);
+  border-bottom: 1px dashed var(--border-muted);
+  cursor: default;
+}
+
+.ve-diagram-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ve-diagram-canvas svg {
+  display: block;
+}
+
+/* A box is a thing you pick up, and it has to look like one before it is
+   touched rather than after. touch-action keeps a drag on a box from scrolling
+   the paper as well — a drag on the paper still does. */
+.dd-editing .dd-node {
+  cursor: grab;
+  touch-action: none;
+}
+
+.dd-editing .dd-node.is-target .dd-shape {
+  stroke: var(--accent);
+  stroke-width: 2.5px;
+}
+
+.dd-editing .dd-paper {
+  fill: var(--canvas);
+}
+
+.dd-editing .dd-grid-line {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1px;
+}
+
+.dd-editing .dd-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 5 4;
   pointer-events: none;
 }
 
-.ve-diagram-marks[hidden] {
-  display: none;
-}
-
-.ve-diagram-ring {
-  position: absolute;
-  border: 2px dashed var(--accent);
-  border-radius: 8px;
-}
-
-/* The one gesture a flowchart is actually built with: the next box grows out of
-   the edge of this one, already joined to it. */
-.ve-diagram-grow {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid rgba(240, 246, 252, 0.1);
-  border-radius: 50%;
-  background: var(--accent-emphasis, var(--accent));
-  color: var(--fg-on-emphasis);
-  font-size: 13px;
-  line-height: 1;
+.dd-editing .dd-handle {
+  fill: var(--accent-emphasis);
+  stroke: var(--canvas);
+  stroke-width: 1.5px;
   cursor: pointer;
+  touch-action: none;
 }
 
-.ve-diagram-grow:hover {
-  filter: brightness(1.1);
+.dd-editing .dd-resize {
+  cursor: nwse-resize;
 }
 
-/* A box in the canvas is a control, and has to look like one before it is
-   tapped rather than after. */
-.ve-diagram-preview g.node {
-  cursor: pointer;
+.dd-editing .dd-handle-mark {
+  stroke: var(--fg-on-emphasis);
+  stroke-width: 1.6px;
+  fill: none;
+  pointer-events: none;
+}
+
+/* The arrow being drawn, which is not an arrow yet. */
+.dd-editing .dd-draft {
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
 }
 
 .ve-diagram-hint {
@@ -3606,6 +3735,13 @@ body.page-editing #dockEdit {
 }
 
 .ve-diagram-text {
+  /* A textarea for a label that is usually one line and sometimes a table's
+     worth of rows. It grows by the row count the field is given, and never by
+     being dragged: a resize grip in a row of controls drags the row apart. */
+  resize: none;
+  font-family: inherit;
+  line-height: 1.4;
+  padding-top: 7px;
   flex: 1 1 auto;
   /* A flex item's floor is its content, and an input's content is its size
      attribute — 20 characters — which is wider than a phone. */
@@ -3694,6 +3830,24 @@ body.page-editing #dockEdit {
 
   .ve-diagram-add {
     min-height: 38px;
+  }
+
+  .ve-diagram-tool {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  /* Both handles are dragged with a finger, so both have to be a finger wide.
+     The SVG is drawn at its own scale, so these are diagram units and screen
+     pixels at the same time. */
+  .dd-editing .dd-connect {
+    r: 13px;
+  }
+
+  .dd-editing .dd-resize {
+    width: 18px;
+    height: 18px;
   }
 }
 
@@ -4282,6 +4436,13 @@ body.page-editing #dockEdit {
   /* An arrow row is five controls, which is one line on a wide pane and two on
      a narrow one. The connection reads across the top — from, to — with how it
      is drawn and what it says underneath. */
+  /* The paper gets less room on a phone than on a laptop, because everything
+     under it — the box being worked on, and its arrows — has to be reachable
+     without scrolling the diagram off the top. */
+  .ve-diagram-canvas {
+    max-height: 46dvh;
+  }
+
   .ve-diagram-arrow {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;

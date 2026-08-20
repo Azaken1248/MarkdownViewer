@@ -303,30 +303,45 @@ console.log("=== the diagram builder fits a phone ===");
     /\.ve-diagram-text \{[\s\S]{0,120}?min-width: 0;/.test(rules), true);
 
   // .app-shell .markdown-body hangs 96px of clearance under the document for
-  // the floating dock. A preview inside that document carries .markdown-body
-  // too — deliberately, for its typography and its diagram sizing — and would
+  // the floating dock. The source box's preview carries .markdown-body too —
+  // deliberately, for its typography and its diagram sizing — and would
   // otherwise carry half an empty screen under it as well. The rule that puts
   // the preview's own padding back therefore has to be nested at least as deep
   // as the one it is overriding, which is the part a later edit can quietly
   // undo by shortening the selector.
   check("the document's dock clearance does not reach the previews inside it",
-    /\.app-shell \.markdown-body \.ve-embed-preview,\s*\n\.app-shell \.markdown-body \.ve-diagram-preview \{/.test(rules), true);
+    /\.app-shell \.markdown-body \.ve-embed-preview \{/.test(rules), true);
 
-  // Mermaid sizes an SVG to the diagram, not to the box it was put in.
-  check("the drawn diagram is held to the width of the panel",
-    /\.ve-diagram-preview svg \{[\s\S]{0,80}?max-width: 100%;/.test(rules), true);
-  check("...and scrolls inside it rather than widening the page",
-    /\.ve-diagram-preview \{[\s\S]{0,200}?overflow-x: auto;/.test(rules), true);
+  // The canvas is drawn at the diagram's own size on purpose — a pixel dragged
+  // has to be a pixel moved — so on a phone it is the canvas that scrolls
+  // rather than the page that widens.
+  check("the paper scrolls inside the panel rather than widening the page",
+    /\.ve-diagram-canvas \{[\s\S]{0,240}?overflow: auto;/.test(rules), true);
+  check("...and never takes more than part of the screen",
+    /\.ve-diagram-canvas \{[\s\S]{0,120}?max-height: \d+dvh;/.test(rules), true);
+  check("...less of it on a phone", /\.ve-diagram-canvas \{\s*max-height: 46dvh;/.test(phone), true);
 
-  // The handle that grows the next box out of the selected one is drawn over
-  // the diagram, so it has to be taken off the flow and given back its clicks —
-  // the layer it sits in deliberately has none.
-  check("the marks over the diagram do not eat its taps",
-    /\.ve-diagram-marks \{[\s\S]{0,240}?pointer-events: none;/.test(rules), true);
-  check("...but the handle drawn in them still takes its own",
-    /\.ve-diagram-grow \{[\s\S]{0,120}?pointer-events: auto;/.test(rules), true);
+  // The palette is a row of shapes directly above the drawing. Wrapping it
+  // would push the diagram off the screen, and letting a touch drag scroll it
+  // would take away the gesture it exists for.
+  check("the shape palette scrolls rather than wrapping",
+    /\.ve-diagram-palette \{[\s\S]{0,200}?overflow-x: auto;/.test(rules), true);
+  check("a shape can be dragged off it with a finger",
+    /\.ve-diagram-tool \{[\s\S]{0,320}?touch-action: none;/.test(rules), true);
+
+  // Dragging a box must move the box. Without this, a touch drag on a box
+  // scrolls the paper underneath it instead.
+  check("dragging a box moves the box, not the paper",
+    /\.dd-editing \.dd-node \{[\s\S]{0,120}?touch-action: none;/.test(rules), true);
   check("a box in the diagram looks like the control it is",
-    /\.ve-diagram-preview g\.node \{\s*cursor: pointer;/.test(rules), true);
+    /\.dd-editing \.dd-node \{\s*cursor: grab;/.test(rules), true);
+
+  // The ring is a drawing over the box it marks; the handles inside it are the
+  // things being aimed at.
+  check("the ring around the selected box does not eat its taps",
+    /\.dd-editing \.dd-ring \{[\s\S]{0,200}?pointer-events: none;/.test(rules), true);
+  check("...but the handles drawn with it are targets",
+    /\.dd-editing \.dd-handle \{[\s\S]{0,200}?cursor: pointer;/.test(rules), true);
 
   // Nothing hovers on a touch screen and nothing there is a mouse-width.
   const touch = mediaBlock("@media (hover: none)", css.indexOf(".ve-diagram-add:disabled"));
@@ -342,6 +357,12 @@ console.log("=== the diagram builder fits a phone ===");
   check("every field in the panel grows for a thumb", size(".ve-diagram-text", "min-height"), 38);
   check("...and so does the button that removes a row", size(".ve-diagram-drop", "height"), 38);
   check("...and the one that adds one", size(".ve-diagram-add", "min-height"), 38);
+  check("...and the shapes on the palette", size(".ve-diagram-tool", "min-height"), 38);
+
+  // Both handles are dragged with a finger. The drawing is at its own scale,
+  // so these numbers are screen pixels as well as diagram units.
+  check("the handle that draws an arrow is a finger wide", size(".dd-editing .dd-connect", "r"), 13);
+  check("...and so is the one that resizes a box", size(".dd-editing .dd-resize", "width"), 18);
 }
 
 console.log("=== touch targets in the header ===");

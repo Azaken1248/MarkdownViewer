@@ -889,22 +889,85 @@
     mermaidState.ready = true;
   }
 
+  function promoteMermaidCodeBlock(codeNode) {
+    const source = codeNode.textContent || "";
+    const block = document.createElement("div");
+    block.className = "mermaid mermaid-block";
+    block.textContent = source;
+    // Kept so the diagram can be redrawn from source when the theme changes;
+    // Mermaid bakes its colours into the SVG at render time, so a repaint is
+    // the only way to recolour one.
+    block.dataset.mermaidSource = source;
+    const pre = codeNode.closest("pre");
+    if (pre) {
+      pre.replaceWith(block);
+    }
+
+    return block;
+  }
+
   function promoteMermaidCodeBlocks(root) {
     const codeNodes = root.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid");
-    codeNodes.forEach((codeNode) => {
-      const source = codeNode.textContent || "";
-      const block = document.createElement("div");
-      block.className = "mermaid mermaid-block";
-      block.textContent = source;
-      // Kept so the diagram can be redrawn from source when the theme changes;
-      // Mermaid bakes its colours into the SVG at render time, so a repaint is
-      // the only way to recolour one.
-      block.dataset.mermaidSource = source;
-      const pre = codeNode.closest("pre");
-      if (pre) {
-        pre.replaceWith(block);
+    codeNodes.forEach(promoteMermaidCodeBlock);
+  }
+
+  /* Diagrams that say where their own boxes go.
+   *
+   * A flowchart carrying layout comments has already been arranged, by hand, in
+   * the editor. Handing it to Mermaid would arrange it again — the comments
+   * mean nothing to it — so those are drawn here instead, from the same
+   * arithmetic the editor drew them with, and land in the document laid out the
+   * way they were left.
+   *
+   * Which also means a page whose diagrams are all like this never asks the CDN
+   * for the 3.5MB engine at all. That is why this runs before the question of
+   * loading it comes up.
+   */
+  function drawLaidOutDiagrams(root) {
+    if (!root || !global.DiagramDraw || !global.DiagramModel) {
+      return 0;
+    }
+
+    const candidates = [
+      ...root.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid"),
+      ...root.querySelectorAll(".mermaid")
+    ];
+
+    let drawn = 0;
+
+    for (const node of candidates) {
+      // Already on screen, the same way and for the same reason as a rendered
+      // Mermaid block: what is in the node now is a drawing, not a source.
+      if (node.querySelector("svg")) {
+        continue;
       }
-    });
+
+      const source = typeof node.dataset.mermaidSource === "string"
+        ? node.dataset.mermaidSource
+        : (node.textContent || "");
+
+      if (!global.DiagramModel.hasLayout(source)) {
+        continue;
+      }
+
+      const svg = global.DiagramDraw.renderSource(source);
+      if (!svg) {
+        // Layout comments on something this cannot draw. Mermaid ignores them,
+        // so leaving it alone leaves a diagram rather than an error.
+        continue;
+      }
+
+      const block = node.classList.contains("mermaid")
+        ? node
+        : promoteMermaidCodeBlock(node);
+
+      block.dataset.mermaidSource = source;
+      block.dataset.diagramDrawn = "1";
+      block.innerHTML = svg;
+      drawn += 1;
+    }
+
+    return drawn;
   }
 
   // Resolves when the code on screen is coloured. As with maths, an already
@@ -1714,12 +1777,15 @@
   }
 
   async function renderMermaidBlocks(root) {
-    // Asked before anything is promoted, and deliberately so. Promoting turns a
-    // fenced block into a bare <div>, so doing it first and then finding the
-    // engine unavailable would leave the diagram's source as loose body text.
-    // A document with no diagram in it never downloads the engine at all.
+    const drawn = drawLaidOutDiagrams(root);
+
+    // Asked before anything else is promoted, and deliberately so. Promoting
+    // turns a fenced block into a bare <div>, so doing it first and then
+    // finding the engine unavailable would leave the diagram's source as loose
+    // body text. A document with no diagram in it — or none left that needs an
+    // engine — never downloads one at all.
     const wantsDiagram = Boolean(root?.querySelector(
-      "pre > code.language-mermaid, pre > code.lang-mermaid, .mermaid"
+      "pre > code.language-mermaid, pre > code.lang-mermaid, .mermaid:not([data-diagram-drawn])"
     ));
 
     if (wantsDiagram) {
@@ -1729,6 +1795,9 @@
     ensureMermaidInitialized();
     if (!window.mermaid) {
       await decorateCodeBlocks(root);
+      if (drawn > 0) {
+        await applyPanZoom(root);
+      }
       await renderMathBlocks(root);
       return;
     }
@@ -1736,8 +1805,12 @@
     await waitForNextFrame();
     promoteMermaidCodeBlocks(root);
     await waitForNextFrame();
-    const nodes = root.querySelectorAll(".mermaid");
+    const nodes = root.querySelectorAll(".mermaid:not([data-diagram-drawn])");
     if (nodes.length === 0) {
+      if (drawn > 0) {
+        await applyPanZoom(root);
+      }
+
       await decorateCodeBlocks(root);
       await renderMathBlocks(root);
       return;
@@ -1779,6 +1852,7 @@
     // Diagrams, code and math
     renderMermaidBlocks,
     promoteMermaidCodeBlocks,
+    drawLaidOutDiagrams,
     ensureMermaidInitialized,
     highlightCodeBlocks,
     decorateCodeBlocks,

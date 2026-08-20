@@ -26,6 +26,11 @@ const VE = globalThis.VisualEditor;
 require(path.join(ROOT, "js", "diagram-model.js"));
 const DM = globalThis.DiagramModel;
 
+// And the drawing, which is what makes writing the layout down worth doing: a
+// diagram that says where its boxes are is one this app can draw itself.
+require(path.join(ROOT, "js", "diagram-draw.js"));
+const DD = globalThis.DiagramDraw;
+
 let failures = 0;
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -606,6 +611,204 @@ console.log("=== a trip through the builder loses nothing it could see ===");
   }
 }
 
+console.log("=== a diagram can say where its own boxes go ===");
+{
+  /* Mermaid has no coordinates in it, and every Mermaid parser throws comments
+   * away. So the arrangement lives in comments: still a flowchart everywhere
+   * else, drawn where it was left here.
+   */
+  const arranged = [
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 160x56",
+    "    %% @ B 40,220 200x90 table",
+    "    A[Start]",
+    "    B[\"Person<br/>name: string\"]",
+    "    A --> B"
+  ].join("\n");
+
+  const model = DM.parseFlowchart(arranged);
+  check("a laid-out diagram still reads as a diagram", model.ok, true);
+  check("...with the boxes it always had", model.nodes.map((node) => node.id), ["A", "B"]);
+  check("...and where each of them is",
+    model.layout.A, { x: 40, y: 40, w: 160, h: 56, kind: "box" });
+  check("...including which of them is a table",
+    model.layout.B.kind, "table");
+  check("a diagram nobody has arranged says so by having no layout at all",
+    Object.prototype.hasOwnProperty.call(DM.parseFlowchart("flowchart TD\n  A --> B\n"), "layout"), false);
+  check("...and is told apart without being parsed", DM.hasLayout(arranged), true);
+  check("...from one that has not been", DM.hasLayout("flowchart TD\n  A --> B\n"), false);
+
+  // Everything else beginning with %% is still refused, because keeping a
+  // comment we do not understand means writing it back somewhere and there is
+  // no somewhere.
+  check("a comment that is not ours is still refused",
+    DM.parseFlowchart("flowchart TD\n  %% a note\n  A --> B\n").ok, false);
+  check("...including an init directive",
+    DM.parseFlowchart("flowchart TD\n  %%{init: {'theme':'dark'}}%%\n  A --> B\n").ok, false);
+  check("...and a position with no header above it",
+    DM.parseFlowchart("flowchart TD\n  %% @ A 10,10 90x50\n  A --> B\n").ok, false);
+
+  // A position for a box that is not in the diagram is a position for nothing.
+  const stray = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 160x56",
+    "    %% @ ghost 10,10 90x50",
+    "    A[Start]"
+  ].join("\n"));
+  check("a position for a box that is not there is dropped",
+    Object.keys(stray.layout), ["A"]);
+
+  // The identity that matters, extended: what comes back out has to be what
+  // went in, positions included, or dragging one box moves another.
+  const trips = [
+    arranged,
+    "flowchart LR\n    %% layout v1\n    %% @ A -20,0 90x50\n    A[Only]",
+    "flowchart TD\n    %% layout v1\n    A[No positions yet]"
+  ];
+
+  for (const source of trips) {
+    const first = DM.parseFlowchart(source);
+    const back = DM.parseFlowchart(DM.serializeFlowchart(first));
+    check(`a laid-out diagram survives the round trip: ${source.split("\n")[0]} (${Object.keys(first.layout).length} placed)`,
+      JSON.stringify(back), JSON.stringify(first));
+  }
+
+  // The format has no room for half a pixel, and half a pixel is not a
+  // position anybody chose.
+  const rounded = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A" }],
+    edges: [],
+    layout: { A: { x: 40.4, y: 39.6, w: 90.2, h: 50.7, kind: "box" } }
+  });
+  check("a position is written as whole numbers", rounded.includes("%% @ A 40,40 90x51"), true);
+
+  // And the comments go inside the diagram, after the line that says what it
+  // is — the one place every Mermaid parser is certain to allow them.
+  check("the layout is written under the header, not above it",
+    rounded.indexOf("flowchart TD") < rounded.indexOf("%% layout v1"), true);
+}
+
+console.log("=== a diagram nobody has arranged is arranged on the way in ===");
+{
+  const model = DM.parseFlowchart("flowchart TD\n  A[Start] --> B[Middle] --> C[End]\n");
+  const layout = DM.autoLayout(model);
+
+  check("every box gets a place", Object.keys(layout).sort(), ["A", "B", "C"]);
+  check("...following the flow of the diagram",
+    layout.A.y < layout.B.y && layout.B.y < layout.C.y, true);
+  check("...on the grid it will be dragged on",
+    Object.values(layout).every((at) => at.x % DM.GRID === 0 && at.y % DM.GRID === 0), true);
+  check("...clear of the edge of the paper",
+    Object.values(layout).every((at) => at.x >= 0 && at.y >= 0), true);
+
+  const overlapping = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const places = Object.values(layout);
+  check("...and not on top of each other",
+    places.some((a, i) => places.slice(i + 1).some((b) => overlapping(a, b))), false);
+
+  const sideways = DM.autoLayout(DM.parseFlowchart("flowchart LR\n  A --> B\n"));
+  check("a left-to-right diagram is laid out left to right",
+    sideways.A.x < sideways.B.x && sideways.A.y === sideways.B.y, true);
+
+  // A flowchart with a loop in it has no longest path. Ranking one anyway walks
+  // the boxes round and round until a cap stops it, and the first step ends up
+  // somewhere in the middle of the picture.
+  const looped = DM.autoLayout(DM.parseFlowchart("flowchart TD\n  A --> B\n  B --> C\n  C --> A\n"));
+  check("a loop does not scramble the order it is drawn in",
+    looped.A.y < looped.B.y && looped.B.y < looped.C.y, true);
+
+  // A box can arrive without a position — somebody edited the source by hand.
+  // It has to be drawn somewhere, and somewhere is out of the way of everything
+  // that already has one.
+  const partial = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 160x56",
+    "    A[Start]",
+    "    B[Added by hand]",
+    "    A --> B"
+  ].join("\n"));
+  const filled = DM.ensureLayout(partial);
+  check("a box with no position gets one", Boolean(filled.B), true);
+  check("...without moving the boxes that had one", filled.A, partial.layout.A);
+  check("...and clear of them", filled.B.y >= filled.A.y + filled.A.h, true);
+
+  // Bigger text needs a bigger box, and a box is only ever measured to start
+  // with: a size somebody dragged to is a size they chose.
+  const small = DM.measureNode({ text: "Go", shape: "rect" }, "box");
+  const large = DM.measureNode({ text: "A much longer label than that", shape: "rect" }, "box");
+  check("a longer label starts in a wider box", large.w > small.w, true);
+  check("...and more lines in a taller one",
+    DM.measureNode({ text: "one<br/>two<br/>three", shape: "rect" }, "box").h > small.h, true);
+  check("a table's rows are the lines in its label",
+    DM.textRows("Person<br/>name: string"), ["Person", "name: string"]);
+  check("...and are written back the way Mermaid writes a line break",
+    DM.joinRows(["Person", "name: string"]), "Person<br/>name: string");
+}
+
+console.log("=== an arrow goes round what is in its way ===");
+{
+  // The drawing is the other half of writing the layout down: nothing else on
+  // the page knows where these boxes are, so nothing else can draw the lines
+  // between them.
+  const square = (x, y) => ({ x, y, w: 100, h: 60, kind: "box" });
+  const layout = { A: square(0, 0), B: square(0, 300) };
+
+  const straight = DD.routeEdge(layout, { from: "A", to: "B", kind: "arrow", label: "" });
+  const corners = (route) => route.points.length;
+  const axial = (route) => route.points.every((point, index) => index === 0
+    || point[0] === route.points[index - 1][0]
+    || point[1] === route.points[index - 1][1]);
+
+  check("an arrow between two boxes in line is a straight line", corners(straight), 2);
+  check("...leaving the box it comes from", straight.points[0], [50, 60]);
+  check("...and arriving at the one it points to", straight.points[1], [50, 300]);
+
+  // Put something between them and the arrow has to go round it rather than
+  // through it.
+  const blocked = { ...layout, C: square(0, 140) };
+  const around = DD.routeEdge(blocked, { from: "A", to: "B", kind: "arrow", label: "" });
+  check("an arrow with a box in its way turns", corners(around) > 2, true);
+  check("...and every turn is a right angle", axial(around), true);
+
+  const through = around.points.some((point, index) => index > 0
+    && Math.min(around.points[index - 1][0], point[0]) < blocked.C.x + blocked.C.w
+    && Math.max(around.points[index - 1][0], point[0]) > blocked.C.x
+    && Math.min(around.points[index - 1][1], point[1]) < blocked.C.y + blocked.C.h
+    && Math.max(around.points[index - 1][1], point[1]) > blocked.C.y);
+  check("...so the box it went round is not crossed", through, false);
+
+  // There and back again is most of what a loop in a flowchart is, and two
+  // arrows drawn down the same line are one arrow.
+  const spread = DD.lanes([
+    { from: "A", to: "B", kind: "arrow", label: "" },
+    { from: "B", to: "A", kind: "arrow", label: "" }
+  ]);
+  check("two arrows between the same boxes get their own lanes", spread[0] !== spread[1], true);
+  check("...and one arrow does not need one", DD.lanes([{ from: "A", to: "B" }]), [0]);
+
+  // A box that points at itself has nowhere to route to, so it goes out and
+  // comes back.
+  const loop = DD.routeEdge(layout, { from: "A", to: "A", kind: "arrow", label: "" });
+  check("a box can point at itself", corners(loop) > 2, true);
+
+  // The drawing is written as markup, so anything written in a box is text
+  // rather than markup.
+  const drawn = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "<script>alert(1)</script>" }],
+    edges: [],
+    layout: { A: square(0, 0) }
+  });
+  check("a label is drawn as text, not as markup", drawn.includes("<script>"), false);
+  check("...with the characters that made it dangerous still readable",
+    drawn.includes("&lt;script&gt;"), true);
+  check("a drawing is sized to what is in it", /viewBox="0 0 130 90"/.test(drawn), true);
+}
+
 console.log("=== ...for every diagram in the real library ===");
 {
   // The same argument as the block splitter's library pass: fixtures cover what
@@ -656,9 +859,9 @@ console.log("=== a new step needs an id nothing is using ===");
 
 console.log("=== the previews are actually on the screen ===");
 {
-  // Both source previews and the builder's diagram carry .markdown-body, and
-  // they carry it deliberately: it is what makes an equation, a code block or a
-  // diagram inside them look the way it will look once it is in the document.
+  // A source preview carries .markdown-body, and it carries it deliberately: it
+  // is what makes an equation, a code block or a diagram inside it look the way
+  // it will look once it is in the document.
   //
   // What comes with it is the article's own rules, which are about the article.
   // `.markdown-body { display: none }` waits for a document to be loaded, and
@@ -668,12 +871,16 @@ console.log("=== the previews are actually on the screen ===");
   // half-screen under it — so this is computed from the real stylesheet rather
   // than asserted as a string, because the bug is in the cascade and a regex
   // cannot see a cascade.
+  //
+  // The builder's canvas is deliberately not one of these. It is a drawing we
+  // make ourselves rather than rendered markdown, so it has no reason to carry
+  // the article's class and nothing to inherit from it.
   const stylesheet = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
   const page = new JSDOM(`<style>${stylesheet}</style>
     <div class="app-shell"><article class="markdown-body doc-editing visible">
       <div class="ve-embed">
         <div class="ve-embed-preview markdown-body" id="source">x</div>
-        <div class="ve-diagram-preview markdown-body" id="diagram">y</div>
+        <div class="ve-diagram-canvas" id="canvas">y</div>
         <div class="ve-embed-preview markdown-body" id="blank"></div>
       </div>
     </article></div>`);
@@ -681,10 +888,11 @@ console.log("=== the previews are actually on the screen ===");
   const styleOf = (id) => page.window.getComputedStyle(page.window.document.getElementById(id));
 
   check("a source preview is visible", styleOf("source").display, "block");
-  check("...and so is the diagram the builder draws", styleOf("diagram").display, "block");
   check("a source preview keeps its own padding, not the document's",
     styleOf("source").paddingBottom, "10px");
-  check("...and so does the diagram", styleOf("diagram").paddingBottom, "10px");
+  check("the canvas the diagram is drawn on is visible", styleOf("canvas").display, "block");
+  check("...and scrolls its own paper rather than the page",
+    styleOf("canvas").overflow, "auto");
   check("a preview of markdown that renders to nothing stays hidden",
     styleOf("blank").display, "none");
 }

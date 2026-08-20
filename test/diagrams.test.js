@@ -236,6 +236,10 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
     }
   };
 
+  // The model and the renderer are loaded the way the page loads them: plain
+  // scripts, before markdown-core, hanging themselves off the window.
+  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-model.js"), "utf8"));
+  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-draw.js"), "utf8"));
   win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8"));
 
   const root = win.document.createElement("div");
@@ -313,6 +317,69 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
     await win.MarkdownCore.renderMermaidBlocks(root);
     check("...so a retry retries the diagram, not the error message",
       drawn.slice(beforeRetry), ["not a diagram at all"]);
+
+    /* A diagram that says where its own boxes go is drawn here rather than by
+     * Mermaid, which is the whole point of writing the layout down: the file
+     * renders anywhere, and where this app renders it, it looks the way it was
+     * left. The engine is never asked — a page whose diagrams are all like this
+     * never downloads it.
+     */
+    const arranged = [
+      "flowchart TD",
+      "    %% layout v1",
+      "    %% @ A 40,40 160x56",
+      "    %% @ B 40,220 160x56",
+      "    A[Start]",
+      "    B[End]",
+      "    A --> B"
+    ].join("\n");
+
+    seed(root, `<pre><code class="language-mermaid">${arranged}</code></pre>`);
+    const beforeDrawn = drawn.length;
+    panZoomed.splice(0);
+    await win.MarkdownCore.renderMermaidBlocks(root);
+
+    check("a diagram carrying its own layout is drawn here",
+      Boolean(root.querySelector(".mermaid-block svg.dd")), true);
+    check("...without asking the engine to lay it out again", drawn.length, beforeDrawn);
+    check("...with each box where the file says it is",
+      [...root.querySelectorAll(".dd-node")].map((g) => g.getAttribute("transform")),
+      ["translate(40,40)", "translate(40,220)"]);
+    check("...at the size the file says it is",
+      root.querySelector('.dd-node[data-id="A"] .dd-shape').getAttribute("width"), "160");
+    check("...and an arrow drawn between them",
+      Boolean(root.querySelector(".dd-edge .dd-line")), true);
+    check("...still marked as the block it came from", sourceOf(), arranged);
+    check("...and still something to pan and zoom", panZoomed.length, 1);
+
+    // Rendering the same root twice must leave it alone, for the same reason a
+    // Mermaid one must: what is in the node now is a drawing, not a source.
+    const standing = root.querySelector(".mermaid-block svg");
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a second pass leaves the drawing alone",
+      root.querySelectorAll(".mermaid-block svg").length, 1);
+    check("...the same drawing, rather than an identical new one",
+      root.querySelector(".mermaid-block svg") === standing, true);
+    check("...and still does not reach for the engine", drawn.length, beforeDrawn);
+
+    // The theme repaint puts the source back as the block's text and renders
+    // again. A drawn diagram has to survive that, because it is the same path.
+    const block = root.querySelector(".mermaid-block");
+    block.textContent = block.getAttribute("data-mermaid-source");
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a repaint draws it again rather than handing it over",
+      Boolean(root.querySelector(".mermaid-block svg.dd")), true);
+    check("...still without the engine", drawn.length, beforeDrawn);
+
+    // Layout comments on a diagram this cannot model — a subgraph — are still
+    // comments, and Mermaid ignores comments. So it goes to Mermaid, which is
+    // the only reading that leaves a diagram on the screen.
+    const beyond = "flowchart TD\n    %% layout v1\n    %% @ A 40,40 160x56\n    subgraph outer\n    A --> B\n    end";
+    seed(root, `<pre><code class="language-mermaid">${beyond}</code></pre>`);
+    const beforeHandover = drawn.length;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a laid-out diagram we cannot draw is handed to the engine",
+      drawn.slice(beforeHandover), [beyond]);
 
     console.log(failures === 0 ? "\nALL DIAGRAM CHECKS PASSED" : `\n${failures} DIAGRAM CHECK(S) FAILED`);
     process.exit(failures === 0 ? 0 : 1);

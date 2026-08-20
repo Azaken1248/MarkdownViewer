@@ -106,7 +106,8 @@ proxy hop rather than the client's scheme.
 │   │   ├── app.js            # The client
 │   │   ├── markdown-core.js  # Render engine shared by both pages
 │   │   ├── visual-editor.js  # Block splitting + markdown serialization
-│   │   ├── diagram-model.js  # Mermaid flowcharts as steps and arrows
+│   │   ├── diagram-model.js  # Mermaid flowcharts as steps, arrows and positions
+│   │   ├── diagram-draw.js   # Draws the ones that carry their own layout
 │   │   ├── notebook-runtime.js   # Talks to the Python worker
 │   │   ├── pyodide-worker.js     # Python (Pyodide/WASM), isolated from the DOM
 │   │   ├── share.js          # The share page
@@ -552,30 +553,64 @@ checks all of that, because it is a promise a stylesheet can quietly break.
 ### Building a flowchart
 
 A **Mermaid flowchart** gets a second way in, next to its markdown: a **Build**
-button that opens the diagram as something you work on directly. Tap a box to
-select it; a ring is drawn over it and everything you can do to it appears
-underneath — its name, its shape, the arrows leaving it. The plus on the edge of
-the selected box **grows the next box out of it**, already joined and already
-ready to be named, which is the loop a flowchart is actually built in. **Arrow
-to…** arms a connection and the next box you tap is the one it points at. The
-full lists of steps and arrows are still there, folded away: the way to reach an
-arrow nobody can find on a crowded diagram, and the way to work without a
-pointing device.
+button that opens it as a canvas you work on directly. Drag a box to move it,
+drag its corner to resize it, and drag the circle on its edge onto another box
+to draw an arrow between them — or let go of that circle on empty paper and a
+new box appears there, already joined and ready to be named. Drag a shape off
+the palette to put one anywhere. Everything snaps to the grid it is drawn on,
+arrow keys nudge the selected box, and Delete removes it. **Tidy** arranges the
+whole diagram again along the flow direction.
 
-There is nothing to drag, and that is deliberate: Mermaid has no coordinates in
-it. A flowchart says what connects to what and the layout engine decides where
-everything goes, so a canvas of boxes you could arrange would be a canvas whose
-arrangement is discarded the moment the file is saved.
+The palette carries the flowchart shapes and a **table box** — a title with rows
+under it, for the class-diagram shape of thing. A table is an ordinary Mermaid
+node whose label has `<br/>` line breaks in it, so it still renders as a box of
+text anywhere else.
+
+The full lists of steps and arrows are still there, folded away: the way to reach
+an arrow nobody can find on a crowded diagram, the way to change an arrow's
+style or label, and the way to work without a pointing device.
+
+#### Where the positions go
+
+Mermaid has no coordinates in it. A flowchart says what connects to what and the
+layout engine decides where everything goes — so an arrangement has nowhere in
+the file to live. Except that every Mermaid parser throws comments away, which
+is a place to write it down:
+
+```mermaid
+flowchart TD
+    %% layout v1
+    %% @ A 40,40 160x56
+    %% @ B 40,220 160x56
+    A[Start]
+    B[End]
+    A --> B
+```
+
+That is still a flowchart. GitHub renders it, laid out by its own engine, exactly
+as it always did. **Here it is drawn where it was left** — this app draws those
+diagrams itself, in the editor and in the document, from
+`public/js/diagram-draw.js`: the shapes, the table boxes, and orthogonal arrows
+that route around whatever is in the way. Which also means a diagram carrying its
+own layout never downloads the 3.5MB Mermaid engine at all, and never needs
+redrawing when the theme changes — it is ordinary SVG in ordinary CSS colours.
+
+The trade is worth being explicit about: **a diagram you arrange here will look
+different on GitHub**, because GitHub re-lays it out from the same file. What it
+will not do is stop rendering.
+
+#### What the builder will not open
 
 The model behind it is `public/js/diagram-model.js`, and it is **deliberately
-narrow**. It reads a flowchart made of node declarations and links and nothing
-else — no subgraphs, no `classDef`, no `style`, no `click`, no comments — and
-refuses everything else outright rather than dropping it. A builder that reads
-half a diagram and writes back the half it understood would delete the styling
-off a diagram the first time anyone renamed a box. A refused diagram has no
-Build button and stays editable as source, which is where it came from. Within
-what it does accept, `parse(serialize(model))` is the identity, asserted against
-every Mermaid block in the real library on every test run.
+narrow**. It reads a flowchart made of node declarations, links, and its own
+layout comments — and nothing else: no subgraphs, no `classDef`, no `style`, no
+`click`, no other comments. Everything else it refuses outright rather than
+dropping. A builder that reads half a diagram and writes back the half it
+understood would delete the styling off a diagram the first time anyone renamed
+a box. A refused diagram has no Build button and stays editable as source, which
+is where it came from. Within what it does accept, `parse(serialize(model))` is
+the identity — positions included — asserted against every Mermaid block in the
+real library on every test run.
 
 ---
 

@@ -61,6 +61,7 @@ const BROWSER_GLOBALS = {
   VisualEditor: "readonly",
   // Mermaid flowcharts as steps and arrows, for the diagram builder.
   DiagramModel: "readonly",
+  DiagramDraw: "readonly",
   // The notebook Python controller, loaded before app.js.
   NotebookRuntime: "readonly",
   Worker: "readonly"
