@@ -14,6 +14,10 @@ const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf
 // repaints, so those checks read the pages rather than the engine.
 const appJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
 const shareJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "share.js"), "utf8");
+// And the two pages themselves, because which scripts a page loads decides
+// which diagrams it can draw.
+const indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
+const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -174,6 +178,23 @@ check("...after releasing pan/zoom on the old SVGs",
 // it needs the same repaint or its diagrams keep the old palette.
 check("the share page does the same", shareJs.includes("resetMermaidForThemeChange"), true);
 check("...and redraws from the stored source", shareJs.includes("block.dataset.mermaidSource"), true);
+
+// A diagram carrying its own layout is drawn by us rather than by Mermaid. A
+// page that does not load the drawing still renders that diagram — Mermaid
+// ignores the comments — so the failure is silent: the same file, arranged one
+// way in the app and another way in the shared copy of it.
+for (const [page, markup, script] of [
+  ["the app", indexHtml, "app.js"],
+  ["the share page", shareHtml, "share.js"]
+]) {
+  check(`${page} loads the model a laid-out diagram is read with`,
+    markup.includes("diagram-model.js"), true);
+  check("...and the drawing it is drawn with", markup.includes("diagram-draw.js"), true);
+  // Deferred scripts run in the order they are written, and the page's own
+  // script is the one that renders anything.
+  check("...before the script that renders the document",
+    markup.indexOf("diagram-draw.js") < markup.indexOf(`/js/${script}`), true);
+}
 
 console.log("=== the blanket overrides that broke edges are gone ===");
 const themeCss = js.slice(js.indexOf("function buildDiagramThemeCss("), js.indexOf("function ensureMermaidInitialized("));

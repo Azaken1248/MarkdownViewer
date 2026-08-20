@@ -685,6 +685,16 @@ console.log("=== a diagram can say where its own boxes go ===");
   });
   check("a position is written as whole numbers", rounded.includes("%% @ A 40,40 90x51"), true);
 
+  // A whole-file .mmd document is wrapped in a fence before it is rendered, and
+  // the wrapper indents what it wraps. So every line of a laid-out diagram can
+  // arrive with whitespace in front of it, including the lines that say where
+  // the boxes are.
+  const indented = arranged.split("\n").map((line) => `  ${line}`).join("\n");
+  check("a diagram indented inside a fence is still a laid-out one",
+    DM.hasLayout(indented), true);
+  check("...and still reads the same", JSON.stringify(DM.parseFlowchart(indented).layout),
+    JSON.stringify(model.layout));
+
   // And the comments go inside the diagram, after the line that says what it
   // is — the one place every Mermaid parser is certain to allow them.
   check("the layout is written under the header, not above it",
