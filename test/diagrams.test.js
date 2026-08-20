@@ -236,7 +236,28 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
   const panZoomed = [];
   win.svgPanZoom = (selector) => {
     panZoomed.push(selector);
-    return { destroy() {}, resize() {}, fit() {}, center() {}, enableMouseWheelZoom() {} };
+
+    // svg-pan-zoom nulls its own internals on destroy and throws out of any
+    // method called afterwards — "Cannot read properties of undefined (reading
+    // 'options')" — which is the whole reason this stand-in has a destroy that
+    // does something.
+    const gone = () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'options')");
+    };
+
+    const instance = {
+      resize() {},
+      fit() {},
+      center() {},
+      enableMouseWheelZoom() {},
+      destroy() {
+        instance.resize = gone;
+        instance.fit = gone;
+        instance.center = gone;
+      }
+    };
+
+    return instance;
   };
 
   // What Mermaid actually hands back: an SVG carrying the stylesheet that made
@@ -326,6 +347,46 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
     panZoomed.length = 0;
     await win.MarkdownCore.renderMermaidBlocks(root);
     check("...while a diagram in the document still gets pan and zoom", panZoomed.length, 1);
+
+    /* Pan and zoom is set up now and refitted on the next frame, because the
+     * SVG has to have been laid out before it can be fitted to anything. Which
+     * leaves a gap: a second render pass over the same root takes that instance
+     * apart and builds another one, and the frame the first one was waiting for
+     * still arrives.
+     *
+     * Two passes over one root is not exotic — an embedded block redraws while
+     * the page around it is still rendering — and this was reaching the console
+     * as a TypeError out of svg-pan-zoom on every one of them.
+     */
+    seed(root, '<pre><code class="language-mermaid">flowchart TD\n  R[Refit]</code></pre>');
+    await win.MarkdownCore.renderMermaidBlocks(root);
+
+    // Listened to through a holder rather than by putting the console back
+    // after an await, which is a race in every other file and a lint rule here.
+    const complaints = [];
+    const console_ = { on: false };
+    const realError = win.console.error;
+    win.console.error = (...args) => {
+      if (console_.on) {
+        complaints.push(String(args[0]));
+        return;
+      }
+
+      realError(...args);
+    };
+
+    console_.on = true;
+
+    // Both passes inside one frame, which is the shape that broke.
+    win.MarkdownCore.applyPanZoom(root);
+    win.MarkdownCore.applyPanZoom(root);
+    await new Promise((done) => win.requestAnimationFrame(
+      () => win.requestAnimationFrame(done)));
+    console_.on = false;
+
+    check("a refit left over from a replaced instance does not fire", complaints, []);
+    check("...and the diagram still has one that works",
+      Boolean(root.querySelector(".mermaid-block svg")), true);
 
     // A block whose source will not parse keeps the source, not the apology it
     // was given — or a retry would try to draw the error message.

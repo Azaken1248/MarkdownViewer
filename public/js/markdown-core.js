@@ -1762,6 +1762,15 @@
           panZoomInstance.enableMouseWheelZoom();
         }
         window.requestAnimationFrame(() => {
+          // Destroyed between the init and the frame, which is what a second
+          // render pass over the same root does: it takes the instance apart
+          // and builds another one. svg-pan-zoom nulls its internals on
+          // destroy, so the refit this frame was scheduled for would be a
+          // refit of nothing — and it threw rather than saying so.
+          if (livePanZoomInstances.get(svg) !== panZoomInstance) {
+            return;
+          }
+
           try {
             panZoomInstance.resize();
             panZoomInstance.fit();
