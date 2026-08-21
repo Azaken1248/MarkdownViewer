@@ -474,6 +474,23 @@
 
   /* --- The whole drawing -------------------------------------------------- */
 
+  /* How much of the diagram is on screen, and where.
+   *
+   * A diagram is not a picture on a page here, it is a place you are looking
+   * at part of. `x`, `y` and `scale` say which part: a point p in the diagram
+   * is drawn at p * scale + (x, y). One transform on one group moves the whole
+   * drawing, which is what makes panning and zooming cost the same whether
+   * there are six boxes or six hundred.
+   */
+  function viewOf(view) {
+    const scale = Number(view?.scale);
+    return {
+      x: Number(view?.x) || 0,
+      y: Number(view?.y) || 0,
+      scale: Number.isFinite(scale) && scale > 0 ? scale : 1
+    };
+  }
+
   function render(model, options = {}) {
     const layout = options.layout || Model.ensureLayout(model);
     const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
@@ -486,25 +503,40 @@
     const width = bounds.w + pad;
     const height = bounds.h + pad;
     const gridId = `dd-grid-${drawCounter}`;
-    const parts = [];
 
-    parts.push(`<defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="9" refY="5"`
+    // A viewport is a window onto a diagram with no edges, so nothing in it is
+    // measured against how big the diagram happens to be.
+    const view = options.viewport ? viewOf(options.view) : null;
+    const moved = view ? `translate(${round(view.x)},${round(view.y)}) scale(${view.scale})` : "";
+
+    const defs = `<defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="9" refY="5"`
       + ` markerWidth="7" markerHeight="7" orient="auto-start-reverse">`
       + `<path class="dd-head" d="M0,0 L10,5 L0,10 z"/></marker>`
       + (options.grid
-        ? `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}" patternUnits="userSpaceOnUse">`
+        ? `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}"`
+          + ` patternUnits="userSpaceOnUse"${view ? ` patternTransform="${moved}"` : ""}>`
           + `<path class="dd-grid-line" d="M${GRID_STEP},0 L0,0 L0,${GRID_STEP}"/></pattern>`
         : "")
-      + `</defs>`);
+      + `</defs>`;
 
-    // The paper. Also what a click lands on when it lands on nothing, which is
-    // how a box is put down.
+    /* The paper. Also what a click lands on when it lands on nothing, which is
+     * how a box is put down.
+     *
+     * In a viewport it is the whole window and it never moves — the pattern
+     * inside it is what pans and zooms, which is how the grid can be endless
+     * without anything having to decide how endless.
+     */
+    let paper = "";
     if (options.grid) {
-      parts.push(`<rect class="dd-paper" x="0" y="0" width="${round(width)}"`
-        + ` height="${round(height)}" fill="url(#${gridId})"/>`);
+      paper = view
+        ? `<rect class="dd-paper" x="0" y="0" width="100%" height="100%" fill="url(#${gridId})"/>`
+        : `<rect class="dd-paper" x="0" y="0" width="${round(width)}"`
+          + ` height="${round(height)}" fill="url(#${gridId})"/>`;
     }
 
     const spread = lanes(edges);
+    const parts = [];
+
     parts.push(`<g class="dd-edges">${edges
       .map((edge, index) => edgeMarkup(edge, index, layout, arrowId, spread[index])).join("")}</g>`);
 
@@ -517,18 +549,31 @@
       parts.push(marksMarkup(selected));
     }
 
-    // Two ways to be sized. On a page, width in percent with a max-width in
-    // pixels, which is what every other diagram there does — so a drawn one
-    // sits in the flow the same way and the pan-zoom sizing already knows how
-    // to measure it. In the editor, its own size exactly, so that a pixel
-    // dragged is a pixel moved and there is no scale to undo.
+    // Everything that belongs to the diagram rather than to the window goes in
+    // one group, so panning and zooming is one attribute written once.
+    const body = view
+      ? `<g class="dd-view" transform="${moved}">${parts.join("")}</g>`
+      : parts.join("");
+
+    /* Three ways to be sized. In a viewport, the window it was given, with no
+     * viewBox at all so that one unit is one pixel and the transform above is
+     * the only scale there is. On a page, width in percent with a max-width in
+     * pixels, which is what every other diagram there does. In the old
+     * in-document editor, its own size exactly.
+     */
+    if (view) {
+      return `<svg class="dd dd-editing dd-viewport" xmlns="http://www.w3.org/2000/svg"`
+        + ` width="100%" height="100%" role="application"`
+        + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
+    }
+
     const size = options.natural
       ? ` width="${round(width)}" height="${round(height)}"`
       : ` width="100%" style="max-width: ${round(width)}px"`;
 
     return `<svg class="dd${options.natural ? " dd-editing" : ""}" xmlns="http://www.w3.org/2000/svg"`
       + ` viewBox="0 0 ${round(width)} ${round(height)}"${size} role="img"`
-      + ` aria-label="${escapeText(options.label || "Diagram")}">${parts.join("")}</svg>`;
+      + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
   }
 
   /* What this can draw.
@@ -559,6 +604,7 @@
   }
 
   global.DiagramDraw = {
+    viewOf,
     canDraw,
     render,
     renderSource,

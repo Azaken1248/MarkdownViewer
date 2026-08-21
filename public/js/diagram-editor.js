@@ -92,6 +92,17 @@
   const DIAGRAM_MIN_BOX = 50;
   const SVG_NS = "http://www.w3.org/2000/svg";
 
+  // How far in and out a diagram can be looked at. Free between the two — a
+  // zoom that clicks through fixed steps is a zoom that will not stop where the
+  // thing you are working on happens to fit.
+  const MIN_SCALE = 0.1;
+  const MAX_SCALE = 8;
+  // Wheel notches vary wildly between devices, so what is used is the sign and
+  // a fixed ratio per notch rather than the distance reported.
+  const ZOOM_PER_NOTCH = 1.12;
+  // Room left around a diagram when the view is fitted to it.
+  const FIT_MARGIN = 60;
+
   // What the palette offers. A table is not a Mermaid shape — it is an ordinary
   // box whose label has rows in it and whose layout line says to rule a line
   // under the first one — so it travels with the shapes but is spelled as a kind.
@@ -146,6 +157,20 @@
     let selectedId = null;
     let armedFrom = null;
 
+    /* --- Where we are looking ---------------------------------------------
+     *
+     * A diagram in a viewport has no edges and no size: it is a place, and this
+     * says which part of it is on screen. A point p in the diagram is drawn at
+     * p * scale + (x, y), so panning and zooming are one transform written to
+     * one group, whether there are six boxes in it or six hundred.
+     *
+     * The in-document editor has no viewport — it draws the diagram at its own
+     * size and lets the strip scroll — so all of this is inert there.
+     */
+    const viewport = Boolean(settings.viewport);
+    const view = { x: 0, y: 0, scale: 1 };
+    let fitted = false;
+
     /* --- The paper -------------------------------------------------------- */
 
     const stage = document.createElement("div");
@@ -179,14 +204,86 @@
 
       canvas.innerHTML = DiagramDraw.render(model, {
         layout: model.layout,
-        // Its own size, on grid paper, with the handles on whatever is selected.
-        natural: true,
+        // A window onto the diagram, or — in a document — the diagram at its own
+        // size on grid paper with the strip scrolling it.
+        viewport,
+        view,
+        natural: !viewport,
         grid: true,
         pad: DIAGRAM_PAPER_PAD,
         selected: selectedId,
         label: "Diagram being edited"
       });
     };
+
+    /* Moving the view without drawing the diagram again.
+     *
+     * Two attributes: the group everything is in, and the grid pattern behind
+     * it. That is the whole cost of a pan or a zoom, which is why it stays the
+     * whole cost at any size.
+     */
+    function applyView() {
+      const svg = drawing();
+      if (!svg) {
+        return;
+      }
+
+      const moved = `translate(${round(view.x)},${round(view.y)}) scale(${view.scale})`;
+      svg.querySelector(".dd-view")?.setAttribute("transform", moved);
+      svg.querySelector("pattern")?.setAttribute("patternTransform", moved);
+      showZoom();
+    }
+
+    const round = (value) => Math.round(value * 100) / 100;
+    const clampScale = (value) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+
+    // Zooming about a point on the screen: that point is the one thing that must
+    // not move, which is what makes a wheel zoom feel like it is aimed rather
+    // than merely applied.
+    function zoomAbout(clientX, clientY, factor) {
+      const next = clampScale(view.scale * factor);
+      if (next === view.scale) {
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const sx = clientX - rect.left;
+      const sy = clientY - rect.top;
+
+      view.x = sx - ((sx - view.x) * next / view.scale);
+      view.y = sy - ((sy - view.y) * next / view.scale);
+      view.scale = next;
+      applyView();
+    }
+
+    function zoomToCentre(factor) {
+      const rect = canvas.getBoundingClientRect();
+      zoomAbout(rect.left + (rect.width / 2), rect.top + (rect.height / 2), factor);
+    }
+
+    // The whole diagram, as large as it will go without touching the edges.
+    function fitView() {
+      const rect = canvas.getBoundingClientRect();
+      // Where the diagram is, not how large a picture of it would be: on an
+      // endless canvas a box can be at -400, and fitting to a rectangle that
+      // starts at the origin would leave it off the top of the window.
+      const bounds = DiagramModel.layoutExtent(model.layout);
+      const room = { w: rect.width - (FIT_MARGIN * 2), h: rect.height - (FIT_MARGIN * 2) };
+
+      // Before the canvas has been laid out there is nothing to fit into, and
+      // fitting to zero would put the diagram at the smallest zoom there is.
+      if (room.w <= 0 || room.h <= 0 || bounds.w <= 0 || bounds.h <= 0) {
+        return false;
+      }
+
+      // Never magnified to fit: a diagram of one box would fill the window with
+      // one box, which is not what anyone means by fit.
+      view.scale = clampScale(Math.min(room.w / bounds.w, room.h / bounds.h, 1));
+      view.x = ((rect.width - (bounds.w * view.scale)) / 2) - (bounds.x * view.scale);
+      view.y = ((rect.height - (bounds.h * view.scale)) / 2) - (bounds.y * view.scale);
+      applyView();
+      return true;
+    }
 
     // Typing redraws on a pause. Everything else redraws at once: the thing you
     // just did has to be on screen before it can be worked on.
@@ -219,6 +316,16 @@
       const svg = drawing();
       if (!svg) {
         return { x: 0, y: 0 };
+      }
+
+      // In a viewport one unit is one pixel and the view transform is the only
+      // scale there is, so undoing it is the whole conversion.
+      if (viewport) {
+        const box = canvas.getBoundingClientRect();
+        return {
+          x: (clientX - box.left - view.x) / view.scale,
+          y: (clientY - box.top - view.y) / view.scale
+        };
       }
 
       const rect = svg.getBoundingClientRect();
@@ -369,6 +476,29 @@
       }
     }
 
+    /* Panning is not an edit, so it is not a gesture in the sense the others
+     * are: nothing in the model changes, nothing is committed, and there is
+     * nothing to undo. It is its own small state for that reason.
+     */
+    let panning = null;
+
+    function beginPan(event) {
+      panning = {
+        x: event.clientX,
+        y: event.clientY,
+        from: { x: view.x, y: view.y }
+      };
+
+      canvas.classList.add("is-panning");
+
+      try {
+        canvas.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Without capture the pan ends when the pointer leaves the canvas,
+        // which is a smaller loss than not panning at all.
+      }
+    }
+
     function applyGesture(point) {
       if (!gesture) {
         return;
@@ -417,13 +547,25 @@
       }
     }
 
+    // Held down, the space bar turns a drag into a pan wherever it starts, which
+    // is how every canvas has worked since before any of them had a canvas.
+    let spaceHeld = false;
+
     canvas.addEventListener("pointerdown", (event) => {
-      if (typeof event.button === "number" && event.button > 0) {
+      const svg = drawing();
+      if (!svg) {
         return;
       }
 
-      const svg = drawing();
-      if (!svg) {
+      // The middle button is a pan and nothing else, on every diagram tool
+      // anyone has used, and it is the one gesture that never means select.
+      if (viewport && (event.button === 1 || spaceHeld)) {
+        event.preventDefault?.();
+        beginPan(event);
+        return;
+      }
+
+      if (typeof event.button === "number" && event.button > 0) {
         return;
       }
 
@@ -439,8 +581,13 @@
       const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
 
       if (!id) {
-        // Tapping the paper is how you put something down.
+        // Tapping the paper is how you put something down. Dragging it is how
+        // you go somewhere else, which is the same press until it moves.
         select(null);
+        if (viewport) {
+          beginPan(event);
+        }
+
         return;
       }
 
@@ -457,6 +604,26 @@
     });
 
     canvas.addEventListener("pointermove", (event) => {
+      if (panning) {
+        event.preventDefault?.();
+        latest = { x: event.clientX, y: event.clientY };
+
+        if (!frame) {
+          frame = later(() => {
+            frame = 0;
+            if (!panning) {
+              return;
+            }
+
+            view.x = panning.from.x + (latest.x - panning.x);
+            view.y = panning.from.y + (latest.y - panning.y);
+            applyView();
+          });
+        }
+
+        return;
+      }
+
       if (!gesture) {
         return;
       }
@@ -491,6 +658,20 @@
     });
 
     const endGesture = (event) => {
+      if (panning) {
+        panning = null;
+        frame = 0;
+        canvas.classList.remove("is-panning");
+
+        try {
+          canvas.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Nothing was captured.
+        }
+
+        return;
+      }
+
       if (!gesture) {
         return;
       }
@@ -566,7 +747,143 @@
       }
     });
 
+    /* --- Getting about ------------------------------------------------------
+     *
+     * The wheel zooms about the pointer, because the thing under it is the thing
+     * being looked at and it is the one point that must not move. Shift makes it
+     * a sideways pan, which is what a wheel means on a trackpad held sideways.
+     * Two fingers pinch. Space held turns any drag into a pan.
+     */
+    if (viewport) {
+      canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          view.x -= event.deltaY;
+          applyView();
+          return;
+        }
+
+        // The sign and a fixed ratio, not the distance: what a notch reports
+        // varies by an order of magnitude between a mouse and a trackpad.
+        const notches = event.deltaY > 0 ? -1 : 1;
+        zoomAbout(event.clientX, event.clientY, ZOOM_PER_NOTCH ** notches);
+      }, { passive: false });
+
+      canvas.addEventListener("keyup", (event) => {
+        if (event.key === " " || event.code === "Space") {
+          spaceHeld = false;
+          canvas.classList.remove("is-panning-armed");
+        }
+      });
+
+      // A canvas that keeps thinking the space bar is down after the window has
+      // gone away is a canvas where nothing can be selected any more.
+      window.addEventListener("blur", () => {
+        spaceHeld = false;
+        canvas.classList.remove("is-panning-armed");
+      });
+    }
+
+    /* Two fingers: pinch to zoom, and the midpoint between them to pan.
+     *
+     * Tracked here rather than as a gesture because it starts halfway through
+     * whatever the first finger was already doing — and that gesture has to be
+     * abandoned rather than finished, or a pinch leaves a box wherever the first
+     * finger happened to be when the second arrived.
+     */
+    const touches = new Map();
+    let pinch = null;
+
+    const spanOf = () => {
+      const [a, b] = [...touches.values()];
+      return {
+        distance: Math.hypot(a.x - b.x, a.y - b.y),
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2
+      };
+    };
+
+    if (viewport) {
+      canvas.addEventListener("pointerdown", (event) => {
+        if (event.pointerType !== "touch") {
+          return;
+        }
+
+        touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (touches.size !== 2) {
+          return;
+        }
+
+        // Whatever one finger had started is abandoned: two fingers are a
+        // different intention, and finishing the first would move a box.
+        gesture = null;
+        panning = null;
+        canvas.classList.remove("is-panning");
+        drawing()?.querySelector(".dd-draft")?.remove();
+
+        const span = spanOf();
+        pinch = { span, from: { x: view.x, y: view.y }, scale: view.scale };
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (event.pointerType !== "touch" || !touches.has(event.pointerId)) {
+          return;
+        }
+
+        touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (!pinch || touches.size !== 2) {
+          return;
+        }
+
+        event.preventDefault();
+        const span = spanOf();
+        if (pinch.span.distance <= 0) {
+          return;
+        }
+
+        const next = clampScale(pinch.scale * (span.distance / pinch.span.distance));
+        const rect = canvas.getBoundingClientRect();
+        const sx = pinch.span.x - rect.left;
+        const sy = pinch.span.y - rect.top;
+
+        // The point between the fingers stays under them, and the fingers
+        // themselves are allowed to travel — so a pinch pans as well as zooms,
+        // which is what makes it feel like moving a piece of paper.
+        view.scale = next;
+        view.x = (sx - ((sx - pinch.from.x) * next / pinch.scale)) + (span.x - pinch.span.x);
+        view.y = (sy - ((sy - pinch.from.y) * next / pinch.scale)) + (span.y - pinch.span.y);
+        applyView();
+      }, { passive: false });
+
+      const liftFinger = (event) => {
+        if (event.pointerType !== "touch") {
+          return;
+        }
+
+        touches.delete(event.pointerId);
+        if (touches.size < 2) {
+          pinch = null;
+        }
+      };
+
+      canvas.addEventListener("pointerup", liftFinger);
+      canvas.addEventListener("pointercancel", liftFinger);
+    }
+
     canvas.addEventListener("keydown", (event) => {
+      if (viewport && (event.key === " " || event.code === "Space")) {
+        // Not while typing into something on the canvas, where a space is a
+        // space.
+        if (!/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
+          event.preventDefault();
+          spaceHeld = true;
+          canvas.classList.add("is-panning-armed");
+        }
+
+        return;
+      }
+
       if (!selectedId) {
         return;
       }
@@ -1199,6 +1516,71 @@
 
     head.append(title, flowLabel);
 
+    /* The zoom, which is a readout as much as a control.
+     *
+     * Typeable, because "make this 100%" and "make this fit on a slide" are
+     * things people want exactly rather than approximately, and a pair of
+     * buttons can only ever get near.
+     */
+    let zoomField = null;
+
+    function showZoom() {
+      if (zoomField && document.activeElement !== zoomField) {
+        zoomField.value = `${Math.round(view.scale * 100)}%`;
+      }
+    }
+
+    if (viewport) {
+      const zoom = document.createElement("div");
+      zoom.className = "ve-diagram-zoom";
+
+      const stepButton = (label, icon, run) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ve-diagram-zoom-step";
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.addEventListener("click", run);
+        return button;
+      };
+
+      zoomField = document.createElement("input");
+      zoomField.type = "text";
+      zoomField.className = "ve-diagram-zoom-value";
+      zoomField.setAttribute("aria-label", "Zoom");
+      zoomField.value = "100%";
+
+      const readTyped = () => {
+        const asked = parseFloat(String(zoomField.value).replace(/[^\d.]/g, ""));
+        if (Number.isFinite(asked) && asked > 0) {
+          const rect = canvas.getBoundingClientRect();
+          zoomAbout(rect.left + (rect.width / 2), rect.top + (rect.height / 2),
+            clampScale(asked / 100) / view.scale);
+        }
+
+        showZoom();
+      };
+
+      zoomField.addEventListener("change", readTyped);
+      zoomField.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          readTyped();
+          canvas.focus();
+        }
+      });
+
+      zoom.append(
+        stepButton("Zoom out", "ph-minus", () => zoomToCentre(1 / ZOOM_PER_NOTCH ** 2)),
+        zoomField,
+        stepButton("Zoom in", "ph-plus", () => zoomToCentre(ZOOM_PER_NOTCH ** 2)),
+        stepButton("Fit the whole diagram", "ph-corners-out", () => fitView())
+      );
+
+      head.append(zoom);
+    }
+
     const parts = [head, palette, stage, hint, inspector, all];
 
     // A host with somewhere to go back to gets a way back. The page has nowhere
@@ -1220,7 +1602,38 @@
     node.append(...parts);
     draw();
 
+    /* The first sight of a diagram is the whole of it.
+     *
+     * Which cannot be arranged until the canvas has been laid out, and appending
+     * it is not the same moment as measuring it — so it is tried now, and again
+     * on the next frame if now was too early, and again when the window changes
+     * size until it has worked once.
+     */
+    let watching = null;
+    if (viewport) {
+      fitted = fitView();
+
+      if (!fitted) {
+        later(() => {
+          fitted = fitView();
+        });
+      }
+
+      if (typeof window.ResizeObserver === "function") {
+        watching = new window.ResizeObserver(() => {
+          if (!fitted) {
+            fitted = fitView();
+          }
+        });
+        watching.observe(canvas);
+      }
+    }
+
     return {
+      // Where the diagram is being looked at from, which is not part of it and
+      // is not written anywhere — but is worth being able to ask about.
+      view: () => ({ ...view }),
+      fit: fitView,
       // What the file would say if it were written now. The host asks for this
       // when it saves rather than keeping its own copy in step.
       source: () => DiagramModel.serializeFlowchart(model).replace(/\n$/, ""),
@@ -1228,6 +1641,7 @@
       // drawn into an element nobody will see.
       destroy: () => {
         window.clearTimeout(drawTimer);
+        watching?.disconnect();
         node.innerHTML = "";
       }
     };

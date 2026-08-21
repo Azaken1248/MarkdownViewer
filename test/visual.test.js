@@ -1087,6 +1087,87 @@ console.log("=== a diagram nobody has arranged is arranged on the way in ===");
     DM.joinRows(["Person", "name: string"]), "Person<br/>name: string");
 }
 
+console.log("=== a diagram is a place, not a picture ===");
+{
+  /* On the page a diagram has no edges: it is somewhere you are looking at part
+   * of, and the part you are looking at is one transform. That matters more
+   * than it sounds — it is what makes panning and zooming cost the same at six
+   * boxes and at six hundred, because neither one redraws anything.
+   */
+  const model = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 100,100 120x60",
+    "    %% @ B 100,300 120x60",
+    "    A[One]",
+    "    B[Two]",
+    "    A --> B"
+  ].join("\n"));
+
+  const drawn = DD.render(model, {
+    layout: model.layout,
+    viewport: true,
+    view: { x: 40, y: -25, scale: 1.5 },
+    grid: true
+  });
+
+  check("a viewport fills whatever it is given",
+    /<svg[^>]*width="100%"[^>]*height="100%"/.test(drawn), true);
+  // A viewBox would be a second scale to undo, and two scales is one too many
+  // for "a pixel on the screen is this point in the diagram" to stay simple.
+  check("...with no viewBox, so one unit is one pixel",
+    /viewBox/.test(drawn.slice(0, drawn.indexOf(">"))), false);
+  check("...and says it is somewhere to work rather than a picture",
+    /role="application"/.test(drawn), true);
+
+  check("everything in the diagram moves together",
+    /<g class="dd-view" transform="translate\(40,-25\) scale\(1.5\)">/.test(drawn), true);
+  // Inside it, not merely after it: a group that moves with nothing in it moves
+  // nothing, and the difference is invisible in the text of the file.
+  const parsed = new JSDOM(`<!doctype html><body>${drawn}</body>`).window.document;
+  check("...and every box and arrow is inside that one group",
+    ["dd-nodes", "dd-edges", "dd-marks"].map((part) =>
+      Boolean(parsed.querySelector(`.dd-view > .${part}`)) || !parsed.querySelector(`.${part}`)),
+    [true, true, true]);
+  check("...so moving it is the whole of moving the diagram",
+    parsed.querySelectorAll(".dd-view .dd-node").length, 2);
+
+  // The grid is the one thing that must not be inside it: a rectangle big
+  // enough to be under an endless canvas is a rectangle of no particular size.
+  // So the paper stays still and the pattern on it moves.
+  check("the paper is the whole window and stays there",
+    /<rect class="dd-paper" x="0" y="0" width="100%" height="100%"/.test(drawn), true);
+  check("...while the grid on it moves with the diagram",
+    /<pattern[^>]*patternTransform="translate\(40,-25\) scale\(1.5\)"/.test(drawn), true);
+  check("...so nothing had to decide how big an endless canvas is",
+    /dd-paper[^>]*width="\d+"/.test(drawn), false);
+
+  // A view nobody has set is the diagram at its own size at the origin, which
+  // is also what a broken one has to come out as rather than NaN.
+  for (const [what, bad] of Object.entries({
+    "no view at all": undefined,
+    "a scale of zero": { x: 0, y: 0, scale: 0 },
+    "a scale that is not a number": { x: 1, y: 2, scale: "wide" },
+    "positions that are not numbers": { x: "left", y: null, scale: 2 }
+  })) {
+    const view = DD.viewOf(bad);
+    check(`${what} is still somewhere to look from`,
+      Number.isFinite(view.x) && Number.isFinite(view.y) && view.scale > 0, true);
+  }
+
+  check("a scale that is not a number is life size", DD.viewOf({ scale: "wide" }).scale, 1);
+  check("...and a position that is not a number is the origin",
+    [DD.viewOf({ x: "left" }).x, DD.viewOf({ y: null }).y], [0, 0]);
+
+  // And the old way still works, because the editor inside a document still
+  // uses it and this phase was not supposed to touch that.
+  const inPage = DD.render(model, { layout: model.layout, natural: true, grid: true, pad: 200 });
+  check("a diagram drawn at its own size still is",
+    /<svg[^>]*viewBox="0 0 \d+ \d+"[^>]* width="\d+" height="\d+"/.test(inPage), true);
+  check("...with nothing moved out from under it",
+    /class="dd-view"/.test(inPage), false);
+}
+
 console.log("=== an arrow goes round what is in its way ===");
 {
   // The drawing is the other half of writing the layout down: nothing else on

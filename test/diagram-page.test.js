@@ -88,11 +88,21 @@ function openPage({ url, cookie, origin, stash = null }) {
   return boot(dom, { cookie, origin }).then((page) => ({ ...page, dom }));
 }
 
-async function waitFor(window, done, timeoutMs = 4000) {
+// Click Save and wait for it to have happened. A fixed pause here is a pause
+// racing a real HTTP round trip, and the race is won often enough to make a
+// broken check look like a passing one.
+async function saveAndWait(page) {
+  page.document.getElementById("diagramSave").click();
+  await waitFor(page.window,
+    () => /^Saved/.test(page.document.getElementById("diagramStatus").textContent),
+    `the save never finished: the page says "${page.document.getElementById("diagramStatus").textContent}"`);
+}
+
+async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 4000) {
   const started = Date.now();
   while (!done()) {
     if (Date.now() - started > timeoutMs) {
-      throw new Error("the page never finished starting up");
+      throw new Error(what);
     }
 
     await settle();
@@ -311,6 +321,236 @@ async function run(server, cookie) {
     check("...and no fence wrapped round it", saved.body.content.includes("```"), false);
     check("...ending in one newline, the way a file does",
       /[^\n]\n$/.test(saved.body.content), true);
+  }
+
+  console.log("=== the diagram is somewhere you are looking at part of ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "wide.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x60",
+        "    %% @ B 100,400 120x60",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/wide.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const svg = () => canvas.querySelector("svg");
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(svg().querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+
+    // The harness reports a 900x600 canvas, and the diagram is 320 tall by the
+    // time its margins are counted, so the whole of it fits without magnifying.
+    check("a diagram opens with the whole of it in view", view().scale, 1);
+    check("...centred on where the diagram is, not on where a picture of it would be",
+      [Math.round(view().x), Math.round(view().y)], [290, 20]);
+
+    const source = () => window.eval("document.getElementById('diagramSave').disabled");
+    check("looking at a diagram is not editing it", source(), true);
+
+    /* --- panning ---------------------------------------------------------- */
+
+    const at = (x, y, extra = {}) => ({ clientX: x, clientY: y, bubbles: true, ...extra });
+    const started = view();
+
+    // The empty paper. A press on it puts nothing down and a drag on it goes
+    // somewhere, which is the same press until it moves.
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(700, 500)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(760, 460)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(760, 460)));
+
+    check("dragging the paper moves the view by exactly what the pointer did",
+      [view().x - started.x, view().y - started.y], [60, -40]);
+    check("...at the same zoom it was", view().scale, started.scale);
+    check("...and moves nothing in the diagram", source(), true);
+
+    /* --- zooming ---------------------------------------------------------- */
+
+    const before = view();
+    const aimed = { x: 400, y: 300 };
+    // What the pointer is over, in the diagram, before the wheel turns.
+    const under = {
+      x: (aimed.x - before.x) / before.scale,
+      y: (aimed.y - before.y) / before.scale
+    };
+
+    canvas.dispatchEvent(new window.window.WheelEvent("wheel",
+      { clientX: aimed.x, clientY: aimed.y, deltaY: -100, bubbles: true, cancelable: true }));
+
+    const zoomed = view();
+    check("the wheel zooms in", zoomed.scale > before.scale, true);
+    // The whole point of zooming about the pointer: the thing you are pointing
+    // at is the thing that stays put, and everything else moves around it.
+    check("...about the pointer, so what was under it still is", [
+      Math.round(((under.x * zoomed.scale) + zoomed.x) - aimed.x),
+      Math.round(((under.y * zoomed.scale) + zoomed.y) - aimed.y)
+    ], [0, 0]);
+
+    canvas.dispatchEvent(new window.window.WheelEvent("wheel",
+      { clientX: aimed.x, clientY: aimed.y, deltaY: 100, bubbles: true, cancelable: true }));
+    check("...and the other way turns it back", Math.round(view().scale * 1000),
+      Math.round(before.scale * 1000));
+
+    check("the grid moves with the diagram rather than staying behind it",
+      svg().querySelector("pattern").getAttribute("patternTransform"),
+      svg().querySelector(".dd-view").getAttribute("transform"));
+
+    check("zooming is not editing either", source(), true);
+
+    /* --- the readout ------------------------------------------------------ */
+
+    const field = page.document.querySelector(".ve-diagram-zoom-value");
+    check("the zoom says what it is", field.value, "100%");
+
+    field.value = "250";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and can be told what to be", view().scale, 2.5);
+    check("...saying so afterwards in the same words", field.value, "250%");
+
+    // Free, not stepped: a zoom that clicks through fixed sizes cannot stop
+    // where the thing being worked on happens to fit.
+    field.value = "137";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("a zoom can be any size at all", view().scale, 1.37);
+
+    field.value = "9000";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...up to a point", view().scale, 8);
+    field.value = "0.01";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and down to one", view().scale, 0.1);
+    field.value = "not a number";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and nonsense leaves it where it was", view().scale, 0.1);
+
+    /* --- fit -------------------------------------------------------------- */
+
+    const fit = [...page.document.querySelectorAll(".ve-diagram-zoom-step")].pop();
+    fit.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    // The diagram is 120 wide by 360 tall and its top-left corner is at
+    // (100, 100). In a 900x600 window that fits at life size, centred — which
+    // is a fit of the diagram where it actually is, not of a rectangle that
+    // starts at the origin and happens to contain it.
+    check("fit puts the whole diagram back in view", view().scale, 1);
+    check("...centred on the diagram itself, wherever it happens to be",
+      [Math.round(view().x), Math.round(view().y)], [290, 20]);
+
+    /* --- the space bar ----------------------------------------------------- */
+
+    const box = canvas.querySelector('.dd-node[data-id="A"]');
+    const boxAt = () => /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box.getAttribute("transform"));
+    const wasAt = boxAt()[0];
+    const held = view();
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    // The same press that would have moved a box, with space held down.
+    box.dispatchEvent(new window.MouseEvent("pointerdown", at(200, 200)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(230, 210)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(230, 210)));
+
+    check("space held turns a drag on a box into a pan",
+      [view().x - held.x, view().y - held.y], [30, 10]);
+    check("...and leaves the box exactly where it was",
+      canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform"), wasAt);
+    check("...and the diagram unedited", source(), true);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
+    const after = view();
+    box.dispatchEvent(new window.MouseEvent("pointerdown", at(200, 200)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(230, 210)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(230, 210)));
+    check("...and letting go of it gives the box back",
+      [view().x - after.x, view().y - after.y], [0, 0]);
+    check("...which is an edit, unlike everything above it", source(), false);
+
+    /* --- a pixel is not a unit ---------------------------------------------- */
+
+    // Looked at twice life size, a box dragged a hundred pixels across the
+    // screen has moved fifty in the diagram — and it is the diagram the file
+    // records. This is the one place the zoom has to be divided out rather than
+    // cancelling itself in a difference.
+    field.value = "200";
+    field.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    const magnified = canvas.querySelector('.dd-node[data-id="B"]');
+    const wasThere = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(magnified.getAttribute("transform"));
+
+    magnified.dispatchEvent(new window.MouseEvent("pointerdown", at(300, 300)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(400, 380)));
+    await new Promise((r) => setTimeout(r, 80));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(400, 380)));
+
+    const nowThere = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+      .exec(canvas.querySelector('.dd-node[data-id="B"]').getAttribute("transform"));
+    check("a box dragged at twice life size moves half as far in the diagram",
+      [Number(nowThere[1]) - Number(wasThere[1]), Number(nowThere[2]) - Number(wasThere[2])],
+      [50, 40]);
+
+    fit.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    /* --- the middle button -------------------------------------------------- */
+
+    const middled = view();
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(200, 200, { button: 1 })));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(150, 250)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(150, 250)));
+    check("the middle button pans wherever it is pressed",
+      [view().x - middled.x, view().y - middled.y], [-50, 50]);
+
+    /* --- two fingers -------------------------------------------------------- */
+
+    // A pinch begins as one finger doing something else, and the something else
+    // has to be abandoned rather than finished — otherwise every pinch leaves a
+    // box wherever the first finger happened to be when the second arrived.
+    const pinched = view();
+    const touch = (type, id, x, y) => {
+      const event = new window.MouseEvent(type, at(x, y, { cancelable: true }));
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      Object.defineProperty(event, "pointerId", { value: id });
+      return event;
+    };
+
+    // Saved first, so that what the file says about where A is, is what it said
+    // before any of this — and a pinch that moved it has somewhere to show.
+    await saveAndWait(page);
+    const placedBefore = /%% @ A (-?\d+),(-?\d+)/
+      .exec((await server.request("GET", "/api/docs/wide.mmd", undefined, { Cookie: cookie })).body.content);
+
+    canvas.querySelector('.dd-node[data-id="A"]').dispatchEvent(touch("pointerdown", 1, 400, 300));
+    canvas.dispatchEvent(touch("pointerdown", 2, 500, 300));
+    canvas.dispatchEvent(touch("pointermove", 1, 350, 300));
+    canvas.dispatchEvent(touch("pointermove", 2, 550, 300));
+    canvas.dispatchEvent(touch("pointerup", 1, 350, 300));
+    canvas.dispatchEvent(touch("pointerup", 2, 550, 300));
+    await new Promise((r) => setTimeout(r, 60));
+
+    check("fingers moving apart zoom in", view().scale > pinched.scale, true);
+    check("...about the point between them",
+      [Math.round(((450 - pinched.x) / pinched.scale * view().scale) + view().x),
+        Math.round(((300 - pinched.y) / pinched.scale * view().scale) + view().y)], [450, 300]);
+
+    // The finger that started on a box was doing something else, and two
+    // fingers are a different intention. Finishing what the first one started
+    // would leave a box wherever it happened to be when the second arrived —
+    // which the drawing would not show for another quarter of a second, so this
+    // asks the file rather than the screen.
+    await saveAndWait(page);
+    const placedAfter = /%% @ A (-?\d+),(-?\d+)/
+      .exec((await server.request("GET", "/api/docs/wide.mmd", undefined, { Cookie: cookie })).body.content);
+    check("...and the finger that was on a box does not take it along",
+      [placedAfter[1], placedAfter[2]], [placedBefore[1], placedBefore[2]]);
   }
 
   console.log("=== the way in and the way back ===");

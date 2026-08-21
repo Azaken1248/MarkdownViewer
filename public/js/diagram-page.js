@@ -288,6 +288,9 @@
     const editor = DiagramEditor.mount(elements.canvas, {
       source,
       title,
+      // The page is a window onto the diagram rather than a strip showing it:
+      // pan, zoom, and no end to the paper in any direction.
+      viewport: true,
       onChange: (body) => {
         state.source = body;
         syncSaveButton();

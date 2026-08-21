@@ -1584,6 +1584,32 @@
     };
   }
 
+  /* Where the diagram actually is, rather than how big it is from the origin.
+   *
+   * layoutBounds answers "how large a picture is this", which is what sizing a
+   * drawing on a page needs and which assumes the diagram starts at the corner.
+   * On an endless canvas it does not: a box can be dragged to -400, and fitting
+   * the view to a rectangle that starts at zero would put half the diagram off
+   * the top of the window.
+   */
+  function layoutExtent(layout) {
+    const boxes = Object.values(layout || {});
+
+    if (boxes.length === 0) {
+      return { x: 0, y: 0, w: MARGIN * 2, h: MARGIN * 2 };
+    }
+
+    const left = Math.min(...boxes.map((at) => at.x));
+    const top = Math.min(...boxes.map((at) => at.y));
+
+    return {
+      x: left,
+      y: top,
+      w: Math.max(...boxes.map((at) => at.x + at.w)) - left,
+      h: Math.max(...boxes.map((at) => at.y + at.h)) - top
+    };
+  }
+
   // Cheap enough to ask of every fenced block on a page, which is where it is
   // asked: a diagram that carries its own layout is one we draw ourselves, and
   // one that does not is one the engine has to be downloaded for.
@@ -1622,6 +1648,7 @@
     autoLayout,
     ensureLayout,
     layoutBounds,
+    layoutExtent,
     measureNode,
     hasLayout,
     textRows,

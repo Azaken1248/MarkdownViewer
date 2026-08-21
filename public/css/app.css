@@ -3568,6 +3568,80 @@ body.page-editing #dockEdit {
   opacity: 0.9;
 }
 
+/* A viewport is a window onto a diagram rather than a picture of one: it
+   fills what it is given, never scrolls, and what moves is the drawing inside
+   it. touch-action: none because every gesture on it is ours — a one-finger
+   drag pans, two fingers pinch, and neither should also scroll the page. */
+.ve-diagram-canvas:has(> .dd-viewport) {
+  overflow: hidden;
+  touch-action: none;
+}
+
+.dd-viewport {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Grabbing, and about to grab. The cursor is the only thing that says the
+   space bar has been noticed. */
+.ve-diagram-canvas.is-panning-armed {
+  cursor: grab;
+}
+
+.ve-diagram-canvas.is-panning,
+.ve-diagram-canvas.is-panning-armed:active {
+  cursor: grabbing;
+}
+
+/* The strokes of the selection ring and its handles are furniture, not part of
+   the diagram, so they keep their width whatever the zoom is. Without this a
+   diagram looked at from far away has a ring too thin to see and one looked at
+   closely has a ring like a border. */
+.dd-viewport .dd-ring,
+.dd-viewport .dd-handle,
+.dd-viewport .dd-draft {
+  vector-effect: non-scaling-stroke;
+}
+
+.ve-diagram-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.ve-diagram-zoom-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  cursor: pointer;
+}
+
+.ve-diagram-zoom-step:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.ve-diagram-zoom-value {
+  width: 4.5rem;
+  padding: 4px 6px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: center;
+}
+
 /* --- The diagram editor on a page of its own ---------------------------
    The canvas is the page here rather than a strip inside a document, so it
    takes the height it is given instead of capping itself. Everything else
@@ -3619,13 +3693,24 @@ body.page-editing #dockEdit {
    pushes the save button off the bottom of the window is an editor you cannot
    save from. */
 .diagram-page-canvas {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   overflow: auto;
 }
 
+/* The canvas is the page. It takes what is left after the bar and does not
+   grow past it, because a viewport that pushes the Save button off the bottom
+   of the window is a viewport you cannot save from. */
+.diagram-page-canvas .ve-diagram-stage {
+  flex: 1;
+  min-height: 0;
+}
+
 .diagram-page-canvas .ve-diagram-canvas {
   max-height: none;
+  height: 100%;
 }
 
 .diagram-page-empty {
