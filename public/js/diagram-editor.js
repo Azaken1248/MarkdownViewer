@@ -236,6 +236,11 @@
         return;
       }
 
+      // The field typed into is laid over the drawing rather than part of it,
+      // so a redraw takes the drawing out and leaves the field where it is.
+      const typing = editing?.field || null;
+      typing?.remove();
+
       canvas.innerHTML = DiagramDraw.render(model, {
         layout: model.layout,
         // A window onto the diagram, or — in a document — the diagram at its own
@@ -248,6 +253,11 @@
         selected: selection,
         label: "Diagram being edited"
       });
+
+      if (typing) {
+        canvas.append(typing);
+        placeEditor();
+      }
     };
 
     /* Moving the view without drawing the diagram again.
@@ -265,6 +275,7 @@
       const moved = `translate(${round(view.x)},${round(view.y)}) scale(${view.scale})`;
       svg.querySelector(".dd-view")?.setAttribute("transform", moved);
       svg.querySelector("pattern")?.setAttribute("patternTransform", moved);
+      placeEditor();
       showZoom();
     }
 
@@ -1114,6 +1125,154 @@
       } catch {
         // Nothing was captured.
       }
+    });
+
+    /* --- Typing into the diagram itself -------------------------------------
+     *
+     * The options panel edits the same words, and both stay: a panel is how you
+     * find a setting you have never used, and typing into the thing itself is
+     * how you rename a box you are looking at. The spec asks for both, and they
+     * edit the same model.
+     *
+     * The box is a real textarea laid over the shape, sized and positioned in
+     * screen coordinates from where the shape is in the diagram — so it stays
+     * over its box while the view is panned or zoomed under it.
+     */
+    let editing = null;
+
+    function placeEditor() {
+      if (!editing) {
+        return;
+      }
+
+      const at = editing.box();
+      if (!at) {
+        stopEditing(false);
+        return;
+      }
+
+      const style = editing.field.style;
+      style.left = `${(at.x * view.scale) + view.x}px`;
+      style.top = `${(at.y * view.scale) + view.y}px`;
+      style.width = `${at.w * view.scale}px`;
+      style.height = `${at.h * view.scale}px`;
+      // Scaled with the diagram, so what is typed is the size it will be.
+      style.fontSize = `${13 * view.scale}px`;
+    }
+
+    function startEditing(what) {
+      stopEditing(true);
+
+      const field = document.createElement("textarea");
+      field.className = "ve-diagram-inline";
+      field.value = what.read();
+      field.setAttribute("aria-label", what.label);
+      field.spellcheck = false;
+
+      editing = { ...what, field, was: what.read() };
+      canvas.append(field);
+      placeEditor();
+      field.focus();
+      field.select();
+
+      field.addEventListener("keydown", (event) => {
+        // Escape belongs to whatever is being typed into, not to the canvas
+        // underneath it, which would take it as "let go of this box".
+        event.stopPropagation();
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          stopEditing(false);
+          canvas.focus();
+          return;
+        }
+
+        // Enter commits and shift-enter is a line break, the way it is in every
+        // box anyone has typed a label into.
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          stopEditing(true);
+          canvas.focus();
+        }
+      });
+
+      // Clicking away is agreeing with what you typed, not throwing it away.
+      field.addEventListener("blur", () => stopEditing(true));
+    }
+
+    function stopEditing(keep) {
+      if (!editing) {
+        return;
+      }
+
+      const held = editing;
+      editing = null;
+      const typed = held.field.value;
+      held.field.remove();
+
+      if (keep && typed !== held.was) {
+        held.write(typed);
+        write();
+        paintLists();
+        paintInspector();
+      }
+
+      drawAtOnce();
+    }
+
+    canvas.addEventListener("dblclick", (event) => {
+      const group = event.target.closest?.(".dd-node");
+      if (group) {
+        const id = group.getAttribute("data-id");
+        const item = nodeById(id);
+        if (!item) {
+          return;
+        }
+
+        select(id);
+        startEditing({
+          label: "Box text",
+          box: () => boxOf(id),
+          read: () => DiagramModel.textRows(item.text || "").join("\n"),
+          write: (value) => {
+            item.text = DiagramModel.joinRows(value.split("\n"));
+          }
+        });
+        return;
+      }
+
+      const line = event.target.closest?.(".dd-edge");
+      if (!line) {
+        return;
+      }
+
+      const edge = model.edges[Number(line.getAttribute("data-edge"))];
+      if (!edge) {
+        return;
+      }
+
+      // An arrow has no box to type in, so one is borrowed: a small field where
+      // its label is drawn, which is where anyone would expect to type.
+      const where = () => {
+        const from = boxOf(edge.from);
+        const to = boxOf(edge.to);
+        if (!from || !to) {
+          return null;
+        }
+
+        const x = ((from.x + (from.w / 2)) + (to.x + (to.w / 2))) / 2;
+        const y = ((from.y + (from.h / 2)) + (to.y + (to.h / 2))) / 2;
+        return { x: x - 50, y: y - 12, w: 100, h: 24 };
+      };
+
+      startEditing({
+        label: "Arrow label",
+        box: where,
+        read: () => String(edge.label || ""),
+        write: (value) => {
+          edge.label = value.replace(/\n/g, " ").trim();
+        }
+      });
     });
 
     /* --- Getting about ------------------------------------------------------

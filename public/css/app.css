@@ -3573,8 +3573,32 @@ body.page-editing #dockEdit {
    it. touch-action: none because every gesture on it is ours — a one-finger
    drag pans, two fingers pinch, and neither should also scroll the page. */
 .ve-diagram-canvas:has(> .dd-viewport) {
+  position: relative;
   overflow: hidden;
   touch-action: none;
+}
+
+/* Typing into the box itself. Laid over the shape rather than drawn as part of
+   it: an SVG has no caret, no selection and no input method, and a diagram
+   editor that cannot accept an accented character is not one anyone can use. */
+.ve-diagram-inline {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  line-height: 1.25;
+  text-align: center;
+  resize: none;
+  overflow: hidden;
+}
+
+.ve-diagram-inline:focus {
+  outline: none;
 }
 
 .dd-viewport {

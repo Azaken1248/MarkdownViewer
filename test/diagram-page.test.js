@@ -860,6 +860,97 @@ async function run(server, cookie) {
       emptied.includes("-->"), false);
   }
 
+  console.log("=== typing into the diagram itself ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "words.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x50",
+        "    %% @ B 100,300 120x50",
+        "    A[\"One<br/>two\"]",
+        "    B[Other]",
+        "    A -->|when| B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/words.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const field = () => canvas.querySelector(".ve-diagram-inline");
+    const twice = (target) => target.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    const key = (target, name, extra = {}) => target.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...extra }));
+
+    check("nothing is being typed into to begin with", Boolean(field()), false);
+
+    twice(canvas.querySelector('.dd-node[data-id="A"]'));
+    check("double-clicking a box opens a place to type in it", Boolean(field()), true);
+    // The file says <br/> because that is what Mermaid reads. A person typing
+    // into a box presses Enter.
+    check("...holding what the box says, as lines rather than markup",
+      field().value, "One\ntwo");
+    // Over the box, not merely somewhere: a field that opens in the corner is a
+    // field you have to look away from the thing you are naming to use.
+    const seat = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      const at = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+        .exec(canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform"));
+      const scale = Number(found[3]);
+      return [`${(Number(at[1]) * scale) + Number(found[1])}px`,
+        `${(Number(at[2]) * scale) + Number(found[2])}px`];
+    };
+
+    check("...over the box it belongs to", [field().style.left, field().style.top], seat());
+    check("...at the size it is drawn",
+      [field().style.width, field().style.height], ["120px", "50px"]);
+
+    field().value = "Renamed";
+    key(field(), "Enter");
+    check("enter puts what was typed into the box", Boolean(field()), false);
+    check("...and the box says it",
+      canvas.querySelector('.dd-node[data-id="A"]').textContent.includes("Renamed"), true);
+
+    // The options panel edits the same words. Both stay: a panel is how you
+    // find a setting you have never used, and typing into the thing itself is
+    // how you rename a box you are looking at.
+    check("...and so does the panel beside it",
+      page.document.querySelector(".ve-diagram-text").value, "Renamed");
+
+    twice(canvas.querySelector('.dd-node[data-id="A"]'));
+    field().value = "Thrown away";
+    key(field(), "Escape");
+    check("escape throws away what was typed", Boolean(field()), false);
+    check("...leaving the box as it was",
+      canvas.querySelector('.dd-node[data-id="A"]').textContent.includes("Renamed"), true);
+
+    // Shift-enter is a line break, the way it is in every box anyone has typed
+    // a label into.
+    twice(canvas.querySelector('.dd-node[data-id="B"]'));
+    field().value = "Two\nlines";
+    key(field(), "Enter");
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/words.mmd", undefined, { Cookie: cookie })).body.content;
+    check("a line break is written the way Mermaid reads one",
+      written.includes("B[\"Two<br/>lines\"]"), true);
+
+    // An arrow has no box to type in, so one is borrowed where its label is.
+    twice(canvas.querySelector(".dd-edge"));
+    check("double-clicking an arrow opens a place to type its label", field().value, "when");
+    field().value = "if ready";
+    key(field(), "Enter");
+    await saveAndWait(page);
+    const labelled = (await server.request("GET", "/api/docs/words.mmd", undefined, { Cookie: cookie })).body.content;
+    check("...which is written on the arrow", labelled.includes("-->|if ready|"), true);
+
+    // And it is one step, like every other edit.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "z", ctrlKey: true, bubbles: true }));
+    check("typing into the diagram can be undone",
+      canvas.querySelector(".dd-edge").textContent.includes("when"), true);
+  }
+
   console.log("=== every edit has a way back ===");
   {
     await server.request("POST", "/api/docs",
