@@ -7131,7 +7131,15 @@ function buildableDiagram(block) {
   }
 
   const model = DiagramModel.parseFlowchart(fence.body);
-  return model.ok ? { fence, model } : null;
+
+  // The parser reads groups; this builder cannot show one, and a builder that
+  // hides part of a diagram is a builder that writes back a diagram nobody
+  // recognises. Those open as source until the page editor can draw them.
+  if (!model.ok || !DiagramDraw.canDraw(model)) {
+    return null;
+  }
+
+  return { fence, model };
 }
 
 function diagramShapeLabel(name) {
@@ -7700,11 +7708,16 @@ function openDiagramBuilder(node, block) {
       text: kind === "table" ? "Thing<br/>field: type" : `Step ${model.nodes.length + 1}`
     };
 
+    // What a box is belongs to the box. Where it is belongs to the layout.
+    if (kind !== "box") {
+      item.kind = kind;
+    }
+
     model.nodes.push(item);
 
-    const size = DiagramModel.measureNode(item, kind);
+    const size = DiagramModel.measureNode(item);
     const where = placeFor(options, size);
-    model.layout[id] = { x: where.x, y: where.y, w: size.w, h: size.h, kind };
+    model.layout[id] = { x: where.x, y: where.y, w: size.w, h: size.h };
 
     // A step with nothing pointing at it is not in the flowchart at all — it is
     // drawn off to one side on its own. Joining it to the box it was grown from
@@ -7953,7 +7966,6 @@ function openDiagramBuilder(node, block) {
     const shape = document.createElement("select");
     shape.className = "ve-diagram-shape";
     shape.setAttribute("aria-label", "Step shape");
-    const at = boxOf(item.id);
 
     for (const name of diagramShapeChoices(item.shape)) {
       const option = document.createElement("option");
@@ -7967,18 +7979,12 @@ function openDiagramBuilder(node, block) {
     table.textContent = "Table";
     shape.appendChild(table);
 
-    shape.value = at && at.kind === "table" ? "table" : item.shape;
+    shape.value = item.kind === "table" ? "table" : item.shape;
     shape.addEventListener("change", () => {
-      const spot = boxOf(item.id);
-
       if (shape.value === "table") {
-        if (spot) {
-          spot.kind = "table";
-        }
+        item.kind = "table";
       } else {
-        if (spot) {
-          spot.kind = "box";
-        }
+        delete item.kind;
         item.shape = shape.value;
       }
 
@@ -7998,7 +8004,7 @@ function openDiagramBuilder(node, block) {
       return;
     }
 
-    const size = DiagramModel.measureNode(item, at.kind);
+    const size = DiagramModel.measureNode(item);
     at.w = Math.max(at.w, size.w);
     at.h = Math.max(at.h, size.h);
   }
@@ -8006,13 +8012,12 @@ function openDiagramBuilder(node, block) {
   // The label, as lines. One line for most boxes; a title and its rows for a
   // table. Newlines here are the <br/> Mermaid understands.
   const labelField = (item) => {
-    const at = boxOf(item.id);
     const field = document.createElement("textarea");
     field.className = "ve-diagram-text";
-    field.rows = at && at.kind === "table" ? 3 : 1;
+    field.rows = item.kind === "table" ? 3 : 1;
     field.value = DiagramModel.textRows(item.text).join("\n");
     field.placeholder = item.id;
-    field.setAttribute("aria-label", at && at.kind === "table" ? "Table rows" : "Step label");
+    field.setAttribute("aria-label", item.kind === "table" ? "Table rows" : "Step label");
 
     field.addEventListener("input", () => {
       item.text = DiagramModel.joinRows(field.value.split("\n"));

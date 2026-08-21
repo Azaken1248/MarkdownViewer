@@ -1849,8 +1849,8 @@ async function run(server) {
     tableTool.dispatchEvent(new window.MouseEvent("pointerdown", at(0, 0)));
     tableTool.dispatchEvent(new window.MouseEvent("pointerup", at(0, 0)));
     check("the palette adds a shape", boxes().length, 4);
-    check("...and a table says it is one, in the layout rather than the diagram",
-      / table$/m.test(markdown()), true);
+    check("...and a table says it is one, in a comment rather than in the diagram",
+      /%% @ \w+ [-\d]+,[-\d]+ \d+x\d+ kind=table/.test(markdown()), true);
     check("...with its rows written the way Mermaid writes a line break",
       markdown().includes("field: type"), true);
     check("...drawn with a rule under its title",

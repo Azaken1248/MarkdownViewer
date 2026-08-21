@@ -525,18 +525,24 @@ console.log("=== ...and refuses the ones it cannot account for ===");
   // that models only steps and arrows would write back a diagram with the rest
   // of it deleted, which is the failure mode this whole file exists to prevent.
   const refused = {
-    "a subgraph": "flowchart TD\n  subgraph one\n  A --> B\n  end\n",
-    "a class definition": "flowchart TD\n  A --> B\n  classDef big fill:#f00\n",
-    "a style": "flowchart TD\n  A --> B\n  style A fill:#f00\n",
     "a link style": "flowchart TD\n  A --> B\n  linkStyle 0 stroke:#f00\n",
     "a click handler": "flowchart TD\n  A --> B\n  click A href \"https://x\"\n",
     "a comment": "flowchart TD\n  %% a note\n  A --> B\n",
-    "a fan-out": "flowchart TD\n  A --> B & C\n",
-    "a circle-ended link": "flowchart TD\n  A --o B\n",
     "a sequence diagram": "sequenceDiagram\n  A->>B: hi\n",
     "a pie chart": "pie title x\n  \"a\" : 1\n",
     "a state diagram": "stateDiagram-v2\n  [*] --> Still\n",
-    "nothing at all": ""
+    "nothing at all": "",
+    // The new syntax has its own ways of being wrong, and each of them is a
+    // diagram that would come back different if it were read anyway.
+    "a subgraph left open": "flowchart TD\n  subgraph one\n  A --> B\n",
+    "an end with nothing open": "flowchart TD\n  A --> B\n  end\n",
+    "a class given to a box that is not there":
+      "flowchart TD\n  A --> B\n  classDef big fill:#f00\n  class Z big\n",
+    "a classDef nobody can read": "flowchart TD\n  A --> B\n  classDef big nonsense\n",
+    "a box and a group sharing a name":
+      "flowchart TD\n  A[Box]\n  subgraph A\n  B --> C\n  end\n",
+    "a style on a box that is not there":
+      "flowchart TD\n  A --> B\n  style Z fill:#f00\n"
   };
 
   for (const [label, source] of Object.entries(refused)) {
@@ -545,14 +551,18 @@ console.log("=== ...and refuses the ones it cannot account for ===");
     check(`...${label} says why`, typeof model.reason === "string" && model.reason.length > 0, true);
   }
 
-  // Too big to be worth building by hand is also a refusal, and it has to be
-  // one: every menu in the panel names every step, so the rows are quadratic in
-  // the size of the diagram.
+  // Size is no longer one of them. It used to be, because every menu in the old
+  // panel named every step and the rows were quadratic in the diagram; the page
+  // editor has no such shape, the document has to draw a diagram of any size,
+  // and a canvas you can browse for ever cannot refuse the thing on it.
   const wide = ["flowchart TD"];
-  for (let n = 0; n <= DM.MAX_NODES; n += 1) {
+  for (let n = 0; n <= 400; n += 1) {
     wide.push(`  a${n}[Step ${n}]`);
   }
-  check("a diagram past the row limit", DM.parseFlowchart(`${wide.join("\n")}\n`).ok, false);
+
+  const huge = DM.parseFlowchart(`${wide.join("\n")}\n`);
+  check("a diagram far past the old row limit opens anyway", huge.ok, true);
+  check("...with every box in it", huge.nodes.length, 401);
 }
 
 console.log("=== a trip through the builder loses nothing it could see ===");
@@ -611,6 +621,236 @@ console.log("=== a trip through the builder loses nothing it could see ===");
   }
 }
 
+console.log("=== a diagram says more than boxes and arrows ===");
+{
+  /* Everything here is real Mermaid, and that is the whole point of reading it.
+   * A colour written as a classDef is a colour every other renderer can see; a
+   * group written as a subgraph is a group GitHub draws. Only what Mermaid
+   * cannot say at all — where a box is, what icon is on it — goes in comments.
+   */
+
+  // --- groups ---------------------------------------------------------------
+  const grouped = DM.parseFlowchart([
+    "flowchart LR",
+    "  subgraph Backend [\"The back end\"]",
+    "    direction TB",
+    "    A[Postgres]",
+    "    subgraph Inner",
+    "      B[Cache]",
+    "    end",
+    "  end",
+    "  C[Client]",
+    "  C --> A"
+  ].join("\n"));
+
+  check("a subgraph is a group", grouped.ok && grouped.groups.map((g) => g.id), ["Backend", "Inner"]);
+  check("...with the label it was given", grouped.groups[0].label, "The back end");
+  check("...and one that names itself when it was given none", grouped.groups[1].label, "Inner");
+  check("...nested where it was nested", grouped.groups[1].parent, "Backend");
+  check("...keeping the direction it asked for", grouped.groups[0].direction, "TB");
+  check("a box inside one belongs to it",
+    grouped.nodes.map((node) => [node.id, node.parent || null]),
+    [["C", null], ["A", "Backend"], ["B", "Inner"]]);
+
+  // Mermaid lets a subgraph be nothing but a title, and invents an id for it.
+  // So does this — and it writes that id into the file, so the group keeps the
+  // same name from then on rather than being renamed on every save.
+  const titled = DM.parseFlowchart([
+    "flowchart TD",
+    "  subgraph \"Query phase (60 fps)\"",
+    "    A --> B",
+    "  end"
+  ].join("\n"));
+
+  // Two of them in one diagram are two different groups, and two groups with
+  // one name between them is a diagram that loses one of them on the next save.
+  const twoTitles = DM.parseFlowchart([
+    "flowchart TD",
+    "  subgraph \"First\"",
+    "    A[One]",
+    "  end",
+    "  subgraph \"Second\"",
+    "    B[Two]",
+    "  end"
+  ].join("\n"));
+  check("two subgraphs that are only titles get a name each",
+    twoTitles.ok && twoTitles.groups.map((group) => group.id), ["group1", "group2"]);
+  check("...and each keeps the boxes that were inside it",
+    twoTitles.nodes.map((node) => [node.id, node.parent]), [["A", "group1"], ["B", "group2"]]);
+
+  check("a subgraph that is only a title still opens", titled.ok, true);
+  check("...with a name nothing else is using", titled.groups[0].id, "group1");
+  check("...and the title as its label", titled.groups[0].label, "Query phase (60 fps)");
+  check("...written into the file so it stays that way",
+    DM.serializeFlowchart(titled).includes("subgraph group1 [\"Query phase (60 fps)\"]"), true);
+
+  // --- colours --------------------------------------------------------------
+  const coloured = DM.parseFlowchart([
+    "flowchart TD",
+    "  A[One]:::blue",
+    "  B[Two]",
+    "  A --> B",
+    "  classDef blue fill:#2b6cb0,stroke:#1a365d",
+    "  classDef bold stroke-width:3px",
+    "  class B blue",
+    "  class A bold",
+    "  style B fill:#eee"
+  ].join("\n"));
+
+  check("a classDef is a colour", coloured.ok && coloured.classes.blue,
+    { fill: "#2b6cb0", stroke: "#1a365d" });
+  check("...and a box can wear more than one", coloured.nodes[0].classes, ["blue", "bold"]);
+  check("...whether it was written inline or as a statement",
+    coloured.nodes[1].classes, ["blue"]);
+  check("a style is a colour on one box", coloured.nodes[1].style, { fill: "#eee" });
+
+  // Two styles on one box are two halves of one look, not one replacing the
+  // other — which is what Mermaid draws, and what anyone writing the second
+  // line meant by writing it.
+  const twice = DM.parseFlowchart([
+    "flowchart TD",
+    "  A[One]",
+    "  style A fill:#eee",
+    "  style A stroke:#333,stroke-width:2px"
+  ].join("\n"));
+  check("a second style on a box adds to the first",
+    twice.ok && twice.nodes[0].style,
+    { fill: "#eee", stroke: "#333", "stroke-width": "2px" });
+
+  // The order a box's classes arrive in is the order they happen to be written
+  // in, which is not the order they will be written back in: the file groups
+  // them by class. So they are put into the file's order while they are read,
+  // and the box that arrives wearing them backwards still comes back the same.
+  const backwards = DM.parseFlowchart([
+    "flowchart TD",
+    "  A[One]:::bold",
+    "  classDef blue fill:#2b6cb0",
+    "  classDef bold stroke-width:3px",
+    "  class A blue"
+  ].join("\n"));
+  check("the classes on a box are in the order the file will list them",
+    backwards.ok && backwards.nodes[0].classes, ["blue", "bold"]);
+  check("...so a box wearing them backwards still survives the round trip",
+    JSON.stringify(DM.parseFlowchart(DM.serializeFlowchart(backwards))),
+    JSON.stringify(backwards));
+
+  // --- links ----------------------------------------------------------------
+  const links = DM.parseFlowchart("flowchart TD\n  A <--> B\n  B <-.-> C\n  C --o D\n  D --x E\n");
+  check("an arrow can point both ways",
+    links.ok && links.edges.map((edge) => edge.kind),
+    ["both", "dotted-both", "circle", "cross"]);
+
+  // "A & B --> C & D" is four arrows. It is read as four and written back as
+  // four, which draws identically — the shorthand is a spelling.
+  const fanned = DM.parseFlowchart("flowchart TD\n  A & B --> C & D\n");
+  check("a fan-out is every left to every right",
+    fanned.ok && fanned.edges.map((edge) => `${edge.from}${edge.to}`),
+    ["AC", "AD", "BC", "BD"]);
+
+  // --- what Mermaid cannot say ---------------------------------------------
+  const rich = [
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 160x56 kind=table icon=lucide:database layer=2 z=3",
+    "    %% @ B 240,40 160x56 image=/assets/ab12cd.png",
+    "    %% edge 0 sides=r,l via=210,68;210,120 ends=none,crow",
+    "    %% layer 2 \"Back end\" locked hidden",
+    "    A[\"Thing<br/>field: type\"]",
+    "    B[Picture]",
+    "    A --> B"
+  ].join("\n");
+
+  const model = DM.parseFlowchart(rich);
+  check("a box can be a table, and says so on its own line", model.ok && model.nodes[0].kind, "table");
+  check("...carry an icon", model.nodes[0].icon, "lucide:database");
+  check("...belong to a layer, at a depth", [model.nodes[0].layer, model.nodes[0].z], [2, 3]);
+  check("...and be a picture", model.nodes[1].image, "/assets/ab12cd.png");
+  check("an arrow can leave and arrive by a named side", model.edges[0].sides, ["r", "l"]);
+  check("...bend where it was bent",
+    model.edges[0].waypoints, [{ x: 210, y: 68 }, { x: 210, y: 120 }]);
+  check("...and end in something Mermaid has no spelling for", model.edges[0].ends, ["none", "crow"]);
+  check("a layer has a name, and can be locked or hidden",
+    model.layers, [{ id: 2, name: "Back end", locked: true, hidden: true }]);
+
+  // The first version of the layout line put `table` on the end as a bare word.
+  // Those files are out there, and they still open.
+  const older = DM.parseFlowchart([
+    "flowchart TD", "    %% layout v1", "    %% @ A 40,40 160x56 table", "    A[Rows]"
+  ].join("\n"));
+  check("a layout line from the first version of the format still reads",
+    older.ok && older.nodes[0].kind, "table");
+
+  // An editor that meets a key it has never heard of must not eat it: a diagram
+  // written by a newer version and opened by an older one has to come back
+  // whole, and the only way to promise that is never to throw anything away.
+  const future = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 160x56 shadow=soft corner=\"top left\"",
+    "    %% edge 0 curve=bezier",
+    "    A[One]",
+    "    B[Two]",
+    "    A --> B"
+  ].join("\n"));
+
+  check("a key this version has never heard of is kept",
+    future.ok && future.nodes[0].extra, { shadow: "soft", corner: "top left" });
+  check("...on arrows too", future.edges[0].extra, { curve: "bezier" });
+  check("...and written back exactly as it was found",
+    DM.serializeFlowchart(future).includes("shadow=soft corner=\"top left\""), true);
+
+  // An editor that takes a group apart can leave a box pointing at a group that
+  // is no longer there. Whatever else that costs, it must not cost the box: a
+  // file that has quietly lost one is worse than a box that has lost its group.
+  const orphaned = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [
+      { id: "A", shape: "rect", text: "Kept", parent: "Gone" },
+      { id: "B", shape: "rect", text: "Here", parent: "Real" }
+    ],
+    edges: [],
+    groups: [{ id: "Real", label: "Real", parent: "Gone" }]
+  });
+  check("a box in a group that is not there is still written down",
+    /^\s+A\[Kept\]$/m.test(orphaned), true);
+  check("...and so is a group whose own group is not there",
+    orphaned.includes("subgraph Real"), true);
+  check("...and reading it back finds both boxes",
+    DM.parseFlowchart(orphaned).nodes.map((node) => node.id), ["A", "B"]);
+
+  // A group inside itself is nowhere in the tree, so a walk of the tree never
+  // arrives at it or at anything in it. Nobody can draw that diagram, but they
+  // can open it and put it right — as long as the boxes are still in the file.
+  const looped = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Inside", parent: "Loop" }],
+    edges: [],
+    groups: [{ id: "Loop", label: "Loop", parent: "Loop" }]
+  });
+  check("a box in a group that contains itself is still written down",
+    DM.parseFlowchart(looped).nodes.map((node) => node.id), ["A"]);
+
+  // --- and all of it, twice --------------------------------------------------
+  for (const [label, source] of Object.entries({
+    "a grouped diagram": grouped,
+    "a coloured one": coloured,
+    "one with both-ways arrows": links,
+    "a fanned-out one": fanned,
+    "one carrying everything Mermaid cannot say": model,
+    "one written by a later version": future
+  })) {
+    const back = DM.parseFlowchart(DM.serializeFlowchart(source));
+    check(`${label} survives the round trip`, JSON.stringify(back), JSON.stringify(source));
+  }
+
+  // What comes out is a flowchart, not a flowchart with our things bolted on.
+  const written = DM.serializeFlowchart(model);
+  check("what is written is still a diagram Mermaid reads",
+    /^flowchart TD\n(?:\s*%%.*\n)+\s+A\[/.test(written), true);
+  check("...with every one of our lines a comment",
+    written.split("\n").filter((line) => /^\s*%%/.test(line)).length, 5);
+}
+
 console.log("=== a diagram can say where its own boxes go ===");
 {
   /* Mermaid has no coordinates in it, and every Mermaid parser throws comments
@@ -631,9 +871,9 @@ console.log("=== a diagram can say where its own boxes go ===");
   check("a laid-out diagram still reads as a diagram", model.ok, true);
   check("...with the boxes it always had", model.nodes.map((node) => node.id), ["A", "B"]);
   check("...and where each of them is",
-    model.layout.A, { x: 40, y: 40, w: 160, h: 56, kind: "box" });
-  check("...including which of them is a table",
-    model.layout.B.kind, "table");
+    model.layout.A, { x: 40, y: 40, w: 160, h: 56 });
+  check("...while what each of them is belongs to the box, not to the place",
+    model.nodes.find((node) => node.id === "B").kind, "table");
   check("a diagram nobody has arranged says so by having no layout at all",
     Object.prototype.hasOwnProperty.call(DM.parseFlowchart("flowchart TD\n  A --> B\n"), "layout"), false);
   check("...and is told apart without being parsed", DM.hasLayout(arranged), true);

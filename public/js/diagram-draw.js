@@ -154,13 +154,13 @@
   function nodeBody(node, at) {
     const rows = Model.textRows(node.text || node.id);
 
-    return at.kind === "table"
+    return node.kind === "table"
       ? tableMarkup(rows, at.w, at.h)
       : shapeMarkup(node.shape, at.w, at.h) + centredText(rows, at.w, at.h);
   }
 
   function nodeMarkup(node, at) {
-    return `<g class="dd-node${at.kind === "table" ? " dd-node-table" : ""}"`
+    return `<g class="dd-node${node.kind === "table" ? " dd-node-table" : ""}"`
       + ` data-id="${escapeText(node.id)}"`
       + ` transform="translate(${round(at.x)},${round(at.y)})">${nodeBody(node, at)}</g>`;
   }
@@ -531,6 +531,18 @@
       + ` aria-label="${escapeText(options.label || "Diagram")}">${parts.join("")}</svg>`;
   }
 
+  /* What this can draw.
+   *
+   * The parser understands more than the drawing does, deliberately: reading a
+   * group has to come before drawing one, and a diagram whose groups this would
+   * silently leave out is a diagram better handed to Mermaid, which draws them.
+   * The alternative — drawing it anyway — loses the boxes around things without
+   * saying so.
+   */
+  function canDraw(model) {
+    return !model.groups || model.groups.length === 0;
+  }
+
   // Source in, drawing out, or null for anything this cannot honestly draw —
   // which is the same narrowness the builder has, for the same reason.
   function renderSource(source, options = {}) {
@@ -539,7 +551,7 @@
     }
 
     const model = Model.parseFlowchart(source);
-    if (!model.ok) {
+    if (!model.ok || !canDraw(model)) {
       return null;
     }
 
@@ -547,6 +559,7 @@
   }
 
   global.DiagramDraw = {
+    canDraw,
     render,
     renderSource,
     nodeBody,
