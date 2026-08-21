@@ -1765,15 +1765,25 @@ async function run(server) {
     const nudge = () => canvas.dispatchEvent(
       new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
 
+    // Dragging snaps and an arrow key does not, which is the whole reason to
+    // reach for one: the grid has put something a few pixels from where you
+    // want it, and only an arrow key can say so.
     nudge();
-    check("an arrow key nudges the selected box by one grid step",
-      box("B"), [nudged[0] + 10, nudged[1]]);
+    check("an arrow key moves the selected box by one pixel",
+      box("B"), [nudged[0] + 1, nudged[1]]);
 
     // And again once the redraw has caught up, which is the case that matters:
     // these marks were drawn fresh, with no drag behind them to measure from.
     await new Promise((r) => setTimeout(r, 400));
     nudge();
-    check("...and again after it has been redrawn", box("B"), [nudged[0] + 20, nudged[1]]);
+    check("...and again after it has been redrawn", box("B"), [nudged[0] + 2, nudged[1]]);
+
+    // Shift is the coarse one, and it lands on the grid rather than a step away
+    // from wherever those two pixels left the box.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "ArrowRight", shiftKey: true, bubbles: true }));
+    check("...while shift moves it a whole grid step, onto the grid",
+      box("B"), [nudged[0] + 10, nudged[1]]);
     check("...leaving the ring somewhere on the paper",
       /NaN/.test(canvas.querySelector(".dd-marks").getAttribute("transform") || ""), false);
 

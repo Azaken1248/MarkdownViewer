@@ -176,6 +176,37 @@
    */
   const RING_PAD = 5;
   const HANDLE = 9;
+  // Outside the rings, so the frame reads as around them rather than on them.
+  const FRAME_PAD = 12;
+
+  /* What is drawn around several boxes at once.
+   *
+   * A ring on each, so you can see exactly what you have, and one frame around
+   * the lot, so you can see that it is one thing now. No handles: connecting
+   * and resizing are things you do to a box, and offering them on a selection
+   * of nine would be offering something that has no meaning yet.
+   */
+  function frameMarkup(boxes) {
+    const left = Math.min(...boxes.map((at) => at.x));
+    const top = Math.min(...boxes.map((at) => at.y));
+    const right = Math.max(...boxes.map((at) => at.x + at.w));
+    const bottom = Math.max(...boxes.map((at) => at.y + at.h));
+    const rings = boxes.map((at) =>
+      `<rect class="dd-ring dd-ring-one" x="${round(at.x - RING_PAD)}" y="${round(at.y - RING_PAD)}"`
+      + ` width="${round(at.w + (RING_PAD * 2))}" height="${round(at.h + (RING_PAD * 2))}" rx="9"/>`).join("");
+
+    return `<g class="dd-marks dd-marks-many">${rings}`
+      + `<rect class="dd-frame" x="${round(left - FRAME_PAD)}" y="${round(top - FRAME_PAD)}"`
+      + ` width="${round(right - left + (FRAME_PAD * 2))}"`
+      + ` height="${round(bottom - top + (FRAME_PAD * 2))}" rx="4"/></g>`;
+  }
+
+  // The rubber band, while it is being pulled. Not part of the diagram and not
+  // in the model — it is drawn straight into the SVG and taken out again.
+  function marqueeMarkup(box) {
+    return `<rect class="dd-marquee" x="${round(box.x)}" y="${round(box.y)}"`
+      + ` width="${round(box.w)}" height="${round(box.h)}"/>`;
+  }
 
   function marksMarkup(at) {
     const cx = at.x + at.w + HANDLE + 2;
@@ -544,9 +575,17 @@
       .filter((node) => layout[node.id])
       .map((node) => nodeMarkup(node, layout[node.id])).join("")}</g>`);
 
-    const selected = options.selected && layout[options.selected];
-    if (selected) {
-      parts.push(marksMarkup(selected));
+    /* What is selected: one id, or a list of them. One box gets the ring and
+     * the handles it has always had; several get a ring each and one frame.
+     */
+    const chosen = (Array.isArray(options.selected) ? options.selected : [options.selected])
+      .filter((id) => id && layout[id])
+      .map((id) => layout[id]);
+
+    if (chosen.length === 1) {
+      parts.push(marksMarkup(chosen[0]));
+    } else if (chosen.length > 1) {
+      parts.push(frameMarkup(chosen));
     }
 
     // Everything that belongs to the diagram rather than to the window goes in
@@ -610,6 +649,8 @@
     renderSource,
     nodeBody,
     marksMarkup,
+    frameMarkup,
+    marqueeMarkup,
     routeEdge,
     lanes,
     pathData,

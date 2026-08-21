@@ -154,8 +154,19 @@
     // Which box is being worked on, and — when an arrow is being drawn by tapping
     // rather than dragging — which box it is being drawn from. Both are ids
     // rather than elements, because the elements are redrawn constantly.
+    /* What is being worked on.
+     *
+     * A list rather than an id, because a diagram is edited in handfuls as
+     * often as one box at a time — and because everything that acts on a
+     * selection then has one shape to act on whether it holds one box or nine.
+     * `selectedId` is the one box the options panel is about, which is only a
+     * box at all when exactly one is chosen.
+     */
+    let selection = [];
     let selectedId = null;
     let armedFrom = null;
+
+    const isSelected = (id) => selection.includes(id);
 
     /* --- Where we are looking ---------------------------------------------
      *
@@ -211,7 +222,7 @@
         natural: !viewport,
         grid: true,
         pad: DIAGRAM_PAPER_PAD,
-        selected: selectedId,
+        selected: selection,
         label: "Diagram being edited"
       });
     };
@@ -394,14 +405,23 @@
       }
     }
 
-    function moveTo(id, x, y) {
+    const moveTo = (id, x, y) => placeAt(id, snap(x), snap(y));
+
+    /* Where a box is, exactly.
+     *
+     * moveTo snaps, because a box dragged by hand should line up with the ones
+     * already there. This one does not, because the reason anyone reaches for
+     * an arrow key is that snapping has put something two pixels from where
+     * they want it.
+     */
+    function placeAt(id, x, y) {
       const at = boxOf(id);
       if (!at) {
         return;
       }
 
-      at.x = snap(x);
-      at.y = snap(y);
+      at.x = Math.round(x);
+      at.y = Math.round(y);
 
       const svg = drawing();
       const group = svg?.querySelector(`.dd-node[data-id="${id}"]`);
@@ -416,11 +436,24 @@
       // the redraw that follows puts them where they belong.
       const marks = svg?.querySelector(".dd-marks");
       const drawnAt = marks ? Number(marks.dataset.x) : NaN;
-      if (marks && id === selectedId && Number.isFinite(drawnAt)) {
+      if (marks && id === marks.dataset.id && Number.isFinite(drawnAt)) {
         marks.setAttribute("transform", `translate(${at.x - drawnAt},${at.y - Number(marks.dataset.y)})`);
       }
 
       reroute(id);
+    }
+
+    /* Moving everything that is selected, by the same amount.
+     *
+     * Each box is put where it was when the drag began plus how far the drag
+     * has gone, rather than nudged by the difference since the last frame:
+     * nudging accumulates rounding, and a selection dragged across the canvas
+     * would come apart on the way.
+     */
+    function moveSelectionTo(group, dx, dy) {
+      for (const [id, from] of Object.entries(group || {})) {
+        moveTo(id, from.x + dx, from.y + dy);
+      }
     }
 
     function resizeTo(id, w, h) {
@@ -452,20 +485,37 @@
 
     function beginGesture(kind, id, point, event) {
       const at = boxOf(id);
+
+      // Where everything being carried was when the drag began. One box or
+      // nine, the arithmetic afterwards is the same.
+      const group = {};
+      if (kind === "move") {
+        for (const one of (isSelected(id) ? selection : [id])) {
+          const where = boxOf(one);
+          if (where) {
+            group[one] = { x: where.x, y: where.y };
+          }
+        }
+      }
+
       gesture = {
         kind,
         id,
         origin: point,
         from: at ? { x: at.x, y: at.y, w: at.w, h: at.h } : null,
+        group,
         moved: false
       };
 
       const marks = drawing()?.querySelector(".dd-marks");
       if (marks && at) {
         // Where the marks were drawn, so moving them is a difference rather than
-        // a re-render.
+        // a re-render. Only worth doing for one box: a frame round several is
+        // redrawn when the drag ends, which is soon enough for something that is
+        // already the same shape as what it surrounds.
         marks.dataset.x = String(at.x);
         marks.dataset.y = String(at.y);
+        marks.dataset.id = id;
       }
 
       try {
@@ -474,6 +524,62 @@
         // A browser without pointer capture still gets the move and up events
         // while the pointer is over the canvas, which is most of a drag.
       }
+    }
+
+    /* The rubber band.
+     *
+     * Like panning, not an edit and not a gesture: nothing in the model changes
+     * while it is being pulled, and what it leaves behind is a selection rather
+     * than a change. It is drawn straight into the SVG and taken out again.
+     */
+    let marquee = null;
+
+    function beginMarquee(point, event) {
+      marquee = { from: point, to: point, adding: Boolean(event.shiftKey), was: [...selection] };
+
+      try {
+        canvas.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Without capture the band ends when the pointer leaves the canvas.
+      }
+    }
+
+    const marqueeBox = () => ({
+      x: Math.min(marquee.from.x, marquee.to.x),
+      y: Math.min(marquee.from.y, marquee.to.y),
+      w: Math.abs(marquee.to.x - marquee.from.x),
+      h: Math.abs(marquee.to.y - marquee.from.y)
+    });
+
+    // Touched, not enclosed: a band that only takes what it swallows whole is a
+    // band you have to be careful with, and being careful is the thing a rubber
+    // band is for avoiding.
+    const boxesIn = (band) => model.nodes
+      .filter((item) => {
+        const at = boxOf(item.id);
+        return at && at.x < band.x + band.w && at.x + at.w > band.x
+          && at.y < band.y + band.h && at.y + at.h > band.y;
+      })
+      .map((item) => item.id);
+
+    function drawMarquee() {
+      const svg = drawing();
+      if (!svg) {
+        return;
+      }
+
+      const band = marqueeBox();
+      let shape = svg.querySelector(".dd-marquee");
+      if (!shape) {
+        shape = document.createElementNS(SVG_NS, "rect");
+        shape.setAttribute("class", "dd-marquee");
+        (svg.querySelector(".dd-view") || svg).appendChild(shape);
+      }
+
+      shape.setAttribute("x", String(round(band.x)));
+      shape.setAttribute("y", String(round(band.y)));
+      shape.setAttribute("width", String(round(band.w)));
+      shape.setAttribute("height", String(round(band.h)));
     }
 
     /* Panning is not an edit, so it is not a gesture in the sense the others
@@ -505,8 +611,7 @@
       }
 
       if (gesture.kind === "move" && gesture.from) {
-        moveTo(gesture.id, gesture.from.x + (point.x - gesture.origin.x),
-          gesture.from.y + (point.y - gesture.origin.y));
+        moveSelectionTo(gesture.group, point.x - gesture.origin.x, point.y - gesture.origin.y);
         return;
       }
 
@@ -580,12 +685,22 @@
 
       const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
 
+      const adding = Boolean(event.shiftKey);
+
       if (!id) {
-        // Tapping the paper is how you put something down. Dragging it is how
-        // you go somewhere else, which is the same press until it moves.
-        select(null);
-        if (viewport) {
+        /* Empty paper. With a finger it is how you go somewhere else, because a
+         * finger has no space bar and no middle button to pan with. With a
+         * pointer it is how you draw a rubber band round several boxes, which
+         * is what dragging empty space means everywhere else.
+         */
+        if (!adding) {
+          select(null);
+        }
+
+        if (viewport && event.pointerType === "touch") {
           beginPan(event);
+        } else if (viewport) {
+          beginMarquee(point, event);
         }
 
         return;
@@ -596,7 +711,15 @@
         return;
       }
 
-      if (id !== selectedId) {
+      if (adding) {
+        toggleInSelection(id);
+        return;
+      }
+
+      // A box already in a selection of several is not a new selection — it is
+      // the handle you drag the whole lot by. Narrowing to it on the way down
+      // would make a multiple selection impossible to move.
+      if (!isSelected(id)) {
         select(id);
       }
 
@@ -618,6 +741,22 @@
             view.x = panning.from.x + (latest.x - panning.x);
             view.y = panning.from.y + (latest.y - panning.y);
             applyView();
+          });
+        }
+
+        return;
+      }
+
+      if (marquee) {
+        event.preventDefault?.();
+        marquee.to = pointIn(event.clientX, event.clientY);
+
+        if (!frame) {
+          frame = later(() => {
+            frame = 0;
+            if (marquee) {
+              drawMarquee();
+            }
           });
         }
 
@@ -658,6 +797,31 @@
     });
 
     const endGesture = (event) => {
+      if (marquee) {
+        const band = marqueeBox();
+        const held = marquee;
+        marquee = null;
+        frame = 0;
+        drawing()?.querySelector(".dd-marquee")?.remove();
+
+        try {
+          canvas.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Nothing was captured.
+        }
+
+        // A band smaller than a press wobbles is a click on the paper, not a
+        // band: a hand that moves two pixels while letting go should not come
+        // away holding whatever those two pixels happened to touch. The same
+        // slop every other gesture here uses, for the same reason.
+        if (band.w > DIAGRAM_DRAG_SLOP || band.h > DIAGRAM_DRAG_SLOP) {
+          const caught = boxesIn(band);
+          choose(held.adding ? [...new Set([...held.was, ...caught])] : caught);
+        }
+
+        return;
+      }
+
       if (panning) {
         panning = null;
         frame = 0;
@@ -718,8 +882,7 @@
       }
 
       if (held.kind === "move" && held.from) {
-        moveTo(held.id, held.from.x + (point.x - held.origin.x),
-          held.from.y + (point.y - held.origin.y));
+        moveSelectionTo(held.group, point.x - held.origin.x, point.y - held.origin.y);
       }
 
       if (held.kind === "resize" && held.from) {
@@ -884,13 +1047,10 @@
         return;
       }
 
-      if (!selectedId) {
-        return;
-      }
-
-      if (event.key === "Delete" || event.key === "Backspace") {
+      // The one keystroke that does not need anything selected already.
+      if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
         event.preventDefault();
-        removeStep(selectedId);
+        choose(model.nodes.map((item) => item.id));
         return;
       }
 
@@ -899,25 +1059,52 @@
         return;
       }
 
-      const step = event.shiftKey ? DiagramModel.GRID * 5 : DiagramModel.GRID;
+      if (selection.length === 0) {
+        return;
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        removeSteps(selection);
+        return;
+      }
+
       const nudge = {
-        ArrowLeft: [-step, 0],
-        ArrowRight: [step, 0],
-        ArrowUp: [0, -step],
-        ArrowDown: [0, step]
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1]
       }[event.key];
 
       if (!nudge) {
         return;
       }
 
+      /* Two different things, and they were the same thing until now.
+       *
+       * Dragging snaps, because a box put down by hand should line up with the
+       * ones already there. An arrow key does not, because the reason to reach
+       * for one is that the grid has put something two pixels from where you
+       * want it. Shift is the coarse one: a whole grid step, landing on the
+       * grid rather than a step away from wherever the box happens to be.
+       */
       event.preventDefault();
-      const at = boxOf(selectedId);
-      if (at) {
-        moveTo(selectedId, at.x + nudge[0], at.y + nudge[1]);
-        write();
-        drawSoon();
+      for (const id of selection) {
+        const at = boxOf(id);
+        if (!at) {
+          continue;
+        }
+
+        if (event.shiftKey) {
+          moveTo(id, snap(at.x) + (nudge[0] * DiagramModel.GRID),
+            snap(at.y) + (nudge[1] * DiagramModel.GRID));
+        } else {
+          placeAt(id, at.x + nudge[0], at.y + nudge[1]);
+        }
       }
+
+      write();
+      drawSoon();
     });
 
     /* --- Making things ------------------------------------------------------ */
@@ -1009,11 +1196,22 @@
     }
 
     function removeStep(id) {
-      model.nodes = model.nodes.filter((item) => item.id !== id);
+      removeSteps([id]);
+    }
+
+    // All of them in one go rather than one at a time: removing nine boxes in
+    // nine steps writes the file nine times and redraws it nine times, and an
+    // arrow between two of them would be removed twice.
+    function removeSteps(ids) {
+      const going = new Set(ids);
+      model.nodes = model.nodes.filter((item) => !going.has(item.id));
       // An arrow to a step that is no longer there would declare it again by
       // naming it, and the step would come back as an empty box.
-      model.edges = model.edges.filter((edge) => edge.from !== id && edge.to !== id);
-      delete model.layout[id];
+      model.edges = model.edges.filter((edge) => !going.has(edge.from) && !going.has(edge.to));
+      for (const id of going) {
+        delete model.layout[id];
+      }
+
       write();
       paintLists();
       select(null);
@@ -1151,13 +1349,30 @@
 
     const selectedNode = () => nodeById(selectedId);
 
-    function select(id, options = {}) {
-      selectedId = nodeById(id) ? id : null;
+    /* Choosing what to work on.
+     *
+     * Everything goes through here — a tap, a shift-tap, a rubber band, select
+     * all, escape — so there is one place that decides what "selected" means
+     * and one place that redraws because of it.
+     */
+    function choose(ids, options = {}) {
+      selection = ids.filter((id) => nodeById(id));
+      selectedId = selection.length === 1 ? selection[0] : null;
       armedFrom = null;
       paintInspector(options);
       // The ring and its handles are part of the drawing, so selecting something
       // is a redraw — of a picture that is a few kilobytes of string.
       drawAtOnce();
+    }
+
+    function select(id, options = {}) {
+      choose(id ? [id] : [], options);
+    }
+
+    // Shift, on every canvas anyone has used: add what was not there, take away
+    // what was.
+    function toggleInSelection(id) {
+      choose(isSelected(id) ? selection.filter((one) => one !== id) : [...selection, id]);
     }
 
     /* --- What you can do to what is selected ------------------------------- */

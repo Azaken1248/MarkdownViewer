@@ -361,14 +361,21 @@ async function run(server, cookie) {
     const at = (x, y, extra = {}) => ({ clientX: x, clientY: y, bubbles: true, ...extra });
     const started = view();
 
-    // The empty paper. A press on it puts nothing down and a drag on it goes
-    // somewhere, which is the same press until it moves.
-    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(700, 500)));
-    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(760, 460)));
-    await new Promise((r) => setTimeout(r, 60));
-    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(760, 460)));
+    const finger = (type, x, y, id = 9) => {
+      const event = new window.MouseEvent(type, at(x, y, { cancelable: true }));
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      Object.defineProperty(event, "pointerId", { value: id });
+      return event;
+    };
 
-    check("dragging the paper moves the view by exactly what the pointer did",
+    // The empty paper, under a finger. A finger has no space bar and no middle
+    // button, so dragging the paper is the only way it can go anywhere.
+    canvas.dispatchEvent(finger("pointerdown", 700, 500));
+    canvas.dispatchEvent(finger("pointermove", 760, 460));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(finger("pointerup", 760, 460));
+
+    check("dragging the paper with a finger moves the view by exactly that much",
       [view().x - started.x, view().y - started.y], [60, -40]);
     check("...at the same zoom it was", view().scale, started.scale);
     check("...and moves nothing in the diagram", source(), true);
@@ -551,6 +558,167 @@ async function run(server, cookie) {
       .exec((await server.request("GET", "/api/docs/wide.mmd", undefined, { Cookie: cookie })).body.content);
     check("...and the finger that was on a box does not take it along",
       [placedAfter[1], placedAfter[2]], [placedBefore[1], placedBefore[2]]);
+  }
+
+  console.log("=== a diagram is edited in handfuls as often as one box at a time ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "grid.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    %% @ C 100,300 80x40",
+        "    %% @ D 300,300 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]",
+        "    D[Four]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/grid.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const at = (x, y, extra = {}) => ({ clientX: x, clientY: y, bubbles: true, ...extra });
+    const box = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const placed = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box(id).getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+    const ringed = () => canvas.querySelectorAll(".dd-ring").length;
+    const framed = () => canvas.querySelectorAll(".dd-frame").length;
+
+    // The view is fitted, so a point in the diagram is a point on the screen
+    // plus wherever the fit put it.
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const onScreen = (x, y) => [(x * view().scale) + view().x, (y * view().scale) + view().y];
+
+    const tap = (id, extra = {}) => {
+      const [x, y] = onScreen(...placed(id));
+      box(id).dispatchEvent(new window.MouseEvent("pointerdown", at(x + 10, y + 10, extra)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x + 10, y + 10, extra)));
+    };
+
+    check("nothing is selected to begin with", [ringed(), framed()], [0, 0]);
+
+    tap("A");
+    check("tapping a box selects it, and only it", [ringed(), framed()], [1, 0]);
+    check("...with the handles that belong to one box",
+      canvas.querySelectorAll("[data-role]").length, 2);
+
+    tap("B", { shiftKey: true });
+    check("shift adds a second", [ringed(), framed()], [2, 1]);
+    // Connecting and resizing are things you do to a box. Offering them on a
+    // selection of four would be offering something that has no meaning yet.
+    check("...and the handles go away, because they are about one box",
+      canvas.querySelectorAll("[data-role]").length, 0);
+
+    tap("B", { shiftKey: true });
+    check("shift on one that is already in takes it back out", [ringed(), framed()], [1, 0]);
+
+    /* --- the rubber band --------------------------------------------------- */
+
+    const band = (x1, y1, x2, y2, extra = {}) => {
+      const [sx, sy] = onScreen(x1, y1);
+      const [ex, ey] = onScreen(x2, y2);
+      canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(sx, sy, extra)));
+      canvas.dispatchEvent(new window.MouseEvent("pointermove", at(ex, ey, extra)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(ex, ey, extra)));
+    };
+
+    // A band drawn round the top two boxes, from empty paper above and left of
+    // them to empty paper below and right.
+    band(60, 60, 420, 180);
+    check("a band round two boxes takes both", [ringed(), framed()], [2, 1]);
+
+    band(60, 60, 200, 180);
+    check("...and one round one takes one", [ringed(), framed()], [1, 0]);
+
+    // Touched, not swallowed whole: a band you have to draw carefully is a band
+    // that is no easier than clicking the boxes one at a time.
+    band(60, 60, 140, 120);
+    check("a band that only clips a box still takes it", [ringed(), framed()], [1, 0]);
+
+    // A hand that moves two pixels while letting go of the paper has clicked
+    // the paper, not drawn a band round the corner of the box next to it.
+    band(99, 99, 102, 102);
+    check("a press on the paper that wobbles is still a press on the paper",
+      [ringed(), framed()], [0, 0]);
+
+    band(60, 60, 420, 400);
+    check("a band round everything takes everything", [ringed(), framed()], [4, 1]);
+
+    band(600, 500, 700, 560);
+    check("a band round nothing takes nothing", [ringed(), framed()], [0, 0]);
+
+    tap("A");
+    band(240, 240, 420, 400, { shiftKey: true });
+    check("shift adds what a band catches to what was already there",
+      [ringed(), framed()], [2, 1]);
+
+    /* --- select all, and let go -------------------------------------------- */
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+    check("select all selects all", [ringed(), framed()], [4, 1]);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    check("escape lets go of all of it", [ringed(), framed()], [0, 0]);
+
+    /* --- dragging a handful ------------------------------------------------ */
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", metaKey: true, bubbles: true }));
+
+    const was = { A: placed("A"), B: placed("B"), C: placed("C"), D: placed("D") };
+    const [gx, gy] = onScreen(...was.A);
+    box("A").dispatchEvent(new window.MouseEvent("pointerdown", at(gx + 10, gy + 10)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(gx + 70, gy + 50)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(gx + 70, gy + 50)));
+
+    check("dragging one of them drags all of them", Object.keys(was).map((id) =>
+      [placed(id)[0] - was[id][0], placed(id)[1] - was[id][1]]),
+    [[60, 40], [60, 40], [60, 40], [60, 40]]);
+    check("...and the selection is still what it was", [ringed(), framed()], [4, 1]);
+
+    // Each box is put where it was plus how far the drag went, rather than
+    // nudged by the difference since the last frame — which accumulates, and a
+    // selection dragged across the canvas would come apart on the way.
+    check("...so nothing has drifted out of line",
+      [placed("B")[0] - placed("A")[0], placed("C")[1] - placed("A")[1]], [200, 200]);
+
+    /* --- and the arrow keys ------------------------------------------------ */
+
+    const before = { A: placed("A"), D: placed("D") };
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    check("an arrow key moves everything selected, by one pixel",
+      [placed("A")[0] - before.A[0], placed("D")[0] - before.D[0]], [1, 1]);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    tap("C");
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    check("delete removes what is selected", Boolean(box("C")), false);
+    check("...and lets go of it", [ringed(), framed()], [0, 0]);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    check("...and a selection of everything empties the diagram in one go",
+      canvas.querySelectorAll(".dd-node").length, 0);
+
+    await saveAndWait(page);
+    const emptied = (await server.request("GET", "/api/docs/grid.mmd", undefined, { Cookie: cookie })).body.content;
+    check("...which is one edit to the file, not four",
+      emptied.includes("A[One]") || emptied.includes("B[Two]"), false);
+    check("...with the arrow between two of them gone with them",
+      emptied.includes("-->"), false);
   }
 
   console.log("=== the way in and the way back ===");
