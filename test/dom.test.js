@@ -388,6 +388,7 @@ async function run(server) {
   // puts on the screen, the same way.
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-model.js"), "utf8"));
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-draw.js"), "utf8"));
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-editor.js"), "utf8"));
 
   // The notebook Python controller, loaded before app.js the same way the page
   // loads it. jsdom has no Worker, but nothing here constructs one until a Run
@@ -423,7 +424,8 @@ async function run(server) {
         backfillLinkIcons,
         restoreDocumentView, stashSearchQuery, setPlaceBusy, hydrateSearchContent,
         showEmptyState, showLoadingState, updateActiveDocUI,
-        openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand
+        openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand,
+        stashDocument, takeStashedDocument, diagramStashKey
       };
     `);
     check("no exception on load", true, true);
@@ -1946,6 +1948,62 @@ async function run(server) {
     check("the diagram nobody opened is untouched",
       savedFlow.includes("  subgraph outer\n  C --> D\n  end"), true);
     check("...and so is the prose", savedFlow.endsWith("After.\n"), true);
+  }
+
+  console.log("=== a diagram leaves the document and comes back to it ===");
+  {
+    /* A diagram opens on a page of its own, and the document behind it may have
+     * changes in it nobody has saved. Reading the file from disk on the other
+     * side would throw those away without saying so, so the document goes
+     * across in sessionStorage and comes back the same way. This is the half of
+     * that the document editor owns: leaving it, and picking it back up.
+     */
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const embed = doc.querySelector("#docContent .ve-embed");
+    check("a buildable diagram offers a page of its own",
+      Boolean(embed.querySelector(".ve-embed-expand")), true);
+
+    // Change something first, so what goes across is a document that would be
+    // lost if the other page read the file instead.
+    const before = window.eval("window.__t.collectPageMarkdown()");
+    const stashed = before.replace("After.", "Edited and not saved.");
+
+    check("a document can be left where the diagram page will find it",
+      window.eval(`window.__t.stashDocument("flow.md", ${JSON.stringify(JSON.stringify(stashed))})`), true);
+    check("...under a name that is that document's and no other",
+      window.eval('window.__t.diagramStashKey("flow.md")'), "azadocs:diagram:flow.md");
+
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Coming back. The document on screen is the one that was left, with
+    // whatever the diagram page did to it, and it is still unsaved.
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 400));
+
+    check("the document comes back as it was left, not as it is on disk",
+      window.eval("window.__t.collectPageMarkdown()").includes("Edited and not saved."), true);
+    check("...and is still unsaved", window.eval("window.__t.isPageEditDirty()"), true);
+    check("...with the bar saying so rather than looking clean",
+      doc.getElementById("pageEditSaveBtn").disabled, false);
+    check("...and a note saying where the change came from",
+      [...doc.querySelectorAll(".toast")].some((one) => /has the edited diagram in it/.test(one.textContent)), true);
+
+    // Taken, not read. Left behind, it would be picked up by an edit weeks
+    // later and quietly undo everything in between.
+    check("the stash is gone once it has been used",
+      window.eval('window.sessionStorage.getItem("azadocs:diagram:flow.md")'), null);
+
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 200));
+    await window.eval("window.__t.startPageEdit()");
+    await new Promise((r) => setTimeout(r, 300));
+    check("...so opening the document again is the document, not the diagram session",
+      window.eval("window.__t.collectPageMarkdown()").includes("Edited and not saved."), false);
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   console.log("=== a wait says what it is waiting for ===");

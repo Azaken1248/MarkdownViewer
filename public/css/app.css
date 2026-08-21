@@ -3568,6 +3568,86 @@ body.page-editing #dockEdit {
   opacity: 0.9;
 }
 
+/* --- The diagram editor on a page of its own ---------------------------
+   The canvas is the page here rather than a strip inside a document, so it
+   takes the height it is given instead of capping itself. Everything else
+   about it — the palette, the handles, the lists underneath — is the same
+   canvas the document uses, which is the point of it being one module. */
+
+.diagram-page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+.diagram-page-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.diagram-page-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagram-page-status {
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+.diagram-page-status.is-good {
+  color: var(--success-emphasis);
+}
+
+.diagram-page-status.is-bad {
+  color: var(--danger);
+}
+
+/* The whole of what is left, and it scrolls itself: an editor whose canvas
+   pushes the save button off the bottom of the window is an editor you cannot
+   save from. */
+.diagram-page-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diagram-page-canvas .ve-diagram-canvas {
+  max-height: none;
+}
+
+.diagram-page-empty {
+  max-width: 34rem;
+  margin: 15dvh auto;
+  padding: 0 24px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+.diagram-page-empty h2 {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-size: 17px;
+}
+
+.diagram-page-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
 .ve-diagram-stage {
   position: relative;
 }

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Diagram</title>
+  <meta name="description" content="Edit a diagram" />
+
+  <!-- A page for editing one diagram is not a page anyone should arrive at from
+       a search result, and the address of one names a document. -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css"
+    integrity="sha384-6p9AefaqUhEVheRlj1mpAkbngHXy9mbYMrIdcIt4Jlc9lOLIablJq3bBsLOjGwZ7" crossorigin="anonymous"
+    referrerpolicy="no-referrer" />
+
+  <!-- Absolute, not relative: this page is served for every /diagram/... address,
+       so a relative path would resolve against the document's own folder. -->
+  <script src="/js/theme-boot.js?v=64"></script>
+  <link rel="stylesheet" href="/css/app.css?v=79" />
+
+  <!-- Nothing here renders markdown, so none of the rendering libraries are
+       loaded: no marked, no DOMPurify, no Mermaid. The page splits a document
+       into blocks to find one fence, and draws a diagram itself. -->
+  <script src="/js/visual-editor.js?v=65" defer></script>
+  <script src="/js/diagram-model.js?v=79" defer></script>
+  <script src="/js/diagram-draw.js?v=78" defer></script>
+  <script src="/js/diagram-editor.js?v=1" defer></script>
+  <script src="/js/diagram-page.js?v=1" defer></script>
+</head>
+
+<body>
+  <div class="diagram-page">
+    <header class="diagram-page-bar">
+      <button class="icon-btn" id="diagramBack" type="button" aria-label="Back to the document">
+        <i class="ph ph-arrow-left" aria-hidden="true"></i>
+      </button>
+      <span class="diagram-page-title" id="diagramTitle"></span>
+      <span class="diagram-page-status" id="diagramStatus" role="status" aria-live="polite"></span>
+      <button class="btn btn-primary" id="diagramSave" type="button" disabled>
+        <i class="ph ph-floppy-disk" aria-hidden="true"></i><span>Save</span>
+      </button>
+    </header>
+
+    <main class="diagram-page-canvas ve-embed is-builder-open" id="diagramCanvas"></main>
+  </div>
+</body>
+
+</html>

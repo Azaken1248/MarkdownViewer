@@ -19,7 +19,8 @@ const SUITES = [
   ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],
   ["code", "code.test.js", "Code blocks: copy buttons, the clipboard paths and live highlighting"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
-  ["dom", "dom.test.js", "The real app in jsdom against a real server"]
+  ["dom", "dom.test.js", "The real app in jsdom against a real server"],
+  ["diagram-page", "diagram-page.test.js", "The diagram editor page, its address and the document handoff"]
 ];
 
 const only = process.argv[2];

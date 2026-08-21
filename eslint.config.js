@@ -62,6 +62,7 @@ const BROWSER_GLOBALS = {
   // Mermaid flowcharts as steps and arrows, for the diagram builder.
   DiagramModel: "readonly",
   DiagramDraw: "readonly",
+  DiagramEditor: "readonly",
   // The notebook Python controller, loaded before app.js.
   NotebookRuntime: "readonly",
   Worker: "readonly"
@@ -82,6 +83,9 @@ const NODE_GLOBALS = {
   clearInterval: "readonly",
   setImmediate: "readonly",
   URL: "readonly",
+  // Node has had a global fetch since 18, and the test suites use it to talk to
+  // a server they started.
+  fetch: "readonly",
   TextEncoder: "readonly",
   TextDecoder: "readonly"
 };

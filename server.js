@@ -74,6 +74,7 @@ const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
 const ERROR_TEMPLATE_PATH = path.join(PUBLIC_DIR, "error.html");
+const DIAGRAM_TEMPLATE_PATH = path.join(PUBLIC_DIR, "diagram.html");
 const SITE_NAME = "AzaDocs";
 const EMBED_TITLE = "AzaDocs";
 const EMBED_DESCRIPTION = "A personal markdown library: browse, search and edit documents, with Mermaid diagrams and Jupyter notebooks rendered inline.";
@@ -4169,6 +4170,23 @@ app.get(["/share.html", "/error.html"], (req, res, next) => {
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
+/* The diagram editor, which is a page rather than a document.
+ *
+ * /diagram/doc/<path>#<block> is one mermaid fence inside a document, and
+ * /diagram/file/<path> is a .mmd file that is all diagram. Both get the same
+ * shell, and it goes and asks the API for the document as whoever is asking —
+ * so this route, like the document shell below it, deliberately does not check
+ * whether the document exists. Answering differently for a real path and an
+ * imaginary one would tell anyone who asked exactly what is in the library.
+ */
+app.get(/^\/diagram\/(?:doc|file)\/.+$/, (req, res, next) => {
+  res.set("Cache-Control", "no-cache").sendFile(DIAGRAM_TEMPLATE_PATH, (error) => {
+    if (error) {
+      next(error);
+    }
+  });
+});
+
 /* A document has a real address.
  *
  * Opening one used to put it in the fragment — /#Notes/day-one.md — which meant
@@ -4188,7 +4206,7 @@ app.use(express.static(PUBLIC_DIR, { index: false }));
  * path gets the same answer, and the client says "not found" after it asks the
  * API as itself.
  */
-const SHELL_RESERVED_PREFIXES = ["/api", "/s/", "/docs", "/oembed", "/graphql", "/healthz"];
+const SHELL_RESERVED_PREFIXES = ["/api", "/s/", "/docs", "/oembed", "/graphql", "/healthz", "/diagram"];
 
 function wantsDocumentShell(req) {
   if (req.method !== "GET" && req.method !== "HEAD") {

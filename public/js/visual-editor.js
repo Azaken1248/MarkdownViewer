@@ -715,6 +715,108 @@
     return `${text.slice(0, index)}${checked ? "x" : " "}${text.slice(index + 1)}`;
   }
 
+  /* -------------------------------------------------------------------
+     Finding a diagram again
+
+     A diagram is edited on its own page, and the way back to the block it
+     came from is a line in the address bar. A block index alone will not do
+     it: insert a paragraph above while the editor is open and the index now
+     points at something else, and saving would overwrite a block nobody
+     touched. So the address carries the index and a hash of what was in the
+     fence, and the index is only believed while the hash still agrees.
+     ------------------------------------------------------------------- */
+
+  const DIAGRAM_INFO_RE = /^mermaid\b/i;
+  const ADDRESS_RE = /^(\d+)-([0-9a-z]+)$/;
+
+  /* A short, stable name for a piece of text.
+   *
+   * FNV-1a twice over, with different offsets, because one 32-bit hash over a
+   * library's worth of diagrams is a coincidence waiting to happen and the
+   * only cost of a second is a few more characters in the address bar. Not a
+   * cryptographic hash and not trying to be one: nothing here is a secret, and
+   * what it guards against is two blocks looking alike, not somebody making
+   * them look alike on purpose.
+   */
+  function contentHash(text) {
+    const source = String(text ?? "");
+    let a = 0x811c9dc5;
+    let b = 0x01000193;
+
+    for (let index = 0; index < source.length; index += 1) {
+      const code = source.charCodeAt(index);
+      a = Math.imul(a ^ code, 16777619) >>> 0;
+      b = Math.imul(b ^ code, 2166136261) >>> 0;
+    }
+
+    return `${a.toString(36)}${b.toString(36).padStart(7, "0")}`;
+  }
+
+  // Every diagram in a document, in the order a reader meets them.
+  function diagramFences(markdown) {
+    const blocks = splitBlocks(String(markdown ?? ""));
+    const found = [];
+
+    for (const [index, block] of blocks.entries()) {
+      if (block.type !== "fence") {
+        continue;
+      }
+
+      const fence = parseFence(block.source);
+      if (!DIAGRAM_INFO_RE.test(fence.info)) {
+        continue;
+      }
+
+      found.push({ index, fence, body: fence.body, hash: contentHash(fence.body) });
+    }
+
+    return found;
+  }
+
+  // The address that finds one of them again.
+  function diagramAddress(found) {
+    return `${found.index}-${found.hash}`;
+  }
+
+  /* The diagram an address names, or null.
+   *
+   * The index first, because in the ordinary case nothing has moved and the
+   * answer is one lookup. Then the hash anywhere in the document, because a
+   * block that moved is still the block that was opened. Then nothing, and a
+   * caller that writes anyway is a caller that overwrites the wrong block.
+   */
+  function findDiagram(markdown, address) {
+    const parsed = ADDRESS_RE.exec(String(address ?? ""));
+    if (!parsed) {
+      return null;
+    }
+
+    const wanted = Number(parsed[1]);
+    const hash = parsed[2];
+    const found = diagramFences(markdown);
+
+    return found.find((one) => one.index === wanted && one.hash === hash)
+      || found.find((one) => one.hash === hash)
+      || null;
+  }
+
+  /* One diagram in a document, rewritten, and nothing else touched.
+   *
+   * Null rather than a guess when the block is gone: a diagram whose home has
+   * been deleted has nowhere to be saved, and putting it back where the block
+   * used to be would write it over whatever is there now.
+   */
+  function replaceDiagram(markdown, address, body) {
+    const target = findDiagram(markdown, address);
+    if (!target) {
+      return null;
+    }
+
+    const blocks = splitBlocks(String(markdown ?? ""));
+    blocks[target.index].source = serializeFence({ ...target.fence, body: String(body ?? "") });
+    return joinBlocks(blocks);
+  }
+
   global.VisualEditor = {
     splitBlocks,
     joinBlocks,
@@ -732,6 +834,11 @@
     serializeFence,
     taskMarkers,
     setTaskMarker,
+    contentHash,
+    diagramFences,
+    diagramAddress,
+    findDiagram,
+    replaceDiagram,
     RICH_TYPES
   };
 })(typeof window === "undefined" ? globalThis : window);

@@ -851,6 +851,94 @@ console.log("=== a diagram says more than boxes and arrows ===");
     written.split("\n").filter((line) => /^\s*%%/.test(line)).length, 5);
 }
 
+console.log("=== finding a diagram again after the document moved under it ===");
+{
+  /* A diagram is edited on a page of its own, and the way back to the block it
+   * came from is a line in the address bar. A block index alone will not do it:
+   * insert a paragraph above while the editor is open and the index now points
+   * at something else, and saving would write the diagram over a block nobody
+   * touched. So the address carries the index and a hash of what was in the
+   * fence, and the index is only believed while the hash still agrees.
+   */
+  const doc = [
+    "# Title",
+    "",
+    "```mermaid",
+    "flowchart TD",
+    "  A --> B",
+    "```",
+    "",
+    "Some prose.",
+    "",
+    "```mermaid",
+    "flowchart LR",
+    "  C --> D",
+    "```",
+    "",
+    "```js",
+    "notADiagram();",
+    "```",
+    ""
+  ].join("\n");
+
+  const found = VE.diagramFences(doc);
+  check("every diagram in a document, and only the diagrams",
+    found.map((one) => one.body.split("\n")[0]), ["flowchart TD", "flowchart LR"]);
+  check("...each one saying where in the document it is",
+    found.map((one) => one.index), [2, 6]);
+
+  const second = VE.diagramAddress(found[1]);
+  check("an address is the index and what was in the fence", /^6-[0-9a-z]+$/.test(second), true);
+
+  check("the address finds the diagram it was made from",
+    VE.findDiagram(doc, second).body, "flowchart LR\n  C --> D");
+
+  // The dangerous case, and the reason the hash is there at all.
+  const shifted = doc.replace("Some prose.\n", "Some prose.\n\nAnd more of it.\n");
+  check("...and still finds it after something was inserted above it",
+    VE.findDiagram(shifted, second).body, "flowchart LR\n  C --> D");
+  check("...at its new index rather than its old one",
+    VE.findDiagram(shifted, second).index, 8);
+
+  // Two diagrams that happen to say the same thing are the same diagram as far
+  // as a hash can tell, so the index has to break the tie.
+  const twins = "```mermaid\nflowchart TD\n  A --> B\n```\n\n```mermaid\nflowchart TD\n  A --> B\n```\n";
+  const both = VE.diagramFences(twins);
+  check("two diagrams that say the same thing still have different addresses",
+    VE.diagramAddress(both[0]) !== VE.diagramAddress(both[1]), true);
+  check("...and each address finds its own",
+    [VE.findDiagram(twins, VE.diagramAddress(both[0])).index,
+      VE.findDiagram(twins, VE.diagramAddress(both[1])).index], [0, 2]);
+
+  // A block that has been edited to something else is not the block that was
+  // opened, and writing over it would be the exact accident this prevents.
+  const gone = doc.replace("flowchart LR\n  C --> D", "flowchart LR\n  C --> Z");
+  check("a diagram that has been changed underneath is not found",
+    VE.findDiagram(gone, second), null);
+  check("...and a document it is not in cannot be written to",
+    VE.replaceDiagram(gone, second, "flowchart TD\n  X --> Y"), null);
+  check("...nor can one whose block was deleted",
+    VE.replaceDiagram("# Title\n", second, "flowchart TD\n  X --> Y"), null);
+  check("a malformed address finds nothing", VE.findDiagram(doc, "not-an-address"), null);
+
+  // And the whole point: one block changes and the document is otherwise the
+  // document, byte for byte.
+  const written = VE.replaceDiagram(doc, second, "flowchart LR\n  C --> E");
+  check("writing one diagram back changes that diagram",
+    VE.findDiagram(written, VE.diagramAddress(VE.diagramFences(written)[1])).body,
+    "flowchart LR\n  C --> E");
+  check("...and nothing else in the document",
+    written.replace("C --> E", "C --> D"), doc);
+
+  // The fence's own shape is not the diagram's business either: a tilde fence
+  // with an info string comes back a tilde fence with an info string.
+  const tilded = "~~~~mermaid render\nflowchart TD\n  A --> B\n~~~~\n";
+  const address = VE.diagramAddress(VE.diagramFences(tilded)[0]);
+  check("a diagram keeps the fence it was written in",
+    VE.replaceDiagram(tilded, address, "flowchart TD\n  A --> C"),
+    "~~~~mermaid render\nflowchart TD\n  A --> C\n~~~~\n");
+}
+
 console.log("=== a diagram can say where its own boxes go ===");
 {
   /* Mermaid has no coordinates in it, and every Mermaid parser throws comments

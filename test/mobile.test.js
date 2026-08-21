@@ -41,6 +41,7 @@ const short = mediaBlock("@media (max-height: 560px)");
 const shortPhone = mediaBlock("@media (max-height: 560px) and (max-width: 920px)");
 const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 const errorHtml = fs.readFileSync(path.join(PUBLIC_DIR, "error.html"), "utf8");
+const diagramHtml = fs.readFileSync(path.join(PUBLIC_DIR, "diagram.html"), "utf8");
 
 console.log("=== mobile drawer has a way out ===");
 check("a close button exists in the markup", html.includes('id="closeSidebarBtn"'), true);
@@ -393,7 +394,7 @@ console.log("=== one file, one version of it ===");
   // stylesheet from cache under the old address — including, until this, none
   // of the responsive rules that page needs.
   const versions = new Map();
-  for (const [page, markup] of [["index.html", html], ["share.html", shareHtml], ["error.html", errorHtml]]) {
+  for (const [page, markup] of [["index.html", html], ["share.html", shareHtml], ["error.html", errorHtml], ["diagram.html", diagramHtml]]) {
     for (const [, file, version] of markup.matchAll(/\/((?:css|js)\/[a-z-]+\.(?:css|js))\?v=(\d+)/g)) {
       if (!versions.has(file)) versions.set(file, new Map());
       versions.get(file).set(page, version);
