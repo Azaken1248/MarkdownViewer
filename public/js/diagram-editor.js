@@ -112,6 +112,15 @@
   // Far enough back to cover a session's worth of mistakes without holding a
   // diagram's whole life in memory.
   const HISTORY_DEPTH = 200;
+  // How far a pasted copy lands from what it was copied from, so it can be seen
+  // to be a second thing rather than looking like nothing happened.
+  const PASTE_OFFSET = 20;
+
+  /* What was last copied, kept for as long as the page is open rather than for
+   * as long as one diagram is. Copying a box out of one diagram and pasting it
+   * into another is the obvious thing to want and costs nothing to allow.
+   */
+  let clipboard = null;
 
   // What the palette offers. A table is not a Mermaid shape — it is an ordinary
   // box whose label has rows in it and whose layout line says to rule a line
@@ -1127,6 +1136,103 @@
       }
     });
 
+    /* --- Carrying boxes about -----------------------------------------------
+     *
+     * What is copied is the boxes and the arrows that run wholly between them:
+     * an arrow with one end outside the selection has nowhere to arrive when it
+     * is pasted, and inventing an end for it would be inventing a diagram.
+     */
+    function copySelection() {
+      if (selection.length === 0) {
+        return null;
+      }
+
+      const taken = new Set(selection);
+      const cut = {
+        nodes: model.nodes.filter((item) => taken.has(item.id)).map((item) => ({ ...item })),
+        edges: model.edges
+          .filter((edge) => taken.has(edge.from) && taken.has(edge.to))
+          .map((edge) => ({ ...edge })),
+        layout: {}
+      };
+
+      for (const id of taken) {
+        const at = boxOf(id);
+        if (at) {
+          cut.layout[id] = { ...at };
+        }
+      }
+
+      clipboard = cut;
+      return cut;
+    }
+
+    /* Putting them back, as new things.
+     *
+     * Every box gets a name nothing is using, and the arrows are rewritten to
+     * the new names — otherwise pasting a copy would be declaring the same box
+     * twice, and the file would come back with one of them.
+     */
+    function pasteClipboard() {
+      if (!clipboard || clipboard.nodes.length === 0) {
+        return;
+      }
+
+      const renamed = new Map();
+      const fresh = [];
+
+      for (const item of clipboard.nodes) {
+        // Asked of the model as it grows, so two boxes pasted at once cannot
+        // both be given the same new name.
+        const id = DiagramModel.nextNodeId({ nodes: [...model.nodes, ...fresh] });
+        renamed.set(item.id, id);
+        fresh.push({ ...item, id });
+      }
+
+      model.nodes.push(...fresh);
+
+      for (const item of clipboard.nodes) {
+        const at = clipboard.layout[item.id];
+        if (at) {
+          model.layout[renamed.get(item.id)] = {
+            ...at,
+            x: at.x + PASTE_OFFSET,
+            y: at.y + PASTE_OFFSET
+          };
+        }
+      }
+
+      for (const edge of clipboard.edges) {
+        model.edges.push({ ...edge, from: renamed.get(edge.from), to: renamed.get(edge.to) });
+      }
+
+      write();
+      paintLists();
+      // What was just pasted is what you want to move, so it is what is held.
+      choose([...renamed.values()]);
+    }
+
+    function cutSelection() {
+      if (!copySelection()) {
+        return;
+      }
+
+      removeSteps(selection);
+    }
+
+    // The same as copy then paste, and worth its own keystroke because it is
+    // the commonest thing anyone does with either of them.
+    function duplicateSelection() {
+      const held = clipboard;
+      if (copySelection()) {
+        pasteClipboard();
+      }
+
+      // Duplicating is not copying: whatever was on the clipboard before is
+      // still what a paste should put down.
+      clipboard = held || clipboard;
+    }
+
     /* --- Typing into the diagram itself -------------------------------------
      *
      * The options panel edits the same words, and both stay: a panel is how you
@@ -1418,6 +1524,30 @@
        */
       if (event.ctrlKey || event.metaKey) {
         const key = String(event.key).toLowerCase();
+
+        if (key === "c" && selection.length > 0) {
+          event.preventDefault();
+          copySelection();
+          return;
+        }
+
+        if (key === "x" && selection.length > 0) {
+          event.preventDefault();
+          cutSelection();
+          return;
+        }
+
+        if (key === "v") {
+          event.preventDefault();
+          pasteClipboard();
+          return;
+        }
+
+        if (key === "d" && selection.length > 0) {
+          event.preventDefault();
+          duplicateSelection();
+          return;
+        }
 
         if (key === "z" && !event.shiftKey) {
           event.preventDefault();
@@ -2263,6 +2393,10 @@
       fit: fitView,
       undo,
       redo,
+      copy: copySelection,
+      cut: cutSelection,
+      paste: pasteClipboard,
+      duplicate: duplicateSelection,
       // Whether there is anywhere to go, so a host can grey out a button.
       canUndo: () => history.past.length > 0 || sourceNow() !== history.present,
       canRedo: () => history.future.length > 0,

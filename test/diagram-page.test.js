@@ -860,6 +860,167 @@ async function run(server, cookie) {
       emptied.includes("-->"), false);
   }
 
+  console.log("=== boxes can be carried about ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "carry.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    %% @ C 100,300 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]",
+        "    A --> B",
+        "    B --> C"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/carry.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const boxes = () => [...canvas.querySelectorAll(".dd-node")].map((one) => one.getAttribute("data-id"));
+    const arrows = () => canvas.querySelectorAll(".dd-edge").length;
+    const ringed = () => canvas.querySelectorAll(".dd-ring").length;
+    const press = (key, extra = {}) => canvas.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key, bubbles: true, ...extra }));
+
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const placed = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+        .exec(canvas.querySelector(`.dd-node[data-id="${id}"]`).getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+    const tap = (id, extra = {}) => {
+      const [x, y] = placed(id);
+      const at = { clientX: (x * view().scale) + view().x + 10,
+        clientY: (y * view().scale) + view().y + 10, bubbles: true, ...extra };
+      canvas.querySelector(`.dd-node[data-id="${id}"]`).dispatchEvent(new window.MouseEvent("pointerdown", at));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at));
+    };
+
+    check("three boxes and two arrows to begin with", [boxes().length, arrows()], [3, 2]);
+
+    // An edit first, so that undoing a paste has somewhere to land that is not
+    // simply the diagram as it was opened.
+    tap("A");
+    press("ArrowRight", { shiftKey: true });
+    await new Promise((r) => setTimeout(r, 700));
+    const nudged = placed("A");
+
+    press("c", { ctrlKey: true });
+    press("v", { ctrlKey: true });
+
+    check("pasting a box makes a second box", boxes().length, 4);
+    check("...under a name nothing else is using",
+      new Set(boxes()).size, boxes().length);
+    check("...put down beside what it came from, not on top of it",
+      placed(boxes()[3]), [placed("A")[0] + 20, placed("A")[1] + 20]);
+    check("...and it is what is now held, because it is what you want to move",
+      ringed(), 1);
+    check("...while the arrows are as they were, because one end was outside",
+      arrows(), 2);
+
+    // Saved and read back, because an arrow with one end that is not there is
+    // something the drawing quietly leaves out and the file does not.
+    await saveAndWait(page);
+    const oneCopied = (await server.request("GET", "/api/docs/carry.mmd", undefined, { Cookie: cookie })).body.content;
+    check("...and the file has no arrow to a box that was left behind",
+      (oneCopied.match(/-->/g) || []).length, 2);
+    check("...nor any mention of one", /undefined/.test(oneCopied), false);
+
+    press("z", { ctrlKey: true });
+    check("a paste can be undone", boxes().length, 3);
+    check("...back to the edit before it rather than past it", placed("A"), nudged);
+
+    /* Undoing leaves a way forward. Pasting is doing something new, and doing
+     * something new is what makes the way forward stop existing — so a redo
+     * after a paste must not walk into a diagram that never happened.
+     *
+     * Undone twice, so what is forward is the nudge rather than another paste:
+     * two states that differ only in whether they happened are two states this
+     * check cannot tell apart.
+     */
+    press("z", { ctrlKey: true });
+    check("...and again takes back the nudge", placed("A")[0], nudged[0] - 10);
+
+    press("v", { ctrlKey: true });
+    check("pasting after an undo puts a box down", boxes().length, 4);
+
+    press("z", { ctrlKey: true, shiftKey: true });
+    check("...and there is nothing to redo past it", boxes().length, 4);
+    check("...least of all the edit the paste was done instead of",
+      placed("A")[0], nudged[0] - 10);
+
+    press("z", { ctrlKey: true });
+
+    /* --- what comes with a copy --------------------------------------------- */
+
+    // An arrow with one end outside the selection has nowhere to arrive when it
+    // is pasted, so it does not come. An arrow wholly inside does.
+    press("Escape");
+    tap("A");
+    tap("B", { shiftKey: true });
+    press("c", { ctrlKey: true });
+    press("v", { ctrlKey: true });
+    check("copying two joined boxes brings the arrow between them",
+      [boxes().length, arrows()], [5, 3]);
+    check("...and holds both of the new ones", ringed(), 2);
+    // Two boxes pasted at once are two boxes: asking for a free name once and
+    // using it twice would declare the same box twice, and the file would come
+    // back with one of them.
+    check("...each under a name of its own", new Set(boxes()).size, boxes().length);
+
+    // The new arrow joins the new boxes, not the old ones.
+    await saveAndWait(page);
+    const pasted = (await server.request("GET", "/api/docs/carry.mmd", undefined, { Cookie: cookie })).body.content;
+    const fresh = boxes().filter((id) => !["A", "B", "C"].includes(id));
+    check("...joined to each other rather than back to the originals",
+      pasted.includes(`${fresh[0]} --> ${fresh[1]}`), true);
+
+    press("z", { ctrlKey: true });
+
+    /* --- cut ---------------------------------------------------------------- */
+
+    press("Escape");
+    tap("C");
+    press("x", { ctrlKey: true });
+    check("cut takes the box out", boxes().includes("C"), false);
+    check("...and the arrow that reached it", arrows(), 1);
+
+    press("v", { ctrlKey: true });
+    check("...and paste puts one back", boxes().length, 3);
+
+    press("z", { ctrlKey: true });
+    press("z", { ctrlKey: true });
+    check("both halves of a cut can be undone", boxes().length, 3);
+
+    /* --- duplicate ---------------------------------------------------------- */
+
+    press("Escape");
+    tap("A");
+    press("c", { ctrlKey: true });
+    press("Escape");
+    tap("B");
+    press("d", { ctrlKey: true });
+    check("duplicate copies what is held", boxes().length, 4);
+
+    // Duplicating is not copying: what was on the clipboard before is still
+    // what a paste should put down.
+    press("Escape");
+    press("v", { ctrlKey: true });
+    const added = boxes().filter((id) => !["A", "B", "C"].includes(id));
+    check("...and leaves the clipboard alone", boxes().length, 5);
+    check("...so what was copied earlier is what is pasted now",
+      canvas.querySelector(`.dd-node[data-id="${added[added.length - 1]}"]`).textContent.includes("One"),
+      true);
+  }
+
   console.log("=== typing into the diagram itself ===");
   {
     await server.request("POST", "/api/docs",
