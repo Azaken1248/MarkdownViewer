@@ -142,10 +142,23 @@
     }
 
     const onChange = typeof settings.onChange === "function" ? settings.onChange : () => {};
+
+    /* All of it, not the parts this editor happens to have controls for.
+     *
+     * A diagram can say more than the canvas can yet change — what colour a
+     * class is, what layers there are, keys written by a later version of this
+     * editor than the one open. Copying out only the boxes and arrows meant
+     * that saving a coloured diagram wrote back the classes each box wears and
+     * not the definitions of them, so the colours went and left the names
+     * behind. Everything comes in, and everything nothing touched goes back
+     * out unchanged.
+     */
+    const carried = { ...opened };
+    // `ok` is the parser saying it managed, not part of the diagram.
+    delete carried.ok;
+
     const model = {
-      direction: opened.direction,
-      nodes: opened.nodes,
-      edges: opened.edges,
+      ...carried,
       // A diagram that has never been arranged is arranged on the way in, so
       // there is something to drag. Nothing is written to the file until
       // something is actually changed.

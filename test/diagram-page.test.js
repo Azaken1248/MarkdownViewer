@@ -323,6 +323,52 @@ async function run(server, cookie) {
       /[^\n]\n$/.test(saved.body.content), true);
   }
 
+  console.log("=== a diagram says more than the canvas can change ===");
+  {
+    /* The canvas has controls for boxes and arrows. A diagram can say more than
+     * that — what colour a class is, what layers there are, keys written by a
+     * later version of this editor than the one open. None of it can be edited
+     * here yet, and every bit of it has to come back out unchanged: an editor
+     * that quietly drops what it has no button for is an editor that eats work.
+     */
+    const coloured = [
+      "flowchart TD",
+      "    %% layout v1",
+      "    %% @ A 40,40 120x50 shadow=soft",
+      "    %% @ B 40,200 120x50",
+      "    %% layer 2 \"Back end\" locked",
+      "    A[One]:::blue",
+      "    B[Two]",
+      "    A --> B",
+      "    classDef blue fill:#2b6cb0,stroke:#1a365d",
+      "    style B fill:#eee"
+    ].join("\n") + "\n";
+
+    await server.request("POST", "/api/docs",
+      { fileName: "styled.mmd", overwrite: true, content: coloured },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/styled.mmd`, cookie, origin });
+    check("a coloured diagram opens", page.document.querySelectorAll(".dd-node").length, 2);
+
+    dragBox(page.window, "A", 60, 40);
+    await saveAndWait(page);
+
+    const saved = (await server.request("GET", "/api/docs/styled.mmd", undefined, { Cookie: cookie })).body.content;
+    check("moving a box moves the box", /%% @ A (?!40,40)/.test(saved), true);
+    // The class each box wears was never in danger — it is written on the box.
+    // What went missing was what the class means, which left the names behind
+    // pointing at nothing.
+    check("...and what its colour means is still there",
+      saved.includes("classDef blue fill:#2b6cb0,stroke:#1a365d"), true);
+    check("...along with the box that wears it", saved.includes("class A blue"), true);
+    check("...the one-off colour on the other box", saved.includes("style B fill:#eee"), true);
+    check("...the layer nothing here can show yet",
+      saved.includes('%% layer 2 "Back end" locked'), true);
+    check("...and a key written by a version this one has never met",
+      saved.includes("shadow=soft"), true);
+  }
+
   console.log("=== the diagram is somewhere you are looking at part of ===");
   {
     await server.request("POST", "/api/docs",
