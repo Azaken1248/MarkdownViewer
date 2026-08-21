@@ -860,6 +860,192 @@ async function run(server, cookie) {
       emptied.includes("-->"), false);
   }
 
+  console.log("=== every edit has a way back ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "steps.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    A[One]:::blue",
+        "    B[Two]",
+        "    A --> B",
+        "    classDef blue fill:#2b6cb0"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/steps.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const box = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const placed = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box(id).getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const onScreen = (x, y) => [(x * view().scale) + view().x, (y * view().scale) + view().y];
+    const at = (x, y, extra = {}) => ({ clientX: x, clientY: y, bubbles: true, ...extra });
+    const press = (key, extra = {}) => canvas.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key, bubbles: true, ...extra }));
+
+    const drag = async (id, dx, dy) => {
+      const [sx, sy] = onScreen(...placed(id));
+      box(id).dispatchEvent(new window.MouseEvent("pointerdown", at(sx + 5, sy + 5)));
+      canvas.dispatchEvent(new window.MouseEvent("pointermove", at(sx + 5 + dx, sy + 5 + dy)));
+      await new Promise((r) => setTimeout(r, 60));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(sx + 5 + dx, sy + 5 + dy)));
+    };
+
+    const stepButtons = () => [...page.document.querySelectorAll(".ve-diagram-steps button")];
+    check("a fresh diagram has nothing to undo and nothing to redo",
+      stepButtons().map((one) => one.disabled), [true, true]);
+
+    const started = placed("A");
+    await drag("A", 0, 200);
+    check("...and one edit gives it something to undo",
+      stepButtons().map((one) => one.disabled), [false, true]);
+    const moved = placed("A");
+    check("a box dragged is a box moved", moved[1] - started[1], 200);
+
+    press("z", { ctrlKey: true });
+    check("undo puts it back", placed("A"), started);
+    check("...and now there is something to redo",
+      stepButtons().map((one) => one.disabled), [true, false]);
+
+    stepButtons()[1].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the button does what the keystroke does", placed("A"), moved);
+    stepButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("...in both directions", placed("A"), started);
+
+    press("z", { ctrlKey: true, shiftKey: true });
+    check("redo moves it again", placed("A"), moved);
+
+    press("y", { ctrlKey: true });
+    check("...and there is nothing further forward to go to", placed("A"), moved);
+
+    // One step per gesture, not one per frame: a drag that took forty frames
+    // is one thing that happened, and one press of undo has to take it back.
+    press("z", { ctrlKey: true });
+    check("one drag is one step, however many frames it took", placed("A"), started);
+
+    /* --- a run of them ------------------------------------------------------ */
+
+    await drag("A", 0, 100);
+    await drag("B", 100, 0);
+    const both = { A: placed("A"), B: placed("B") };
+
+    press("z", { ctrlKey: true });
+    check("undo takes back the last thing done, not the last two",
+      [placed("A"), placed("B")], [both.A, [both.B[0] - 100, both.B[1]]]);
+
+    press("z", { ctrlKey: true });
+    check("...and again takes back the one before it", placed("A"), started);
+
+    press("z", { ctrlKey: true });
+    check("...and running out of past is not an error", placed("A"), started);
+
+    press("z", { ctrlKey: true, shiftKey: true });
+    press("z", { ctrlKey: true, shiftKey: true });
+    check("redo walks the same way forward",
+      [placed("A"), placed("B")], [both.A, both.B]);
+
+    // Doing something new is what makes the way forward stop existing.
+    press("z", { ctrlKey: true });
+    await drag("B", 0, 150);
+    const branched = placed("B");
+    press("z", { ctrlKey: true, shiftKey: true });
+    check("a new edit closes off the way forward", placed("B"), branched);
+
+    /* --- what undo has to restore ------------------------------------------- */
+
+    press("Escape");
+    const [cx, cy] = onScreen(...placed("A"));
+    box("A").dispatchEvent(new window.MouseEvent("pointerdown", at(cx + 5, cy + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(cx + 5, cy + 5)));
+    press("Delete");
+    check("a box can be removed", Boolean(box("A")), false);
+
+    press("z", { ctrlKey: true });
+    check("undo brings it back", Boolean(box("A")), true);
+    check("...and the arrow that went with it",
+      canvas.querySelectorAll(".dd-edge").length, 1);
+
+    /* --- typing ------------------------------------------------------------- */
+
+    // A word typed into a box arrives one character at a time, and a history
+    // with one step per keystroke is a history where undo means "take back that
+    // letter". A burst is gathered up into one step; a pause ends it.
+    press("Escape");
+    const [nx, ny] = onScreen(...placed("B"));
+    box("B").dispatchEvent(new window.MouseEvent("pointerdown", at(nx + 5, ny + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(nx + 5, ny + 5)));
+
+    // Re-queried every time: an undo repaints the panel, so a reference kept
+    // from before one is a reference to a box that is no longer on the screen.
+    const naming = () => page.document.querySelector(".ve-diagram-text");
+    const type = (text) => {
+      const field = naming();
+      field.value = text;
+      field.dispatchEvent(new window.Event("input", { bubbles: true }));
+    };
+
+    const wasCalled = naming().value;
+    for (const text of ["T", "Tw", "Two", "Two ", "Two b"]) {
+      type(text);
+    }
+
+    // Long enough for the burst to have been gathered up and closed.
+    await new Promise((r) => setTimeout(r, 700));
+    for (const text of ["Two bo", "Two box"]) {
+      type(text);
+    }
+
+    await new Promise((r) => setTimeout(r, 700));
+    check("typing changes the box", naming().value, "Two box");
+
+    press("z", { ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 60));
+    check("undo takes back the burst, not the letter",
+      naming().value, "Two b");
+
+    press("z", { ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 60));
+    check("...and again takes back the burst before it",
+      naming().value, wasCalled);
+
+    /* A step still being gathered has to be taken back first rather than
+     * skipped over, or an undo lands one step further back than it should and
+     * the letters just typed survive it.
+     *
+     * Two bursts, the first finished and the second still open: undo has to
+     * arrive at the first, not at what came before it.
+     */
+    type("Alpha");
+    await new Promise((r) => setTimeout(r, 700));
+    type("Beta");
+    press("z", { ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 60));
+    check("undo during a burst takes back the burst so far",
+      naming().value, "Alpha");
+    check("...rather than the finished burst underneath it",
+      naming().value === wasCalled, false);
+
+    // A step is the file, so it restores the things this editor has no controls
+    // for as faithfully as the things it has.
+    await drag("A", 40, 0);
+    press("z", { ctrlKey: true });
+    await saveAndWait(page);
+    const saved = (await server.request("GET", "/api/docs/steps.mmd", undefined, { Cookie: cookie })).body.content;
+    check("...and a colour nothing here can edit",
+      saved.includes("classDef blue fill:#2b6cb0"), true);
+    check("...and the box that wears it", saved.includes("class A blue"), true);
+  }
+
   console.log("=== the way in and the way back ===");
   {
     const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");

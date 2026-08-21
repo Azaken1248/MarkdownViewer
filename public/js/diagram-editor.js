@@ -106,6 +106,12 @@
   // rather than in the diagram: at half zoom, six pixels of file is three
   // pixels of hand, and the hand is what is doing the aiming.
   const GUIDE_WITHIN = 6;
+  // A burst of typing is one step, not one per keystroke. Long enough that a
+  // word is a step, short enough that a pause between words is a boundary.
+  const HISTORY_IDLE = 500;
+  // Far enough back to cover a session's worth of mistakes without holding a
+  // diagram's whole life in memory.
+  const HISTORY_DEPTH = 200;
 
   // What the palette offers. A table is not a Mermaid shape — it is an ordinary
   // box whose label has rows in it and whose layout line says to rule a line
@@ -325,12 +331,114 @@
       draw();
     };
 
-    const write = () => {
-      onChange(DiagramModel.serializeFlowchart(model).replace(/\n$/, ""));
+    const sourceNow = () => DiagramModel.serializeFlowchart(model).replace(/\n$/, "");
+
+    /* --- Going back ---------------------------------------------------------
+     *
+     * A step is the file as it was, because the file is exactly what a diagram
+     * is: cheap to keep, impossible to get subtly wrong, and it restores the
+     * colours and the layers and the keys this editor has no controls for
+     * along with everything it does.
+     *
+     * One step per gesture. A drag is one step however many frames it took, and
+     * a burst of typing is one step however many keystrokes — which is what
+     * makes undo mean "that thing I just did" rather than "one frame of it".
+     */
+    const history = { past: [], future: [], present: "" };
+    let historyTimer = 0;
+
+    function rememberNow() {
+      window.clearTimeout(historyTimer);
+      historyTimer = 0;
+
+      const now = sourceNow();
+      if (now === history.present) {
+        return;
+      }
+
+      history.past.push(history.present);
+      if (history.past.length > HISTORY_DEPTH) {
+        history.past.shift();
+      }
+
+      history.present = now;
+      // Doing something new is what makes the way forward stop existing.
+      history.future.length = 0;
+      showSteps();
+    }
+
+    function rememberSoon() {
+      window.clearTimeout(historyTimer);
+      historyTimer = window.setTimeout(rememberNow, HISTORY_IDLE);
+    }
+
+    /* A step, put back.
+     *
+     * The model is filled in rather than replaced, because everything on this
+     * canvas holds a reference to it — and a selection that named a box which
+     * is no longer there is a selection of nothing.
+     */
+    function restore(source) {
+      const back = DiagramModel.parseFlowchart(source);
+      if (!back.ok) {
+        return;
+      }
+
+      for (const key of Object.keys(model)) {
+        delete model[key];
+      }
+
+      Object.assign(model, back, { layout: DiagramModel.ensureLayout(back) });
+      delete model.ok;
+
+      onChange(source);
+      paintLists();
+      choose(selection);
+      showSteps();
+    }
+
+    function undo() {
+      // Whatever is still being typed is a step of its own, and undoing has to
+      // take that back first rather than skipping over it.
+      rememberNow();
+
+      if (history.past.length === 0) {
+        return false;
+      }
+
+      history.future.push(history.present);
+      history.present = history.past.pop();
+      restore(history.present);
+      return true;
+    }
+
+    function redo() {
+      window.clearTimeout(historyTimer);
+      historyTimer = 0;
+
+      if (history.future.length === 0) {
+        return false;
+      }
+
+      history.past.push(history.present);
+      history.present = history.future.pop();
+      restore(history.present);
+      return true;
+    }
+
+    const write = ({ atOnce = true } = {}) => {
+      onChange(sourceNow());
+      if (atOnce) {
+        rememberNow();
+      } else {
+        rememberSoon();
+      }
     };
 
+    // Typing is the one edit that arrives a character at a time, so it is the
+    // one whose steps are gathered up rather than taken as they come.
     const commit = () => {
-      write();
+      write({ atOnce: false });
       drawSoon();
     };
 
@@ -1145,6 +1253,26 @@
         return;
       }
 
+      /* Back and forward. Both spellings of redo, because half the world
+       * learned Ctrl+Y and the other half Ctrl+Shift+Z, and neither half is
+       * going to be talked out of it.
+       */
+      if (event.ctrlKey || event.metaKey) {
+        const key = String(event.key).toLowerCase();
+
+        if (key === "z" && !event.shiftKey) {
+          event.preventDefault();
+          undo();
+          return;
+        }
+
+        if ((key === "z" && event.shiftKey) || key === "y") {
+          event.preventDefault();
+          redo();
+          return;
+        }
+      }
+
       // The one keystroke that does not need anything selected already.
       if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
         event.preventDefault();
@@ -1201,7 +1329,7 @@
         }
       }
 
-      write();
+      write({ atOnce: false });
       drawSoon();
     });
 
@@ -1836,6 +1964,8 @@
      * buttons can only ever get near.
      */
     let zoomField = null;
+    // Replaced with the real thing when there are buttons to keep in step.
+    let showSteps = () => {};
 
     function showZoom() {
       if (zoomField && document.activeElement !== zoomField) {
@@ -1891,7 +2021,27 @@
         stepButton("Fit the whole diagram", "ph-corners-out", () => fitView())
       );
 
-      head.append(zoom);
+      // The keystroke is the one people use, but a canvas that only offers undo
+      // to those who know the keystroke is a canvas that has hidden it.
+      const steps = document.createElement("div");
+      steps.className = "ve-diagram-zoom ve-diagram-steps";
+
+      const back = stepButton("Undo", "ph-arrow-counter-clockwise", () => {
+        undo();
+        showSteps();
+      });
+      const forward = stepButton("Redo", "ph-arrow-clockwise", () => {
+        redo();
+        showSteps();
+      });
+
+      showSteps = () => {
+        back.disabled = !(history.past.length > 0 || sourceNow() !== history.present);
+        forward.disabled = history.future.length === 0;
+      };
+
+      steps.append(back, forward);
+      head.append(steps, zoom);
     }
 
     const parts = [head, palette, stage, hint, inspector, all];
@@ -1914,6 +2064,11 @@
     paintInspector();
     node.append(...parts);
     draw();
+
+    // The diagram as it was opened is the state everything else is a change
+    // from, and the one an undo run all the way back arrives at.
+    history.present = sourceNow();
+    showSteps();
 
     /* The first sight of a diagram is the whole of it.
      *
@@ -1947,6 +2102,11 @@
       // is not written anywhere — but is worth being able to ask about.
       view: () => ({ ...view }),
       fit: fitView,
+      undo,
+      redo,
+      // Whether there is anywhere to go, so a host can grey out a button.
+      canUndo: () => history.past.length > 0 || sourceNow() !== history.present,
+      canRedo: () => history.future.length > 0,
       // What the file would say if it were written now. The host asks for this
       // when it saves rather than keeping its own copy in step.
       source: () => DiagramModel.serializeFlowchart(model).replace(/\n$/, ""),

@@ -3614,6 +3614,21 @@ body.page-editing #dockEdit {
   margin-left: auto;
 }
 
+/* Undo and redo sit to the left of the zoom, and only the zoom pushes itself
+   to the right — so the two groups stay together at that end of the strip. */
+.ve-diagram-steps {
+  margin-left: auto;
+}
+
+.ve-diagram-steps + .ve-diagram-zoom {
+  margin-left: 8px;
+}
+
+.ve-diagram-zoom-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .ve-diagram-zoom-step {
   display: inline-flex;
   align-items: center;
