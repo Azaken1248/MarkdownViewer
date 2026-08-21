@@ -694,6 +694,99 @@ async function run(server, cookie) {
     check("...so nothing has drifted out of line",
       [placed("B")[0] - placed("A")[0], placed("C")[1] - placed("A")[1]], [200, 200]);
 
+    /* --- lining up --------------------------------------------------------- */
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    // Dragged so its left edge lands five pixels past another box's left edge.
+    // The grid alone would round that the other way, to ten past — so a box
+    // that ends up exactly on the line got there by lining up, not by rounding.
+    const nudgeOff = 5;
+    const target = placed("B");
+    const start = placed("D");
+    tap("D");
+
+    const [dx0, dy0] = onScreen(...start);
+    const wantedX = target[0] + nudgeOff;
+    box("D").dispatchEvent(new window.MouseEvent("pointerdown", at(dx0 + 5, dy0 + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove",
+      at(dx0 + 5 + (wantedX - start[0]), dy0 + 5)));
+    await new Promise((r) => setTimeout(r, 60));
+
+    check("a box dragged near another's edge is drawn on it, not near it",
+      placed("D")[0], target[0]);
+    // Two lines, not one: the drag was sideways, so the box is still level with
+    // the one it started beside, and that is worth saying as well.
+    const upright = [...canvas.querySelectorAll(".dd-guide")]
+      .filter((line) => line.getAttribute("x1") === line.getAttribute("x2"));
+    check("...with a line saying why", upright.length, 1);
+    check("...and another for the row it is still in",
+      canvas.querySelectorAll(".dd-guide").length, 2);
+    check("...drawn on the edge the box went to",
+      [Number(upright[0].getAttribute("x1")), Number(upright[0].getAttribute("x2"))],
+      [target[0], target[0]]);
+    check("...and long enough to reach both boxes",
+      Number(upright[0].getAttribute("y2")) - Number(upright[0].getAttribute("y1")) > 200, true);
+
+    canvas.dispatchEvent(new window.MouseEvent("pointerup",
+      at(dx0 + 5 + (wantedX - start[0]), dy0 + 5)));
+    check("...and where it is let go is where it stays", placed("D")[0], target[0]);
+    check("...with the explanation gone once the drag is",
+      canvas.querySelectorAll(".dd-guide").length, 0);
+
+    // Far from anything, the grid is all there is, and the box lands on it.
+    const loose = placed("D");
+    const [lx, ly] = onScreen(...loose);
+    box("D").dispatchEvent(new window.MouseEvent("pointerdown", at(lx + 5, ly + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(lx + 5 + 137, ly + 5 + 73)));
+    await new Promise((r) => setTimeout(r, 60));
+    check("a box dragged nowhere near anything shows no lines",
+      canvas.querySelectorAll(".dd-guide").length, 0);
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(lx + 5 + 137, ly + 5 + 73)));
+    check("...and lands on the grid instead",
+      [placed("D")[0] % 10, placed("D")[1] % 10], [0, 0]);
+
+    // Five pixels is half a grid step, so the grid rounds it up to a whole one.
+    // A box that came back to where it started would be one lining itself up
+    // with itself, which is the one box it must never be compared against.
+    const tiny = placed("D");
+    const [tx, ty] = onScreen(...tiny);
+    box("D").dispatchEvent(new window.MouseEvent("pointerdown", at(tx + 5, ty + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(tx + 10, ty + 5)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(tx + 10, ty + 5)));
+    check("a box nudged half a grid step goes a whole one, not back where it was",
+      placed("D")[0] - tiny[0], 10);
+
+    // A line does not have to be on the grid. Nudge one box a single pixel off
+    // it, then drag another up against it: the second has to land exactly on
+    // the first, not on the nearest grid line to it.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    tap("D");
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    await new Promise((r) => setTimeout(r, 350));
+
+    const offGrid = placed("D")[0];
+    check("a box can sit off the grid to begin with", offGrid % 10 !== 0, true);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    const mover = placed("A");
+    const [ax, ay] = onScreen(...mover);
+    tap("A");
+    box("A").dispatchEvent(new window.MouseEvent("pointerdown", at(ax + 5, ay + 5)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove",
+      at(ax + 5 + (offGrid + 3 - mover[0]), ay + 5)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup",
+      at(ax + 5 + (offGrid + 3 - mover[0]), ay + 5)));
+
+    check("...and a box lining up with it lands on it, not on the grid near it",
+      placed("A")[0], offGrid);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+
     /* --- and the arrow keys ------------------------------------------------ */
 
     const before = { A: placed("A"), D: placed("D") };

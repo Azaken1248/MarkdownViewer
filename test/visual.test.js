@@ -1087,6 +1087,66 @@ console.log("=== a diagram nobody has arranged is arranged on the way in ===");
     DM.joinRows(["Person", "name: string"]), "Person<br/>name: string");
 }
 
+console.log("=== a box lines itself up with the ones already there ===");
+{
+  /* Six lines matter on any box: left, centre, right, top, middle, bottom.
+   * When one of the six on the box being moved comes close to one of the six
+   * on a box that is not, the moving box goes exactly on it. That is the whole
+   * of the difference between a diagram that looks arranged and one that looks
+   * nearly arranged.
+   */
+  const anchor = { x: 100, y: 100, w: 80, h: 40 };
+  const guide = (moving, others = [anchor], within = 6) => DM.alignGuides(moving, others, within);
+
+  check("a box three pixels off another box's left edge is put on it",
+    guide({ x: 103, y: 300, w: 80, h: 40 }).x, 100);
+  check("...and says which line it went to",
+    guide({ x: 103, y: 300, w: 80, h: 40 }).guides.map((one) => [one.axis, one.at]), [["x", 100]]);
+  check("...with a line long enough to reach both boxes",
+    guide({ x: 103, y: 300, w: 80, h: 40 }).guides[0], { axis: "x", at: 100, from: 100, to: 340 });
+  // And from the other side, where the box that is not moving is the far end:
+  // a line that stops at the box under the hand explains nothing.
+  check("...whichever of the two is further along",
+    guide({ x: 103, y: 20, w: 80, h: 40 }).guides[0], { axis: "x", at: 100, from: 20, to: 140 });
+
+  check("a box seven pixels off is left where it is",
+    guide({ x: 107, y: 300, w: 80, h: 40 }).x, 107);
+  check("...with nothing to explain", guide({ x: 107, y: 300, w: 80, h: 40 }).guides, []);
+
+  // Centres and far edges count as much as near ones, which is what lets a
+  // wide box be centred under a narrow one.
+  check("a box can line up by its centre",
+    guide({ x: 85, y: 300, w: 120, h: 40 }).x, 80);
+  check("...or by its right edge against another's right edge",
+    guide({ x: 22, y: 300, w: 160, h: 40 }).x, 20);
+  check("...or by its left edge against another's right edge",
+    guide({ x: 178, y: 300, w: 60, h: 40 }).x, 180);
+
+  // Both axes at once, and they are decided independently: a box can be level
+  // with one thing and in line with another.
+  const corner = guide({ x: 103, y: 97, w: 80, h: 40 });
+  check("a box can line up both ways at once", [corner.x, corner.y], [100, 100]);
+  check("...and says so twice", corner.guides.map((one) => one.axis), ["x", "y"]);
+
+  const two = guide({ x: 103, y: 138, w: 80, h: 40 }, [anchor, { x: 400, y: 140, w: 80, h: 40 }]);
+  check("...against different boxes on each axis", [two.x, two.y], [100, 140]);
+
+  // The nearest wins, so a box between two others does not flicker between
+  // them while the hand shakes.
+  const between = guide({ x: 104, y: 300, w: 80, h: 40 }, [anchor, { x: 108, y: 500, w: 80, h: 40 }]);
+  check("the nearest line wins", between.x, 104 - 4);
+
+  check("a box with nothing to line up against stays put",
+    [guide({ x: 103, y: 300, w: 80, h: 40 }, []).x, guide({ x: 103, y: 300, w: 80, h: 40 }, []).guides.length],
+    [103, 0]);
+
+  // How close counts is the caller's business, because on screen it depends on
+  // the zoom: at half size, six pixels of file is three pixels of hand.
+  check("how close counts can be widened",
+    guide({ x: 112, y: 300, w: 80, h: 40 }, [anchor], 20).x, 100);
+  check("...and narrowed", guide({ x: 103, y: 300, w: 80, h: 40 }, [anchor], 1).x, 103);
+}
+
 console.log("=== a diagram is a place, not a picture ===");
 {
   /* On the page a diagram has no edges: it is somewhere you are looking at part

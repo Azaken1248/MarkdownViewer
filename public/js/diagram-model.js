@@ -1584,6 +1584,81 @@
     };
   }
 
+  /* Lining a box up with the ones already there.
+   *
+   * Six lines matter on any box: its left, centre and right, and its top,
+   * middle and bottom. When one of the six on the box being moved comes within
+   * a few pixels of one of the six on a box that is not moving, the moving box
+   * is put exactly on it and a line is drawn to say why. That is the whole of
+   * what makes a hand-arranged diagram look arranged rather than nearly
+   * arranged.
+   *
+   * `moving` is where the box would go if nothing were snapping it. `others`
+   * are the boxes to line up against. `within` is how close counts, and is in
+   * diagram units — the caller divides by the zoom, so that being close is
+   * measured by what the eye sees rather than by what the file says.
+   *
+   * Comes back with where the box should actually go, and the lines to draw.
+   */
+  const GUIDE_KINDS = [
+    ["x", "left", (at) => at.x],
+    ["x", "centre", (at) => at.x + (at.w / 2)],
+    ["x", "right", (at) => at.x + at.w],
+    ["y", "top", (at) => at.y],
+    ["y", "middle", (at) => at.y + (at.h / 2)],
+    ["y", "bottom", (at) => at.y + at.h]
+  ];
+
+  function alignGuides(moving, others, within = 6) {
+    const found = { x: null, y: null };
+
+    for (const [axis, , edgeOf] of GUIDE_KINDS) {
+      const mine = edgeOf(moving);
+
+      for (const other of others) {
+        for (const [otherAxis, , otherEdge] of GUIDE_KINDS) {
+          if (otherAxis !== axis) {
+            continue;
+          }
+
+          const theirs = otherEdge(other);
+          const gap = theirs - mine;
+
+          // The nearest one wins, and a tie goes to the one found first, which
+          // is the leftmost or topmost edge — so a box between two others does
+          // not flicker between them as the hand shakes.
+          if (Math.abs(gap) <= within && (!found[axis] || Math.abs(gap) < Math.abs(found[axis].gap))) {
+            found[axis] = { gap, at: theirs, other };
+          }
+        }
+      }
+    }
+
+    const put = {
+      x: moving.x + (found.x ? found.x.gap : 0),
+      y: moving.y + (found.y ? found.y.gap : 0)
+    };
+
+    // A line long enough to reach both the box that snapped and the box it
+    // snapped to, so it is obvious which two are being lined up.
+    const guides = [];
+    for (const axis of ["x", "y"]) {
+      const hit = found[axis];
+      if (!hit) {
+        continue;
+      }
+
+      const box = { ...moving, ...put };
+      const across = axis === "x" ? "y" : "x";
+      const size = across === "y" ? "h" : "w";
+      const from = Math.min(box[across], hit.other[across]);
+      const to = Math.max(box[across] + box[size], hit.other[across] + hit.other[size]);
+      guides.push({ axis, at: hit.at, from, to });
+    }
+
+    return { x: put.x, y: put.y, guides };
+  }
+
   /* Where the diagram actually is, rather than how big it is from the origin.
    *
    * layoutBounds answers "how large a picture is this", which is what sizing a
@@ -1649,6 +1724,7 @@
     ensureLayout,
     layoutBounds,
     layoutExtent,
+    alignGuides,
     measureNode,
     hasLayout,
     textRows,

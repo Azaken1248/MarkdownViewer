@@ -201,6 +201,17 @@
       + ` height="${round(bottom - top + (FRAME_PAD * 2))}" rx="4"/></g>`;
   }
 
+  // The lines that say why a box stopped where it did. Drawn while a drag is
+  // happening and taken out again when it ends: they are an explanation, not
+  // part of the diagram.
+  function guidesMarkup(guides) {
+    return guides.map((guide) => (guide.axis === "x"
+      ? `<line class="dd-guide" x1="${round(guide.at)}" y1="${round(guide.from)}"`
+        + ` x2="${round(guide.at)}" y2="${round(guide.to)}"/>`
+      : `<line class="dd-guide" x1="${round(guide.from)}" y1="${round(guide.at)}"`
+        + ` x2="${round(guide.to)}" y2="${round(guide.at)}"/>`)).join("");
+  }
+
   // The rubber band, while it is being pulled. Not part of the diagram and not
   // in the model — it is drawn straight into the SVG and taken out again.
   function marqueeMarkup(box) {
@@ -651,6 +662,7 @@
     marksMarkup,
     frameMarkup,
     marqueeMarkup,
+    guidesMarkup,
     routeEdge,
     lanes,
     pathData,

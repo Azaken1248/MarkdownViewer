@@ -102,6 +102,10 @@
   const ZOOM_PER_NOTCH = 1.12;
   // Room left around a diagram when the view is fitted to it.
   const FIT_MARGIN = 60;
+  // How close to a line on another box counts as being on it. On the screen
+  // rather than in the diagram: at half zoom, six pixels of file is three
+  // pixels of hand, and the hand is what is doing the aiming.
+  const GUIDE_WITHIN = 6;
 
   // What the palette offers. A table is not a Mermaid shape — it is an ordinary
   // box whose label has rows in it and whose layout line says to rule a line
@@ -450,10 +454,88 @@
      * nudging accumulates rounding, and a selection dragged across the canvas
      * would come apart on the way.
      */
+    /* Moving everything that is carried, by an amount already decided.
+     *
+     * Placed rather than snapped: whoever worked out the offset has already
+     * settled what to line up with, and rounding it to the grid here would take
+     * a box back off the line it was just put on.
+     */
     function moveSelectionTo(group, dx, dy) {
       for (const [id, from] of Object.entries(group || {})) {
-        moveTo(id, from.x + dx, from.y + dy);
+        placeAt(id, from.x + dx, from.y + dy);
       }
+    }
+
+    /* Where a drag should actually put things.
+     *
+     * The grid first, because a box put down by hand should line up with the
+     * ones already there. Then the boxes themselves, which win when they are
+     * close enough: lining up with something real beats lining up with a
+     * measurement, and a diagram where nothing quite touches is a diagram that
+     * looks nearly arranged.
+     */
+    function guidedMove(group, dx, dy) {
+      const ids = Object.keys(group || {});
+      if (ids.length === 0) {
+        return { dx, dy, guides: [] };
+      }
+
+      const carried = new Set(ids);
+      const boxes = ids.map((id) => ({ ...group[id], w: boxOf(id).w, h: boxOf(id).h }));
+      const corner = {
+        x: Math.min(...boxes.map((at) => at.x)),
+        y: Math.min(...boxes.map((at) => at.y))
+      };
+
+      // Where the hand actually is, before anything has been rounded. The grid
+      // is not applied first: snapping to it can carry a box past a line it was
+      // about to meet, and then the two never meet at all.
+      const moving = {
+        x: corner.x + dx,
+        y: corner.y + dy,
+        w: Math.max(...boxes.map((at) => at.x + at.w)) - corner.x,
+        h: Math.max(...boxes.map((at) => at.y + at.h)) - corner.y
+      };
+
+      // Everything that is not being carried. A box cannot line up with itself,
+      // and a selection being dragged cannot line up with its own members.
+      const others = model.nodes
+        .filter((item) => !carried.has(item.id))
+        .map((item) => boxOf(item.id))
+        .filter(Boolean);
+
+      const lined = DiagramModel.alignGuides(moving, others, GUIDE_WITHIN / view.scale);
+
+      // A line on a real box beats a line on the grid, and only where there is
+      // one: an axis with nothing to line up against falls back to the grid,
+      // which is what keeps a diagram tidy where nothing else is near.
+      const held = { x: false, y: false };
+      for (const one of lined.guides) {
+        held[one.axis] = true;
+      }
+
+      const put = {
+        x: held.x ? lined.x : snap(moving.x),
+        y: held.y ? lined.y : snap(moving.y)
+      };
+
+      return { dx: put.x - corner.x, dy: put.y - corner.y, guides: lined.guides };
+    }
+
+    function drawGuides(guides) {
+      const svg = drawing();
+      if (!svg) {
+        return;
+      }
+
+      let holder = svg.querySelector(".dd-guides");
+      if (!holder) {
+        holder = document.createElementNS(SVG_NS, "g");
+        holder.setAttribute("class", "dd-guides");
+        (svg.querySelector(".dd-view") || svg).appendChild(holder);
+      }
+
+      holder.innerHTML = DiagramDraw.guidesMarkup(guides);
     }
 
     function resizeTo(id, w, h) {
@@ -611,7 +693,9 @@
       }
 
       if (gesture.kind === "move" && gesture.from) {
-        moveSelectionTo(gesture.group, point.x - gesture.origin.x, point.y - gesture.origin.y);
+        const lined = guidedMove(gesture.group, point.x - gesture.origin.x, point.y - gesture.origin.y);
+        moveSelectionTo(gesture.group, lined.dx, lined.dy);
+        drawGuides(lined.guides);
         return;
       }
 
@@ -882,7 +966,8 @@
       }
 
       if (held.kind === "move" && held.from) {
-        moveSelectionTo(held.group, point.x - held.origin.x, point.y - held.origin.y);
+        const lined = guidedMove(held.group, point.x - held.origin.x, point.y - held.origin.y);
+        moveSelectionTo(held.group, lined.dx, lined.dy);
       }
 
       if (held.kind === "resize" && held.from) {

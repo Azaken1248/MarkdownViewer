@@ -3602,6 +3602,7 @@ body.page-editing #dockEdit {
 .dd-viewport .dd-handle,
 .dd-viewport .dd-frame,
 .dd-viewport .dd-marquee,
+.dd-viewport .dd-guide,
 .dd-viewport .dd-draft {
   vector-effect: non-scaling-stroke;
 }
@@ -3804,6 +3805,16 @@ body.page-editing #dockEdit {
   stroke-width: 1px;
   stroke-dasharray: 2 3;
   opacity: 0.75;
+  pointer-events: none;
+}
+
+/* The lines that say why a box stopped where it did. Bright and thin: they are
+   an explanation that appears under the hand and goes away again, so they have
+   to be readable at a glance and gone the moment they are not needed. */
+.dd-editing .dd-guide {
+  stroke: var(--danger);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
   pointer-events: none;
 }
 
