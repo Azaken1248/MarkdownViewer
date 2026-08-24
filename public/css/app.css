@@ -3631,6 +3631,52 @@ body.page-editing #dockEdit {
   vector-effect: non-scaling-stroke;
 }
 
+/* Everything you can do to what is under the pointer. Positioned against the
+   canvas rather than the page, so it travels with a canvas that scrolls and
+   cannot be left behind pointing at nothing. */
+.ve-diagram-menu {
+  position: absolute;
+  z-index: 5;
+  min-width: 12rem;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+}
+
+.ve-diagram-menu-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ve-diagram-menu-item:hover {
+  background: var(--accent-subtle, var(--surface));
+}
+
+.ve-diagram-menu-keys {
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.ve-diagram-menu-rule {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-muted);
+}
+
 .ve-diagram-zoom {
   display: flex;
   align-items: center;

@@ -115,6 +115,10 @@
   // How far a pasted copy lands from what it was copied from, so it can be seen
   // to be a second thing rather than looking like nothing happened.
   const PASTE_OFFSET = 20;
+  // How long a finger has to stay put before it means "show me the options".
+  // Long enough not to fire while starting a drag, short enough not to feel
+  // like nothing is happening.
+  const LONG_PRESS = 500;
 
   /* What was last copied, kept for as long as the page is open rather than for
    * as long as one diagram is. Copying a box out of one diagram and pasting it
@@ -285,6 +289,9 @@
       svg.querySelector(".dd-view")?.setAttribute("transform", moved);
       svg.querySelector("pattern")?.setAttribute("patternTransform", moved);
       placeEditor();
+      // A menu opened at a point on the diagram is about that point, and the
+      // point has just moved out from under it.
+      closeMenu();
       showZoom();
     }
 
@@ -1136,6 +1143,253 @@
       }
     });
 
+    /* --- Everything you can do to what is under the pointer ------------------
+     *
+     * One list, built for whatever was clicked: a box, an arrow, or the paper.
+     * Right-click on a pointer, a long press on a finger — a phone has no
+     * second button, and hiding half the operations behind one would put them
+     * out of reach of half the people using this.
+     */
+    let menu = null;
+
+    function closeMenu() {
+      menu?.remove();
+      menu = null;
+    }
+
+    function openMenu(clientX, clientY, items) {
+      closeMenu();
+
+      const shown = items.filter(Boolean);
+      if (shown.length === 0) {
+        return;
+      }
+
+      menu = document.createElement("div");
+      menu.className = "ve-diagram-menu";
+      menu.setAttribute("role", "menu");
+
+      for (const item of shown) {
+        if (item === "-") {
+          const rule = document.createElement("div");
+          rule.className = "ve-diagram-menu-rule";
+          menu.append(rule);
+          continue;
+        }
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ve-diagram-menu-item";
+        button.setAttribute("role", "menuitem");
+        button.textContent = item.label;
+        if (item.keys) {
+          const keys = document.createElement("span");
+          keys.className = "ve-diagram-menu-keys";
+          keys.textContent = item.keys;
+          button.append(keys);
+        }
+
+        button.addEventListener("click", () => {
+          closeMenu();
+          item.run();
+        });
+
+        menu.append(button);
+      }
+
+      const box = canvas.getBoundingClientRect();
+      menu.style.left = `${clientX - box.left}px`;
+      menu.style.top = `${clientY - box.top}px`;
+      canvas.append(menu);
+
+      // Off the right or bottom edge is a menu half of which cannot be read, so
+      // it flips back over the point it was opened at rather than being clipped.
+      const shape = menu.getBoundingClientRect();
+      if (shape.right > box.right) {
+        menu.style.left = `${Math.max(0, clientX - box.left - shape.width)}px`;
+      }
+
+      if (shape.bottom > box.bottom) {
+        menu.style.top = `${Math.max(0, clientY - box.top - shape.height)}px`;
+      }
+    }
+
+    // Whatever this diagram would say if it were only what is selected. The
+    // menu offers it so a box can be taken somewhere that is not this app.
+    function selectionSource() {
+      if (selection.length === 0) {
+        return sourceNow();
+      }
+
+      const taken = new Set(selection);
+      return DiagramModel.serializeFlowchart({
+        direction: model.direction,
+        nodes: model.nodes.filter((item) => taken.has(item.id)),
+        edges: model.edges.filter((edge) => taken.has(edge.from) && taken.has(edge.to)),
+        layout: Object.fromEntries(selection.filter((id) => boxOf(id)).map((id) => [id, boxOf(id)]))
+      }).replace(/\n$/, "");
+    }
+
+    function copyOutside(text) {
+      // Not every browser and not every page will allow it, and a menu item
+      // that throws is worse than one that quietly does nothing here.
+      try {
+        void window.navigator?.clipboard?.writeText?.(text)?.catch?.(() => {});
+      } catch {
+        // No clipboard to write to.
+      }
+    }
+
+    /* Which box is drawn over which.
+     *
+     * The order they are declared in is the order they are drawn in, so moving
+     * one along the list is the whole of bringing it forward — and it survives
+     * into the file without needing anywhere of its own to be written down.
+     */
+    function restack(ids, forward) {
+      const moving = new Set(ids);
+      const staying = model.nodes.filter((item) => !moving.has(item.id));
+      const carried = model.nodes.filter((item) => moving.has(item.id));
+
+      model.nodes = forward ? [...staying, ...carried] : [...carried, ...staying];
+      write();
+      paintLists();
+      drawAtOnce();
+    }
+
+    function menuFor(target, point) {
+      const many = selection.length > 1;
+      const holding = selection.length > 0;
+
+      if (target.kind === "edge") {
+        const edge = model.edges[target.index];
+        return [
+          { label: "Edit label", run: () => editEdge(target.index) },
+          { label: "Turn it round", run: () => {
+            const was = edge.from;
+            edge.from = edge.to;
+            edge.to = was;
+            write();
+            paintLists();
+            drawAtOnce();
+          } },
+          "-",
+          { label: "Delete arrow", keys: "Del", run: () => {
+            model.edges = model.edges.filter((other) => other !== edge);
+            write();
+            paintLists();
+            paintInspector();
+            drawAtOnce();
+          } }
+        ];
+      }
+
+      if (target.kind === "node") {
+        return [
+          many ? null : { label: "Edit text", run: () => editNode(target.id) },
+          many ? null : { label: "Draw an arrow from here", run: () => {
+            armedFrom = target.id;
+            say("Tap another box to join it.");
+          } },
+          "-",
+          { label: many ? "Duplicate them" : "Duplicate", keys: "Ctrl+D", run: duplicateSelection },
+          { label: "Cut", keys: "Ctrl+X", run: cutSelection },
+          { label: "Copy", keys: "Ctrl+C", run: copySelection },
+          { label: "Copy as Mermaid", run: () => copyOutside(selectionSource()) },
+          "-",
+          { label: "Bring to front", run: () => restack(selection, true) },
+          { label: "Send to back", run: () => restack(selection, false) },
+          "-",
+          { label: many ? "Delete them" : "Delete", keys: "Del", run: () => removeSteps(selection) }
+        ];
+      }
+
+      return [
+        { label: "Paste", keys: "Ctrl+V", run: pasteClipboard },
+        { label: "Add a box here", run: () => addBox({ x: point.x, y: point.y }) },
+        "-",
+        { label: "Select all", keys: "Ctrl+A", run: () => choose(model.nodes.map((item) => item.id)) },
+        holding ? { label: "Select none", keys: "Esc", run: () => select(null) } : null,
+        "-",
+        viewport ? { label: "Fit the whole diagram", run: () => fitView() } : null,
+        { label: "Copy the diagram as Mermaid", run: () => copyOutside(sourceNow()) }
+      ];
+    }
+
+    // What is under a point, asked the same way for both ways of asking.
+    function targetAt(event, point) {
+      const group = event.target.closest?.(".dd-node");
+      const id = group?.getAttribute("data-id") || boxAt(point);
+      if (id) {
+        return { kind: "node", id };
+      }
+
+      const line = event.target.closest?.(".dd-edge");
+      if (line) {
+        return { kind: "edge", index: Number(line.getAttribute("data-edge")) };
+      }
+
+      return { kind: "paper" };
+    }
+
+    function showMenuFrom(event) {
+      const point = pointIn(event.clientX, event.clientY);
+      const target = targetAt(event, point);
+
+      // Right-clicking a box that is not in the selection is about that box.
+      // Right-clicking one that is, is about the whole handful.
+      if (target.kind === "node" && !isSelected(target.id)) {
+        select(target.id);
+      }
+
+      openMenu(event.clientX, event.clientY, menuFor(target, point));
+    }
+
+    canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      showMenuFrom(event);
+    });
+
+    /* A finger has no second button, so it holds still instead.
+     *
+     * Cancelled by moving, because a press that turns into a drag was a drag
+     * all along, and by letting go, because that was a tap.
+     */
+    let pressTimer = 0;
+    const forgetPress = () => {
+      window.clearTimeout(pressTimer);
+      pressTimer = 0;
+    };
+
+    canvas.addEventListener("pointerdown", (event) => {
+      closeMenu();
+
+      if (event.pointerType !== "touch") {
+        return;
+      }
+
+      const held = { clientX: event.clientX, clientY: event.clientY, target: event.target };
+      forgetPress();
+      pressTimer = window.setTimeout(() => {
+        pressTimer = 0;
+        // Whatever the finger had started is abandoned: it turned out to be a
+        // request for the menu, not the beginning of a drag.
+        gesture = null;
+        panning = null;
+        canvas.classList.remove("is-panning");
+        showMenuFrom(held);
+      }, LONG_PRESS);
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (pressTimer && event.pointerType === "touch") {
+        forgetPress();
+      }
+    });
+
+    canvas.addEventListener("pointerup", forgetPress);
+    canvas.addEventListener("pointercancel", forgetPress);
+
     /* --- Carrying boxes about -----------------------------------------------
      *
      * What is copied is the boxes and the arrows that run wholly between them:
@@ -1326,33 +1580,25 @@
       drawAtOnce();
     }
 
-    canvas.addEventListener("dblclick", (event) => {
-      const group = event.target.closest?.(".dd-node");
-      if (group) {
-        const id = group.getAttribute("data-id");
-        const item = nodeById(id);
-        if (!item) {
-          return;
+    function editNode(id) {
+      const item = nodeById(id);
+      if (!item) {
+        return;
+      }
+
+      select(id);
+      startEditing({
+        label: "Box text",
+        box: () => boxOf(id),
+        read: () => DiagramModel.textRows(item.text || "").join("\n"),
+        write: (value) => {
+          item.text = DiagramModel.joinRows(value.split("\n"));
         }
+      });
+    }
 
-        select(id);
-        startEditing({
-          label: "Box text",
-          box: () => boxOf(id),
-          read: () => DiagramModel.textRows(item.text || "").join("\n"),
-          write: (value) => {
-            item.text = DiagramModel.joinRows(value.split("\n"));
-          }
-        });
-        return;
-      }
-
-      const line = event.target.closest?.(".dd-edge");
-      if (!line) {
-        return;
-      }
-
-      const edge = model.edges[Number(line.getAttribute("data-edge"))];
+    function editEdge(index) {
+      const edge = model.edges[index];
       if (!edge) {
         return;
       }
@@ -1379,6 +1625,19 @@
           edge.label = value.replace(/\n/g, " ").trim();
         }
       });
+    }
+
+    canvas.addEventListener("dblclick", (event) => {
+      const group = event.target.closest?.(".dd-node");
+      if (group) {
+        editNode(group.getAttribute("data-id"));
+        return;
+      }
+
+      const line = event.target.closest?.(".dd-edge");
+      if (line) {
+        editEdge(Number(line.getAttribute("data-edge")));
+      }
     });
 
     /* --- Getting about ------------------------------------------------------
@@ -1570,6 +1829,11 @@
       }
 
       if (event.key === "Escape") {
+        if (menu) {
+          closeMenu();
+          return;
+        }
+
         select(null);
         return;
       }

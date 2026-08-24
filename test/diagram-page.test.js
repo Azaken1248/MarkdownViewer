@@ -860,6 +860,145 @@ async function run(server, cookie) {
       emptied.includes("-->"), false);
   }
 
+  console.log("=== everything you can do to what is under the pointer ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "menu.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/menu.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const menu = () => canvas.querySelector(".ve-diagram-menu");
+    const labels = () => [...canvas.querySelectorAll(".ve-diagram-menu-item")]
+      .map((one) => one.firstChild.textContent.trim());
+    const clickItem = (text) => [...canvas.querySelectorAll(".ve-diagram-menu-item")]
+      .find((one) => one.firstChild.textContent.trim() === text)
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const boxes = () => [...canvas.querySelectorAll(".dd-node")].map((one) => one.getAttribute("data-id"));
+    const ringed = () => canvas.querySelectorAll(".dd-ring").length;
+
+    const rightClick = (target) => {
+      const event = new window.MouseEvent("contextmenu",
+        { clientX: 300, clientY: 300, bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event;
+    };
+
+    check("nothing is open to begin with", Boolean(menu()), false);
+
+    const stopped = rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
+    check("right-clicking a box opens a list of what can be done to it",
+      Boolean(menu()), true);
+    // Otherwise the browser's own menu covers ours.
+    check("...instead of the browser's own", stopped.defaultPrevented, true);
+    check("...about the box, so it holds it", ringed(), 1);
+    check("...offering what a box can do",
+      ["Edit text", "Duplicate", "Copy", "Delete"].every((one) => labels().includes(one)), true);
+    check("...and saying which keys do the same",
+      [...canvas.querySelectorAll(".ve-diagram-menu-keys")].map((one) => one.textContent)
+        .includes("Ctrl+D"), true);
+
+    /* Copy leaves the paper exactly as it was, so if the list has gone it is
+     * because choosing put it away — and not because a redraw swept it off. */
+    clickItem("Copy");
+    check("choosing something puts the list away", Boolean(menu()), false);
+
+    rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
+    clickItem("Duplicate");
+    check("choosing something does it", boxes().length, 3);
+    check("...and the list is gone after that too", Boolean(menu()), false);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+
+    /* --- what is offered depends on what was clicked ------------------------ */
+
+    rightClick(canvas.querySelector(".dd-edge"));
+    check("right-clicking an arrow is about the arrow",
+      labels().includes("Edit label") && labels().includes("Delete arrow"), true);
+    check("...and does not offer what only a box can do",
+      labels().includes("Edit text"), false);
+
+    clickItem("Turn it round");
+    await saveAndWait(page);
+    const turned = (await server.request("GET", "/api/docs/menu.mmd", undefined, { Cookie: cookie })).body.content;
+    check("an arrow can be turned round", turned.includes("B --> A"), true);
+
+    rightClick(canvas);
+    check("right-clicking the paper is about the diagram",
+      labels().includes("Select all") && labels().includes("Copy the diagram as Mermaid"), true);
+    check("...and offers nothing that needs a box", labels().includes("Duplicate"), false);
+
+    clickItem("Select all");
+    check("...and select all from it selects all", ringed(), 2);
+
+    // With several held, the list speaks about all of them.
+    rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
+    check("with a handful held, the list is about the handful",
+      labels().includes("Delete them"), true);
+    check("...and drops what only makes sense for one", labels().includes("Edit text"), false);
+
+    clickItem("Delete them");
+    check("...and does it to all of them", boxes().length, 0);
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+
+    /* --- putting it away --------------------------------------------------- */
+
+    rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    check("escape puts the list away", Boolean(menu()), false);
+    check("...without also letting go of the box", ringed(), 1);
+
+    /* Pressed on the box that is already held, so nothing about the diagram
+     * changes and the list can only have gone because pressing put it away —
+     * pressing empty paper would let go of everything and redraw over it. */
+    rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
+    canvas.querySelector('.dd-node[data-id="A"]').dispatchEvent(
+      new window.MouseEvent("pointerdown", { clientX: 200, clientY: 200, bubbles: true }));
+    check("pressing anywhere puts it away too", Boolean(menu()), false);
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", { clientX: 200, clientY: 200, bubbles: true }));
+
+    /* --- a finger has no second button ------------------------------------- */
+
+    const finger = (type, x, y) => {
+      const event = new window.MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      Object.defineProperty(event, "pointerId", { value: 4 });
+      return event;
+    };
+
+    // Asked for again every time: a redraw replaces the drawing, and a press on
+    // a box that has been swept out of the document reaches nothing at all.
+    const box = () => canvas.querySelector('.dd-node[data-id="A"]');
+
+    box().dispatchEvent(finger("pointerdown", 200, 200));
+    await new Promise((r) => setTimeout(r, 700));
+    check("a finger held still opens the same list", Boolean(menu()), true);
+    check("...about the box under it", labels().includes("Edit text"), true);
+    canvas.dispatchEvent(finger("pointerup", 200, 200));
+
+    // A press that turns into a drag was a drag all along.
+    box().dispatchEvent(finger("pointerdown", 200, 200));
+    canvas.dispatchEvent(finger("pointermove", 260, 240));
+    await new Promise((r) => setTimeout(r, 700));
+    check("a finger that moves is dragging, not asking", Boolean(menu()), false);
+    canvas.dispatchEvent(finger("pointerup", 260, 240));
+
+    // And one that lets go quickly was a tap.
+    box().dispatchEvent(finger("pointerdown", 200, 200));
+    canvas.dispatchEvent(finger("pointerup", 200, 200));
+    await new Promise((r) => setTimeout(r, 700));
+    check("a finger that lets go is tapping, not asking", Boolean(menu()), false);
+  }
+
   console.log("=== boxes can be carried about ===");
   {
     await server.request("POST", "/api/docs",
