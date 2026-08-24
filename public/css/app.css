@@ -3578,6 +3578,14 @@ body.page-editing #dockEdit {
   touch-action: none;
 }
 
+/* A window has to be given a height to be a window. The drawing inside it is
+   100% of the canvas, and 100% of a box that is only as tall as its contents is
+   nothing at all — so a viewport in a document is told how much of the screen
+   it may have. The page says so for itself, further down, and is not in here. */
+.ve-embed .ve-diagram-canvas:has(> .dd-viewport) {
+  height: 60dvh;
+}
+
 /* Typing into the box itself. Laid over the shape rather than drawn as part of
    it: an SVG has no caret, no selection and no input method, and a diagram
    editor that cannot accept an accented character is not one anyone can use. */
@@ -4731,6 +4739,10 @@ body.page-editing #dockEdit {
      without scrolling the diagram off the top. */
   .ve-diagram-canvas {
     max-height: 46dvh;
+  }
+
+  .ve-embed .ve-diagram-canvas:has(> .dd-viewport) {
+    height: 46dvh;
   }
 
   .ve-diagram-arrow {

@@ -814,7 +814,7 @@ async function run(server) {
 
     window.__t.exitModalLayer(modal);
     check("the app is interactive again", doc.getElementById("appShell").inert, false);
-    check("focus returns to whatever opened it", doc.activeElement, opener);
+    check("focus returns to whatever opened it", doc.activeElement === opener, true);
   }
 
   console.log("=== stacked dialogs only free the background once ===");
@@ -1684,8 +1684,13 @@ async function run(server) {
     check("...with a box per step", boxes(), ["A", "B"]);
     check("...and an arrow between them",
       canvas.querySelectorAll(".dd-edge").length, 1);
-    check("...on paper that can be dragged into",
-      Number(svg().getAttribute("width")) > 200, true);
+    // A window onto the diagram rather than a picture of it: the same canvas
+    // the standalone page gets, so the wheel, the space bar and two fingers all
+    // mean here what they mean there.
+    check("...on paper with no edges, because a diagram is a place",
+      svg().classList.contains("dd-viewport"), true);
+    check("...which fills what it is given rather than being a size",
+      svg().getAttribute("width"), "100%");
 
     // Every gesture is a pointer press, a move and a release. jsdom has no
     // PointerEvent, but an event is dispatched by its name: a MouseEvent named
@@ -1885,7 +1890,9 @@ async function run(server) {
     const armed = arrowsIn();
     tap("n1");
     check("tapping the target draws the arrow", arrowsIn(), armed + 1);
-    check("...and the hint stands down", embed.querySelector(".ve-diagram-hint").hidden, true);
+    check("...and the hint stops asking for a target",
+      embed.querySelector(".ve-diagram-hint").textContent,
+      "Double-click a box, or press Enter, to type into it.");
 
     const arrowLabel = inspector.querySelector(".ve-diagram-arrow .ve-diagram-text");
     arrowLabel.value = "yes";
@@ -1918,11 +1925,14 @@ async function run(server) {
     press(canvas.querySelector('.dd-node[data-id="n1"]'), corner[0] + 10, corner[1] + 10);
     move(corner[0] + 610, corner[1] + 510);
     release(corner[0] + 610, corner[1] + 510);
-    const stretched = Number(svg().getAttribute("width"));
+    // The paper has no edges to measure any more, so what has to shrink is the
+    // diagram's own reach: the furthest a box has been put.
+    const reach = () => Math.max(0, ...boxes().map((id) => box(id)[0]));
+    const stretched = reach();
 
     canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
     check("Delete removes the selected step", boxes().includes("n1"), false);
-    check("...and the paper it was out on", Number(svg().getAttribute("width")) < stretched, true);
+    check("...and the reach it was out at", reach() < stretched, true);
     check("...and every arrow that touched it",
       markdown().includes("n1"), false);
     check("...and nothing is selected", Boolean(inspector.querySelector(".ve-diagram-selected")), false);
@@ -1939,6 +1949,157 @@ async function run(server) {
       [...lists()[0].children].map((row) => row.querySelector(".ve-diagram-text").value)[0], "Begin");
     check("every arrow is there too", lists()[1].children.length, 2);
 
+    /* --- a diagram in a document is a place too --------------------------------
+     *
+     * Pan and zoom used to be gated on the standalone page. In a document the
+     * wheel, the space bar and two fingers all did nothing, and a diagram wider
+     * than the strip could not be reached at all.
+     */
+    const zoomField = embed.querySelector(".ve-diagram-zoom input");
+    check("a diagram in a document has a zoom of its own", Boolean(zoomField), true);
+    check("...reading where the diagram is", zoomField.value, "100%");
+
+    const scaleNow = () => {
+      const view = canvas.querySelector(".dd-view");
+      return Number(/scale\(([-\d.]+)\)/.exec(view.getAttribute("transform"))[1]);
+    };
+    check("...and a view to read it from", scaleNow(), 1);
+
+    canvas.dispatchEvent(new window.WheelEvent("wheel",
+      { deltaY: -100, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
+    check("the wheel zooms the diagram", scaleNow() > 1, true);
+    check("...and the reading follows it", zoomField.value === "100%", false);
+
+    canvas.dispatchEvent(new window.WheelEvent("wheel",
+      { deltaY: 100, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
+    check("...and the other way back again", scaleNow(), 1);
+
+    // Space turns any drag into a pan, which is how every canvas has worked
+    // since before any of them had a canvas.
+    const keyOn = (target, key, more = {}) =>
+      target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...more }));
+
+    keyOn(canvas, " ");
+    check("holding space arms a pan", canvas.classList.contains("is-panning-armed"), true);
+    canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
+    check("...and letting go puts it down", canvas.classList.contains("is-panning-armed"), false);
+
+    /* --- the diagram's keys are the diagram's ----------------------------------
+     *
+     * The builder is mounted inside the page editor, which listens for Ctrl+Z,
+     * Escape and Ctrl+S of its own. Every key the canvas answered used to reach
+     * it as well, so undoing a box undid the whole document — and the document
+     * coming back re-rendered the block, taking the builder with it.
+     */
+    /* Keys only reach a canvas that has focus, and clicking one inside a
+     * document leaves focus on the document — which is where Ctrl+Z was going
+     * instead of into the diagram. */
+    zoomField.focus();
+    // Compared by identity rather than by value: two different elements are both
+    // {} once JSON has had them, so a check written that way cannot fail.
+    check("the caret can be somewhere else in the builder",
+      doc.activeElement === zoomField, true);
+    tap("A");
+    check("...and pressing the diagram is saying the diagram is what you are in",
+      doc.activeElement === canvas, true);
+
+    const settled = box("A");
+    keyOn(canvas, "ArrowRight", { shiftKey: true });
+    check("a box can be nudged with the keyboard", box("A")[0] > settled[0], true);
+
+    keyOn(canvas, "z", { ctrlKey: true });
+    check("Ctrl+Z in a diagram takes back the nudge", box("A"), settled);
+    check("...and leaves the builder standing", canvas.isConnected, true);
+    check("...because the document's own undo never ran",
+      window.eval("window.__t.pageHistory.future.length"), 0);
+
+    // Counted rather than inferred: what the canvas has answered has to stop at
+    // the canvas, because everything above it — the page editor, the window —
+    // has its own Ctrl+Z, its own Escape and its own Ctrl+S, and none of them
+    // are what somebody working in a diagram is asking for.
+    let heard = 0;
+    const countKey = () => { heard += 1; };
+    doc.body.addEventListener("keydown", countKey);
+
+    keyOn(canvas, "z", { ctrlKey: true });
+    keyOn(canvas, "ArrowRight");
+    keyOn(canvas, " ");
+    check("what the canvas answers does not go on to the page", heard, 0);
+    // Put down again, or every press after this is a pan rather than a choice.
+    canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
+
+    tap("A");
+    heard = 0;
+    keyOn(canvas, "Escape");
+    check("Escape lets go of the box",
+      Boolean(inspector.querySelector(".ve-diagram-selected")), false);
+    check("...and goes no further than the box it let go of", heard, 0);
+    check("...rather than leaving the document editor",
+      window.eval("window.__t.state.pageEdit.active"), true);
+
+    // With nothing left to dismiss it is allowed out, so a diagram is never a
+    // place a key press cannot leave.
+    heard = 0;
+    keyOn(canvas, "Escape");
+    check("...and an Escape with nothing to dismiss is let out", heard, 1);
+    doc.body.removeEventListener("keydown", countKey);
+
+    /* Focus is not always on the paper. A shape menu, a button — anything in
+     * the builder that is not a text box — and the page editor would take a
+     * Ctrl+Z pressed there, throwing the builder away just the same.
+     */
+    tap("A");
+    const shapeMenu = inspector.querySelector("select");
+    check("the builder has a control that is not a text box", Boolean(shapeMenu), true);
+    keyOn(shapeMenu, "z", { ctrlKey: true });
+    check("Ctrl+Z from a control in the builder is not the document's either",
+      canvas.isConnected, true);
+    check("...so the document's own undo still never ran",
+      window.eval("window.__t.pageHistory.future.length"), 0);
+
+    /* --- the way into a box ---------------------------------------------------- */
+    const field = () => canvas.querySelector(".ve-diagram-inline");
+
+    tap("A");
+    check("the hint says how to get into a box",
+      embed.querySelector(".ve-diagram-hint").textContent,
+      "Double-click a box, or press Enter, to type into it.");
+    check("nothing is being typed into yet", Boolean(field()), false);
+
+    keyOn(canvas, "Enter");
+    check("Enter opens the box for typing", Boolean(field()), true);
+    check("...holding what the box already says", field().value, "Begin");
+    check("...with the caret in it", doc.activeElement === field(), true);
+
+    field().value = "Start here";
+    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    check("...and Enter agrees with what was typed",
+      markdown().includes("A[Start here]"), true);
+    check("...and puts the field away", Boolean(field()), false);
+
+    canvas.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    check("double-clicking a box opens it too", Boolean(field()), true);
+
+    field().value = "Never mind";
+    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    check("...and Escape leaves the box as it was",
+      markdown().includes("A[Start here]"), true);
+    check("...without also letting go of it",
+      Boolean(inspector.querySelector(".ve-diagram-selected")), true);
+
+    keyOn(canvas, "F2");
+    check("F2 is the same way in", Boolean(field()), true);
+    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    // A handful of boxes has no one label to type into. The key is still the
+    // diagram's — it must not go on to the page — but it opens nothing.
+    keyOn(canvas, "a", { ctrlKey: true });
+    check("Ctrl+A holds the whole lot", Boolean(canvas.querySelector(".dd-frame")), true);
+    keyOn(canvas, "Enter");
+    check("...and Enter on a handful opens nothing", Boolean(field()), false);
+    keyOn(canvas, "Escape");
+
     embed.querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("Done returns the block to its rendering",
       embed.querySelectorAll(".ve-diagram-canvas").length, 0);
@@ -1953,8 +2114,8 @@ async function run(server) {
     check("the built diagram reached the file", savedFlow.includes("flowchart LR"), true);
     check("...carrying the arrangement in comments", /%% @ A \d+,\d+ 90x50/.test(savedFlow), true);
     check("...and still fenced as mermaid", savedFlow.includes("```mermaid"), true);
-    check("...with the diagram itself still a diagram",
-      savedFlow.includes("    A[Begin]"), true);
+    check("...with the diagram itself still a diagram, under the name typed into it",
+      savedFlow.includes("    A[Start here]"), true);
     check("the diagram nobody opened is untouched",
       savedFlow.includes("  subgraph outer\n  C --> D\n  end"), true);
     check("...and so is the prose", savedFlow.endsWith("After.\n"), true);
@@ -2322,7 +2483,7 @@ async function run(server) {
     check("...without closing the editor", window.eval("window.__t.state.editorOpen"), true);
     check("...leaving nothing unsaved behind it", window.eval("window.__t.isEditorDirty()"), false);
     // The redraw behind the modal must not reach into the text being written.
-    check("...and the caret still in the text it was in", doc.activeElement, area);
+    check("...and the caret still in the text it was in", doc.activeElement === area, true);
 
     // These belong to the text, so they are not taken off the other fields.
     const fromNameAgain = new window.KeyboardEvent("keydown", {

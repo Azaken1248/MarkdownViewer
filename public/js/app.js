@@ -7222,6 +7222,11 @@ function openDiagramBuilder(node, block) {
 
   const editor = fence && DiagramEditor.mount(node, {
     source: fence.body,
+    // The same window onto the diagram the page gets. A diagram is a place you
+    // move about in, and it was a place on the page and a picture in a document
+    // — which meant the wheel, the space bar and two fingers all did nothing
+    // here, and a diagram wider than the strip could not be reached at all.
+    viewport: true,
     onChange: (body) => {
       block.dirty = true;
       block.sourceOverride = VisualEditor.serializeFence({ ...fence, body });
@@ -9955,6 +9960,16 @@ elements.imageInput.addEventListener("change", () => {
 // otherwise take it for the address bar.
 elements.docContent.addEventListener("keydown", (event) => {
   if (!pageEditActive()) {
+    return;
+  }
+
+  /* A diagram builder is an editor in its own right: it has its own undo, its
+   * own Escape and its own selection. Every key it handles used to arrive here
+   * as well, so Ctrl+Z inside a diagram undid the whole document — which threw
+   * away the rendered block the builder was mounted in, and looked from the
+   * outside like being thrown out of the builder.
+   */
+  if (event.target?.closest?.(".ve-embed.is-builder-open")) {
     return;
   }
 

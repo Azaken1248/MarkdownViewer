@@ -889,6 +889,16 @@
     let spaceHeld = false;
 
     canvas.addEventListener("pointerdown", (event) => {
+      /* Keys only reach a canvas that has focus, and clicking one inside a
+       * document leaves focus on the document — so Ctrl+Z went to the page
+       * editor rather than to the diagram. Pressing the diagram is saying the
+       * diagram is what you are working in. Not while typing into the box laid
+       * over it, which lives in here and would lose the caret.
+       */
+      if (!canvas.contains(document.activeElement)) {
+        canvas.focus({ preventScroll: true });
+      }
+
       const svg = drawing();
       if (!svg) {
         return;
@@ -1764,12 +1774,24 @@
       canvas.addEventListener("pointercancel", liftFinger);
     }
 
+    /* A key the canvas has answered is not also the document's key.
+     *
+     * The builder can be mounted inside the page editor, which listens for
+     * Ctrl+Z, Ctrl+S and Escape of its own. Without this, undoing a box also
+     * undid the whole document — and the document coming back re-rendered the
+     * block, taking the builder with it.
+     */
+    const answered = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
     canvas.addEventListener("keydown", (event) => {
       if (viewport && (event.key === " " || event.code === "Space")) {
         // Not while typing into something on the canvas, where a space is a
         // space.
         if (!/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
-          event.preventDefault();
+          answered(event);
           spaceHeld = true;
           canvas.classList.add("is-panning-armed");
         }
@@ -1785,37 +1807,37 @@
         const key = String(event.key).toLowerCase();
 
         if (key === "c" && selection.length > 0) {
-          event.preventDefault();
+          answered(event);
           copySelection();
           return;
         }
 
         if (key === "x" && selection.length > 0) {
-          event.preventDefault();
+          answered(event);
           cutSelection();
           return;
         }
 
         if (key === "v") {
-          event.preventDefault();
+          answered(event);
           pasteClipboard();
           return;
         }
 
         if (key === "d" && selection.length > 0) {
-          event.preventDefault();
+          answered(event);
           duplicateSelection();
           return;
         }
 
         if (key === "z" && !event.shiftKey) {
-          event.preventDefault();
+          answered(event);
           undo();
           return;
         }
 
         if ((key === "z" && event.shiftKey) || key === "y") {
-          event.preventDefault();
+          answered(event);
           redo();
           return;
         }
@@ -1823,18 +1845,26 @@
 
       // The one keystroke that does not need anything selected already.
       if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
-        event.preventDefault();
+        answered(event);
         choose(model.nodes.map((item) => item.id));
         return;
       }
 
+      /* Escape dismisses one thing at a time. The list first, then the
+       * selection — and only then is it allowed out to whatever is around the
+       * builder, so a press with nothing to dismiss can still leave. */
       if (event.key === "Escape") {
         if (menu) {
+          event.stopPropagation();
           closeMenu();
           return;
         }
 
-        select(null);
+        if (selection.length > 0) {
+          event.stopPropagation();
+          select(null);
+        }
+
         return;
       }
 
@@ -1842,8 +1872,22 @@
         return;
       }
 
+      /* The way into a box that does not need a pointing device, and the one
+       * every other editor already has. F2 as well as Enter, because that is
+       * the key in a file manager and in StarUML, and one of the two is what
+       * anybody's hands reach for first. A handful has no one label to type
+       * into, so it answers the key and does nothing with it.
+       */
+      if (event.key === "Enter" || event.key === "F2") {
+        answered(event);
+        if (selection.length === 1) {
+          editNode(selection[0]);
+        }
+        return;
+      }
+
       if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault();
+        answered(event);
         removeSteps(selection);
         return;
       }
@@ -1867,7 +1911,7 @@
        * want it. Shift is the coarse one: a whole grid step, landing on the
        * grid rather than a step away from wherever the box happens to be.
        */
-      event.preventDefault();
+      answered(event);
       for (const id of selection) {
         const at = boxOf(id);
         if (!at) {
@@ -2322,7 +2366,11 @@
         return;
       }
 
-      say(armedFrom ? "Now tap the step this one should point at." : "");
+      // An editor whose way into a box is a gesture nobody mentions is an editor
+      // where boxes cannot be renamed, whatever the code does.
+      say(armedFrom
+        ? "Now tap the step this one should point at."
+        : "Double-click a box, or press Enter, to type into it.");
 
       const line = document.createElement("div");
       line.className = "ve-diagram-row ve-diagram-selected";
