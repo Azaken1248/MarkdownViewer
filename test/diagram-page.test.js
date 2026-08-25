@@ -1041,6 +1041,117 @@ async function run(server, cookie) {
     check("a finger that lets go is tapping, not asking", Boolean(menu()), false);
   }
 
+  console.log("=== a colour is a classDef, which every other renderer reads ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "colour.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    %% @ C 500,100 80x40",
+        "    classDef mine fill:#123456",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/colour.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const swatches = () => [...inspector.querySelectorAll(".ve-diagram-swatch")];
+    const pick = (label) => swatches().find((one) => one.title === label)
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const fillOf = (id) => groupOf(id).style.getPropertyValue("--dd-fill");
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(found[1]) + 10;
+      const y = Number(found[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const written = async () => (await server.request("GET", "/api/docs/colour.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    tap("A");
+    check("a box offers the colours it can be", swatches().length > 2, true);
+    check("...and starts wearing none of them",
+      swatches()[0].getAttribute("aria-pressed"), "true");
+
+    pick("Red");
+    check("choosing one colours the box", fillOf("A"), "#fbdedc");
+    check("...and says which one is being worn",
+      swatches().find((one) => one.title === "Red").getAttribute("aria-pressed"), "true");
+    check("...and leaves the box beside it alone", fillOf("B"), "");
+
+    await saveAndWait(page);
+    const red = await written();
+    check("the colour reaches the file as a classDef, not as a comment",
+      /classDef ddC1 fill:#fbdedc,stroke:#c0453c,color:#4a1512/.test(red), true);
+    check("...with a line saying which box wears it", /class A ddC1/.test(red), true);
+    check("the classDef that was already there is untouched",
+      /classDef mine fill:#123456/.test(red), true);
+
+    /* One definition per colour, shared. Twenty blue boxes are one classDef and
+     * one class line, which is smaller and is how a person would write it.
+     */
+    tap("B");
+    pick("Red");
+    await saveAndWait(page);
+    const both = await written();
+    check("a second box in the same colour reuses the definition",
+      (both.match(/classDef ddC1/g) || []).length, 1);
+    check("...and joins the line that names who wears it", /class A,B ddC1/.test(both), true);
+
+    // Changed rather than added to, or a box that was red and is now green
+    // would be wearing both and the file would say so.
+    tap("A");
+    pick("Green");
+    await saveAndWait(page);
+    const changed = await written();
+    check("changing a colour swaps the class rather than adding one",
+      /class A ddC2/.test(changed) && /class B ddC1/.test(changed), true);
+    check("...leaving the box wearing exactly one of ours",
+      (changed.match(/^\s*class A /gm) || []).length, 1);
+
+    // Cleared: the class goes, and so does a definition of ours nobody wears.
+    tap("B");
+    pick("No colour");
+    await saveAndWait(page);
+    const cleared = await written();
+    check("clearing a colour takes the class off the box", /class B/.test(cleared), false);
+    check("...and takes a definition of ours nobody wears with it",
+      /classDef ddC1/.test(cleared), false);
+    check("...while one written by hand stays, worn or not",
+      /classDef mine fill:#123456/.test(cleared), true);
+
+    // A handful at once, which is the reason to hold four boxes in the first
+    // place.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+    check("holding several offers the colours all the same",
+      inspector.querySelectorAll(".ve-diagram-swatch").length > 2, true);
+    pick("Blue");
+    check("...and one choice colours every one of them",
+      [fillOf("A"), fillOf("B"), fillOf("C")], ["#d9e6fb", "#d9e6fb", "#d9e6fb"]);
+
+    await saveAndWait(page);
+    const blue = await written();
+    check("...written as one definition and one line naming all three",
+      /class A,B,C ddC\d/.test(blue), true);
+
+    // Read back through the parser rather than assumed: a colour this editor
+    // can write and the parser cannot read is a diagram damaged by being saved.
+    const reopened = window.DiagramModel.parseFlowchart(blue);
+    check("...which is read back as the same colour",
+      reopened.classes[reopened.nodes[0].classes[0]].fill, "#d9e6fb");
+  }
+
   console.log("=== the canvas has no edges to be stopped at ===");
   {
     await server.request("POST", "/api/docs",

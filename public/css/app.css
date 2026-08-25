@@ -2172,10 +2172,16 @@ button.crumb:focus-visible {
   font-family: "Inter", sans-serif;
 }
 
+/* A box wears its own colour when it has been given one, and the theme's when
+   it has not. The custom properties are set on the group by the drawing, from
+   the classDef in the file — so an uncoloured diagram still recolours with the
+   rest of the app, and a coloured one looks the same here as it does anywhere
+   else Mermaid is rendered. */
 .dd .dd-shape {
-  fill: var(--raised-hover);
-  stroke: var(--accent-emphasis);
-  stroke-width: 1.5px;
+  fill: var(--dd-fill, var(--raised-hover));
+  stroke: var(--dd-stroke, var(--accent-emphasis));
+  stroke-width: var(--dd-stroke-width, 1.5px);
+  stroke-dasharray: var(--dd-dash, none);
 }
 
 .dd .dd-rule {
@@ -2185,7 +2191,7 @@ button.crumb:focus-visible {
 }
 
 .dd .dd-text {
-  fill: var(--fg);
+  fill: var(--dd-text, var(--fg));
   font-size: 13px;
 }
 
@@ -2195,7 +2201,7 @@ button.crumb:focus-visible {
 
 .dd .dd-row {
   font-size: 12.5px;
-  fill: var(--fg-muted);
+  fill: var(--dd-text, var(--fg-muted));
 }
 
 .dd .dd-line {
@@ -3613,6 +3619,55 @@ body.page-editing #dockEdit {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* The colours a box can be. A row of what there is rather than a menu of names:
+   picking a colour by reading the word "Amber" is picking it twice. */
+.ve-diagram-colours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 2px;
+}
+
+.ve-diagram-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.ve-diagram-swatch:hover {
+  transform: scale(1.08);
+}
+
+/* What is being worn, said with a ring outside the swatch rather than a mark on
+   it — a tick drawn on a colour is a tick you cannot read on half of them. */
+.ve-diagram-swatch.is-on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* No colour at all, which is a choice rather than the absence of one, so it
+   gets a swatch like the rest. Struck through, the way every editor says it. */
+.ve-diagram-swatch-none {
+  position: relative;
+  overflow: hidden;
+}
+
+.ve-diagram-swatch-none::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom right, transparent 45%,
+    var(--danger) 45%, var(--danger) 55%, transparent 55%);
+}
+
+.ve-diagram-swatch-custom {
+  padding: 2px;
 }
 
 /* The hand, switched on. The only thing in the bar that stays pressed, so it

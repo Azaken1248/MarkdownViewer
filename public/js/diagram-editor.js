@@ -36,6 +36,33 @@
     ["RL", "Right to left"]
   ];
 
+  /* The colours a box can be.
+   *
+   * Literal, not the theme's variables, because a classDef goes into the file
+   * and the file is read by Mermaid everywhere else — a diagram whose colours
+   * only existed inside this app would render grey on GitHub. Each is a pale
+   * fill with a stronger stroke of the same hue and near-black text, which is
+   * the one combination that stays readable whether the page behind it is light
+   * or dark. Named for what they are rather than what they mean: a red box
+   * means whatever the diagram says it means.
+   */
+  const DIAGRAM_COLOURS = [
+    ["Slate", { fill: "#e8eaed", stroke: "#5f6b7a", color: "#1b2430" }],
+    ["Red", { fill: "#fbdedc", stroke: "#c0453c", color: "#4a1512" }],
+    ["Amber", { fill: "#fbeecd", stroke: "#b07d1a", color: "#452f05" }],
+    ["Green", { fill: "#d8f0dd", stroke: "#3f8b57", color: "#123420" }],
+    ["Teal", { fill: "#d3ecea", stroke: "#2f8079", color: "#0d302d" }],
+    ["Blue", { fill: "#d9e6fb", stroke: "#3b6db8", color: "#132743" }],
+    ["Purple", { fill: "#e6dff8", stroke: "#6f52ae", color: "#241844" }],
+    ["Pink", { fill: "#fbdcec", stroke: "#b6467f", color: "#43122c" }]
+  ];
+
+  // A classDef this editor wrote, as opposed to one somebody wrote by hand. The
+  // difference matters when a colour is cleared: ours is litter once nobody
+  // wears it, and theirs is part of their diagram whether it is worn or not.
+  const DIAGRAM_CLASS_PREFIX = "ddC";
+  const DIAGRAM_CLASS_RE = /^ddC\d+$/;
+
   /* The diagram this editor is able to open, or null.
    *
    * The parser reads more than the canvas can draw — a group, for one — and an
@@ -2441,11 +2468,210 @@
       return row;
     };
 
+    /* --- Colour ---------------------------------------------------------------
+     *
+     * A colour is a classDef, which is real Mermaid: the file renders in the
+     * same colours on GitHub, in a README preview, anywhere. That is the whole
+     * reason for spending the effort here rather than writing a `%%` comment
+     * nobody else reads.
+     *
+     * One classDef per colour, shared by every box wearing it. Twenty blue
+     * boxes are one definition and one `class` line, which is smaller than
+     * twenty inline styles and is also how a person would have written it.
+     */
+    const sameColour = (a, b) => {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      return [...keys].every((key) => a[key] === b[key]);
+    };
+
+    // The name of a class holding exactly this colour, making one if there is
+    // none. Reused rather than added to, so choosing blue twice does not leave
+    // two definitions of blue behind.
+    function classFor(colour) {
+      model.classes = model.classes || {};
+
+      for (const [name, declarations] of Object.entries(model.classes)) {
+        if (sameColour(declarations, colour)) {
+          return name;
+        }
+      }
+
+      for (let n = 1; ; n += 1) {
+        const name = `${DIAGRAM_CLASS_PREFIX}${n}`;
+        if (!model.classes[name]) {
+          model.classes[name] = { ...colour };
+          return name;
+        }
+      }
+    }
+
+    /* A definition this editor made and nobody wears any more is litter, and a
+     * file that grows a dead classDef every time somebody changes their mind is
+     * a file that gets worse the more it is edited. One written by hand stays
+     * whether it is worn or not — it is part of somebody's diagram, and an
+     * editor with no control for a thing is not a reason to throw the thing
+     * away.
+     */
+    function forgetUnworn() {
+      if (!model.classes) {
+        return;
+      }
+
+      const worn = new Set(model.nodes.flatMap((item) => item.classes || []));
+
+      for (const name of Object.keys(model.classes)) {
+        if (DIAGRAM_CLASS_RE.test(name) && !worn.has(name)) {
+          delete model.classes[name];
+        }
+      }
+    }
+
+    // What a box is wearing, of the colours this editor offers. A box wearing a
+    // hand-written class as well keeps it: only ours is exchanged.
+    function colourOf(item) {
+      const classes = model.classes || {};
+
+      for (const name of item.classes || []) {
+        const declarations = classes[name];
+        if (!declarations) {
+          continue;
+        }
+
+        const found = DIAGRAM_COLOURS.find(([, colour]) => sameColour(declarations, colour));
+        if (found) {
+          return found[0];
+        }
+      }
+
+      return null;
+    }
+
+    /* Painting a handful of boxes, or clearing them.
+     *
+     * The class is swapped rather than added, or a box changed from red to blue
+     * would be wearing both and the file would say so.
+     */
+    function paintWith(ids, colour) {
+      const ours = new Set(Object.keys(model.classes || {}).filter((name) =>
+        DIAGRAM_CLASS_RE.test(name)));
+      const wanted = colour ? classFor(colour) : null;
+
+      for (const id of ids) {
+        const item = nodeById(id);
+        if (!item) {
+          continue;
+        }
+
+        const kept = (item.classes || []).filter((name) => !ours.has(name));
+        item.classes = wanted ? [...kept, wanted] : kept;
+
+        if (item.classes.length === 0) {
+          delete item.classes;
+        }
+      }
+
+      forgetUnworn();
+      write();
+      drawAtOnce();
+      paintInspector();
+    }
+
+    /* The swatches. Shown for one box or for a handful, because "make these
+     * four red" is the reason anybody colours a diagram in the first place.
+     */
+    function colourRow(ids) {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-colours";
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", "Colour");
+
+      const held = ids.length === 1 ? colourOf(nodeById(ids[0])) : null;
+
+      const swatch = (label, colour) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ve-diagram-swatch";
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", held === label ? "true" : "false");
+        button.classList.toggle("is-on", held === label);
+
+        if (colour) {
+          button.style.background = colour.fill;
+          button.style.borderColor = colour.stroke;
+        }
+
+        button.addEventListener("click", () => paintWith(ids, colour));
+        return button;
+      };
+
+      const none = swatch("No colour", null);
+      none.classList.add("ve-diagram-swatch-none");
+      none.setAttribute("aria-pressed", held === null ? "true" : "false");
+      none.classList.toggle("is-on", held === null);
+      row.append(none);
+
+      for (const [label, colour] of DIAGRAM_COLOURS) {
+        row.append(swatch(label, colour));
+      }
+
+      /* Anything at all, for the diagram whose colours are somebody's brand
+       * rather than somebody's taste. The stroke and the text are worked out
+       * from the fill, because asking for three colours to get one box coloured
+       * is three times the work for the same answer nearly every time.
+       */
+      const custom = document.createElement("input");
+      custom.type = "color";
+      custom.className = "ve-diagram-swatch ve-diagram-swatch-custom";
+      custom.title = "Any colour";
+      custom.setAttribute("aria-label", "Any colour");
+      custom.value = "#8ed9cf";
+      custom.addEventListener("change", () => {
+        paintWith(ids, {
+          fill: custom.value,
+          stroke: darken(custom.value, 0.45),
+          color: darken(custom.value, 0.8)
+        });
+      });
+      row.append(custom);
+
+      return row;
+    }
+
+    /* A darker version of a colour, for the stroke and the text.
+     *
+     * Mixed towards black rather than scaled, so a pale fill gives a stroke that
+     * is still recognisably the same colour instead of one that is nearly black
+     * the moment the fill is light.
+     */
+    function darken(hex, amount) {
+      const found = /^#([0-9a-f]{6})$/i.exec(String(hex));
+      if (!found) {
+        return hex;
+      }
+
+      const whole = parseInt(found[1], 16);
+      const parts = [(whole >> 16) & 255, (whole >> 8) & 255, whole & 255]
+        .map((one) => Math.round(one * (1 - amount)));
+
+      return `#${parts.map((one) => one.toString(16).padStart(2, "0")).join("")}`;
+    }
+
     function paintInspector(options = {}) {
       inspector.replaceChildren();
       const item = selectedNode();
 
       if (!item) {
+        /* A handful has no one name or shape to show, but it has a colour: the
+         * reason to hold four boxes at once is usually to do one thing to all
+         * four of them, and this is that thing.
+         */
+        if (selection.length > 1) {
+          say(`${selection.length} boxes held. Colour them, or drag them about.`);
+          inspector.append(colourRow([...selection]));
+          return;
+        }
+
         say(model.nodes.length === 0
           ? "Drag a shape onto the paper to start."
           : "Tap a box to work on it, or drag one to move it.");
@@ -2490,7 +2716,7 @@
       actions.append(step, connect);
 
       const out = model.edges.filter((edge) => edge.from === item.id);
-      inspector.append(line, actions);
+      inspector.append(line, colourRow([item.id]), actions);
 
       if (out.length > 0) {
         const legend = document.createElement("div");

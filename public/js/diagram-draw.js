@@ -159,9 +159,65 @@
       : shapeMarkup(node.shape, at.w, at.h) + centredText(rows, at.w, at.h);
   }
 
-  function nodeMarkup(node, at) {
+  /* --- Colour ---------------------------------------------------------------
+   *
+   * A colour lives in the file as a classDef, which is real Mermaid: it renders
+   * on GitHub and in every other Mermaid renderer exactly as it does here. What
+   * arrives is therefore whatever somebody wrote, and it is about to be put in
+   * a style attribute — so it is checked rather than trusted. A value that is
+   * not plainly a colour is dropped, and the box is drawn in the theme's own
+   * colours as if nothing had been said.
+   *
+   * The declarations become custom properties on the group rather than
+   * attributes on the shape, which is what keeps the theme working: a box with
+   * no colour of its own reads the fallback and recolours with everything else,
+   * and one shape or nine inside a group all follow without being told.
+   */
+  const COLOUR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([0-9.,%/\s]+\))$/i;
+  const WIDTH_RE = /^[0-9.]+(?:px)?$/i;
+  const DASH_RE = /^[0-9.,\s]+$/;
+
+  // Which declaration goes where. A classDef speaks CSS, and the two names that
+  // do not line up are `color`, which is the text rather than the shape, and
+  // `fill`, which SVG has and CSS text does not.
+  const PAINTED = [
+    ["fill", "--dd-fill", COLOUR_RE],
+    ["stroke", "--dd-stroke", COLOUR_RE],
+    ["color", "--dd-text", COLOUR_RE],
+    ["stroke-width", "--dd-stroke-width", WIDTH_RE],
+    ["stroke-dasharray", "--dd-dash", DASH_RE]
+  ];
+
+  /* What a box is actually wearing: every class it names, in the order it names
+   * them, and then its own inline style — which is what `style A fill:#f00`
+   * means in Mermaid, and it wins because it is about that one box.
+   */
+  function paintOf(node, classes) {
+    const worn = {};
+
+    for (const name of node.classes || []) {
+      Object.assign(worn, (classes || {})[name] || {});
+    }
+
+    Object.assign(worn, node.style || {});
+
+    let out = "";
+    for (const [key, property, allowed] of PAINTED) {
+      const value = worn[key];
+      if (typeof value === "string" && allowed.test(value.trim())) {
+        out += `${property}:${value.trim()};`;
+      }
+    }
+
+    return out;
+  }
+
+  function nodeMarkup(node, at, classes) {
+    const paint = paintOf(node, classes);
+
     return `<g class="dd-node${node.kind === "table" ? " dd-node-table" : ""}"`
       + ` data-id="${escapeText(node.id)}"`
+      + (paint ? ` style="${escapeText(paint)}"` : "")
       + ` transform="translate(${round(at.x)},${round(at.y)})">${nodeBody(node, at)}</g>`;
   }
 
@@ -587,7 +643,7 @@
 
     parts.push(`<g class="dd-nodes">${nodes
       .filter((node) => layout[node.id])
-      .map((node) => nodeMarkup(node, layout[node.id])).join("")}</g>`);
+      .map((node) => nodeMarkup(node, layout[node.id], model?.classes)).join("")}</g>`);
 
     /* What is selected: one id, or a list of them. One box gets the ring and
      * the handles it has always had; several get a ring each and one frame.
@@ -662,6 +718,7 @@
     render,
     renderSource,
     nodeBody,
+    paintOf,
     marksMarkup,
     frameMarkup,
     marqueeMarkup,

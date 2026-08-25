@@ -1287,6 +1287,92 @@ console.log("=== an arrow goes round what is in its way ===");
     drawn.includes("&lt;script&gt;"), true);
   check("a drawing is sized to what is in it", /viewBox="0 0 130 90"/.test(drawn), true);
 
+  /* --- a colour is a classDef, and a classDef is drawn --------------------- */
+
+  const coloured = {
+    direction: "TD",
+    classes: { hot: { fill: "#fbdedc", stroke: "#c0453c", color: "#4a1512" } },
+    nodes: [
+      { id: "A", shape: "rect", text: "Hot", classes: ["hot"] },
+      { id: "B", shape: "rect", text: "Plain" }
+    ],
+    edges: [],
+    layout: { A: square(0, 0), B: square(200, 0) }
+  };
+
+  const painted = DD.render(coloured, { layout: coloured.layout });
+  const groupOf = (id) => new RegExp(`<g class="dd-node"[^>]*data-id="${id}"[^>]*>`).exec(painted)[0];
+
+  check("a box wearing a class is drawn in its colours",
+    /--dd-fill:#fbdedc;--dd-stroke:#c0453c;--dd-text:#4a1512;/.test(groupOf("A")), true);
+  check("...and a box wearing none is left to the theme",
+    /style=/.test(groupOf("B")), false);
+
+  // Inline `style A fill:#f00` is about that one box, so it wins over the class.
+  const over = DD.render({
+    ...coloured,
+    nodes: [{ id: "A", shape: "rect", text: "Hot", classes: ["hot"], style: { fill: "#00ff00" } }]
+  }, { layout: { A: square(0, 0) } });
+  check("a box's own style beats the class it wears",
+    /--dd-fill:#00ff00;/.test(over), true);
+
+  /* What arrives is whatever somebody wrote, and it is about to go into a style
+   * attribute. A value that is not plainly a colour is dropped rather than
+   * escaped-and-hoped-for: there is no legitimate diagram it costs.
+   */
+  const nasty = DD.render({
+    direction: "TD",
+    classes: { bad: { fill: "red;} body { display: none } .x {", stroke: "url(#evil)", color: "#0a0a0a" } },
+    nodes: [{ id: "A", shape: "rect", text: "x", classes: ["bad"] }],
+    edges: [],
+    layout: { A: square(0, 0) }
+  }, { layout: { A: square(0, 0) } });
+  check("a fill that is not a colour is not drawn", /display/.test(nasty), false);
+  check("...nor is a stroke that fetches something", /url\(/.test(nasty), false);
+  check("...while the colour beside them is kept", /--dd-text:#0a0a0a;/.test(nasty), true);
+
+  check("a colour of every shape is allowed through", [
+    DD.paintOf({ style: { fill: "#abc" } }, {}),
+    DD.paintOf({ style: { fill: "rebeccapurple" } }, {}),
+    DD.paintOf({ style: { fill: "rgba(1, 2, 3, 0.5)" } }, {}),
+    DD.paintOf({ style: { "stroke-width": "2px" } }, {}),
+    DD.paintOf({ style: { "stroke-dasharray": "6 4" } }, {})
+  ], [
+    "--dd-fill:#abc;",
+    "--dd-fill:rebeccapurple;",
+    "--dd-fill:rgba(1, 2, 3, 0.5);",
+    "--dd-stroke-width:2px;",
+    "--dd-dash:6 4;"
+  ]);
+
+  check("...and anything else is not", [
+    DD.paintOf({ style: { fill: "expression(alert(1))" } }, {}),
+    DD.paintOf({ style: { "stroke-width": "2px;fill:red" } }, {}),
+    DD.paintOf({ style: { fill: "" } }, {})
+  ], ["", "", ""]);
+
+  /* A document shows its diagrams without an editor anywhere near them, and a
+   * colour that only appeared once you opened the editor would be a colour
+   * nobody reading the document ever saw.
+   */
+  const fromFile = DD.renderSource([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 40,40 90x50",
+    "    classDef hot fill:#fbdedc,stroke:#c0453c",
+    "    A[Hot]",
+    "    class A hot"
+  ].join("\n"));
+  check("a diagram read straight from a file is drawn in its colours",
+    /--dd-fill:#fbdedc;--dd-stroke:#c0453c;/.test(fromFile), true);
+
+  // The round trip the whole scheme rests on: a colour written as a classDef is
+  // a colour the file still has after being read and written again.
+  const round = DM.parseFlowchart(DM.serializeFlowchart(coloured));
+  check("a classDef survives being written and read back",
+    round.classes.hot, coloured.classes.hot);
+  check("...and so does the box that wears it", round.nodes[0].classes, ["hot"]);
+
   /* The canvas has no edges, so a box can be to the left of the origin or above
    * it. A drawing that always began at 0,0 would cut such a box off — which is
    * what made the editor forbid the position in the first place, and what left
