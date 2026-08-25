@@ -437,10 +437,11 @@ async function run(server, cookie) {
     };
 
     canvas.dispatchEvent(new window.window.WheelEvent("wheel",
-      { clientX: aimed.x, clientY: aimed.y, deltaY: -100, bubbles: true, cancelable: true }));
+      { clientX: aimed.x, clientY: aimed.y, deltaY: -100, ctrlKey: true,
+        bubbles: true, cancelable: true }));
 
     const zoomed = view();
-    check("the wheel zooms in", zoomed.scale > before.scale, true);
+    check("Ctrl and the wheel zooms in", zoomed.scale > before.scale, true);
     // The whole point of zooming about the pointer: the thing you are pointing
     // at is the thing that stays put, and everything else moves around it.
     check("...about the pointer, so what was under it still is", [
@@ -449,9 +450,40 @@ async function run(server, cookie) {
     ], [0, 0]);
 
     canvas.dispatchEvent(new window.window.WheelEvent("wheel",
-      { clientX: aimed.x, clientY: aimed.y, deltaY: 100, bubbles: true, cancelable: true }));
+      { clientX: aimed.x, clientY: aimed.y, deltaY: 100, ctrlKey: true,
+        bubbles: true, cancelable: true }));
     check("...and the other way turns it back", Math.round(view().scale * 1000),
       Math.round(before.scale * 1000));
+
+    /* --- and a bare wheel moves about ---------------------------------------
+     *
+     * Which is what it means in Figma, in Canva and in every map anybody has
+     * scrolled. It used to zoom, and that left a diagram zoomed away to one
+     * side with no way back: the only thing the wheel could do was zoom it
+     * further away.
+     */
+    const still = view();
+    canvas.dispatchEvent(new window.window.WheelEvent("wheel",
+      { clientX: aimed.x, clientY: aimed.y, deltaY: 120, bubbles: true, cancelable: true }));
+    check("a bare wheel moves the diagram rather than zooming it",
+      [view().x - still.x, view().y - still.y], [0, -120]);
+    check("...at the zoom it was already at", view().scale, still.scale);
+
+    canvas.dispatchEvent(new window.window.WheelEvent("wheel",
+      { clientX: aimed.x, clientY: aimed.y, deltaX: -80, bubbles: true, cancelable: true }));
+    check("...and a trackpad pushed sideways moves it sideways",
+      [view().x - still.x, view().y - still.y], [80, -120]);
+
+    /* A mouse with one wheel says sideways with Shift, and the browsers do not
+     * agree on how to spell it: some translate it to deltaX themselves, some
+     * send deltaY with shiftKey set. Both have to be read, or half the mice in
+     * the world scroll nothing at all.
+     */
+    canvas.dispatchEvent(new window.window.WheelEvent("wheel",
+      { clientX: aimed.x, clientY: aimed.y, deltaY: 50, shiftKey: true,
+        bubbles: true, cancelable: true }));
+    check("...as does a wheel with only one direction and Shift held",
+      [view().x - still.x, view().y - still.y], [30, -120]);
 
     check("the grid moves with the diagram rather than staying behind it",
       svg().querySelector("pattern").getAttribute("patternTransform"),
@@ -513,6 +545,16 @@ async function run(server, cookie) {
 
     check("space held turns a drag on a box into a pan",
       [view().x - held.x, view().y - held.y], [30, 10]);
+
+    // Coalesced to one update per frame, and letting go used to throw away
+    // whatever had not been drawn yet — so a flick quicker than a frame was a
+    // pan that never happened.
+    const flickFrom = view();
+    box.dispatchEvent(new window.MouseEvent("pointerdown", at(200, 200)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(260, 250)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(260, 250)));
+    check("...and a flick quicker than a frame is a pan all the same",
+      [view().x - flickFrom.x, view().y - flickFrom.y], [60, 50]);
     check("...and leaves the box exactly where it was",
       canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform"), wasAt);
     check("...and the diagram unedited", source(), true);
@@ -997,6 +1039,56 @@ async function run(server, cookie) {
     canvas.dispatchEvent(finger("pointerup", 200, 200));
     await new Promise((r) => setTimeout(r, 700));
     check("a finger that lets go is tapping, not asking", Boolean(menu()), false);
+  }
+
+  console.log("=== the canvas has no edges to be stopped at ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "edgeless.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/edgeless.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const at = (id) => {
+      const group = canvas.querySelector(`.dd-node[data-id="${id}"]`);
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(group.getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+
+    /* A position used to be clamped at zero, from when the canvas was a fixed
+     * sheet of paper. Panning to show the space beside a diagram and then being
+     * unable to drag anything into it is not an endless canvas.
+     */
+    const startedAt = at("A");
+    dragBox(window, "A", -500, -360);
+    check("a box can be carried to the left of where the diagram started",
+      at("A"), [startedAt[0] - 500, startedAt[1] - 360]);
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/edgeless.mmd", undefined,
+      { Cookie: cookie })).body.content;
+    check("...and the file says so with a minus sign",
+      new RegExp(`%% @ A ${at("A")[0]},${at("A")[1]} `).test(written), true);
+
+    // Read back rather than assumed: a position the editor can write and the
+    // parser cannot read is a diagram that is damaged by being saved.
+    const reopened = window.DiagramModel.parseFlowchart(written);
+    check("...which is read back as the same place",
+      [reopened.layout.A.x, reopened.layout.A.y], at("A"));
+    check("...which is somewhere no clamp would have allowed",
+      reopened.layout.A.x < 0 && reopened.layout.A.y < 0, true);
+
+    dragBox(window, "A", 500, 360);
+    check("...and it comes back again", at("A"), startedAt);
   }
 
   console.log("=== boxes can be carried about ===");

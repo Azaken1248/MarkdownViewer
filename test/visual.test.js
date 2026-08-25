@@ -1286,6 +1286,39 @@ console.log("=== an arrow goes round what is in its way ===");
   check("...with the characters that made it dangerous still readable",
     drawn.includes("&lt;script&gt;"), true);
   check("a drawing is sized to what is in it", /viewBox="0 0 130 90"/.test(drawn), true);
+
+  /* The canvas has no edges, so a box can be to the left of the origin or above
+   * it. A drawing that always began at 0,0 would cut such a box off — which is
+   * what made the editor forbid the position in the first place, and what left
+   * a diagram unable to be moved into the space beside it.
+   */
+  const out = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Out" }],
+    edges: [],
+    layout: { A: { x: -300, y: -200, w: 80, h: 40 } }
+  }, { natural: true });
+  const seen = /viewBox="(-?\d+) (-?\d+) (\d+) (\d+)"/.exec(out);
+  check("a drawing begins where the diagram does, not at the origin",
+    [Number(seen[1]), Number(seen[2])], [-300, -200]);
+  check("...and is large enough to hold it", [Number(seen[3]), Number(seen[4])], [110, 70]);
+
+  // The grid is painted onto the paper, and paper that starts at the origin
+  // leaves a box out to the left of it on no paper at all.
+  const gridded = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Out" }],
+    edges: [],
+    layout: { A: { x: -300, y: -200, w: 80, h: 40 } }
+  }, { natural: true, grid: true });
+  const sheet = /<rect class="dd-paper" x="(-?\d+)" y="(-?\d+)"/.exec(gridded);
+  check("...and the paper under it starts there too",
+    [Number(sheet[1]), Number(sheet[2])], [-300, -200]);
+
+  const bounds = DM.layoutBounds({ A: { x: 40, y: 40, w: 80, h: 40 } });
+  check("a diagram laid out the usual way still starts at the origin",
+    [bounds.x, bounds.y], [0, 0]);
+  check("...and is the size it always was", [bounds.w, bounds.h], [150, 110]);
 }
 
 console.log("=== ...for every diagram in the real library ===");

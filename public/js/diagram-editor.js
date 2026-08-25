@@ -518,7 +518,15 @@
       return null;
     }
 
-    const snap = (value) => Math.max(0, DiagramModel.snap(value));
+    /* The grid, with nothing forbidden.
+     *
+     * This used to clamp at zero, from when the canvas was a fixed sheet of
+     * paper and a negative coordinate meant off the page. A viewport has no
+     * edges — which is the whole point of it — so the clamp only meant that a
+     * diagram panned to show the space on its left could not be dragged into
+     * that space. The file format has always written a minus sign.
+     */
+    const snap = (value) => DiagramModel.snap(value);
 
     /* --- Moving what is already there -------------------------------------- */
 
@@ -692,6 +700,7 @@
         return;
       }
 
+      // A position may be negative; a size may not.
       at.w = Math.max(DIAGRAM_MIN_BOX, snap(w));
       at.h = Math.max(DIAGRAM_MIN_BOX / 2, snap(h));
       // A shape has to be drawn again to be a different size, and the handles
@@ -886,7 +895,33 @@
 
     // Held down, the space bar turns a drag into a pan wherever it starts, which
     // is how every canvas has worked since before any of them had a canvas.
+    // The hand is the same thing left switched on, for the hands that would
+    // rather press a button than hold a key down while dragging.
     let spaceHeld = false;
+    let handTool = false;
+    // Built with the rest of the zoom bar, further down, and only when there is
+    // a viewport for it to be about.
+    let handButton = null;
+
+    const showGrab = () => {
+      canvas.classList.toggle("is-panning-armed", spaceHeld || handTool);
+      if (handButton) {
+        handButton.setAttribute("aria-pressed", handTool ? "true" : "false");
+        handButton.classList.toggle("is-on", handTool);
+      }
+    };
+
+    function useHand(on) {
+      handTool = Boolean(on);
+      // A band cannot be pulled by a hand, and a hand that arrives mid-band
+      // would leave one drawn on the paper with nothing to finish it.
+      if (handTool && marquee) {
+        marquee = null;
+        drawing()?.querySelector(".dd-marquee")?.remove();
+      }
+
+      showGrab();
+    }
 
     canvas.addEventListener("pointerdown", (event) => {
       /* Keys only reach a canvas that has focus, and clicking one inside a
@@ -906,7 +941,7 @@
 
       // The middle button is a pan and nothing else, on every diagram tool
       // anyone has used, and it is the one gesture that never means select.
-      if (viewport && (event.button === 1 || spaceHeld)) {
+      if (viewport && (event.button === 1 || spaceHeld || handTool)) {
         event.preventDefault?.();
         beginPan(event);
         return;
@@ -1065,9 +1100,20 @@
       }
 
       if (panning) {
+        /* A pan that ended before its frame arrived is still a pan. The moves
+         * are coalesced to one update per frame, and letting go used to throw
+         * away whatever had not been drawn yet — so a quick flick was a pan
+         * that never happened.
+         */
+        if (typeof event.clientX === "number") {
+          view.x = panning.from.x + (event.clientX - panning.x);
+          view.y = panning.from.y + (event.clientY - panning.y);
+        }
+
         panning = null;
         frame = 0;
         canvas.classList.remove("is-panning");
+        applyView();
 
         try {
           canvas.releasePointerCapture?.(event.pointerId);
@@ -1322,6 +1368,13 @@
         holding ? { label: "Select none", keys: "Esc", run: () => select(null) } : null,
         "-",
         viewport ? { label: "Fit the whole diagram", run: () => fitView() } : null,
+        viewport
+          ? {
+            label: handTool ? "Stop moving about" : "Drag to move about",
+            keys: handTool ? "V" : "H",
+            run: () => useHand(!handTool)
+          }
+          : null,
         { label: "Copy the diagram as Mermaid", run: () => copyOutside(sourceNow()) }
       ];
     }
@@ -1652,31 +1705,44 @@
 
     /* --- Getting about ------------------------------------------------------
      *
-     * The wheel zooms about the pointer, because the thing under it is the thing
-     * being looked at and it is the one point that must not move. Shift makes it
-     * a sideways pan, which is what a wheel means on a trackpad held sideways.
-     * Two fingers pinch. Space held turns any drag into a pan.
+     * A wheel means "move about" and Ctrl means "zoom", which is what they mean
+     * in Figma, in Canva and in every map anybody has ever scrolled. A
+     * trackpad's two-finger scroll arrives here as a wheel carrying both deltas
+     * and its pinch arrives as a wheel with ctrlKey set, so the browser has
+     * already spelled both of them correctly.
+     *
+     * A bare wheel used to zoom, and that left a diagram which had been zoomed
+     * away to one side with no way back: the only thing the wheel could do was
+     * zoom it further. Two fingers pinch. Space held, the middle button, or the
+     * hand turn a drag into a pan.
      */
     if (viewport) {
       canvas.addEventListener("wheel", (event) => {
         event.preventDefault();
 
-        if (event.shiftKey) {
-          view.x -= event.deltaY;
-          applyView();
+        if (event.ctrlKey || event.metaKey) {
+          // The sign and a fixed ratio, not the distance: what a notch reports
+          // varies by an order of magnitude between a mouse and a trackpad.
+          const notches = event.deltaY > 0 ? -1 : 1;
+          zoomAbout(event.clientX, event.clientY, ZOOM_PER_NOTCH ** notches);
           return;
         }
 
-        // The sign and a fixed ratio, not the distance: what a notch reports
-        // varies by an order of magnitude between a mouse and a trackpad.
-        const notches = event.deltaY > 0 ? -1 : 1;
-        zoomAbout(event.clientX, event.clientY, ZOOM_PER_NOTCH ** notches);
+        /* Shift is sideways on a mouse with only one wheel. Some browsers do
+         * that translation themselves and send it as deltaX; the ones that do
+         * not send deltaY with shiftKey set — so both spellings have to be read
+         * or half the mice in the world scroll nothing at all.
+         */
+        const sideways = event.shiftKey && event.deltaX === 0;
+        view.x -= sideways ? event.deltaY : event.deltaX;
+        view.y -= sideways ? 0 : event.deltaY;
+        applyView();
       }, { passive: false });
 
       canvas.addEventListener("keyup", (event) => {
         if (event.key === " " || event.code === "Space") {
           spaceHeld = false;
-          canvas.classList.remove("is-panning-armed");
+          showGrab();
         }
       });
 
@@ -1684,7 +1750,7 @@
       // gone away is a canvas where nothing can be selected any more.
       window.addEventListener("blur", () => {
         spaceHeld = false;
-        canvas.classList.remove("is-panning-armed");
+        showGrab();
       });
     }
 
@@ -1799,6 +1865,18 @@
         return;
       }
 
+      /* The hand and the pointer, on the keys they have in every editor that
+       * offers both. Not while typing into something on the canvas, where an h
+       * is an h and a v is a v.
+       */
+      if (viewport && !(event.ctrlKey || event.metaKey || event.altKey)
+        && /^[hv]$/i.test(event.key)
+        && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
+        answered(event);
+        useHand(event.key.toLowerCase() === "h");
+        return;
+      }
+
       /* Back and forward. Both spellings of redo, because half the world
        * learned Ctrl+Y and the other half Ctrl+Shift+Z, and neither half is
        * going to be talked out of it.
@@ -1857,6 +1935,14 @@
         if (menu) {
           event.stopPropagation();
           closeMenu();
+          return;
+        }
+
+        // A hand switched on is a mode, and a mode wants a way out that does
+        // not involve finding the button that turned it on.
+        if (handTool) {
+          event.stopPropagation();
+          useHand(false);
           return;
         }
 
@@ -2615,7 +2701,17 @@
         }
       });
 
+      /* The hand. Dragging empty paper pulls a band round what it touches,
+       * which is what a drag means in every editor that has a band — so the
+       * other thing a drag can mean needs somewhere to be said. Held: the space
+       * bar. Switched on: this.
+       */
+      handButton = stepButton("Hand — drag to move about (H)", "ph-hand",
+        () => useHand(!handTool));
+      handButton.setAttribute("aria-pressed", "false");
+
       zoom.append(
+        handButton,
         stepButton("Zoom out", "ph-minus", () => zoomToCentre(1 / ZOOM_PER_NOTCH ** 2)),
         zoomField,
         stepButton("Zoom in", "ph-plus", () => zoomToCentre(ZOOM_PER_NOTCH ** 2)),

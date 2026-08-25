@@ -1966,23 +1966,97 @@ async function run(server) {
     check("...and a view to read it from", scaleNow(), 1);
 
     canvas.dispatchEvent(new window.WheelEvent("wheel",
-      { deltaY: -100, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
-    check("the wheel zooms the diagram", scaleNow() > 1, true);
+      { deltaY: -100, clientX: 100, clientY: 100, ctrlKey: true,
+        bubbles: true, cancelable: true }));
+    check("Ctrl and the wheel zooms the diagram", scaleNow() > 1, true);
     check("...and the reading follows it", zoomField.value === "100%", false);
 
     canvas.dispatchEvent(new window.WheelEvent("wheel",
-      { deltaY: 100, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
+      { deltaY: 100, clientX: 100, clientY: 100, ctrlKey: true,
+        bubbles: true, cancelable: true }));
     check("...and the other way back again", scaleNow(), 1);
+
+    const offset = () => {
+      const view = canvas.querySelector(".dd-view");
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(view.getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+
+    const restAt = offset();
+    canvas.dispatchEvent(new window.WheelEvent("wheel",
+      { deltaY: 90, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
+    check("a bare wheel moves about rather than zooming",
+      [offset()[0] - restAt[0], offset()[1] - restAt[1]], [0, -90]);
+    check("...leaving the zoom alone", scaleNow(), 1);
 
     // Space turns any drag into a pan, which is how every canvas has worked
     // since before any of them had a canvas.
     const keyOn = (target, key, more = {}) =>
       target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...more }));
 
-    keyOn(canvas, " ");
+    const keyOnFirst = (target, key, more = {}) =>
+      target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...more }));
+
+    keyOnFirst(canvas, " ");
     check("holding space arms a pan", canvas.classList.contains("is-panning-armed"), true);
     canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
     check("...and letting go puts it down", canvas.classList.contains("is-panning-armed"), false);
+
+    /* --- the hand -------------------------------------------------------------
+     *
+     * Dragging empty paper pulls a band round what it touches, which is what a
+     * drag means wherever there is a band to pull — so the other thing a drag
+     * can mean needs somewhere to be said that is not a key held down.
+     */
+    const hand = embed.querySelector('.ve-diagram-zoom-step[aria-pressed]');
+    check("the bar offers a hand", Boolean(hand), true);
+    check("...which starts switched off", hand.getAttribute("aria-pressed"), "false");
+
+    const pannedTo = offset();
+    press(canvas, 400, 400);
+    move(300, 340);
+    release(300, 340);
+    check("dragging the paper without it pulls a band, and moves nothing",
+      offset(), pannedTo);
+
+    hand.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("...and switching it on says so", hand.getAttribute("aria-pressed"), "true");
+    check("...with the cursor to match", canvas.classList.contains("is-panning-armed"), true);
+
+    press(canvas, 400, 400);
+    move(300, 340);
+    release(300, 340);
+    check("...after which the same drag moves the diagram",
+      [offset()[0] - pannedTo[0], offset()[1] - pannedTo[1]], [-100, -60]);
+
+    // A drag on a box moves the diagram too, rather than the box: a hand is a
+    // hand wherever it is put down.
+    const stayedAt = box("A");
+    const overBox = canvas.querySelector('.dd-node[data-id="A"]');
+    press(overBox, stayedAt[0] + 10, stayedAt[1] + 10);
+    move(stayedAt[0] + 60, stayedAt[1] + 10);
+    release(stayedAt[0] + 60, stayedAt[1] + 10);
+    check("...and a drag on a box moves the diagram, not the box", box("A"), stayedAt);
+
+    keyOnFirst(canvas, "v");
+    check("V puts the hand down again", hand.getAttribute("aria-pressed"), "false");
+    keyOnFirst(canvas, "h");
+    check("...and H picks it back up", hand.getAttribute("aria-pressed"), "true");
+    keyOnFirst(canvas, "Escape");
+    check("...as does Escape, which is the way out of any mode",
+      hand.getAttribute("aria-pressed"), "false");
+
+    // A band cannot be pulled by a hand. One left half-pulled when the hand
+    // arrives would have nothing to finish it, and would take whatever it had
+    // reached across with it when the drag ended.
+    press(canvas, -50, -50);
+    check("nothing is held as a band starts", canvas.querySelectorAll(".dd-ring").length, 0);
+    move(900, 900);
+    hand.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    release(900, 900);
+    check("...and a band given up for the hand takes nothing with it",
+      canvas.querySelectorAll(".dd-ring").length, 0);
+    keyOnFirst(canvas, "Escape");
 
     /* --- the diagram's keys are the diagram's ----------------------------------
      *

@@ -544,6 +544,9 @@
     const pad = Number(options.pad) || 0;
     const width = bounds.w + pad;
     const height = bounds.h + pad;
+    // Where the drawing starts, which is the origin unless something has been
+    // put to the left of it or above it.
+    const from = { x: bounds.x, y: bounds.y };
     const gridId = `dd-grid-${drawCounter}`;
 
     // A viewport is a window onto a diagram with no edges, so nothing in it is
@@ -572,8 +575,8 @@
     if (options.grid) {
       paper = view
         ? `<rect class="dd-paper" x="0" y="0" width="100%" height="100%" fill="url(#${gridId})"/>`
-        : `<rect class="dd-paper" x="0" y="0" width="${round(width)}"`
-          + ` height="${round(height)}" fill="url(#${gridId})"/>`;
+        : `<rect class="dd-paper" x="${round(from.x)}" y="${round(from.y)}"`
+          + ` width="${round(width)}" height="${round(height)}" fill="url(#${gridId})"/>`;
     }
 
     const spread = lanes(edges);
@@ -622,7 +625,7 @@
       : ` width="100%" style="max-width: ${round(width)}px"`;
 
     return `<svg class="dd${options.natural ? " dd-editing" : ""}" xmlns="http://www.w3.org/2000/svg"`
-      + ` viewBox="0 0 ${round(width)} ${round(height)}"${size} role="img"`
+      + ` viewBox="${round(from.x)} ${round(from.y)} ${round(width)} ${round(height)}"${size} role="img"`
       + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
   }
 

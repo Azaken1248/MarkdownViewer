@@ -3615,8 +3615,16 @@ body.page-editing #dockEdit {
   height: 100%;
 }
 
+/* The hand, switched on. The only thing in the bar that stays pressed, so it
+   is the only one that says so. */
+.ve-diagram-zoom-step.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
 /* Grabbing, and about to grab. The cursor is the only thing that says the
-   space bar has been noticed. */
+   space bar or the hand has been noticed. */
 .ve-diagram-canvas.is-panning-armed {
   cursor: grab;
 }

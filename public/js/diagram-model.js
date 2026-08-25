@@ -1569,18 +1569,33 @@
     return layout;
   }
 
-  // How much paper the arrangement takes up, which is the drawing's own size
-  // before anything on a page has a say in it.
+  /* How much paper the arrangement takes up, which is the drawing's own size
+   * before anything on a page has a say in it.
+   *
+   * `x` and `y` are where that paper starts. Normally the origin, because a
+   * diagram is normally laid out from it — but the canvas has no edges, so a
+   * box can be at -400, and a drawing that always began at 0,0 would cut it
+   * off. The origin is kept in view when everything is positive, so a diagram
+   * laid out the usual way is sized and padded exactly as it always was.
+   */
   function layoutBounds(layout) {
     const boxes = Object.values(layout || {});
 
     if (boxes.length === 0) {
-      return { w: MARGIN * 2, h: MARGIN * 2 };
+      return { x: 0, y: 0, w: MARGIN * 2, h: MARGIN * 2 };
     }
 
+    /* No margin on this side, which is the convention the origin already set:
+     * a box at x=0 has always been drawn flush against the left edge, and the
+     * gap in an ordinary diagram is the leftmost box's own x. */
+    const left = Math.min(0, ...boxes.map((at) => at.x));
+    const top = Math.min(0, ...boxes.map((at) => at.y));
+
     return {
-      w: Math.max(...boxes.map((at) => at.x + at.w)) + MARGIN,
-      h: Math.max(...boxes.map((at) => at.y + at.h)) + MARGIN
+      x: left,
+      y: top,
+      w: Math.max(...boxes.map((at) => at.x + at.w)) + MARGIN - left,
+      h: Math.max(...boxes.map((at) => at.y + at.h)) + MARGIN - top
     };
   }
 
