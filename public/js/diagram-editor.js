@@ -936,24 +936,6 @@
             group[one] = { x: where.x, y: where.y };
           }
         }
-
-        /* What is being carried is drawn on top of everything for as long as it
-         * is being carried.
-         *
-         * The drawing is layered from the outside in, so a box dragged into a
-         * bigger one belongs a layer deeper than it is — and until the redraw
-         * that follows the drag says so, it would be under the box it was just
-         * dropped into. Which reads as having dropped it and lost it.
-         */
-        const layers = drawing()?.querySelectorAll(".dd-nodes");
-        const top = layers?.[layers.length - 1];
-
-        for (const one of Object.keys(group)) {
-          const box = drawing()?.querySelector(`.dd-node[data-id="${one}"]`);
-          if (top && box) {
-            top.append(box);
-          }
-        }
       }
 
       gesture = {
@@ -977,6 +959,21 @@
       }
 
       hold(event);
+    }
+
+    function carryToFront(ids) {
+      const layers = drawing()?.querySelectorAll(".dd-nodes");
+      const top = layers?.[layers.length - 1];
+      if (!top) {
+        return;
+      }
+
+      for (const one of ids) {
+        const box = drawing()?.querySelector(`.dd-node[data-id="${one}"]`);
+        if (box) {
+          top.append(box);
+        }
+      }
     }
 
     // Keeping the pointer for the length of a drag. A browser without capture
@@ -1162,7 +1159,50 @@
         drawing()?.querySelector(".dd-marquee")?.remove();
       }
 
+      // Two modes at once is one mode too many, and the hand is the one that
+      // takes the whole canvas.
+      if (handTool) {
+        useArrowTool(false);
+      }
+
       showGrab();
+    }
+
+    /* The arrow tool.
+     *
+     * Drawing an arrow meant selecting the box it comes from and then finding
+     * the circle on its edge, which is one arrow's worth of work per arrow. Ten
+     * arrows is ten selections. Switched on, this makes a drag from any box to
+     * any box an arrow, over and over, without selecting anything — which is
+     * what every diagram tool that has a toolbox does, and what StarUML does.
+     *
+     * It stays on until it is switched off, because the reason to reach for it
+     * is that there is more than one arrow to draw.
+     */
+    let arrowTool = false;
+    let arrowButton = null;
+
+    const showArrowTool = () => {
+      canvas.classList.toggle("is-joining", arrowTool);
+      if (arrowButton) {
+        arrowButton.setAttribute("aria-pressed", arrowTool ? "true" : "false");
+        arrowButton.classList.toggle("is-on", arrowTool);
+      }
+    };
+
+    function useArrowTool(on) {
+      arrowTool = Boolean(on);
+
+      if (arrowTool) {
+        // Arming it is saying what the next drag is for, so the half-finished
+        // ways of saying the same thing go away.
+        armedFrom = null;
+        handTool = false;
+        showGrab();
+        paintInspector();
+      }
+
+      showArrowTool();
     }
 
     canvas.addEventListener("pointerdown", (event) => {
@@ -1239,6 +1279,17 @@
       }
 
       const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
+
+      /* Armed, a drag from a box is an arrow out of it, whatever else that box
+       * is or is not. The same gesture the circle on a selected box already
+       * uses, so what it draws, where it lets go, and what it does on empty
+       * paper are all already decided.
+       */
+      if (arrowTool && id) {
+        select(id);
+        beginGesture("connect", id, point, event);
+        return;
+      }
 
       const adding = Boolean(event.shiftKey);
 
@@ -1331,6 +1382,23 @@
         }
 
         gesture.moved = true;
+
+        /* What is being carried is drawn on top of everything for as long as it
+         * is being carried.
+         *
+         * The drawing is layered from the outside in, so a box dragged into a
+         * bigger one belongs a layer deeper than it is — and until the redraw
+         * that follows the drag says so, it would be under the box it was just
+         * dropped into. Which reads as having dropped it and lost it.
+         *
+         * On the first real movement rather than on the press. A press that
+         * never goes anywhere never redraws either, so raising it then left a
+         * box that had merely been selected sitting on top of everything it is
+         * inside, with nothing to put it back.
+         */
+        if (gesture.kind === "move") {
+          carryToFront(Object.keys(gesture.group));
+        }
       }
 
       // A drag on a touch screen would otherwise scroll the canvas as well as
@@ -1680,6 +1748,11 @@
             run: () => useHand(!handTool)
           }
           : null,
+        {
+          label: arrowTool ? "Stop drawing arrows" : "Draw arrows",
+          keys: arrowTool ? "V" : "A",
+          run: () => useArrowTool(!arrowTool)
+        },
         { label: "Copy the diagram as Mermaid", run: () => copyOutside(sourceNow()) }
       ];
     }
@@ -2188,6 +2261,27 @@
         && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
         answered(event);
         useHand(event.key.toLowerCase() === "h");
+
+        // V is the pointer, and the pointer is neither of the modes.
+        if (event.key.toLowerCase() === "v") {
+          useArrowTool(false);
+        }
+
+        return;
+      }
+
+      /* A for arrow. V puts it away with the hand, because V is the pointer in
+       * every editor with a toolbox and putting one mode away while leaving
+       * another on would be a V that half worked.
+       *
+       * Not while typing, and not Ctrl+A, which is select-all and is answered
+       * further up.
+       */
+      if (!(event.ctrlKey || event.metaKey || event.altKey)
+        && /^[av]$/i.test(event.key)
+        && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
+        answered(event);
+        useArrowTool(event.key.toLowerCase() === "a");
         return;
       }
 
@@ -2252,8 +2346,14 @@
           return;
         }
 
-        // A hand switched on is a mode, and a mode wants a way out that does
-        // not involve finding the button that turned it on.
+        // A mode is a mode, and a mode wants a way out that does not involve
+        // finding the button that turned it on.
+        if (arrowTool) {
+          event.stopPropagation();
+          useArrowTool(false);
+          return;
+        }
+
         if (handTool) {
           event.stopPropagation();
           useHand(false);
@@ -3351,8 +3451,17 @@
         () => useHand(!handTool));
       handButton.setAttribute("aria-pressed", "false");
 
+      /* The arrow tool. Switched on, a drag from any box to any box is an
+       * arrow — over and over, without selecting anything first, which is the
+       * whole of why it is a mode rather than a button that does it once.
+       */
+      arrowButton = stepButton("Arrow — drag between boxes to join them (A)",
+        "ph-arrow-up-right", () => useArrowTool(!arrowTool));
+      arrowButton.setAttribute("aria-pressed", "false");
+
       zoom.append(
         handButton,
+        arrowButton,
         stepButton("Zoom out", "ph-minus", () => zoomToCentre(1 / ZOOM_PER_NOTCH ** 2)),
         zoomField,
         stepButton("Zoom in", "ph-plus", () => zoomToCentre(ZOOM_PER_NOTCH ** 2)),

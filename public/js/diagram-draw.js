@@ -1097,6 +1097,12 @@
       + (options.grid
         ? `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}"`
           + ` patternUnits="userSpaceOnUse"${view ? ` patternTransform="${moved}"` : ""}>`
+          // The paper's own colour goes inside the pattern rather than on the
+          // rect. A `fill` in the stylesheet beats a `fill` attribute on the
+          // element — presentation attributes lose to every author rule — so
+          // painting the rect in CSS painted straight over the grid, and the
+          // grid has never once been seen.
+          + `<rect class="dd-grid-back" width="${GRID_STEP}" height="${GRID_STEP}"/>`
           + `<path class="dd-grid-line" d="M${GRID_STEP},0 L0,0 L0,${GRID_STEP}"/></pattern>`
         : "")
       + `</defs>`;

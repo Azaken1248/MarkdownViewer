@@ -6995,7 +6995,7 @@ function renderEmbedBlock(block, index) {
 }
 
 function paintEmbedBlock(node, block) {
-  node.classList.remove("is-source-open", "is-builder-open");
+  node.classList.remove("is-source-open");
   // A diagram in here may already own a pan-zoom instance bound to an element
   // that is about to be thrown away.
   destroyPanZoomInstances(node);
@@ -7021,22 +7021,22 @@ function paintEmbedBlock(node, block) {
 
   const buildable = Boolean(buildableDiagram(block));
 
+  /* One button, and it goes to the page.
+   *
+   * The canvas used to open inside the block as well, in a strip a few hundred
+   * pixels tall with the document either side of it. Everything the canvas has
+   * grown since — a palette, an inspector, a zoom bar, arrows you draw by
+   * dragging — wants room, and the page has room. So there is one way in, and
+   * the document comes back exactly as it was left.
+   */
   if (buildable) {
     const build = document.createElement("button");
     build.type = "button";
     build.className = "ve-embed-edit ve-embed-build";
-    build.title = "Build this diagram from its steps and arrows";
+    build.title = "Build this diagram on a page of its own";
     build.innerHTML = '<i class="ph ph-tree-structure" aria-hidden="true"></i><span>Build</span>';
-    build.addEventListener("click", () => openDiagramBuilder(node, block));
+    build.addEventListener("click", () => openDiagramPage(block));
     tools.appendChild(build);
-
-    const expand = document.createElement("button");
-    expand.type = "button";
-    expand.className = "ve-embed-edit ve-embed-expand";
-    expand.title = "Open this diagram on a page of its own";
-    expand.innerHTML = '<i class="ph ph-arrows-out" aria-hidden="true"></i><span>Expand</span>';
-    expand.addEventListener("click", () => openDiagramPage(block));
-    tools.appendChild(expand);
   }
 
   const open = document.createElement("button");
@@ -7057,7 +7057,6 @@ function paintEmbedBlock(node, block) {
 }
 
 function openEmbedSource(node, block) {
-  node.classList.remove("is-builder-open");
   node.classList.add("is-source-open");
   destroyPanZoomInstances(node);
   node.innerHTML = "";
@@ -7205,42 +7204,6 @@ function buildableDiagram(block) {
   return model ? { fence, model } : null;
 }
 
-/* The canvas, opened on a fence inside the document being edited.
- *
- * All this host does is say where the diagram comes from and where it goes: the
- * canvas itself lives in diagram-editor.js and is the same canvas the standalone
- * page mounts. What is different here is that an edit does not touch the file —
- * it marks the block dirty, the way every other block edit does, and the page's
- * own save writes the document.
- */
-function openDiagramBuilder(node, block) {
-  const fence = diagramFence(block);
-
-  node.classList.remove("is-source-open");
-  node.classList.add("is-builder-open");
-  destroyPanZoomInstances(node);
-
-  const editor = fence && DiagramEditor.mount(node, {
-    source: fence.body,
-    // The same window onto the diagram the page gets. A diagram is a place you
-    // move about in, and it was a place on the page and a picture in a document
-    // — which meant the wheel, the space bar and two fingers all did nothing
-    // here, and a diagram wider than the strip could not be reached at all.
-    viewport: true,
-    onChange: (body) => {
-      block.dirty = true;
-      block.sourceOverride = VisualEditor.serializeFence({ ...fence, body });
-      markPageEditDirty();
-    },
-    onDone: () => paintEmbedBlock(node, block)
-  });
-
-  // Only reachable if the source changed under the button, which is worth
-  // handling rather than asserting: the source box is one click away.
-  if (!editor) {
-    openEmbedSource(node, block);
-  }
-}
 // Which block a rendered node is showing. The index on the node is only ever
 // written, and stops being true the moment a block is inserted above it, so
 // anything that needs to find a block from the page asks here instead.
@@ -9969,10 +9932,6 @@ elements.docContent.addEventListener("keydown", (event) => {
    * away the rendered block the builder was mounted in, and looked from the
    * outside like being thrown out of the builder.
    */
-  if (event.target?.closest?.(".ve-embed.is-builder-open")) {
-    return;
-  }
-
   // Escape leaves editing, and asks first if there is anything to lose.
   if (event.key === "Escape") {
     event.preventDefault();

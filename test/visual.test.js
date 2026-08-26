@@ -2002,6 +2002,43 @@ console.log("=== the previews are actually on the screen ===");
     styleOf("canvas").overflow, "auto");
   check("a preview of markdown that renders to nothing stays hidden",
     styleOf("blank").display, "none");
+
+  /* The grid was drawn from the day the canvas had one and has never once been
+   * seen.
+   *
+   * The paper carries fill="url(#grid)" as an attribute, and the stylesheet
+   * painted the same element var(--canvas). A presentation attribute loses to
+   * every author rule, so the paper came out a flat colour and the pattern
+   * underneath it was never shown. The colour lives inside the pattern now, and
+   * nothing in the stylesheet may paint the paper again.
+   */
+  const drawn = new JSDOM(`<style>${stylesheet}</style>
+    <svg class="dd dd-editing">
+      <rect class="dd-paper" id="paper" fill="url(#grid)"/>
+      <rect class="dd-grid-back" id="back"/>
+      <path class="dd-grid-line" id="line"/>
+    </svg>`);
+  const painted = (id) => drawn.window.getComputedStyle(drawn.window.document.getElementById(id));
+
+  check("nothing in the stylesheet paints over the paper's pattern",
+    painted("paper").fill, "");
+
+  // The pattern carries the paper's own colour, or the paper is transparent and
+  // whatever is behind the canvas shows through the grid.
+  const sheet = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "a" }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 } }
+  }, { natural: true, grid: true });
+  check("...because the paper's colour is a rect inside the pattern",
+    /<pattern[^>]*><rect class="dd-grid-back" width="\d+" height="\d+"\/>/.test(sheet), true);
+  check("...with the lines drawn over it",
+    /dd-grid-back[^>]*\/><path class="dd-grid-line"/.test(sheet), true);
+  check("...and the paper's colour is inside the pattern instead",
+    painted("back").fill, "var(--canvas)");
+  check("...with the lines faint enough to be paper rather than graph paper",
+    [painted("line").stroke, painted("line").opacity], ["var(--border)", "0.55"]);
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

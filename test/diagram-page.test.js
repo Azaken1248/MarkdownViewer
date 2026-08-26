@@ -1454,6 +1454,137 @@ async function run(server, cookie) {
       [propOf("A", "--dd-dash"), propOf("B", "--dd-dash")], ["2 4", "2 4"]);
   }
 
+  console.log("=== the arrow tool stays on until it is put away ===");
+  {
+    /* Drawing an arrow meant selecting the box it comes from and then finding
+     * the circle on its edge: one selection per arrow, ten selections for ten
+     * arrows. Switched on, a drag from any box to any box is an arrow, over and
+     * over, with nothing selected first.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "joining.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 400,100 80x40",
+        "    %% @ C 100,400 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/joining.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const at = (x, y) => ({
+      clientX: (x * view().scale) + view().x,
+      clientY: (y * view().scale) + view().y,
+      bubbles: true
+    });
+    const arrows = () => canvas.querySelectorAll(".dd-edge").length;
+    const joined = () => [...canvas.querySelectorAll(".dd-edge")]
+      .map((one) => `${one.dataset.from}->${one.dataset.to}`);
+
+    const tool = [...page.document.querySelectorAll(".ve-diagram-zoom-step[aria-pressed]")]
+      .find((one) => /Arrow/i.test(one.getAttribute("title") || ""));
+
+    const middleOf = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+        .exec(canvas.querySelector(`.dd-node[data-id="${id}"]`).getAttribute("transform"));
+      return [Number(spot[1]) + 40, Number(spot[2]) + 20];
+    };
+    const drag = (from, to) => {
+      const [x1, y1] = middleOf(from);
+      const [x2, y2] = middleOf(to);
+      canvas.querySelector(`.dd-node[data-id="${from}"]`)
+        .dispatchEvent(new window.MouseEvent("pointerdown", at(x1, y1)));
+      canvas.dispatchEvent(new window.MouseEvent("pointermove", at(x2, y2)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x2, y2)));
+    };
+
+    check("there is an arrow tool to switch on", Boolean(tool), true);
+    check("...and it starts switched off", tool.getAttribute("aria-pressed"), "false");
+    check("a diagram of three boxes starts with no arrows", arrows(), 0);
+
+    // Off, a drag on a box moves the box. That is what a drag has always meant
+    // and switching a tool on is the only thing that may change it.
+    const placeOf = (id) =>
+      canvas.querySelector(`.dd-node[data-id="${id}"]`).getAttribute("transform");
+    const nudge = (id, dx, dy) => {
+      const [x, y] = middleOf(id);
+      canvas.querySelector(`.dd-node[data-id="${id}"]`)
+        .dispatchEvent(new window.MouseEvent("pointerdown", at(x, y)));
+      canvas.dispatchEvent(new window.MouseEvent("pointermove", at(x + dx, y + dy)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x + dx, y + dy)));
+    };
+
+    nudge("A", 0, 60);
+    check("with the tool off, dragging a box moves it rather than joining it",
+      [arrows(), placeOf("A")], [0, "translate(100,160)"]);
+    nudge("A", 0, -60);
+    check("...and back where it was, so what follows starts where it started",
+      placeOf("A"), "translate(100,100)");
+
+    tool.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("switching it on says so", tool.getAttribute("aria-pressed"), "true");
+    check("...and the canvas says so too",
+      canvas.classList.contains("is-joining"), true);
+
+    drag("A", "B");
+    check("a drag between two boxes is an arrow", joined(), ["A->B"]);
+    check("...and the tool is still on", tool.getAttribute("aria-pressed"), "true");
+
+    // The whole reason for it being a mode: the second arrow costs the same as
+    // the first.
+    drag("A", "C");
+    check("...so the next drag is the next arrow", joined(), ["A->B", "A->C"]);
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/joining.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...and both reach the file as ordinary links",
+      /A --> B/.test(written) && /A --> C/.test(written), true);
+
+    // A mode wants a way out that is not finding the button that turned it on.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    check("Escape puts the tool away", tool.getAttribute("aria-pressed"), "false");
+    drag("A", "B");
+    check("...and a drag is a drag again", joined().length, 2);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    check("A switches it on", tool.getAttribute("aria-pressed"), "true");
+
+    /* Two modes at once is one mode too many, and the hand is the one that
+     * takes the whole canvas: a drag that is both an arrow and a pan is
+     * neither.
+     */
+    const hand = [...page.document.querySelectorAll(".ve-diagram-zoom-step[aria-pressed]")]
+      .find((one) => /Hand/i.test(one.getAttribute("title") || ""));
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "h", bubbles: true }));
+    check("reaching for the hand puts the arrow tool away",
+      [hand.getAttribute("aria-pressed"), tool.getAttribute("aria-pressed")], ["true", "false"]);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    check("...and reaching back for the arrow puts the hand away",
+      [hand.getAttribute("aria-pressed"), tool.getAttribute("aria-pressed")], ["false", "true"]);
+
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "v", bubbles: true }));
+    check("...and V is the pointer again", tool.getAttribute("aria-pressed"), "false");
+
+    // Ctrl+A is select-all and has been since before there was a tool to arm.
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+    check("Ctrl+A is still select-all, not the arrow tool",
+      [tool.getAttribute("aria-pressed"), canvas.querySelectorAll(".dd-ring-one").length],
+      ["false", 3]);
+  }
+
   console.log("=== an arrow goes where it is dragged ===");
   {
     await server.request("POST", "/api/docs",
@@ -1668,6 +1799,17 @@ async function run(server, cookie) {
     check("two boxes beside each other are drawn in one layer",
       canvas.querySelectorAll(".dd-nodes").length, 1);
     check("...in the order the file lists them", painted(), ["Chair", "Hall"]);
+
+    /* Selecting is not carrying. A press that never goes anywhere never redraws
+     * either, so a box raised on the way down stays raised — which is a
+     * container that covers everything inside it for as long as it is selected,
+     * and nothing to put it back.
+     */
+    const [still, stillX, stillY] = grab("Chair");
+    still.dispatchEvent(new window.MouseEvent("pointerdown", at(stillX, stillY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(stillX, stillY)));
+    check("selecting a box does not lift it over the ones after it",
+      painted(), ["Chair", "Hall"]);
 
     /* Picked up and carried in. The layer a box belongs in is only worked out
      * when the drawing is made, so between picking it up and putting it down
@@ -2207,7 +2349,11 @@ async function run(server, cookie) {
     const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
 
     check("a diagram in a document has a way out to the page",
-      /ve-embed-expand/.test(appSource), true);
+      /ve-embed-build/.test(appSource), true);
+    // One way in, and it is that one. The canvas used to open inside the block
+    // as well, in a strip too small for what it has grown into.
+    check("...and no second way that opens it in the block instead",
+      /openDiagramBuilder/.test(appSource), false);
     check("...which leaves the document where the page will look for it",
       /stashDocument\(state\.pageEdit\.file, markdown\)/.test(appSource), true);
     check("...and the document editor picks it back up",

@@ -3473,25 +3473,16 @@ body.page-editing #dockEdit {
   border-color: var(--accent-muted);
 }
 
-/* --- The flowchart builder ------------------------------------------------
+/* --- The diagram canvas ----------------------------------------------------
 
-   A Mermaid flowchart has no coordinates in it — the renderer decides where
-   every box goes — so there is nothing here to drag. What there is instead is
-   the two lists the file actually holds, steps and arrows, with the diagram
-   drawn from them above and redrawn as they change. Tapping a box in it goes to
-   that box's row, which is what stops this being a form that happens to sit
-   near a picture.
+   The canvas and the panel beside it, on the page a diagram opens on. It used
+   to open inside a document block as well, in a strip a few hundred pixels
+   tall; everything it has grown since — a palette, an inspector, a zoom bar,
+   arrows drawn by dragging — wants room, so there is one way in and it goes to
+   the page.
 
-   The whole panel is plain flow layout on purpose: it is redrawn on every step
-   added or removed, and it has to stay cheap on a phone. */
-.markdown-body.doc-editing .ve-embed.is-builder-open {
-  margin: 16px 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  overflow: hidden;
-}
-
+   The panel is plain flow layout on purpose: it is redrawn on every step added
+   or removed, and it has to stay cheap on a phone. */
 .ve-diagram-head {
   display: flex;
   align-items: center;
@@ -3697,6 +3688,16 @@ body.page-editing #dockEdit {
 .ve-diagram-canvas.is-panning,
 .ve-diagram-canvas.is-panning-armed:active {
   cursor: grabbing;
+}
+
+/* The arrow tool is a mode, and a mode has to look like one or it is a canvas
+   that has quietly stopped doing what it did a moment ago. */
+.ve-diagram-canvas.is-joining {
+  cursor: crosshair;
+}
+
+.ve-diagram-canvas.is-joining .dd-node {
+  cursor: crosshair;
 }
 
 /* The strokes of the selection ring and its handles are furniture, not part of
@@ -3939,7 +3940,11 @@ body.page-editing #dockEdit {
   stroke-width: 2.5px;
 }
 
-.dd-editing .dd-paper {
+/* Nothing sets a fill here on purpose. The rect carries fill="url(#grid)", and
+   a fill in this stylesheet would beat it: a presentation attribute loses to
+   every author rule, so painting the paper here painted over the grid. The
+   colour lives inside the pattern instead. */
+.dd-editing .dd-grid-back {
   fill: var(--canvas);
 }
 
@@ -3947,6 +3952,9 @@ body.page-editing #dockEdit {
   fill: none;
   stroke: var(--border);
   stroke-width: 1px;
+  /* Faint enough to be paper rather than graph paper: it is there to say which
+     way is straight, not to be looked at. */
+  opacity: 0.55;
 }
 
 .dd-editing .dd-ring {

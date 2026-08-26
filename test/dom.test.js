@@ -1609,31 +1609,20 @@ async function run(server) {
     check("...and the heading is as it was", savedSums.startsWith("# Sums\n"), true);
   }
 
-  console.log("=== a flowchart is built from its steps, not typed ===");
+  console.log("=== a diagram is built on a page of its own ===");
   {
-    // Two diagrams, and the difference between them is the whole safety story:
-    // the first is steps and arrows and nothing else, the second has a subgraph
-    // in it. A builder that models only steps and arrows must open the one and
-    // refuse the other, because writing the second one back would delete the
-    // subgraph nobody asked it to touch.
-    const source = [
-      "# Flow",
-      "",
-      "```mermaid",
-      "flowchart TD",
-      "  A[Start] --> B[End]",
-      "```",
-      "",
-      "```mermaid",
-      "flowchart TD",
-      "  subgraph outer",
-      "  C --> D",
-      "  end",
-      "```",
-      "",
-      "After.",
-      ""
-    ].join("\n");
+    /* Two diagrams, and the difference between them is the whole safety story:
+     * the first is steps and arrows and nothing else, the second has a subgraph
+     * in it, which the canvas cannot draw and must therefore not offer to.
+     *
+     * The canvas used to open inside the block as well, in a strip a few
+     * hundred pixels tall with the document either side of it. Everything it
+     * has grown since — a palette, an inspector, a zoom bar, arrows drawn by
+     * dragging — wants room, and a page has room. So Build goes to the page,
+     * and this is the document editor's half of that: what it offers, and what
+     * it hands across.
+     */
+    const source = "# Flow\n\n```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```\n\n```mermaid\nflowchart TD\n  subgraph outer\n  C --> D\n  end\n```\n\nAfter.\n";
 
     await window.eval(`window.__t.requestJson("/api/docs", {
       method: "POST",
@@ -1651,7 +1640,7 @@ async function run(server) {
 
     const embeds = [...doc.querySelectorAll("#docContent .ve-embed")];
     check("both diagrams are blocks that keep their source", embeds.length, 2);
-    check("the one the builder understands offers to build it",
+    check("the one the canvas understands offers to build it",
       Boolean(embeds[0].querySelector(".ve-embed-build")), true);
     check("...and the one with a subgraph in it does not",
       Boolean(embeds[1].querySelector(".ve-embed-build")), false);
@@ -1660,539 +1649,34 @@ async function run(server) {
     check("a buildable diagram calls its source button by the shorter name",
       embeds[0].querySelector(".ve-embed-source-open").textContent.trim(), "Markdown");
 
-    const embed = embeds[0];
-    embed.querySelector(".ve-embed-build").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    // One way in. Two buttons that both opened a canvas, one of them in a strip
+    // too small for it, was one button too many.
+    check("...and one way in, not two",
+      embeds[0].querySelectorAll(".ve-embed-build, .ve-embed-expand").length, 1);
 
-    const canvas = embed.querySelector(".ve-diagram-canvas");
-    const inspector = embed.querySelector(".ve-diagram-inspector");
-    const palette = embed.querySelector(".ve-diagram-palette");
-    const svg = () => canvas.querySelector("svg");
-    const boxes = () => [...canvas.querySelectorAll(".dd-node")].map((g) => g.getAttribute("data-id"));
-    const markdown = () => window.eval("window.__t.collectPageMarkdown()");
-
-    check("Build opens a canvas, not a text box", Boolean(canvas), true);
-    check("...with no source box in sight", embed.querySelectorAll(".ve-embed-source").length, 0);
-    check("...and a place for whatever is selected", Boolean(inspector), true);
-    check("...and shapes to drag onto it", palette.querySelectorAll(".ve-diagram-tool").length > 1, true);
-    check("nothing is selected to begin with, so it says what to do",
-      embed.querySelector(".ve-diagram-hint").textContent, "Tap a box to work on it, or drag one to move it.");
-
-    // The diagram is ours now: a real SVG, drawn from the model, with a group
-    // per step that carries the id it stands for. Nothing here waits on Mermaid
-    // and nothing here downloads it.
-    check("the diagram is drawn rather than rendered", Boolean(svg()), true);
-    check("...with a box per step", boxes(), ["A", "B"]);
-    check("...and an arrow between them",
-      canvas.querySelectorAll(".dd-edge").length, 1);
-    // A window onto the diagram rather than a picture of it: the same canvas
-    // the standalone page gets, so the wheel, the space bar and two fingers all
-    // mean here what they mean there.
-    check("...on paper with no edges, because a diagram is a place",
-      svg().classList.contains("dd-viewport"), true);
-    check("...which fills what it is given rather than being a size",
-      svg().getAttribute("width"), "100%");
-
-    // Every gesture is a pointer press, a move and a release. jsdom has no
-    // PointerEvent, but an event is dispatched by its name: a MouseEvent named
-    // pointerdown reaches a pointerdown listener with the coordinates on it,
-    // which is all any of this reads.
-    const at = (x, y) => ({ clientX: x, clientY: y, bubbles: true });
-    const press = (target, x, y) => target.dispatchEvent(new window.MouseEvent("pointerdown", at(x, y)));
-    const move = (x, y) => canvas.dispatchEvent(new window.MouseEvent("pointermove", at(x, y)));
-    const release = (x, y) => canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x, y)));
-
-    // jsdom measures nothing, so the SVG reports a zero-sized box and a point on
-    // the screen is a point in the diagram. Which is what the builder is for:
-    // these are the coordinates the file will hold.
-    const box = (id) => {
-      const group = canvas.querySelector(`.dd-node[data-id="${id}"]`);
-      const found = /translate\(([-\d.]+),([-\d.]+)\)/.exec(group.getAttribute("transform"));
-      return [Number(found[1]), Number(found[2])];
-    };
-
-    const tap = (id) => {
-      const [x, y] = box(id);
-      press(canvas.querySelector(`.dd-node[data-id="${id}"]`), x + 10, y + 10);
-      release(x + 10, y + 10);
-    };
-
-    tap("A");
-    check("tapping a box selects it", Boolean(inspector.querySelector(".ve-diagram-selected")), true);
-    check("...and offers its name straight away",
-      inspector.querySelector(".ve-diagram-text").value, "Start");
-    check("...and the arrow it already has",
-      inspector.querySelectorAll(".ve-diagram-arrow").length, 1);
-    check("...and draws a ring on it, in the diagram rather than over it",
-      canvas.querySelectorAll(".dd-marks .dd-ring").length, 1);
-    check("...with a handle to resize it by",
-      canvas.querySelectorAll('[data-role="resize"]').length, 1);
-    check("...and one to draw an arrow from",
-      canvas.querySelectorAll('[data-role="connect"]').length, 1);
-
-    // Dragging is the whole point of the layout comments. Nothing else in the
-    // file can say where a box is.
-    // Dragged by an amount the grid has to round, or the snap would be proved by
-    // arithmetic that happened to land on it anyway.
-    const beforeDrag = box("A");
-    press(canvas.querySelector('.dd-node[data-id="A"]'), beforeDrag[0] + 10, beforeDrag[1] + 10);
-    move(beforeDrag[0] + 137, beforeDrag[1] + 73);
-    release(beforeDrag[0] + 137, beforeDrag[1] + 73);
-
-    check("dragging a box moves it", box("A"), [beforeDrag[0] + 130, beforeDrag[1] + 60]);
-    check("...snapped to the grid it is drawn on", box("A").every((n) => n % 10 === 0), true);
-    check("...and the file now says where it is",
-      markdown().includes(`%% @ A ${beforeDrag[0] + 130},${beforeDrag[1] + 60} 90x50`), true);
-    check("...under a header saying what those lines are",
-      markdown().includes("%% layout v1"), true);
-    check("...inside a diagram that is still a diagram",
-      markdown().includes("flowchart TD\n    %% layout v1"), true);
-    check("...and the bar says there is something to save",
-      doc.getElementById("pageEditState").textContent, "Unsaved changes");
-
-    // A tap that wobbles is still a tap: below the slop a press and release
-    // leaves the box where it is and leaves the drawing alone. The second half
-    // of that is the half that matters — a redraw on every tap is a diagram
-    // that flickers under the finger.
-    const steady = box("B");
-    tap("B");
-    const untouched = svg();
-    press(canvas.querySelector('.dd-node[data-id="B"]'), steady[0] + 10, steady[1] + 10);
-    move(steady[0] + 13, steady[1] + 12);
-    release(steady[0] + 13, steady[1] + 12);
-    check("a tap that wobbles does not move the box", box("B"), steady);
-    check("...or redraw the diagram under the finger", svg() === untouched, true);
-
-    // The same move, without a pointing device. The ring is drawn in the
-    // diagram's own coordinates and slid along with the box during a drag, so a
-    // move with no drag behind it has to leave it somewhere real rather than at
-    // an offset from a drag that never started.
-    const nudged = box("B");
-    const nudge = () => canvas.dispatchEvent(
-      new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-
-    // Dragging snaps and an arrow key does not, which is the whole reason to
-    // reach for one: the grid has put something a few pixels from where you
-    // want it, and only an arrow key can say so.
-    nudge();
-    check("an arrow key moves the selected box by one pixel",
-      box("B"), [nudged[0] + 1, nudged[1]]);
-
-    // And again once the redraw has caught up, which is the case that matters:
-    // these marks were drawn fresh, with no drag behind them to measure from.
-    await new Promise((r) => setTimeout(r, 400));
-    nudge();
-    check("...and again after it has been redrawn", box("B"), [nudged[0] + 2, nudged[1]]);
-
-    // Shift is the coarse one, and it lands on the grid rather than a step away
-    // from wherever those two pixels left the box.
-    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
-      { key: "ArrowRight", shiftKey: true, bubbles: true }));
-    check("...while shift moves it a whole grid step, onto the grid",
-      box("B"), [nudged[0] + 10, nudged[1]]);
-    check("...leaving the ring somewhere on the paper",
-      /NaN/.test(canvas.querySelector(".dd-marks").getAttribute("transform") || ""), false);
-
-    // The corner drags the box bigger. It never shrinks on its own afterwards.
-    tap("B");
-    const grip = canvas.querySelector('[data-role="resize"]');
-    press(grip, steady[0] + 90, steady[1] + 50);
-    move(steady[0] + 190, steady[1] + 100);
-    release(steady[0] + 190, steady[1] + 100);
-    check("the corner resizes the box", markdown().includes("%% @ B "), true);
-    check("...to the size it was dragged to",
-      /%% @ B [-\d]+,[-\d]+ 190x100/.test(markdown()), true);
-
-    // Renaming, which is the one thing that waits: a redraw on every keystroke
-    // is a redraw nobody asked for.
-    tap("A");
-    const name = inspector.querySelector(".ve-diagram-text");
-    name.value = "Begin";
-    name.dispatchEvent(new window.Event("input", { bubbles: true }));
-
-    check("renaming a step reaches the document immediately",
-      markdown().includes("A[Begin]"), true);
-    check("the diagram waits rather than redrawing on every keystroke",
-      canvas.querySelector('.dd-node[data-id="A"]').textContent.includes("Begin"), false);
-
-    await new Promise((r) => setTimeout(r, 400));
-    check("...then catches up with what was typed",
-      canvas.querySelector('.dd-node[data-id="A"]').textContent.includes("Begin"), true);
-
-    // The circle on the edge of the selected box, dragged onto another box, is
-    // an arrow. Let go of it on empty paper and it is a new box instead,
-    // already joined — the gesture a flowchart is actually built with.
-    tap("A");
-    const arrowsIn = () => canvas.querySelectorAll(".dd-edge").length;
-    const before = arrowsIn();
-    const spot = box("A");
-    const target = box("B");
-    press(canvas.querySelector('[data-role="connect"]'), spot[0] + 100, spot[1] + 25);
-    move(target[0] + 40, target[1] + 40);
-    release(target[0] + 40, target[1] + 40);
-    check("dragging the handle onto another box draws an arrow", arrowsIn(), before + 1);
-    // Two arrows between the same two boxes is a real thing — a yes and a no —
-    // so the second one is a second arrow rather than a no-op, and the drawing
-    // gives each of them its own lane off the middle of the box.
-    check("...from the box it was dragged off",
-      markdown().split("\n").filter((line) => /^\s+A --> B$/.test(line)).length, 2);
-
-    tap("A");
-    const grown = box("A");
-    press(canvas.querySelector('[data-role="connect"]'), grown[0] + 100, grown[1] + 25);
-    move(grown[0] + 400, grown[1] + 300);
-    release(grown[0] + 400, grown[1] + 300);
-    check("letting go on empty paper grows a new box there", boxes().length, 3);
-    check("...joined to the one it was drawn from", markdown().includes("A --> n1"), true);
-    // Centred on where the finger was, then snapped to the grid — so "where it
-    // was let go" is within half a grid step of it, not on it.
-    const dropped = box("n1");
-    check("...where it was let go, not where a layout engine would have put it",
-      Math.abs(dropped[0] - (grown[0] + 355)) <= 5 && Math.abs(dropped[1] - (grown[1] + 275)) <= 5, true);
-    check("...snapped there too", dropped.every((n) => n % 10 === 0), true);
-    check("...and it is what is selected now, ready to be named",
-      inspector.querySelector(".ve-diagram-text").value, "Step 3");
-
-    const shape = inspector.querySelector(".ve-diagram-shape");
-    shape.value = "diamond";
-    shape.dispatchEvent(new window.Event("change", { bubbles: true }));
-    check("a shape is a menu, not a bracket to remember",
-      markdown().includes("n1{Step 3}"), true);
-
-    // A table box is an ordinary Mermaid node with rows in its label, so the
-    // file still renders anywhere. The layout line is what says to rule a line
-    // under the first row.
-    const tableTool = [...palette.querySelectorAll(".ve-diagram-tool")]
-      .find((tool) => tool.textContent === "Table");
-    tableTool.dispatchEvent(new window.MouseEvent("pointerdown", at(0, 0)));
-    tableTool.dispatchEvent(new window.MouseEvent("pointerup", at(0, 0)));
-    check("the palette adds a shape", boxes().length, 4);
-    check("...and a table says it is one, in a comment rather than in the diagram",
-      /%% @ \w+ [-\d]+,[-\d]+ \d+x\d+ kind=table/.test(markdown()), true);
-    check("...with its rows written the way Mermaid writes a line break",
-      markdown().includes("field: type"), true);
-    check("...drawn with a rule under its title",
-      canvas.querySelectorAll(".dd-node-table .dd-rule").length, 1);
-
-    const rows = inspector.querySelector(".ve-diagram-text");
-    rows.value = "Person\nname: string\nage: int";
-    rows.dispatchEvent(new window.Event("input", { bubbles: true }));
-    check("its rows are lines in a box, not tags to type",
-      markdown().includes('n2["Person<br/>name: string<br/>age: int"]'), true);
-
-    // Arrow to…: arm it, then tap the box it should point at. The way to draw
-    // an arrow without a pointing device, and the way to draw one to a box that
-    // is off the edge of the paper.
-    tap("A");
-    inspector.querySelector(".ve-diagram-connect").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    check("arming an arrow says what to do next",
-      embed.querySelector(".ve-diagram-hint").textContent, "Now tap the step this one should point at.");
-
-    const armed = arrowsIn();
-    tap("n1");
-    check("tapping the target draws the arrow", arrowsIn(), armed + 1);
-    check("...and the hint stops asking for a target",
-      embed.querySelector(".ve-diagram-hint").textContent,
-      "Double-click a box, or press Enter, to type into it.");
-
-    const arrowLabel = inspector.querySelector(".ve-diagram-arrow .ve-diagram-text");
-    arrowLabel.value = "yes";
-    arrowLabel.dispatchEvent(new window.Event("input", { bubbles: true }));
-    check("an arrow can be labelled without typing pipes",
-      markdown().includes("A -->|yes| B"), true);
-
-    // Tidy is the way back: every box arranged again along the flow, which is
-    // also what every other reader of this file does with it.
-    const scattered = box("n1");
-    embed.querySelector(".ve-diagram-tidy").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    check("Tidy arranges everything again", String(box("n1")) === String(scattered), false);
-    check("...still saying where everything is", markdown().includes("%% @ n1 "), true);
-
-    const flow = embed.querySelector(".ve-diagram-direction");
-    flow.value = "LR";
-    flow.dispatchEvent(new window.Event("change", { bubbles: true }));
-    check("the direction is a menu in the header, reachable with nothing selected",
-      markdown().includes("flowchart LR"), true);
-
-    // Removing a step has to take its arrows with it: an arrow that names a
-    // step Mermaid has never heard of declares it, and the step comes back as
-    // an empty box. Its position has to go too, or the next box to be given
-    // that id inherits where this one was.
-    // Dragged out to the far corner first, so that the paper is demonstrably
-    // bigger for its being there — a position left behind by a box that is gone
-    // is paper nobody can reach the end of.
-    tap("n1");
-    const corner = box("n1");
-    press(canvas.querySelector('.dd-node[data-id="n1"]'), corner[0] + 10, corner[1] + 10);
-    move(corner[0] + 610, corner[1] + 510);
-    release(corner[0] + 610, corner[1] + 510);
-    // The paper has no edges to measure any more, so what has to shrink is the
-    // diagram's own reach: the furthest a box has been put.
-    const reach = () => Math.max(0, ...boxes().map((id) => box(id)[0]));
-    const stretched = reach();
-
-    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
-    check("Delete removes the selected step", boxes().includes("n1"), false);
-    check("...and the reach it was out at", reach() < stretched, true);
-    check("...and every arrow that touched it",
-      markdown().includes("n1"), false);
-    check("...and nothing is selected", Boolean(inspector.querySelector(".ve-diagram-selected")), false);
-
-    // The full lists are still there, folded away: the way to reach an arrow
-    // nobody can find on a crowded diagram, and the way to work without a
-    // pointing device.
-    const all = embed.querySelector(".ve-diagram-all");
-    all.open = true;
-    all.dispatchEvent(new window.Event("toggle", { bubbles: true }));
-    const lists = () => [...embed.querySelectorAll(".ve-diagram-all .ve-diagram-rows")];
-    check("every step is in the full list", lists()[0].children.length, 3);
-    check("...named as the diagram names it",
-      [...lists()[0].children].map((row) => row.querySelector(".ve-diagram-text").value)[0], "Begin");
-    check("every arrow is there too", lists()[1].children.length, 2);
-
-    /* --- a diagram in a document is a place too --------------------------------
-     *
-     * Pan and zoom used to be gated on the standalone page. In a document the
-     * wheel, the space bar and two fingers all did nothing, and a diagram wider
-     * than the strip could not be reached at all.
+    /* What Build hands across. jsdom cannot navigate, so what is checked here
+     * is the half that matters: the document is left where the diagram page
+     * will find it, unsaved changes and all, before anything navigates.
      */
-    const zoomField = embed.querySelector(".ve-diagram-zoom input");
-    check("a diagram in a document has a zoom of its own", Boolean(zoomField), true);
-    check("...reading where the diagram is", zoomField.value, "100%");
+    const typed = window.eval("window.__t.collectPageMarkdown()");
+    check("the document has the diagram in it to begin with",
+      typed.includes("flowchart TD"), true);
 
-    const scaleNow = () => {
-      const view = canvas.querySelector(".dd-view");
-      return Number(/scale\(([-\d.]+)\)/.exec(view.getAttribute("transform"))[1]);
-    };
-    check("...and a view to read it from", scaleNow(), 1);
+    embeds[0].querySelector(".ve-embed-build")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
-    canvas.dispatchEvent(new window.WheelEvent("wheel",
-      { deltaY: -100, clientX: 100, clientY: 100, ctrlKey: true,
-        bubbles: true, cancelable: true }));
-    check("Ctrl and the wheel zooms the diagram", scaleNow() > 1, true);
-    check("...and the reading follows it", zoomField.value === "100%", false);
+    const across = window.eval('window.sessionStorage.getItem("azadocs:diagram:flow.md")');
+    check("Build leaves the document where the diagram page will find it",
+      typeof across === "string", true);
+    check("...as the document on screen rather than the one on disk", across, typed);
+    check("...and does not open a canvas in the block instead",
+      doc.querySelectorAll("#docContent .ve-diagram-canvas").length, 0);
 
-    canvas.dispatchEvent(new window.WheelEvent("wheel",
-      { deltaY: 100, clientX: 100, clientY: 100, ctrlKey: true,
-        bubbles: true, cancelable: true }));
-    check("...and the other way back again", scaleNow(), 1);
-
-    const offset = () => {
-      const view = canvas.querySelector(".dd-view");
-      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(view.getAttribute("transform"));
-      return [Number(found[1]), Number(found[2])];
-    };
-
-    const restAt = offset();
-    canvas.dispatchEvent(new window.WheelEvent("wheel",
-      { deltaY: 90, clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
-    check("a bare wheel moves about rather than zooming",
-      [offset()[0] - restAt[0], offset()[1] - restAt[1]], [0, -90]);
-    check("...leaving the zoom alone", scaleNow(), 1);
-
-    // Space turns any drag into a pan, which is how every canvas has worked
-    // since before any of them had a canvas.
-    const keyOn = (target, key, more = {}) =>
-      target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...more }));
-
-    const keyOnFirst = (target, key, more = {}) =>
-      target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...more }));
-
-    keyOnFirst(canvas, " ");
-    check("holding space arms a pan", canvas.classList.contains("is-panning-armed"), true);
-    canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
-    check("...and letting go puts it down", canvas.classList.contains("is-panning-armed"), false);
-
-    /* --- the hand -------------------------------------------------------------
-     *
-     * Dragging empty paper pulls a band round what it touches, which is what a
-     * drag means wherever there is a band to pull — so the other thing a drag
-     * can mean needs somewhere to be said that is not a key held down.
-     */
-    const hand = embed.querySelector('.ve-diagram-zoom-step[aria-pressed]');
-    check("the bar offers a hand", Boolean(hand), true);
-    check("...which starts switched off", hand.getAttribute("aria-pressed"), "false");
-
-    const pannedTo = offset();
-    press(canvas, 400, 400);
-    move(300, 340);
-    release(300, 340);
-    check("dragging the paper without it pulls a band, and moves nothing",
-      offset(), pannedTo);
-
-    hand.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    check("...and switching it on says so", hand.getAttribute("aria-pressed"), "true");
-    check("...with the cursor to match", canvas.classList.contains("is-panning-armed"), true);
-
-    press(canvas, 400, 400);
-    move(300, 340);
-    release(300, 340);
-    check("...after which the same drag moves the diagram",
-      [offset()[0] - pannedTo[0], offset()[1] - pannedTo[1]], [-100, -60]);
-
-    // A drag on a box moves the diagram too, rather than the box: a hand is a
-    // hand wherever it is put down.
-    const stayedAt = box("A");
-    const overBox = canvas.querySelector('.dd-node[data-id="A"]');
-    press(overBox, stayedAt[0] + 10, stayedAt[1] + 10);
-    move(stayedAt[0] + 60, stayedAt[1] + 10);
-    release(stayedAt[0] + 60, stayedAt[1] + 10);
-    check("...and a drag on a box moves the diagram, not the box", box("A"), stayedAt);
-
-    keyOnFirst(canvas, "v");
-    check("V puts the hand down again", hand.getAttribute("aria-pressed"), "false");
-    keyOnFirst(canvas, "h");
-    check("...and H picks it back up", hand.getAttribute("aria-pressed"), "true");
-    keyOnFirst(canvas, "Escape");
-    check("...as does Escape, which is the way out of any mode",
-      hand.getAttribute("aria-pressed"), "false");
-
-    // A band cannot be pulled by a hand. One left half-pulled when the hand
-    // arrives would have nothing to finish it, and would take whatever it had
-    // reached across with it when the drag ended.
-    press(canvas, -50, -50);
-    check("nothing is held as a band starts", canvas.querySelectorAll(".dd-ring").length, 0);
-    move(900, 900);
-    hand.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    release(900, 900);
-    check("...and a band given up for the hand takes nothing with it",
-      canvas.querySelectorAll(".dd-ring").length, 0);
-    keyOnFirst(canvas, "Escape");
-
-    /* --- the diagram's keys are the diagram's ----------------------------------
-     *
-     * The builder is mounted inside the page editor, which listens for Ctrl+Z,
-     * Escape and Ctrl+S of its own. Every key the canvas answered used to reach
-     * it as well, so undoing a box undid the whole document — and the document
-     * coming back re-rendered the block, taking the builder with it.
-     */
-    /* Keys only reach a canvas that has focus, and clicking one inside a
-     * document leaves focus on the document — which is where Ctrl+Z was going
-     * instead of into the diagram. */
-    zoomField.focus();
-    // Compared by identity rather than by value: two different elements are both
-    // {} once JSON has had them, so a check written that way cannot fail.
-    check("the caret can be somewhere else in the builder",
-      doc.activeElement === zoomField, true);
-    tap("A");
-    check("...and pressing the diagram is saying the diagram is what you are in",
-      doc.activeElement === canvas, true);
-
-    const settled = box("A");
-    keyOn(canvas, "ArrowRight", { shiftKey: true });
-    check("a box can be nudged with the keyboard", box("A")[0] > settled[0], true);
-
-    keyOn(canvas, "z", { ctrlKey: true });
-    check("Ctrl+Z in a diagram takes back the nudge", box("A"), settled);
-    check("...and leaves the builder standing", canvas.isConnected, true);
-    check("...because the document's own undo never ran",
-      window.eval("window.__t.pageHistory.future.length"), 0);
-
-    // Counted rather than inferred: what the canvas has answered has to stop at
-    // the canvas, because everything above it — the page editor, the window —
-    // has its own Ctrl+Z, its own Escape and its own Ctrl+S, and none of them
-    // are what somebody working in a diagram is asking for.
-    let heard = 0;
-    const countKey = () => { heard += 1; };
-    doc.body.addEventListener("keydown", countKey);
-
-    keyOn(canvas, "z", { ctrlKey: true });
-    keyOn(canvas, "ArrowRight");
-    keyOn(canvas, " ");
-    check("what the canvas answers does not go on to the page", heard, 0);
-    // Put down again, or every press after this is a pan rather than a choice.
-    canvas.dispatchEvent(new window.KeyboardEvent("keyup", { key: " ", bubbles: true }));
-
-    tap("A");
-    heard = 0;
-    keyOn(canvas, "Escape");
-    check("Escape lets go of the box",
-      Boolean(inspector.querySelector(".ve-diagram-selected")), false);
-    check("...and goes no further than the box it let go of", heard, 0);
-    check("...rather than leaving the document editor",
-      window.eval("window.__t.state.pageEdit.active"), true);
-
-    // With nothing left to dismiss it is allowed out, so a diagram is never a
-    // place a key press cannot leave.
-    heard = 0;
-    keyOn(canvas, "Escape");
-    check("...and an Escape with nothing to dismiss is let out", heard, 1);
-    doc.body.removeEventListener("keydown", countKey);
-
-    /* Focus is not always on the paper. A shape menu, a button — anything in
-     * the builder that is not a text box — and the page editor would take a
-     * Ctrl+Z pressed there, throwing the builder away just the same.
-     */
-    tap("A");
-    const shapeMenu = inspector.querySelector("select");
-    check("the builder has a control that is not a text box", Boolean(shapeMenu), true);
-    keyOn(shapeMenu, "z", { ctrlKey: true });
-    check("Ctrl+Z from a control in the builder is not the document's either",
-      canvas.isConnected, true);
-    check("...so the document's own undo still never ran",
-      window.eval("window.__t.pageHistory.future.length"), 0);
-
-    /* --- the way into a box ---------------------------------------------------- */
-    const field = () => canvas.querySelector(".ve-diagram-inline");
-
-    tap("A");
-    check("the hint says how to get into a box",
-      embed.querySelector(".ve-diagram-hint").textContent,
-      "Double-click a box, or press Enter, to type into it.");
-    check("nothing is being typed into yet", Boolean(field()), false);
-
-    keyOn(canvas, "Enter");
-    check("Enter opens the box for typing", Boolean(field()), true);
-    check("...holding what the box already says", field().value, "Begin");
-    check("...with the caret in it", doc.activeElement === field(), true);
-
-    field().value = "Start here";
-    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    check("...and Enter agrees with what was typed",
-      markdown().includes("A[Start here]"), true);
-    check("...and puts the field away", Boolean(field()), false);
-
-    canvas.querySelector('.dd-node[data-id="A"]')
-      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
-    check("double-clicking a box opens it too", Boolean(field()), true);
-
-    field().value = "Never mind";
-    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    check("...and Escape leaves the box as it was",
-      markdown().includes("A[Start here]"), true);
-    check("...without also letting go of it",
-      Boolean(inspector.querySelector(".ve-diagram-selected")), true);
-
-    keyOn(canvas, "F2");
-    check("F2 is the same way in", Boolean(field()), true);
-    field().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-
-    // A handful of boxes has no one label to type into. The key is still the
-    // diagram's — it must not go on to the page — but it opens nothing.
-    keyOn(canvas, "a", { ctrlKey: true });
-    check("Ctrl+A holds the whole lot", Boolean(canvas.querySelector(".dd-frame")), true);
-    keyOn(canvas, "Enter");
-    check("...and Enter on a handful opens nothing", Boolean(field()), false);
-    keyOn(canvas, "Escape");
-
-    embed.querySelector(".ve-embed-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    check("Done returns the block to its rendering",
-      embed.querySelectorAll(".ve-diagram-canvas").length, 0);
-    check("...and offers to build it again",
-      Boolean(embed.querySelector(".ve-embed-build")), true);
-    check("...drawn where it was left rather than handed to a layout engine",
-      Boolean(embed.querySelector(".ve-embed-view svg.dd")), true);
-
-    await window.eval("window.__t.savePageEdit()");
-    await new Promise((r) => setTimeout(r, 900));
-    const savedFlow = JSON.parse((await get("/api/docs/flow.md")).body).content;
-    check("the built diagram reached the file", savedFlow.includes("flowchart LR"), true);
-    check("...carrying the arrangement in comments", /%% @ A \d+,\d+ 90x50/.test(savedFlow), true);
-    check("...and still fenced as mermaid", savedFlow.includes("```mermaid"), true);
-    check("...with the diagram itself still a diagram, under the name typed into it",
-      savedFlow.includes("    A[Start here]"), true);
-    check("the diagram nobody opened is untouched",
-      savedFlow.includes("  subgraph outer\n  C --> D\n  end"), true);
-    check("...and so is the prose", savedFlow.endsWith("After.\n"), true);
+    // Left behind, it would be picked up by an edit weeks later and quietly
+    // undo everything in between. The block after this one takes it properly.
+    window.eval('window.sessionStorage.removeItem("azadocs:diagram:flow.md")');
+    await window.eval("window.__t.cancelPageEdit({ confirm: false })");
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   console.log("=== a diagram leaves the document and comes back to it ===");
@@ -2208,7 +1692,7 @@ async function run(server) {
 
     const embed = doc.querySelector("#docContent .ve-embed");
     check("a buildable diagram offers a page of its own",
-      Boolean(embed.querySelector(".ve-embed-expand")), true);
+      Boolean(embed.querySelector(".ve-embed-build")), true);
 
     // Change something first, so what goes across is a document that would be
     // lost if the other page read the file instead.
@@ -2432,7 +1916,7 @@ async function run(server) {
     check("the caret lands back in a block of the document",
       Boolean(focused && focused.closest("#docContent .ve-block")), true);
 
-    /* Inserting a diagram opens the thing you make a diagram with.
+    /* Inserting a diagram goes to the thing you make a diagram with.
      *
      * A diagram is a fence, and for the frame between rendering the block and
      * drawing the diagram in it there is a <pre><code> in there holding the
@@ -2441,15 +1925,16 @@ async function run(server) {
      * type into and the button looks like it did nothing.
      */
     window.eval('window.__t.insertPageBlock("mermaid")');
-    const madeDiagram = doc.querySelector("#docContent .ve-embed.is-builder-open");
-    check("inserting a diagram opens the builder", Boolean(madeDiagram), true);
-    check("...on a canvas with the new diagram's boxes on it",
-      [...(madeDiagram?.querySelectorAll(".dd-node") || [])].map((g) => g.getAttribute("data-id")),
-      ["A", "B"]);
-    check("...and the shapes to add more with",
-      (madeDiagram?.querySelectorAll(".ve-diagram-tool") || []).length > 1, true);
-    check("...rather than the diagram's own source under the caret",
+    const madeDiagram = doc.querySelector("#docContent .ve-embed .ve-embed-build");
+    check("inserting a diagram offers to build it", Boolean(madeDiagram), true);
+    check("...and reaches for that rather than for the caret",
       Boolean(doc.activeElement?.closest?.("pre")), false);
+    check("...having handed the document across on the way",
+      typeof window.eval(
+        `window.sessionStorage.getItem(window.__t.diagramStashKey(window.__t.state.pageEdit.file))`),
+      "string");
+    window.eval(
+      `window.sessionStorage.removeItem(window.__t.diagramStashKey(window.__t.state.pageEdit.file))`);
 
     window.eval("window.__t.undoPageEdit()");
 
@@ -2806,10 +2291,11 @@ async function run(server) {
       /^# Notes\n\n\$\$/.test(window.eval("window.__t.collectPageMarkdown()")), true);
 
     press("mermaid");
-    const diagram = doc.querySelector("#docContent .ve-embed.is-builder-open");
+    const diagram = [...doc.querySelectorAll("#docContent .ve-embed")]
+      .find((one) => one.querySelector(".ve-embed-build"));
     check("a diagram appears", Boolean(diagram), true);
-    check("...opened on the canvas you make one on",
-      Boolean(diagram.querySelector(".ve-diagram-canvas .dd-node")), true);
+    check("...offering the canvas you make one on",
+      Boolean(diagram.querySelector(".ve-embed-build")), true);
     check("...as a fence the renderer will draw",
       window.eval("window.__t.collectPageMarkdown()").includes("```mermaid\nflowchart TD"), true);
 
