@@ -4006,6 +4006,33 @@ body.page-editing #dockEdit {
   cursor: nwse-resize;
 }
 
+/* An arrow is drawn 1.6px wide and is 1.6px wide to a finger too, so each one
+   carries a fat invisible copy of itself while it is being edited. That copy is
+   the thing that gets pressed, and pressing it bends the arrow. */
+.dd-editing .dd-hit {
+  stroke-width: 14px;
+  pointer-events: stroke;
+  cursor: crosshair;
+}
+
+/* A corner somebody put in an arrow, and the two ends they can pin to a side.
+   Hollow, so they read as marks on the line rather than as parts of it — an
+   arrow with a solid dot in the middle looks like an arrow with a dot. */
+.dd-editing .dd-via,
+.dd-editing .dd-pin {
+  fill: var(--canvas);
+  stroke: var(--accent-emphasis);
+  stroke-width: 2px;
+}
+
+.dd-editing .dd-via {
+  cursor: move;
+}
+
+.dd-editing .dd-pin {
+  cursor: grab;
+}
+
 .dd-editing .dd-handle-mark {
   stroke: var(--fg-on-emphasis);
   stroke-width: 1.6px;

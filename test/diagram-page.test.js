@@ -698,7 +698,7 @@ async function run(server, cookie) {
     tap("A");
     check("tapping a box selects it, and only it", [ringed(), framed()], [1, 0]);
     check("...with the handles that belong to one box",
-      canvas.querySelectorAll("[data-role]").length, 2);
+      canvas.querySelectorAll(".dd-marks [data-role]").length, 2);
 
     tap("B", { shiftKey: true });
     check("shift adds a second", [ringed(), framed()], [2, 1]);
@@ -1452,6 +1452,191 @@ async function run(server, cookie) {
     choose("Border", "Dotted");
     check("...and one choice dashes every one of them",
       [propOf("A", "--dd-dash"), propOf("B", "--dd-dash")], ["2 4", "2 4"]);
+  }
+
+  console.log("=== an arrow goes where it is dragged ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "bend.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,300 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/bend.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    // The view is fitted, so a point in the diagram is a point on the screen
+    // plus wherever the fit put it.
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const at = (x, y) => ({
+      clientX: (x * view().scale) + view().x,
+      clientY: (y * view().scale) + view().y,
+      bubbles: true
+    });
+    const lineOf = () => canvas.querySelector(".dd-edge .dd-line").getAttribute("d");
+    const corners = () => canvas.querySelectorAll(".dd-via").length;
+    const pins = () => canvas.querySelectorAll(".dd-pin").length;
+    const written = async () => (await server.request("GET", "/api/docs/bend.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const here = at(Number(spot[1]) + 10, Number(spot[2]) + 10);
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown", here));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", here));
+    };
+
+    check("an arrow nobody has touched has no corners in it", corners(), 0);
+    check("...and the box beside it shows none either", pins(), 0);
+
+    /* Nothing selected, nothing to bend. A finger landing on a line on the way
+     * to somewhere else would otherwise put a corner in it, on a canvas where
+     * pressing empty paper is how you move about.
+     */
+    canvas.querySelector(".dd-edge .dd-hit")
+      .dispatchEvent(new window.MouseEvent("pointerdown", at(140, 220)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(140, 220)));
+    check("pressing a line with nothing selected does not bend it", corners(), 0);
+
+    /* The handles are on the arrows of the box being worked on. Every waypoint
+     * of every arrow in a diagram of two hundred would be two hundred handles
+     * nobody asked for.
+     */
+    tap("A");
+    check("selecting a box offers the ends of its arrows", pins(), 2);
+
+    /* Pressing the line bends it: a corner where the finger went down, dragged
+     * from there. Which is how it works everywhere that has ever let anyone
+     * bend an arrow, and needs nothing explaining.
+     */
+    const hit = canvas.querySelector(".dd-edge .dd-hit");
+    check("...and a stroke wide enough to be caught hold of", Boolean(hit), true);
+
+    hit.dispatchEvent(new window.MouseEvent("pointerdown", at(140, 220)));
+    check("pressing the line puts a corner in it", corners(), 1);
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(60, 220)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(60, 220)));
+
+    /* The line goes through the corner. It does not necessarily *turn* at it —
+     * a corner on a straight run of the line is a corner the line passes
+     * through without changing direction, and listing it as a vertex would be
+     * listing a point that makes no difference to the shape.
+     */
+    check("...which the line then goes out to", lineOf().includes("L60,"), true);
+
+    await saveAndWait(page);
+    const bent = await written();
+    check("...and which the file says in the layout comment",
+      /%% edge 0 [^\n]*via=60,220/.test(bent), true);
+    check("...leaving the link itself alone", /^\s*A --> B\s*$/m.test(bent), true);
+
+    /* Dragged again, and it is the same corner rather than another one: a line
+     * that grew a corner every time it was touched would be unusable.
+     */
+    const corner = canvas.querySelector(".dd-via");
+    corner.dispatchEvent(new window.MouseEvent("pointerdown", at(60, 220)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(40, 260)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(40, 260)));
+    check("dragging a corner moves it rather than making another", corners(), 1);
+    check("...to where it was dragged",
+      [canvas.querySelector(".dd-via").getAttribute("cx"),
+        canvas.querySelector(".dd-via").getAttribute("cy")], ["40", "260"]);
+    check("...and the line goes out to it", lineOf().includes("L40,"), true);
+
+    /* A second corner, put in nearer the start of the line than the one already
+     * there. It has to go into the list before it, not after: the corners are
+     * in the order the line passes through them, and a line that collected them
+     * in the order they were thought of would double back to fetch each one.
+     */
+    canvas.querySelector(".dd-edge .dd-hit")
+      .dispatchEvent(new window.MouseEvent("pointerdown", at(140, 160)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(140, 160)));
+    check("a second corner is a second corner", corners(), 2);
+
+    await saveAndWait(page);
+    check("...and it goes into the list in the order the line reaches them",
+      /via=140,160;40,260/.test(await written()), true);
+
+    // The second of the two, so that taking out "a corner" and taking out "the
+    // one that was asked for" are two different answers.
+    canvas.querySelector('.dd-via[data-at="1"]')
+      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    check("...and the one taken out is the one that was asked for",
+      [corners(), canvas.querySelector(".dd-via").getAttribute("cy")], [1, "160"]);
+
+    // Two taps on the corner itself takes it out, the same way two taps on a
+    // box opens it.
+    canvas.querySelector(".dd-via")
+      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    check("two taps on a corner takes it out", corners(), 0);
+
+    await saveAndWait(page);
+    check("...and the file stops mentioning it", /via=/.test(await written()), false);
+
+    /* A loop back to the same box has a shape of its own and no route to put a
+     * corner into. Taking one and ignoring it would be a press that changed the
+     * file and nothing else.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "loop.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    A[One]",
+        "    A --> A"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const looping = await openPage({ url: `${origin}/diagram/file/loop.mmd`, cookie, origin });
+    const round = looping.document.querySelector(".ve-diagram-canvas");
+    const box = round.querySelector('.dd-node[data-id="A"]');
+    box.dispatchEvent(new looping.window.MouseEvent("pointerdown",
+      { clientX: 0, clientY: 0, bubbles: true }));
+    round.dispatchEvent(new looping.window.MouseEvent("pointerup",
+      { clientX: 0, clientY: 0, bubbles: true }));
+    round.querySelector(".dd-edge .dd-hit")
+      .dispatchEvent(new looping.window.MouseEvent("pointerdown",
+        { clientX: 0, clientY: 0, bubbles: true }));
+    round.dispatchEvent(new looping.window.MouseEvent("pointerup",
+      { clientX: 0, clientY: 0, bubbles: true }));
+    check("a loop back to the same box refuses a corner",
+      round.querySelectorAll(".dd-via").length, 0);
+
+    /* And the ends. Dragged round the box, an end pins itself to the side it
+     * was dragged to; dragged back into the middle, it goes back to being the
+     * router's business.
+     */
+    const end = canvas.querySelector('.dd-pin[data-end="0"]');
+    end.dispatchEvent(new window.MouseEvent("pointerdown", at(140, 140)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(178, 120)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(178, 120)));
+    check("an end dragged to a side leaves from that side",
+      lineOf().startsWith("M180,"), true);
+
+    await saveAndWait(page);
+    check("...which the file says too", /sides=r,a/.test(await written()), true);
+
+    const again = canvas.querySelector('.dd-pin[data-end="0"]');
+    again.dispatchEvent(new window.MouseEvent("pointerdown", at(180, 120)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(140, 120)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(140, 120)));
+    check("dragged back into the middle it is the router's business again",
+      lineOf(), "M140,140 L140,220 L340,220 L340,298");
+
+    await saveAndWait(page);
+    check("...and the file says nothing about it at all",
+      /%% edge 0/.test(await written()), false);
   }
 
   console.log("=== a box carried into another is carried on top of it ===");

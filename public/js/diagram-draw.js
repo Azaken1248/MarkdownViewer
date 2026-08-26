@@ -290,6 +290,48 @@
       + `</g>`;
   }
 
+  /* The handles on the arrows of the box being worked on.
+   *
+   * Only that box's arrows. Every waypoint of every arrow in a diagram of two
+   * hundred would be two hundred handles nobody asked for, and the arrow you
+   * want to bend is on the thing you are looking at.
+   *
+   * Two kinds: a round one at each corner somebody put there, dragged to move
+   * it, and a square one at each end of the line, dragged round the box to say
+   * which side the line should leave from.
+   */
+  const VIA_R = 6;
+  const PIN_R = 5;
+
+  function edgeMarks(edges, layout, id, spread) {
+    const out = [];
+
+    for (const [index, edge] of (edges || []).entries()) {
+      if (edge.from !== id && edge.to !== id) {
+        continue;
+      }
+
+      const route = routeEdge(layout, edge, spread[index]);
+      if (!route) {
+        continue;
+      }
+
+      for (const [at, [x, y]] of wayPoints(edge).entries()) {
+        out.push(`<circle class="dd-handle dd-via" data-role="via" data-edge="${index}"`
+          + ` data-at="${at}" cx="${round(x)}" cy="${round(y)}" r="${VIA_R}"/>`);
+      }
+
+      const ends = [route.points[0], route.points[route.points.length - 1]];
+      for (const [end, [x, y]] of ends.entries()) {
+        out.push(`<rect class="dd-handle dd-pin" data-role="pin" data-edge="${index}"`
+          + ` data-end="${end}" x="${round(x - PIN_R)}" y="${round(y - PIN_R)}"`
+          + ` width="${PIN_R * 2}" height="${PIN_R * 2}" rx="2"/>`);
+      }
+    }
+
+    return out.length > 0 ? `<g class="dd-edge-marks">${out.join("")}</g>` : "";
+  }
+
   /* --- Routing -----------------------------------------------------------
    *
    * An arrow leaves a box at right angles, turns at most twice, and does not
@@ -339,12 +381,18 @@
       out.push(point);
     }
 
+    // Collinear is not enough: a point on the same line as its neighbours but
+    // past one of them is a place the line goes out to and comes back from,
+    // which is exactly what a corner somebody dropped there is for.
+    const within = (a, b, c) => b >= Math.min(a, c) - 0.5 && b <= Math.max(a, c) + 0.5;
+
     for (let index = 1; index < out.length - 1;) {
       const [ax, ay] = out[index - 1];
       const [bx, by] = out[index];
       const [cx, cy] = out[index + 1];
-      const straight = (Math.abs(ax - bx) < 0.5 && Math.abs(bx - cx) < 0.5)
-        || (Math.abs(ay - by) < 0.5 && Math.abs(by - cy) < 0.5);
+      const straight =
+        (Math.abs(ax - bx) < 0.5 && Math.abs(bx - cx) < 0.5 && within(ay, by, cy))
+        || (Math.abs(ay - by) < 0.5 && Math.abs(by - cy) < 0.5 && within(ax, bx, cx));
 
       if (straight) {
         out.splice(index, 1);
@@ -450,6 +498,129 @@
     return tidy(candidates[0]);
   }
 
+  /* --- A route somebody chose ----------------------------------------------
+   *
+   * The auto-router is good at the ordinary case and has no opinions to offer
+   * once somebody has said where the line should go. So when an end is pinned
+   * to a side, or the line has been dragged through a point, this builds the
+   * route asked for instead — squarely, but without trying to dodge anything.
+   * Dodging is what the auto-router is for, and a line somebody has placed by
+   * hand is already where they want it.
+   */
+  const SIDES = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
+
+  const sideAxis = (side) => (side === "l" || side === "r" ? "x" : "y");
+
+  const away = ([x, y], side, by) =>
+    [x + (SIDES[side][0] * by), y + (SIDES[side][1] * by)];
+
+  // Where on a side a line meets it. Offset along the side by the lane, the
+  // same way the auto-router spreads two arrows between the same two boxes.
+  function anchorOn(box, side, spread) {
+    const along = spread || 0;
+    const x = clamp(box.x + (box.w / 2) + along, box.x + 8, box.x + box.w - 8);
+    const y = clamp(box.y + (box.h / 2) + along, box.y + 8, box.y + box.h - 8);
+
+    if (side === "l") {
+      return [box.x, y];
+    }
+    if (side === "r") {
+      return [box.x + box.w, y];
+    }
+
+    return side === "t" ? [x, box.y] : [x, box.y + box.h];
+  }
+
+  // Which sides the auto-router would have used, so an edge with one end pinned
+  // and one not still leaves the other end somewhere sensible.
+  function autoSides(a, b) {
+    const dx = (b.x + (b.w / 2)) - (a.x + (a.w / 2));
+    const dy = (b.y + (b.h / 2)) - (a.y + (a.h / 2));
+    const across = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
+    const down = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+
+    if (across >= down) {
+      return dx >= 0 ? ["r", "l"] : ["l", "r"];
+    }
+
+    return dy >= 0 ? ["b", "t"] : ["t", "b"];
+  }
+
+  // The model keeps a waypoint as a point with names; the arithmetic here works
+  // in pairs, the same as every other point in this file.
+  const wayPoints = (edge) => (Array.isArray(edge?.waypoints) ? edge.waypoints : [])
+    .filter((one) => Number.isFinite(one?.x) && Number.isFinite(one?.y))
+    .map((one) => [one.x, one.y]);
+
+  /* Which side of a box faces a point.
+   *
+   * Measured against the box's own half-width and half-height rather than in
+   * plain pixels, or a box twice as wide as it is tall would answer left or
+   * right to very nearly everything.
+   */
+  function sideTowards(box, [x, y]) {
+    const dx = x - (box.x + (box.w / 2));
+    const dy = y - (box.y + (box.h / 2));
+
+    if (Math.abs(dx) / (box.w || 1) >= Math.abs(dy) / (box.h || 1)) {
+      return dx >= 0 ? "r" : "l";
+    }
+
+    return dy >= 0 ? "b" : "t";
+  }
+
+  function pinnedSides(edge) {
+    const said = Array.isArray(edge?.sides) ? edge.sides : [];
+    const one = (value) => (SIDES[value] ? value : null);
+    return [one(said[0]), one(said[1])];
+  }
+
+  /* The corner between two points, given which way the line is travelling when
+   * it reaches the first of them.
+   *
+   * It turns onto the other axis first and finishes on the one it was already
+   * on, so it never sets off back the way it came: a line that leaves a box
+   * downwards and then has to go down further does not go down, up, and down
+   * again to collect a corner on the way.
+   */
+  const turnTo = (from, to, heading) =>
+    (heading === "y" ? [to[0], from[1]] : [from[0], to[1]]);
+
+  function guidedRoute(a, b, edge, spread) {
+    const auto = autoSides(a, b);
+    const pinned = pinnedSides(edge);
+    const via = wayPoints(edge);
+
+    /* An end nobody pinned faces whatever the line goes to next, which once
+     * there are corners in it is the first corner rather than the other box.
+     * Otherwise a line dragged out to the left still leaves on the right and
+     * doubles back on itself to get there.
+     */
+    const out = pinned[0] || (via.length > 0 ? sideTowards(a, via[0]) : auto[0]);
+    const into = pinned[1]
+      || (via.length > 0 ? sideTowards(b, via[via.length - 1]) : auto[1]);
+
+    const start = anchorOn(a, out, spread);
+    const end = anchorOn(b, into, spread);
+
+    // Both ends leave and arrive squarely, standing off the box far enough that
+    // the line reads as coming out of that side rather than out of the corner.
+    const last = away(end, into, STANDOFF);
+    const points = [start, away(start, out, STANDOFF)];
+    const heading = sideAxis(out);
+
+    for (const stop of via) {
+      points.push(turnTo(points[points.length - 1], stop, heading), stop);
+    }
+
+    // The last leg has to run along the side it is arriving at, so the turn
+    // before it is on the other one.
+    points.push(turnTo(points[points.length - 1], last, sideAxis(into)));
+    points.push(last, end);
+
+    return tidy(points);
+  }
+
   // The obstacles for one arrow: every box except the two it joins, which it is
   // allowed to touch because that is where it starts and stops.
   function obstaclesFor(layout, fromId, toId) {
@@ -551,6 +722,29 @@
     return [leaves(a, from, to), leaves(b, to, from)];
   }
 
+  /* A straight line asked to go through somewhere goes through it, in
+   * straight legs. Asked to leave a particular side, it leaves from the middle
+   * of that side — a straight line has no corner to put anywhere else.
+   */
+  function straightThrough(a, b, edge, spread) {
+    const via = wayPoints(edge);
+    const pinned = pinnedSides(edge);
+
+    if (via.length === 0 && !pinned[0] && !pinned[1]) {
+      return straightBetween(a, b, spread);
+    }
+
+    const here = pinned[0] ? anchorOn(a, pinned[0], spread) : middleOf(a);
+    const there = pinned[1] ? anchorOn(b, pinned[1], spread) : middleOf(b);
+    const stops = [here, ...via, there];
+
+    return tidy([
+      pinned[0] ? here : leaves(a, here, stops[1]),
+      ...via,
+      pinned[1] ? there : leaves(b, there, stops[stops.length - 2])
+    ]);
+  }
+
   const shapeOf = (edge) => (edge?.route === "curved" || edge?.route === "straight"
     ? edge.route
     : "angled");
@@ -597,9 +791,17 @@
     }
 
     const shape = shapeOf(edge);
-    const points = shape === "straight" && from !== to
-      ? straightBetween(from, to, spread)
-      : routeBetween(from, to, obstaclesFor(layout, edge.from, edge.to), spread);
+    const guided = from !== to
+      && (pinnedSides(edge).some(Boolean) || wayPoints(edge).length > 0);
+
+    let points;
+    if (shape === "straight" && from !== to) {
+      points = straightThrough(from, to, edge, spread);
+    } else if (guided) {
+      points = guidedRoute(from, to, edge, spread);
+    } else {
+      points = routeBetween(from, to, obstaclesFor(layout, edge.from, edge.to), spread);
+    }
 
     const drawn = stopShort(points, edge);
     return {
@@ -782,7 +984,7 @@
       .join("");
   }
 
-  function edgeMarkup(edge, index, layout, arrowId, spread) {
+  function edgeMarkup(edge, index, layout, arrowId, spread, editing) {
     const route = routeEdge(layout, edge, spread);
     if (!route) {
       return "";
@@ -807,6 +1009,14 @@
 
     return `<g class="dd-edge dd-edge-${escapeText(edge.kind)}" data-edge="${index}"`
       + ` data-from="${escapeText(edge.from)}" data-to="${escapeText(edge.to)}">`
+      /* A line drawn 1.6px wide is 1.6px wide to a finger as well, and bending
+       * an arrow means catching hold of it first. So while it is being edited
+       * each one carries a second copy of itself, invisible and fat, which is
+       * the thing that actually gets pressed.
+       */
+      + (editing
+        ? `<path class="dd-hit" fill="none" stroke="transparent" d="${route.d}"/>`
+        : "")
       + `<path class="dd-line" fill="none" d="${route.d}"${head}/>${badge}</g>`;
   }
 
@@ -908,6 +1118,7 @@
 
     const spread = lanes(edges);
     const parts = [];
+    const editing = Boolean(view || options.natural);
 
     /* Drawn from the outside in.
      *
@@ -929,7 +1140,8 @@
       // with no arrows in it still has a place arrows go.
       if (level === 0 || lines.length > 0) {
         parts.push(`<g class="dd-edges">${lines
-          .map(([edge, index]) => edgeMarkup(edge, index, layout, arrowId, spread[index]))
+          .map(([edge, index]) =>
+            edgeMarkup(edge, index, layout, arrowId, spread[index], editing))
           .join("")}</g>`);
       }
 
@@ -950,6 +1162,10 @@
 
     if (chosen.length === 1) {
       parts.push(marksMarkup(chosen[0]));
+      parts.push(edgeMarks(edges, layout,
+        (Array.isArray(options.selected) ? options.selected : [options.selected])
+          .find((one) => one && layout[one]),
+        spread));
     } else if (chosen.length > 1) {
       parts.push(frameMarkup(chosen));
     }
@@ -1017,7 +1233,13 @@
     paintOf,
     endsOf,
     shapeOf,
+    edgeMarks,
+    sideTowards,
     pathCurved,
+    wayPoints,
+    pinnedSides,
+    anchorOn,
+    autoSides,
     nestingDepths,
     END_KINDS,
     marksMarkup,

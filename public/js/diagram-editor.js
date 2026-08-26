@@ -611,6 +611,161 @@
       }
     }
 
+    /* --- Bending an arrow ---------------------------------------------------
+     *
+     * An arrow has always gone where the router put it. These are the two ways
+     * of saying otherwise: a corner dropped on the line, and an end pinned to a
+     * side of its box. Both live in the layout comment, both are read back, and
+     * an arrow nobody has touched still has neither.
+     */
+
+    // One arrow re-drawn where it is, the same as reroute does for a box, so a
+    // corner being dragged costs a couple of attribute writes a frame.
+    function redrawEdge(index) {
+      const svg = drawing();
+      const group = svg?.querySelector(`.dd-edge[data-edge="${index}"]`);
+      const edge = model.edges[index];
+      if (!svg || !group || !edge) {
+        return;
+      }
+
+      const route = DiagramDraw.routeEdge(model.layout, edge,
+        DiagramDraw.lanes(model.edges)[index]);
+      if (!route) {
+        return;
+      }
+
+      for (const path of group.querySelectorAll("path")) {
+        path.setAttribute("d", route.d);
+      }
+
+      group.querySelector(".dd-label")
+        ?.setAttribute("transform", `translate(${route.mid.x},${route.mid.y})`);
+
+      for (const [at, [x, y]] of DiagramDraw.wayPoints(edge).entries()) {
+        const dot = svg.querySelector(`.dd-via[data-edge="${index}"][data-at="${at}"]`);
+        dot?.setAttribute("cx", String(round(x)));
+        dot?.setAttribute("cy", String(round(y)));
+      }
+    }
+
+    /* How far along a route a point is, measured rather than guessed.
+     *
+     * Used to work out where in the list a new corner belongs: the corners are
+     * in the order the line passes through them, so a corner dropped between
+     * the second and the third has to go between them in the list too, or the
+     * line doubles back on itself to collect it.
+     */
+    function alongRoute(points, at) {
+      let walked = 0;
+      let best = { away: Infinity, at: 0 };
+
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const [ax, ay] = points[index];
+        const [bx, by] = points[index + 1];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const square = (dx * dx) + (dy * dy);
+        const into = square
+          ? Math.max(0, Math.min(1, (((at.x - ax) * dx) + ((at.y - ay) * dy)) / square))
+          : 0;
+        const away = Math.hypot(at.x - (ax + (dx * into)), at.y - (ay + (dy * into)));
+        const length = Math.hypot(dx, dy);
+
+        if (away < best.away) {
+          best = { away, at: walked + (length * into) };
+        }
+
+        walked += length;
+      }
+
+      return best.at;
+    }
+
+    function addCorner(index, at) {
+      const edge = model.edges[index];
+      const route = DiagramDraw.routeEdge(model.layout, edge,
+        DiagramDraw.lanes(model.edges)[index]);
+      if (!edge || !route) {
+        return -1;
+      }
+
+      // A loop back to the same box has a shape of its own and no route to put
+      // a corner into. Refusing is better than taking one and ignoring it.
+      if (edge.from === edge.to) {
+        return -1;
+      }
+
+      const dropped = { x: snap(at.x), y: snap(at.y) };
+      const via = [...(edge.waypoints || [])];
+      const mark = alongRoute(route.points, dropped);
+      const before = via.findIndex((one) => alongRoute(route.points, one) > mark);
+      const put = before < 0 ? via.length : before;
+
+      via.splice(put, 0, dropped);
+      edge.waypoints = via;
+      return put;
+    }
+
+    function dropCorner(index, at) {
+      const edge = model.edges[index];
+      if (!edge?.waypoints) {
+        return;
+      }
+
+      // Left as an empty list rather than taken off: whether a line with no
+      // corners left says so in the file is the file's question, and the writer
+      // already answers it. One place decides, not two that have to agree.
+      edge.waypoints = edge.waypoints.filter((one, which) => which !== at);
+
+      write();
+      drawAtOnce();
+    }
+
+    /* Which side of a box a point is asking for.
+     *
+     * Well inside means none of them: the middle of a box is not a side, and
+     * dragging an end back into the middle is how an end that was pinned goes
+     * back to being the router's business.
+     */
+    function sideFor(box, at) {
+      const left = at.x - box.x;
+      const right = (box.x + box.w) - at.x;
+      const top = at.y - box.y;
+      const bottom = (box.y + box.h) - at.y;
+
+      if (left > box.w / 3 && right > box.w / 3
+        && top > box.h / 3 && bottom > box.h / 3) {
+        return "a";
+      }
+
+      const nearest = Math.min(left, right, top, bottom);
+      if (nearest === left) {
+        return "l";
+      }
+      if (nearest === right) {
+        return "r";
+      }
+
+      return nearest === top ? "t" : "b";
+    }
+
+    function pinEnd(index, end, at) {
+      const edge = model.edges[index];
+      const box = boxOf(end === 0 ? edge?.from : edge?.to);
+      if (!edge || !box) {
+        return;
+      }
+
+      // Both ends left to the router is said plainly, and the writer is what
+      // decides that saying it is the same as saying nothing.
+      const sides = Array.isArray(edge.sides) ? [...edge.sides] : ["a", "a"];
+      sides[end] = sideFor(box, at);
+      edge.sides = sides;
+
+      redrawEdge(index);
+    }
+
     const moveTo = (id, x, y) => placeAt(id, snap(x), snap(y));
 
     /* Where a box is, exactly.
@@ -821,11 +976,17 @@
         marks.dataset.id = id;
       }
 
+      hold(event);
+    }
+
+    // Keeping the pointer for the length of a drag. A browser without capture
+    // still gets the move and up events while the pointer is over the canvas,
+    // which is most of a drag.
+    function hold(event) {
       try {
         canvas.setPointerCapture?.(event.pointerId);
       } catch {
-        // A browser without pointer capture still gets the move and up events
-        // while the pointer is over the canvas, which is most of a drag.
+        // Nothing was captured.
       }
     }
 
@@ -928,6 +1089,23 @@
 
       if (gesture.kind === "connect") {
         drawDraft(point);
+        return;
+      }
+
+      if (gesture.kind === "via") {
+        const edge = model.edges[gesture.index];
+        const corner = edge?.waypoints?.[gesture.at];
+        if (corner) {
+          corner.x = snap(point.x);
+          corner.y = snap(point.y);
+          redrawEdge(gesture.index);
+        }
+
+        return;
+      }
+
+      if (gesture.kind === "pin") {
+        pinEnd(gesture.index, gesture.end, point);
       }
     }
 
@@ -1019,9 +1197,45 @@
       const handle = event.target.closest?.("[data-role]");
 
       if (handle && selectedId) {
-        beginGesture(handle.getAttribute("data-role") === "resize" ? "resize" : "connect",
-          selectedId, point, event);
+        const role = handle.getAttribute("data-role");
+
+        if (role === "via" || role === "pin") {
+          gesture = {
+            kind: role,
+            index: Number(handle.getAttribute("data-edge")),
+            at: Number(handle.getAttribute("data-at")),
+            end: Number(handle.getAttribute("data-end")),
+            origin: point,
+            moved: false
+          };
+
+          hold(event);
+          return;
+        }
+
+        beginGesture(role === "resize" ? "resize" : "connect", selectedId, point, event);
         return;
+      }
+
+      /* Pressing the line itself bends it: a new corner where the finger went
+       * down, dragged from there. Which is how it works everywhere that has
+       * ever let anyone bend an arrow, and needs nothing explaining.
+       */
+      const bendable = event.target.closest?.(".dd-edge");
+      const bending = bendable
+        && (bendable.getAttribute("data-from") === selectedId
+          || bendable.getAttribute("data-to") === selectedId);
+
+      if (bending) {
+        const index = Number(bendable.getAttribute("data-edge"));
+        const at = addCorner(index, point);
+
+        if (at >= 0) {
+          drawAtOnce();
+          gesture = { kind: "via", index, at, origin: point, moved: false };
+          hold(event);
+          return;
+        }
       }
 
       const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
@@ -1226,6 +1440,33 @@
 
         // Dragged to empty paper: the same thing, put down where it was let go.
         addBox({ joinFrom: held.id, x: point.x, y: point.y });
+        return;
+      }
+
+      /* A corner and a pin settle where the pointer was let go, the same way a
+       * move does — the drags are coalesced to one a frame, and a quick one can
+       * be over before its frame arrives.
+       *
+       * Before the "did it move at all" test rather than after it, because a
+       * press on the line that put a corner in it changed the diagram whether
+       * the hand went anywhere afterwards or not.
+       */
+      if (held.kind === "via") {
+        const corner = model.edges[held.index]?.waypoints?.[held.at];
+        if (corner) {
+          corner.x = snap(point.x);
+          corner.y = snap(point.y);
+        }
+
+        write();
+        drawAtOnce();
+        return;
+      }
+
+      if (held.kind === "pin") {
+        pinEnd(held.index, held.end, point);
+        write();
+        drawAtOnce();
         return;
       }
 
@@ -1755,6 +1996,15 @@
     }
 
     canvas.addEventListener("dblclick", (event) => {
+      // A corner put in by hand is taken out the same way a box is opened: two
+      // taps on the thing itself.
+      const corner = event.target.closest?.(".dd-via");
+      if (corner) {
+        dropCorner(Number(corner.getAttribute("data-edge")),
+          Number(corner.getAttribute("data-at")));
+        return;
+      }
+
       const group = event.target.closest?.(".dd-node");
       if (group) {
         editNode(group.getAttribute("data-id"));

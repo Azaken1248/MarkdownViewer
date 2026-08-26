@@ -1665,6 +1665,153 @@ console.log("=== a line is drawn in the shape it is asked for ===");
     DD.shapeOf(nonsense.edges[0]), "angled");
 }
 
+console.log("=== a line goes where it is put, when it is put anywhere ===");
+{
+  const apart = { A: { x: 100, y: 100, w: 80, h: 40 }, B: { x: 300, y: 300, w: 80, h: 40 } };
+  const line = (edge) => DD.routeEdge(apart, { from: "A", to: "B", kind: "arrow", ...edge }, 0).d;
+
+  check("an arrow nobody has touched is still the router's business",
+    line({}), "M140,140 L140,220 L340,220 L340,298");
+
+  /* Pinned. The auto-router is good at the ordinary case and has nothing to
+   * offer once somebody has said where the line should go, so it steps aside:
+   * squarely, and without trying to dodge anything. Dodging is what it is for,
+   * and a line placed by hand is already where it is wanted.
+   */
+  check("an end pinned to a side leaves from that side",
+    line({ sides: ["r", "t"] }), "M180,120 L340,120 L340,298");
+  check("...and the other end pinned too", line({ sides: ["b", "l"] }),
+    "M140,140 L140,320 L298,320");
+  check("one end pinned leaves the other to the router",
+    line({ sides: ["a", "l"] }), "M140,140 L140,320 L298,320");
+  check("...and both left to it is the route it would have chosen anyway",
+    line({ sides: ["a", "a"] }), line({}));
+  /* Judged on two boxes side by side, where the router's own answer is "right"
+   * and a name nothing recognises would come out "bottom": on two boxes one
+   * above the other the two agree, and a check both answers pass is not one.
+   */
+  const beside = { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 300, y: 0, w: 80, h: 40 } };
+  const sideways = (edge) =>
+    DD.routeEdge(beside, { from: "A", to: "B", kind: "arrow", ...edge }, 0).d;
+  check("a side that is not a side is left to the router",
+    sideways({ sides: ["nonsense", "l"] }), sideways({ sides: ["a", "l"] }));
+  check("...which is not the same as being pinned to the bottom",
+    sideways({ sides: ["b", "l"] }) === sideways({ sides: ["a", "l"] }), false);
+
+  // Which side the router would have used, on its own, because an edge with one
+  // end pinned still has to put the other somewhere sensible.
+  check("the router's own answer for two boxes side by side",
+    DD.autoSides({ x: 0, y: 0, w: 80, h: 40 }, { x: 200, y: 0, w: 80, h: 40 }), ["r", "l"]);
+  check("...and for one above the other",
+    DD.autoSides({ x: 0, y: 0, w: 80, h: 40 }, { x: 0, y: 200, w: 80, h: 40 }), ["b", "t"]);
+  check("...and backwards", DD.autoSides({ x: 200, y: 0, w: 80, h: 40 },
+    { x: 0, y: 0, w: 80, h: 40 }), ["l", "r"]);
+
+  check("a side is a point on that side of the box",
+    [DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "l", 0),
+      DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "r", 0),
+      DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "t", 0),
+      DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "b", 0)],
+    [[0, 20], [80, 20], [40, 0], [40, 40]]);
+  // Two arrows between the same two boxes get two lanes, pinned or not.
+  check("...offset along it by the lane, so two arrows are two lines",
+    DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "t", 16), [56, 0]);
+  // And never off the end of the side it is on.
+  check("...but never off the end of it",
+    DD.anchorOn({ x: 0, y: 0, w: 80, h: 40 }, "t", 500), [72, 0]);
+
+  /* Corners. The line passes through them in the order they are given, which is
+   * the whole of what a waypoint is.
+   */
+  check("a corner put in the line is a corner the line turns",
+    line({ waypoints: [{ x: 60, y: 150 }] }),
+    "M100,120 L82,120 L82,150 L60,150 L340,150 L340,298");
+  check("...and two are turned in the order they are in",
+    line({ waypoints: [{ x: 60, y: 150 }, { x: 60, y: 400 }] }),
+    "M100,120 L82,120 L82,150 L60,150 L60,400 L60,320 L298,320");
+
+  /* An end nobody pinned faces whatever the line goes to next, and once there
+   * are corners in it that is the first corner rather than the other box. A
+   * line dragged out to the left that still left on the right would double back
+   * across the box it came from to get where it was sent.
+   */
+  check("a line dragged to the left leaves on the left",
+    line({ waypoints: [{ x: 60, y: 150 }] }).startsWith("M100,120"), true);
+  check("...and one dragged to the right leaves on the right",
+    line({ waypoints: [{ x: 500, y: 200 }] }).startsWith("M180,120"), true);
+  check("...unless it was pinned, in which case it was told",
+    line({ sides: ["r", "a"], waypoints: [{ x: 60, y: 150 }] }).startsWith("M180,120"), true);
+
+  const small = { x: 0, y: 0, w: 80, h: 40 };
+  check("which side of a box faces a point",
+    [DD.sideTowards(small, [200, 0]), DD.sideTowards(small, [0, 200]),
+      DD.sideTowards(small, [-200, 0]), DD.sideTowards(small, [0, -200])],
+    ["r", "b", "l", "t"]);
+  // Measured against the box's own shape, or a box twice as wide as it is tall
+  // answers left or right to very nearly everything.
+  check("...judged by the shape of the box, not in plain pixels",
+    DD.sideTowards(small, [60, 45]), "b");
+  check("a corner that is not a point is not a corner",
+    line({ waypoints: [{ x: "over there", y: null }] }), line({}));
+
+  check("the model's corners are read as points to do arithmetic with",
+    DD.wayPoints({ waypoints: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }), [[1, 2], [3, 4]]);
+  check("...and an edge with none has none",
+    [DD.wayPoints({}), DD.wayPoints()], [[], []]);
+
+  check("what is pinned, read off an edge",
+    [DD.pinnedSides({ sides: ["r", "a"] }), DD.pinnedSides({}), DD.pinnedSides()],
+    [["r", null], [null, null], [null, null]]);
+
+  /* Straight has no corners to put anywhere, so it does the same two things its
+   * own way: legs through each point, and leaving from the middle of a side it
+   * has been pinned to.
+   */
+  check("a straight line through a corner is two straight legs",
+    line({ route: "straight", waypoints: [{ x: 250, y: 150 }] }),
+    "M180,130.9 L250,150 L328.5,298.2");
+  check("...and pinned, it leaves from the side it was pinned to",
+    line({ route: "straight", sides: ["r", "t"] }), "M180,120 L338.7,298.5");
+  check("...and untouched it is the line between the two boxes",
+    line({ route: "straight" }), "M160,140 L318.6,298.6");
+
+  // Curved is the same route with its corners softened, corners somebody put
+  // there included.
+  const bent = line({ route: "curved", waypoints: [{ x: 60, y: 150 }, { x: 60, y: 400 }] });
+  check("a curved line through corners curves at them",
+    (bent.match(/Q/g) || []).length, 5);
+  check("...and still turns where it was told to",
+    [bent.includes("60,161"), bent.includes("60,388")], [true, true]);
+
+  /* The file. Both are ours, so both go in the layout comment — and an arrow
+   * with neither still says nothing at all.
+   */
+  const kept = DM.serializeFlowchart(DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 0,0 80x40",
+    "    %% @ B 0,200 80x40",
+    "    %% edge 0 sides=a,t via=60,150;60,400",
+    "    A[a]",
+    "    B[b]",
+    "    A --> B"
+  ].join("\n") + "\n"));
+  check("a pinned end and its corners survive being written and read back",
+    /%% edge 0 sides=a,t via=60,150;60,400/.test(kept), true);
+
+  const loose = DM.parseFlowchart(kept);
+  loose.edges[0].sides = ["a", "a"];
+  delete loose.edges[0].waypoints;
+  check("...and an arrow with neither says nothing at all",
+    /%% edge 0/.test(DM.serializeFlowchart(loose)), false);
+
+  const half = DM.parseFlowchart(kept);
+  half.edges[0].waypoints = [];
+  delete half.edges[0].sides;
+  check("...nor does one whose corners have all been taken out",
+    /%% edge 0/.test(DM.serializeFlowchart(half)), false);
+}
+
 console.log("=== a box inside a box is drawn inside it, not under it ===");
 {
   /* Boxes used to be drawn in the order the file lists them, which is fine

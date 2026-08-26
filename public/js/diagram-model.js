@@ -1050,7 +1050,11 @@
         continue;
       }
 
-      if (attributes.sides && /^[ltrb],[ltrb]$/.test(attributes.sides)) {
+      /* Which side of its box each end of the line leaves from. `a` is auto —
+       * one end pinned and the other left to the router is an ordinary thing to
+       * want, and there has to be a way to write it down.
+       */
+      if (attributes.sides && /^[ltrba],[ltrba]$/.test(attributes.sides)) {
         edge.sides = attributes.sides.split(",");
       }
 
@@ -1229,7 +1233,7 @@
       }
 
       const attributes = writeAttributes({
-        sides: edge.sides ? edge.sides.join(",") : "",
+        sides: pinnedAnywhere(edge) ? edge.sides.join(",") : "",
         via: edge.waypoints ? writePoints(edge.waypoints) : "",
         ends: edge.ends ? edge.ends.join(",") : "",
         route: edge.route && edge.route !== ROUTE_DEFAULT ? edge.route : "",
@@ -1337,9 +1341,14 @@
 
   const pad = (depth) => "    ".repeat(Math.max(1, depth));
 
+  // Both ends left to the router is the same as saying nothing, and saying
+  // nothing is what the file should then do.
+  const pinnedAnywhere = (edge) =>
+    Array.isArray(edge.sides) && edge.sides.some((side) => side && side !== "a");
+
   function hasEdgeExtras(edge) {
-    return Boolean(edge.sides || edge.waypoints || edge.ends || edge.class || edge.extra
-      || (edge.route && edge.route !== ROUTE_DEFAULT));
+    return Boolean(pinnedAnywhere(edge) || edge.waypoints?.length || edge.ends
+      || edge.class || edge.extra || (edge.route && edge.route !== ROUTE_DEFAULT));
   }
 
   // Every class name the diagram uses, defined or not, in the order the file
