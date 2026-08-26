@@ -1409,6 +1409,81 @@ async function run(server, cookie) {
       [propOf("A", "--dd-dash"), propOf("B", "--dd-dash")], ["2 4", "2 4"]);
   }
 
+  console.log("=== a box carried into another is carried on top of it ===");
+  {
+    // Listed chair-first on purpose: in one flat layer the file's order is the
+    // drawing's order, and that is exactly what has to stop being true.
+    await server.request("POST", "/api/docs",
+      { fileName: "nested.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ Chair 600,140 80x40",
+        "    %% @ Hall 100,100 320x220",
+        "    Chair[Chair]",
+        "    Hall[Hall]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/nested.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const painted = () => [...canvas.querySelectorAll(".dd-node")].map((one) => one.dataset.id);
+    const at = (px, py) => ({ clientX: px, clientY: py, bubbles: true });
+    const grab = (id) => {
+      const box = canvas.querySelector(`.dd-node[data-id="${id}"]`);
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box.getAttribute("transform"));
+      return [box, Number(spot[1]) + 10, Number(spot[2]) + 10];
+    };
+
+    check("two boxes beside each other are drawn in one layer",
+      canvas.querySelectorAll(".dd-nodes").length, 1);
+    check("...in the order the file lists them", painted(), ["Chair", "Hall"]);
+
+    /* Picked up and carried in. The layer a box belongs in is only worked out
+     * when the drawing is made, so between picking it up and putting it down
+     * it is held in front of everything — otherwise it slides under the hall
+     * halfway across and reappears on being let go, which reads as having
+     * dropped it and lost it.
+     */
+    const [chair, chairX, chairY] = grab("Chair");
+    chair.dispatchEvent(new window.MouseEvent("pointerdown", at(chairX, chairY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(chairX - 400, chairY + 40)));
+    check("a box being carried is drawn in front of what it is carried over",
+      painted(), ["Hall", "Chair"]);
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(chairX - 400, chairY + 40)));
+    await new Promise((r) => setTimeout(r, 300));
+
+    /* And the drawing agrees once it is made again. The hall is opaque, so a
+     * chair painted before it is a chair nobody can see.
+     */
+    check("a box let go inside a bigger one is drawn in a layer of its own",
+      canvas.querySelectorAll(".dd-nodes").length, 2);
+    check("...after the box it is now inside, whatever the file's order",
+      painted(), ["Hall", "Chair"]);
+
+    // Carrying the outer one is the same rule read the other way: what is being
+    // carried is in front, even when what it is in front of is its own content.
+    const [hall, hallX, hallY] = grab("Hall");
+    hall.dispatchEvent(new window.MouseEvent("pointerdown", at(hallX, hallY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(hallX + 20, hallY)));
+    check("...and so is a box carried over what is inside it", painted(), ["Chair", "Hall"]);
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(hallX + 20, hallY)));
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Carried back out, and the layers go with it.
+    dragBox(window, "Chair", 500, 0);
+    await new Promise((r) => setTimeout(r, 300));
+    check("a box carried back out is drawn beside what it was inside",
+      canvas.querySelectorAll(".dd-nodes").length, 1);
+
+    // The file has no opinion about any of this: where a box is, is what says
+    // what it is inside, and where it is was already written down.
+    await saveAndWait(page);
+    const saved = (await server.request("GET", "/api/docs/nested.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...and nothing about layers reaches the file", /layer=/.test(saved), false);
+  }
+
   console.log("=== the canvas has no edges to be stopped at ===");
   {
     await server.request("POST", "/api/docs",

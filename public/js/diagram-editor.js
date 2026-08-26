@@ -781,6 +781,24 @@
             group[one] = { x: where.x, y: where.y };
           }
         }
+
+        /* What is being carried is drawn on top of everything for as long as it
+         * is being carried.
+         *
+         * The drawing is layered from the outside in, so a box dragged into a
+         * bigger one belongs a layer deeper than it is — and until the redraw
+         * that follows the drag says so, it would be under the box it was just
+         * dropped into. Which reads as having dropped it and lost it.
+         */
+        const layers = drawing()?.querySelectorAll(".dd-nodes");
+        const top = layers?.[layers.length - 1];
+
+        for (const one of Object.keys(group)) {
+          const box = drawing()?.querySelector(`.dd-node[data-id="${one}"]`);
+          if (top && box) {
+            top.append(box);
+          }
+        }
       }
 
       gesture = {

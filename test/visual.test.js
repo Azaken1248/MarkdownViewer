@@ -1547,6 +1547,110 @@ console.log("=== a line has two ends, and the file says so in real Mermaid ===")
     DM.parseFlowchart(written).edges[0].ends, ["diamond", "triangle"]);
 }
 
+console.log("=== a box inside a box is drawn inside it, not under it ===");
+{
+  /* Boxes used to be drawn in the order the file lists them, which is fine
+   * until one is inside another: the outer one is opaque, so whichever of the
+   * two the file happens to mention second wins, and half the time the box you
+   * put inside vanishes the moment the drawing is made again. So does the arrow
+   * pointing at it, which has to cross the outer box to get there.
+   *
+   * Drawn from the outside in instead: a box that holds another is background
+   * to it, and so is any arrow that stops outside it.
+   */
+  const nested = {
+    direction: "TD",
+    nodes: [{ id: "Inner", shape: "rect", text: "in" },
+      { id: "Outer", shape: "rect", text: "out" },
+      { id: "C", shape: "rect", text: "C" }],
+    edges: [{ from: "C", to: "Inner", kind: "arrow", label: "" },
+      { from: "C", to: "Outer", kind: "arrow", label: "" }],
+    layout: { Outer: { x: 100, y: 100, w: 300, h: 200 },
+      Inner: { x: 180, y: 180, w: 100, h: 50 },
+      C: { x: 500, y: 180, w: 80, h: 40 } }
+  };
+
+  const depths = DD.nestingDepths(nested.nodes, nested.layout);
+  check("a box inside a bigger one is a layer deeper", depths.get("Inner"), 1);
+  check("...and the one holding it is not", depths.get("Outer"), 0);
+  check("...nor is one standing on its own", depths.get("C"), 0);
+
+  // Same size and place: neither is inside the other, or two boxes drawn on
+  // top of each other would each count as being in the other. It is the same
+  // rule that stops a box counting itself.
+  const twins = DD.nestingDepths(
+    [{ id: "A" }, { id: "B" }],
+    { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 0, w: 80, h: 40 } });
+  check("two boxes the same size and place are neither inside the other",
+    [twins.get("A"), twins.get("B")], [0, 0]);
+
+  /* And it goes as deep as it is drawn. A box in a box in a box is three
+   * layers, or the two inner ones share one and whichever the file mentions
+   * second paints over the other.
+   */
+  const russian = DD.nestingDepths(
+    [{ id: "Big" }, { id: "Middle" }, { id: "Small" }],
+    { Big: { x: 0, y: 0, w: 400, h: 400 }, Middle: { x: 50, y: 50, w: 200, h: 200 },
+      Small: { x: 80, y: 80, w: 60, h: 60 } });
+  check("a box in a box in a box is three layers deep",
+    [russian.get("Big"), russian.get("Middle"), russian.get("Small")], [0, 1, 2]);
+
+  // Overlapping is not containing. Half in and half out is still beside.
+  const overlapping = DD.nestingDepths(
+    [{ id: "A" }, { id: "B" }],
+    { A: { x: 0, y: 0, w: 200, h: 100 }, B: { x: 150, y: 50, w: 100, h: 100 } });
+  check("a box hanging over the edge of another is not inside it",
+    [overlapping.get("A"), overlapping.get("B")], [0, 0]);
+
+  const painted = new JSDOM(`<!doctype html><body>${DD.render(nested,
+    { layout: nested.layout, natural: true })}</body>`).window.document;
+  const order = [...painted.querySelectorAll(".dd-node, .dd-edge")]
+    .map((one) => one.dataset.id || `edge ${one.dataset.edge}`);
+
+  check("the outer box and what stops at it come first, then what is inside",
+    order, ["edge 1", "Outer", "C", "edge 0", "Inner"]);
+
+  /* An arrow keeps the number it has in the file whatever order it is drawn in,
+   * because that number is how everything else refers to it.
+   */
+  check("...and an arrow drawn out of turn keeps its own number",
+    [...painted.querySelectorAll(".dd-edge")].map((one) => one.dataset.from),
+    ["C", "C"]);
+
+  const deep = new JSDOM(`<!doctype html><body>${DD.render({
+    direction: "TD",
+    nodes: [{ id: "Small", shape: "rect", text: "s" }, { id: "Big", shape: "rect", text: "b" },
+      { id: "Middle", shape: "rect", text: "m" }],
+    edges: [],
+    layout: { Big: { x: 0, y: 0, w: 400, h: 400 }, Middle: { x: 50, y: 50, w: 200, h: 200 },
+      Small: { x: 80, y: 80, w: 60, h: 60 } }
+  }, { natural: true })}</body>`).window.document;
+  check("...and it is drawn that way round however the file lists them",
+    [...deep.querySelectorAll(".dd-node")].map((one) => one.dataset.id),
+    ["Big", "Middle", "Small"]);
+
+  // A diagram with nothing inside anything is the one layer of arrows and one
+  // of boxes it always was.
+  const flat = new JSDOM(`<!doctype html><body>${DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A" }, { id: "B", shape: "rect", text: "B" }],
+    edges: [{ from: "A", to: "B", kind: "arrow", label: "" }],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 200, w: 80, h: 40 } }
+  }, { natural: true })}</body>`).window.document;
+  check("a diagram with nothing nested is drawn in one layer as before",
+    [flat.querySelectorAll(".dd-edges").length, flat.querySelectorAll(".dd-nodes").length],
+    [1, 1]);
+
+  // And an empty one still has the places those things go, or the editor has
+  // nothing to put the first box into.
+  const empty = new JSDOM(`<!doctype html><body>${DD.render({
+    direction: "TD", nodes: [], edges: [], layout: {}
+  }, { natural: true })}</body>`).window.document;
+  check("...and an empty diagram still has both places to draw into",
+    [empty.querySelectorAll(".dd-edges").length, empty.querySelectorAll(".dd-nodes").length],
+    [1, 1]);
+}
+
 console.log("=== ...for every diagram in the real library ===");
 {
   // The same argument as the block splitter's library pass: fixtures cover what

@@ -714,6 +714,37 @@
       + `<path class="dd-line" fill="none" d="${route.d}"${head}/>${badge}</g>`;
   }
 
+  /* --- What is inside what -------------------------------------------------
+   *
+   * Read off where the boxes are rather than off what the file calls a group:
+   * a box dragged inside a bigger one is inside it, whatever the diagram says,
+   * and it is the dragging that makes anyone notice this at all. Without it the
+   * inner box is painted over by the outer one the next time the drawing is
+   * made — and so is the arrow that points at it.
+   *
+   * Strictly bigger, which is also the whole of what stops a box counting
+   * itself, and what stops two boxes the same size and place each counting as
+   * inside the other and both ending up a layer deeper than everything else.
+   */
+  const areaOf = (at) => at.w * at.h;
+
+  const surrounds = (outer, inner) => outer.x <= inner.x && outer.y <= inner.y
+    && (outer.x + outer.w) >= (inner.x + inner.w)
+    && (outer.y + outer.h) >= (inner.y + inner.h)
+    && areaOf(outer) > areaOf(inner);
+
+  function nestingDepths(nodes, layout) {
+    const placed = (nodes || []).filter((node) => layout[node.id]);
+    const depths = new Map();
+
+    for (const node of placed) {
+      depths.set(node.id, placed.filter((other) =>
+        surrounds(layout[other.id], layout[node.id])).length);
+    }
+
+    return depths;
+  }
+
   /* --- The whole drawing -------------------------------------------------- */
 
   /* How much of the diagram is on screen, and where.
@@ -782,12 +813,37 @@
     const spread = lanes(edges);
     const parts = [];
 
-    parts.push(`<g class="dd-edges">${edges
-      .map((edge, index) => edgeMarkup(edge, index, layout, arrowId, spread[index])).join("")}</g>`);
+    /* Drawn from the outside in.
+     *
+     * A box that holds another is background to it, so it is painted first;
+     * everything inside it, and every arrow reaching inside it, is painted
+     * after. A diagram with nothing inside anything is one layer of arrows and
+     * one of boxes, which is what it always was.
+     */
+    const depths = nestingDepths(nodes, layout);
+    const depthOf = (id) => depths.get(id) || 0;
+    const deepest = Math.max(0, ...depths.values());
 
-    parts.push(`<g class="dd-nodes">${nodes
-      .filter((node) => layout[node.id])
-      .map((node) => nodeMarkup(node, layout[node.id], model?.classes)).join("")}</g>`);
+    for (let level = 0; level <= deepest; level += 1) {
+      const lines = edges
+        .map((edge, index) => [edge, index])
+        .filter(([edge]) => Math.max(depthOf(edge.from), depthOf(edge.to)) === level);
+
+      // The outermost layer is always written, empty or not, because a drawing
+      // with no arrows in it still has a place arrows go.
+      if (level === 0 || lines.length > 0) {
+        parts.push(`<g class="dd-edges">${lines
+          .map(([edge, index]) => edgeMarkup(edge, index, layout, arrowId, spread[index]))
+          .join("")}</g>`);
+      }
+
+      const layer = nodes.filter((node) => layout[node.id] && depthOf(node.id) === level);
+
+      if (level === 0 || layer.length > 0) {
+        parts.push(`<g class="dd-nodes">${layer
+          .map((node) => nodeMarkup(node, layout[node.id], model?.classes)).join("")}</g>`);
+      }
+    }
 
     /* What is selected: one id, or a list of them. One box gets the ring and
      * the handles it has always had; several get a ring each and one frame.
@@ -864,6 +920,7 @@
     nodeBody,
     paintOf,
     endsOf,
+    nestingDepths,
     END_KINDS,
     marksMarkup,
     frameMarkup,
