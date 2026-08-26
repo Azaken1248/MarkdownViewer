@@ -109,6 +109,61 @@
     { name: "thick-open", re: /^==\s*([^|]+?)\s*={3,}/ }
   ];
 
+  /* A link is a line style and two ends, and Mermaid can spell some of the
+   * combinations and not others.
+   *
+   * The rule is that the file always carries a real link token — the nearest
+   * one Mermaid has — so a diagram rendered anywhere else reads correctly, and
+   * the exact ends go in a layout comment on top for the four styles Mermaid
+   * cannot say. A UML "is a" arrow is written `-->` and reads as an arrow
+   * elsewhere, which is the truthful approximation; writing nothing at all, or
+   * inventing syntax, would not be.
+   */
+  const LINE_STYLES = [
+    ["solid", "Solid"],
+    ["dotted", "Dotted"],
+    ["thick", "Thick"]
+  ];
+
+  // style -> what to write for [nothing at each end, an end forward, ends both ways]
+  const LINK_BY_STYLE = {
+    solid: { none: "open", forward: "arrow", both: "both", circle: "circle", cross: "cross" },
+    dotted: { none: "dotted-open", forward: "dotted", both: "dotted-both" },
+    thick: { none: "thick-open", forward: "thick", both: "thick-both" }
+  };
+
+  // Which of the three a kind is drawn in, whatever its ends are.
+  function lineStyleOf(kind) {
+    const name = String(kind || "arrow");
+    if (name.startsWith("dotted")) {
+      return "dotted";
+    }
+
+    return name.startsWith("thick") ? "thick" : "solid";
+  }
+
+  /* The nearest real link for a line style and a pair of ends.
+   *
+   * `circle` and `cross` are Mermaid's own, so they are used exactly when they
+   * fit — a solid line ending in a circle is `--o` and needs no comment at all.
+   * Everything else lands on an arrow or a plain line, whichever is closer to
+   * what was asked for.
+   */
+  function linkFor(style, ends) {
+    const table = LINK_BY_STYLE[style] || LINK_BY_STYLE.solid;
+    const [back, forward] = Array.isArray(ends) ? ends : ["none", "arrow"];
+
+    // Anything at all behind the line makes it a both-ways link, which is the
+    // nearest real thing however unalike the two ends actually are.
+    if (back !== "none") {
+      return table.both;
+    }
+
+    // Every style can say "nothing"; solid can also say Mermaid's own circle
+    // and cross. Everything else is nearer to an arrow than to a plain line.
+    return table[forward] || table.forward;
+  }
+
   const SHAPE_BY_NAME = new Map(SHAPES.map((shape) => [shape.name, shape]));
 
   /* The same shapes, grouped by opener and longest opener first.
@@ -1729,6 +1784,9 @@
     SHAPES,
     SHAPE_CHOICES,
     EDGE_KINDS,
+    LINE_STYLES,
+    lineStyleOf,
+    linkFor,
     NODE_KINDS,
     MAX_NODES,
     MAX_EDGES,

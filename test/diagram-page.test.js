@@ -1152,6 +1152,234 @@ async function run(server, cookie) {
       reopened.classes[reopened.nodes[0].classes[0]].fill, "#d9e6fb");
   }
 
+  console.log("=== a line is a style and two ends, chosen one at a time ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "ends.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 100,300 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/ends.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const control = (aria) => inspector.querySelector(`[aria-label="${aria}"]`);
+    const choose = (aria, value) => {
+      const found = control(aria);
+      found.value = value;
+      found.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(found[1]) + 10;
+      const y = Number(found[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const written = async () => (await server.request("GET", "/api/docs/ends.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    tap("A");
+
+    /* Three controls, not one list of eleven. A line is a style and two ends,
+     * and the eleven links Mermaid has are what a few of those combinations
+     * happen to be called — asking for the name instead of the thing is why
+     * "dotted line with a hollow diamond on it" was unreachable.
+     */
+    check("the arrow offers what is at its back", Boolean(control("Arrow start")), true);
+    check("...how it is drawn", Boolean(control("Line style")), true);
+    check("...and what is at its point", Boolean(control("Arrow end")), true);
+    check("a plain arrow starts with nothing behind it and an arrow ahead",
+      [control("Arrow start").value, control("Line style").value, control("Arrow end").value],
+      ["none", "solid", "arrow"]);
+
+    // An ending Mermaid has no words for. The file gets the nearest link it
+    // does have, and the exact ending beside it.
+    choose("Arrow end", "triangle");
+    // The canvas redraws a beat after the change, the way it does for typing.
+    await new Promise((r) => setTimeout(r, 300));
+    check("the line is drawn with the ending it was given, not with an arrow",
+      /marker-end="url\(#dd-end-triangle-\d+\)"/.test(canvas.innerHTML), true);
+
+    await saveAndWait(page);
+    const uml = await written();
+    check("...and an ending Mermaid cannot spell still writes a link it can read",
+      /^\s*A --> B\s*$/m.test(uml), true);
+    check("...with the ending it really has kept beside it",
+      /%% edge 0 [^\n]*ends=none,triangle/.test(uml), true);
+
+    // The style is the other half, and it is a separate question.
+    choose("Line style", "dotted");
+    await saveAndWait(page);
+    const dotted = await written();
+    check("changing how the line is drawn leaves its ends alone",
+      /^\s*A -\.-> B\s*$/m.test(dotted) && /ends=none,triangle/.test(dotted), true);
+    check("...and the control agrees it is dotted", control("Line style").value, "dotted");
+
+    // Something at the back makes it a both-ways link, which is the nearest
+    // real thing however unlike the two ends actually are.
+    choose("Arrow start", "diamond");
+    await saveAndWait(page);
+    const both = await written();
+    check("something at the back makes it a both-ways link in the file",
+      /^\s*A <-\.-> B\s*$/m.test(both), true);
+    check("...while the comment still says which end is which",
+      /ends=diamond,triangle/.test(both), true);
+
+    /* And the controls have to be able to read all that back. A panel that
+     * always opens saying "solid arrow" is a panel that quietly undoes the
+     * line the moment anything else about it is changed.
+     */
+    tap("B");
+    tap("A");
+    check("reopening the arrow shows the line it actually is",
+      [control("Arrow start").value, control("Line style").value, control("Arrow end").value],
+      ["diamond", "dotted", "triangle"]);
+
+    /* And back to an ordinary arrow. The comment has to go with it: a file that
+     * kept saying `ends=none,arrow` would carry a layout line for every arrow
+     * in every diagram, saying what the arrow already said.
+     */
+    choose("Arrow start", "none");
+    choose("Line style", "solid");
+    choose("Arrow end", "arrow");
+    await saveAndWait(page);
+    const back = await written();
+    check("an ordinary arrow is written as an ordinary arrow",
+      /^\s*A --> B\s*$/m.test(back), true);
+    check("...and grows no comment saying what it already says",
+      /ends=/.test(back), false);
+  }
+
+  console.log("=== a box can be dashed, and thick, and red, all at once ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "border.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 100,300 80x40",
+        "    A[One]",
+        "    B[Two]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/border.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const control = (aria) => inspector.querySelector(`[aria-label="${aria}"]`);
+    const choose = (aria, value) => {
+      const found = control(aria);
+      found.value = value;
+      found.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const propOf = (id, name) => groupOf(id).style.getPropertyValue(name);
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(found[1]) + 10;
+      const y = Number(found[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const written = async () => (await server.request("GET", "/api/docs/border.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    tap("A");
+    check("a box starts plain and thin",
+      [control("Border").value, control("Border weight").value], ["Plain", "Thin"]);
+
+    choose("Border", "Dashed");
+    check("a dashed border is drawn dashed", propOf("A", "--dd-dash"), "6 4");
+
+    /* The point of doing it as a classDef: a dash is real Mermaid, so the file
+     * is dashed everywhere and not only here.
+     */
+    await saveAndWait(page);
+    const dashed = await written();
+    check("...and the dash reaches the file as a classDef",
+      /classDef ddC1 stroke-dasharray:6 4/.test(dashed), true);
+
+    /* Three separate questions, so answering one must not undo another. A box
+     * asked to be red should not stop being dashed.
+     */
+    inspector.querySelector('.ve-diagram-swatch[title="Red"]')
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("colouring a dashed box leaves it dashed",
+      [propOf("A", "--dd-fill"), propOf("A", "--dd-dash")], ["#fbdedc", "6 4"]);
+    // ...and the swatches have to know it is still red, or a box goes on
+    // looking uncoloured the moment it is also dashed.
+    check("...and the panel still says which colour it is",
+      inspector.querySelector('.ve-diagram-swatch[title="Red"]').getAttribute("aria-pressed"),
+      "true");
+
+    choose("Border weight", "Thick");
+    check("...and so does thickening it",
+      [propOf("A", "--dd-fill"), propOf("A", "--dd-dash"), propOf("A", "--dd-stroke-width")],
+      ["#fbdedc", "6 4", "4px"]);
+
+    await saveAndWait(page);
+    const all = await written();
+    // Order is whatever order they were chosen in, so what matters is that
+    // there is one definition and that everything asked for is in it.
+    const defined = (all.match(/^\s*classDef ddC\d .*$/gm) || []);
+    check("all three live in one definition", defined.length, 1);
+    check("...which says every one of them",
+      ["fill:#fbdedc", "stroke:#c0453c", "color:#4a1512", "stroke-dasharray:6 4",
+        "stroke-width:4px"].every((part) => defined[0].includes(part)), true);
+    check("...and the box wears exactly one of ours",
+      (all.match(/^\s*class A /gm) || []).length, 1);
+
+    // Read back through the parser: a border this editor writes and the parser
+    // cannot read is a diagram damaged by being saved.
+    const reopened = window.DiagramModel.parseFlowchart(all);
+    check("...which is read back as the same border",
+      reopened.classes[reopened.nodes[0].classes[0]]["stroke-dasharray"], "6 4");
+    check("...and the controls come back saying so",
+      [control("Border").value, control("Border weight").value], ["Dashed", "Thick"]);
+
+    /* Clearing a colour clears the colour. It is not a way of resetting the
+     * box, and a dashed box that lost its dash by being un-coloured would be
+     * one more thing the person has to put back.
+     */
+    inspector.querySelector('.ve-diagram-swatch[title="No colour"]')
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("clearing the colour keeps the border",
+      [propOf("A", "--dd-fill"), propOf("A", "--dd-dash"), propOf("A", "--dd-stroke-width")],
+      ["", "6 4", "4px"]);
+
+    choose("Border", "Plain");
+    choose("Border weight", "Thin");
+    await saveAndWait(page);
+    const bare = await written();
+    check("a box put back to plain wears no class of ours", /^\s*class A/m.test(bare), false);
+    check("...and leaves no definition of ours behind", /classDef ddC/.test(bare), false);
+
+    /* A handful at once, the same as the colours. "Make these four dashed" is
+     * as much a reason to hold four boxes as "make these four red" is.
+     */
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "a", ctrlKey: true, bubbles: true }));
+    check("holding several offers the border all the same",
+      Boolean(control("Border")), true);
+    choose("Border", "Dotted");
+    check("...and one choice dashes every one of them",
+      [propOf("A", "--dd-dash"), propOf("B", "--dd-dash")], ["2 4", "2 4"]);
+  }
+
   console.log("=== the canvas has no edges to be stopped at ===");
   {
     await server.request("POST", "/api/docs",

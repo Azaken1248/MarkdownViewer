@@ -2214,6 +2214,16 @@ button.crumb:focus-visible {
   stroke: none;
 }
 
+/* The ends that are an outline rather than a shape: UML's "is a" triangle and
+   "has a" diamond, the crow's foot, the cross. Drawn in the line's own colour
+   with no fill, which is what makes a hollow diamond mean something different
+   from a solid one. */
+.dd .dd-head-hollow {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.4px;
+}
+
 .dd .dd-edge-dotted .dd-line,
 .dd .dd-edge-dotted-open .dd-line {
   stroke-dasharray: 6 4;
@@ -4116,6 +4126,33 @@ body.page-editing #dockEdit {
   max-width: 40%;
 }
 
+/* A line is three choices — what is at its back, how it is drawn, what is at
+   its point — and they read left to right in the order the line does. Held
+   together so the row still counts them as one control. */
+.ve-diagram-ends {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Inside the group the cap is the group, not the row, so a percentage of the
+   row would leave two of the three unreachable on a narrow pane. */
+.ve-diagram-ends > .ve-diagram-kind {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+}
+
+/* The border is a dash and a weight, sharing the line evenly. Same reasoning
+   as the group above: the cap here is the pair, not the panel. */
+.ve-diagram-border > .ve-diagram-kind {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+}
+
 .ve-diagram-text:focus,
 .ve-diagram-shape:focus,
 .ve-diagram-kind:focus,
@@ -4813,7 +4850,8 @@ body.page-editing #dockEdit {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
     grid-template-areas:
       "from  to    drop"
-      "kind  label label";
+      "ends  ends  ends"
+      "label label label";
     align-items: center;
   }
 
@@ -4821,8 +4859,10 @@ body.page-editing #dockEdit {
     grid-area: from;
   }
 
-  .ve-diagram-arrow > .ve-diagram-kind {
-    grid-area: kind;
+  /* Three selects will not fit beside a label on a phone, so they take the
+     width to themselves and the label takes the line under them. */
+  .ve-diagram-arrow > .ve-diagram-ends {
+    grid-area: ends;
   }
 
   .ve-diagram-arrow > .ve-diagram-text {
@@ -4839,8 +4879,7 @@ body.page-editing #dockEdit {
 
   /* In a grid the cells decide the widths, and a percentage cap on a select
      would fight them. */
-  .ve-diagram-arrow > .ve-diagram-pick,
-  .ve-diagram-arrow > .ve-diagram-kind {
+  .ve-diagram-arrow > .ve-diagram-pick {
     max-width: none;
   }
 }

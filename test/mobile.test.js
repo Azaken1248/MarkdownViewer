@@ -289,13 +289,17 @@ console.log("=== the diagram builder fits a phone ===");
   // diagram, and a drawn diagram above it — three separate ways to be wider
   // than the screen, on the one screen where that is not survivable.
 
-  // An arrow is from, style, label, to and a way to remove it. On one line
-  // that is five controls in 360px; the connection reads across the top and
-  // how it is drawn goes underneath.
+  // An arrow is from, how it is drawn, a label, to, and a way to remove it. On
+  // one line that is five controls in 360px; the connection reads across the
+  // top and how it is drawn goes underneath.
   check("an arrow row stops being one line", /\.ve-diagram-arrow \{\s*display: grid;/.test(phone), true);
   check("...with the label given a cell of its own", /grid-area: label;/.test(phone), true);
+  // How a line is drawn is three selects of its own, and three selects beside a
+  // label is four things in 360px. They take the width and the label drops.
+  check("...and the line's own three a row of their own",
+    /\.ve-diagram-arrow > \.ve-diagram-ends \{\s*grid-area: ends;/.test(phone), true);
   check("...and the step menus no longer capped at a fraction of a row",
-    /\.ve-diagram-arrow > \.ve-diagram-pick,[\s\S]{0,80}?max-width: none;/.test(phone), true);
+    /\.ve-diagram-arrow > \.ve-diagram-pick \{\s*max-width: none;/.test(phone), true);
 
   // A text input's content is its size attribute — twenty characters — and a
   // flex item's floor is its content, so a label field without this is a field

@@ -60,6 +60,25 @@
   // A classDef this editor wrote, as opposed to one somebody wrote by hand. The
   // difference matters when a colour is cleared: ours is litter once nobody
   // wears it, and theirs is part of their diagram whether it is worn or not.
+  /* A border is a dash and a weight, and both are ordinary classDef
+   * declarations — the same place the colours go, read by every other renderer
+   * the same way. "Plain" and "Thin" are the absence of a declaration rather
+   * than a declaration of the default, so a box nobody has styled carries
+   * nothing at all and still follows the theme.
+   */
+  const DIAGRAM_BORDERS = [
+    ["Plain", {}],
+    ["Dashed", { "stroke-dasharray": "6 4" }],
+    ["Dotted", { "stroke-dasharray": "2 4" }]
+  ];
+
+  const DIAGRAM_WEIGHTS = [
+    ["Thin", {}],
+    ["Medium", { "stroke-width": "2.5px" }],
+    ["Thick", { "stroke-width": "4px" }]
+  ];
+
+  const DIAGRAM_COLOUR_KEYS = ["fill", "stroke", "color"];
   const DIAGRAM_CLASS_PREFIX = "ddC";
   const DIAGRAM_CLASS_RE = /^ddC\d+$/;
 
@@ -2408,23 +2427,62 @@
       return field;
     };
 
+    // A select with a fixed list of choices, which the arrow row wants three of.
+    const chooser = (className, aria, choices, value) => {
+      const select = document.createElement("select");
+      select.className = className;
+      select.setAttribute("aria-label", aria);
+
+      for (const [name, text] of choices) {
+        const choice = document.createElement("option");
+        choice.value = name;
+        choice.textContent = text;
+        select.appendChild(choice);
+      }
+
+      select.value = value;
+      return select;
+    };
+
+    /* A link is a line style and two ends, and the file has to say so in
+     * Mermaid's own words.
+     *
+     * So the kind written down is the nearest real link — an "is a" triangle is
+     * still `-->` and reads as an arrow on GitHub — and `ends` is the
+     * refinement kept beside it. It is written only when the kind alone does
+     * not already say the same thing, so an ordinary arrow never grows a
+     * layout comment it has no use for.
+     */
+    const setLink = (edge, style, ends) => {
+      edge.kind = DiagramModel.linkFor(style, ends);
+
+      const implied = DiagramDraw.endsOf({ kind: edge.kind });
+      if (implied[0] === ends[0] && implied[1] === ends[1]) {
+        delete edge.ends;
+      } else {
+        edge.ends = ends;
+      }
+    };
+
     const arrowRow = (edge) => {
       const row = document.createElement("div");
       row.className = "ve-diagram-row ve-diagram-arrow";
 
       const from = stepSelect(edge.from, "Arrow from", "ve-diagram-pick");
-      const kind = document.createElement("select");
-      kind.className = "ve-diagram-kind";
-      kind.setAttribute("aria-label", "Arrow style");
 
-      for (const option of DiagramModel.EDGE_KINDS) {
-        const choice = document.createElement("option");
-        choice.value = option.name;
-        choice.textContent = option.label;
-        kind.appendChild(choice);
-      }
+      const ends = DiagramDraw.endsOf(edge);
+      const endChoices = DiagramDraw.END_KINDS.map((one) => [one.name, one.label]);
 
-      kind.value = edge.kind;
+      // The three read left to right the way the line does: what is at its
+      // back, how it is drawn, what is at its point.
+      const back = chooser("ve-diagram-kind", "Arrow start", endChoices, ends[0]);
+      const style = chooser("ve-diagram-kind", "Line style",
+        DiagramModel.LINE_STYLES, DiagramModel.lineStyleOf(edge.kind));
+      const forward = chooser("ve-diagram-kind", "Arrow end", endChoices, ends[1]);
+
+      const line = document.createElement("div");
+      line.className = "ve-diagram-ends";
+      line.append(back, style, forward);
 
       const label = document.createElement("input");
       label.type = "text";
@@ -2446,10 +2504,12 @@
         commit();
       });
 
-      kind.addEventListener("change", () => {
-        edge.kind = kind.value;
-        commit();
-      });
+      for (const control of [back, style, forward]) {
+        control.addEventListener("change", () => {
+          setLink(edge, style.value, [back.value, forward.value]);
+          commit();
+        });
+      }
 
       label.addEventListener("input", () => {
         edge.label = label.value;
@@ -2464,7 +2524,7 @@
         drawAtOnce();
       });
 
-      row.append(from, kind, label, to, drop);
+      row.append(from, line, label, to, drop);
       return row;
     };
 
@@ -2526,35 +2586,51 @@
       }
     }
 
-    // What a box is wearing, of the colours this editor offers. A box wearing a
-    // hand-written class as well keeps it: only ours is exchanged.
-    function colourOf(item) {
+    // The declarations on the class this editor put on a box, if it put one
+    // there. A hand-written class alongside is left alone: only ours is read,
+    // and only ours is ever exchanged.
+    function styleOf(item) {
       const classes = model.classes || {};
 
-      for (const name of item.classes || []) {
-        const declarations = classes[name];
-        if (!declarations) {
-          continue;
-        }
-
-        const found = DIAGRAM_COLOURS.find(([, colour]) => sameColour(declarations, colour));
-        if (found) {
-          return found[0];
+      for (const name of item?.classes || []) {
+        if (DIAGRAM_CLASS_RE.test(name) && classes[name]) {
+          return { ...classes[name] };
         }
       }
 
-      return null;
+      return {};
     }
 
-    /* Painting a handful of boxes, or clearing them.
+    // Which of an offered set a box is wearing, judged on that set's own keys
+    // alone: a red box with a dashed border is still red, and still dashed.
+    function wearing(declarations, offered, keys) {
+      const found = offered.find(([, part]) =>
+        keys.every((key) => (declarations[key] || "") === (part[key] || "")));
+
+      return found ? found[0] : offered[0][0];
+    }
+
+    function colourOf(item) {
+      const declarations = styleOf(item);
+      const found = DIAGRAM_COLOURS.find(([, colour]) =>
+        DIAGRAM_COLOUR_KEYS.every((key) => declarations[key] === colour[key]));
+
+      return found ? found[0] : null;
+    }
+
+    /* Changing part of how a handful of boxes are drawn.
+     *
+     * A patch, not a replacement: making four boxes red leaves whatever dashes
+     * they had, because "make these red" is one thing being asked for and not
+     * three. A key set to null is taken off, which is how a colour is cleared
+     * without also clearing the border it had.
      *
      * The class is swapped rather than added, or a box changed from red to blue
      * would be wearing both and the file would say so.
      */
-    function paintWith(ids, colour) {
+    function restyle(ids, patch) {
       const ours = new Set(Object.keys(model.classes || {}).filter((name) =>
         DIAGRAM_CLASS_RE.test(name)));
-      const wanted = colour ? classFor(colour) : null;
 
       for (const id of ids) {
         const item = nodeById(id);
@@ -2562,6 +2638,16 @@
           continue;
         }
 
+        const declarations = { ...styleOf(item), ...patch };
+        for (const [key, value] of Object.entries(declarations)) {
+          if (value === null || value === "") {
+            delete declarations[key];
+          }
+        }
+
+        const wanted = Object.keys(declarations).length > 0
+          ? classFor(declarations)
+          : null;
         const kept = (item.classes || []).filter((name) => !ours.has(name));
         item.classes = wanted ? [...kept, wanted] : kept;
 
@@ -2575,6 +2661,10 @@
       drawAtOnce();
       paintInspector();
     }
+
+    // Clearing a colour is taking its three declarations off, and nothing else:
+    // the box keeps the dashed border it also had.
+    const NO_COLOUR = Object.fromEntries(DIAGRAM_COLOUR_KEYS.map((key) => [key, null]));
 
     /* The swatches. Shown for one box or for a handful, because "make these
      * four red" is the reason anybody colours a diagram in the first place.
@@ -2601,7 +2691,7 @@
           button.style.borderColor = colour.stroke;
         }
 
-        button.addEventListener("click", () => paintWith(ids, colour));
+        button.addEventListener("click", () => restyle(ids, colour || NO_COLOUR));
         return button;
       };
 
@@ -2627,7 +2717,7 @@
       custom.setAttribute("aria-label", "Any colour");
       custom.value = "#8ed9cf";
       custom.addEventListener("change", () => {
-        paintWith(ids, {
+        restyle(ids, {
           fill: custom.value,
           stroke: darken(custom.value, 0.45),
           color: darken(custom.value, 0.8)
@@ -2635,6 +2725,43 @@
       });
       row.append(custom);
 
+      return row;
+    }
+
+    /* The border: a dash and a weight, two selects side by side.
+     *
+     * Selects rather than swatches because neither is a thing you recognise at
+     * eight pixels square, and because the two together are six choices that
+     * would otherwise be six more buttons in a panel that already has ten.
+     */
+    function borderRow(ids) {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-row ve-diagram-border";
+
+      const declarations = ids.length === 1 ? styleOf(nodeById(ids[0])) : {};
+      const dash = wearing(declarations, DIAGRAM_BORDERS, ["stroke-dasharray"]);
+      const weight = wearing(declarations, DIAGRAM_WEIGHTS, ["stroke-width"]);
+
+      const named = (offered) => offered.map(([name]) => [name, name]);
+
+      const border = chooser("ve-diagram-kind", "Border", named(DIAGRAM_BORDERS), dash);
+      const thickness = chooser("ve-diagram-kind", "Border weight",
+        named(DIAGRAM_WEIGHTS), weight);
+
+      // A patch that always names its own key, so choosing "Plain" takes the
+      // dash off rather than leaving the old one behind unmentioned.
+      const patchFrom = (offered, name, keys) => {
+        const found = offered.find(([one]) => one === name);
+        const part = found ? found[1] : {};
+        return Object.fromEntries(keys.map((key) => [key, part[key] ?? null]));
+      };
+
+      border.addEventListener("change", () =>
+        restyle(ids, patchFrom(DIAGRAM_BORDERS, border.value, ["stroke-dasharray"])));
+      thickness.addEventListener("change", () =>
+        restyle(ids, patchFrom(DIAGRAM_WEIGHTS, thickness.value, ["stroke-width"])));
+
+      row.append(border, thickness);
       return row;
     }
 
@@ -2668,7 +2795,7 @@
          */
         if (selection.length > 1) {
           say(`${selection.length} boxes held. Colour them, or drag them about.`);
-          inspector.append(colourRow([...selection]));
+          inspector.append(colourRow([...selection]), borderRow([...selection]));
           return;
         }
 
@@ -2716,7 +2843,7 @@
       actions.append(step, connect);
 
       const out = model.edges.filter((edge) => edge.from === item.id);
-      inspector.append(line, colourRow([item.id]), actions);
+      inspector.append(line, colourRow([item.id]), borderRow([item.id]), actions);
 
       if (out.length > 0) {
         const legend = document.createElement("div");

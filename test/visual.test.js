@@ -1407,6 +1407,113 @@ console.log("=== an arrow goes round what is in its way ===");
   check("...and is the size it always was", [bounds.w, bounds.h], [150, 110]);
 }
 
+console.log("=== a line has two ends, and the file says so in real Mermaid ===");
+{
+  /* Mermaid can spell four endings: nothing, an arrow, a circle, a cross. UML
+   * and ERD want five more it has no words for.
+   *
+   * So the ends are read off the kind — the thing every other renderer acts on
+   * — and `ends` in a layout comment is the refinement on top. The kind stays
+   * the nearest real link, which is why a triangle-headed line is still an
+   * arrow on GitHub rather than nothing at all.
+   */
+  check("an arrow has a head and no tail", DD.endsOf({ kind: "arrow" }), ["none", "arrow"]);
+  check("a plain line has neither", DD.endsOf({ kind: "open" }), ["none", "none"]);
+  check("a dotted line has neither either", DD.endsOf({ kind: "dotted-open" }), ["none", "none"]);
+  check("a both-ways link has a head at each end", DD.endsOf({ kind: "both" }), ["arrow", "arrow"]);
+  check("...however it is drawn", DD.endsOf({ kind: "thick-both" }), ["arrow", "arrow"]);
+  check("Mermaid's own circle ending is drawn as one", DD.endsOf({ kind: "circle" }), ["none", "circle"]);
+  check("...and so is its cross", DD.endsOf({ kind: "cross" }), ["none", "cross"]);
+
+  check("what the comment says wins over what the kind implies",
+    DD.endsOf({ kind: "arrow", ends: ["diamond", "triangle"] }), ["diamond", "triangle"]);
+  check("...but a name nothing draws falls back to the kind",
+    DD.endsOf({ kind: "arrow", ends: ["nonsense", "alsonot"] }), ["none", "arrow"]);
+
+  // One definition per ending actually used. A diagram of ordinary arrows costs
+  // one marker however many arrows are in it.
+  const plain = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A" }, { id: "B", shape: "rect", text: "B" },
+      { id: "C", shape: "rect", text: "C" }],
+    edges: [{ from: "A", to: "B", kind: "arrow", label: "" },
+      { from: "B", to: "C", kind: "arrow", label: "" }],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 120, w: 80, h: 40 },
+      C: { x: 0, y: 240, w: 80, h: 40 } }
+  }, { natural: true });
+  check("two arrows share one marker", (plain.match(/<marker /g) || []).length, 1);
+  check("...which the line points at with its end and not its start",
+    /marker-end="url\(#dd-end-arrow-\d+\)"/.test(plain) && !plain.includes("marker-start"), true);
+
+  const uml = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A" }, { id: "B", shape: "rect", text: "B" }],
+    edges: [{ from: "A", to: "B", kind: "arrow", ends: ["diamond", "triangle"], label: "" }],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 120, w: 80, h: 40 } }
+  }, { natural: true });
+  check("a line with a shape at each end defines both", (uml.match(/<marker /g) || []).length, 2);
+  check("...and points at each from the right end",
+    /marker-start="url\(#dd-end-diamond-\d+\)"/.test(uml)
+    && /marker-end="url\(#dd-end-triangle-\d+\)"/.test(uml), true);
+  check("...and neither of them is an arrow", uml.includes("dd-end-arrow-"), false);
+  // A hollow head has to be drawn hollow, or "is a" and "is made of" are the
+  // same picture.
+  check("a hollow ending is drawn hollow", (uml.match(/dd-head dd-head-hollow/g) || []).length, 2);
+
+  const shut = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A" }, { id: "B", shape: "rect", text: "B" }],
+    edges: [{ from: "A", to: "B", kind: "open", label: "" }],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 120, w: 80, h: 40 } }
+  }, { natural: true });
+  check("a line with nothing on either end defines no markers", shut.includes("<marker "), false);
+  check("...and points at none", shut.includes("marker-"), false);
+
+  /* The line style, which is the other half of a link and the half Mermaid can
+   * always say.
+   */
+  check("a dotted kind is drawn dotted", DM.lineStyleOf("dotted-both"), "dotted");
+  check("a thick kind is drawn thick", DM.lineStyleOf("thick-open"), "thick");
+  check("everything else is a solid line", [DM.lineStyleOf("arrow"), DM.lineStyleOf("circle")],
+    ["solid", "solid"]);
+
+  /* And the rule that keeps the file honest: whatever ends are asked for, what
+   * is written down is the nearest link Mermaid actually has.
+   */
+  check("a solid line with an arrow is an arrow", DM.linkFor("solid", ["none", "arrow"]), "arrow");
+  check("...with nothing on it, a line", DM.linkFor("solid", ["none", "none"]), "open");
+  check("...with heads both ways, a both-ways link", DM.linkFor("solid", ["arrow", "arrow"]), "both");
+  check("Mermaid's own circle is used when it fits", DM.linkFor("solid", ["none", "circle"]), "circle");
+  check("...and so is its cross", DM.linkFor("solid", ["none", "cross"]), "cross");
+  check("a dotted line with a UML triangle is written as a dotted arrow",
+    DM.linkFor("dotted", ["none", "triangle"]), "dotted");
+  check("a thick line with nothing on it is a thick line",
+    DM.linkFor("thick", ["none", "none"]), "thick-open");
+  check("anything at the back makes it a both-ways link",
+    DM.linkFor("dotted", ["diamond", "crow"]), "dotted-both");
+  // Dotted has no circle of its own, so it lands on the nearest thing it does
+  // have rather than on nothing.
+  check("a style with no circle of its own falls back to its arrow",
+    DM.linkFor("dotted", ["none", "circle"]), "dotted");
+
+  // Written to the file and read back: the kind is real Mermaid and the exact
+  // ends are beside it, or a saved diagram loses its UML the moment it is
+  // reopened.
+  const uml2 = {
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "A", label: "A" },
+      { id: "B", shape: "rect", text: "B", label: "B" }],
+    edges: [{ from: "A", to: "B", kind: "arrow", label: "", ends: ["diamond", "triangle"] }],
+    layout: { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 120, w: 80, h: 40 } }
+  };
+  const written = DM.serializeFlowchart(uml2);
+  check("the file carries a link Mermaid can read", /A\s+-->\s+B/.test(written), true);
+  check("...and the exact ends in a comment above it",
+    /%% edge 0 [^\n]*ends=diamond,triangle/.test(written), true);
+  check("...which come back the same way round",
+    DM.parseFlowchart(written).edges[0].ends, ["diamond", "triangle"]);
+}
+
 console.log("=== ...for every diagram in the real library ===");
 {
   // The same argument as the block splitter's library pass: fixtures cover what

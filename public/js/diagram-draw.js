@@ -548,15 +548,105 @@
     return spread;
   }
 
+  /* --- What an arrow ends in ------------------------------------------------
+   *
+   * Mermaid can say four of these in its own syntax — an arrowhead, nothing, a
+   * circle and a cross — and a diagram that needs the other four says so in a
+   * layout comment while still writing the nearest real link, so the file reads
+   * correctly wherever else it is rendered.
+   *
+   * Each is drawn in a 10x10 marker box pointing along the line. `refX` is how
+   * far back from the line's end the shape sits: a filled head touches the box
+   * it points at, and a hollow one has to stop short of it or the outline is
+   * cut in half by the box's own edge.
+   */
+  const END_KINDS = [
+    { name: "none", label: "Nothing" },
+    { name: "arrow", label: "Arrow", refX: 9, fill: true, d: "M0,0 L10,5 L0,10 z" },
+    { name: "open-arrow", label: "Open arrow", refX: 9, fill: false,
+      d: "M0,0 L10,5 L0,10" },
+    { name: "circle", label: "Circle", refX: 10, fill: true,
+      d: "M0,5 A 5,5 0 1 0 10,5 A 5,5 0 1 0 0,5 z" },
+    { name: "cross", label: "Cross", refX: 10, fill: false, d: "M1,1 L9,9 M9,1 L1,9" },
+    // UML: a hollow triangle is "is a", a hollow diamond is "has a", a filled
+    // diamond is "is made of".
+    { name: "triangle", label: "Triangle (is a)", refX: 10, fill: false,
+      d: "M0,0 L10,5 L0,10 z" },
+    { name: "diamond", label: "Diamond (has a)", refX: 10, fill: false,
+      d: "M0,5 L5,0 L10,5 L5,10 z" },
+    { name: "diamond-filled", label: "Solid diamond (made of)", refX: 10, fill: true,
+      d: "M0,5 L5,0 L10,5 L5,10 z" },
+    // ERD: the fork that says "many of these".
+    { name: "crow", label: "Crow's foot (many)", refX: 10, fill: false,
+      d: "M10,0 L0,5 L10,10 M0,5 L10,5" }
+  ];
+
+  const END_BY_NAME = new Map(END_KINDS.map((one) => [one.name, one]));
+
+  /* Which ends a link has when nothing has said otherwise.
+   *
+   * Read from the kind, because the kind is what the file says in Mermaid's own
+   * words and it is the thing every other renderer will act on. `ends` in a
+   * layout comment is the refinement on top, for the four this cannot spell.
+   */
+  function endsOf(edge) {
+    const kind = String(edge?.kind || "arrow");
+    const asked = Array.isArray(edge?.ends) ? edge.ends : null;
+
+    const back = /^<|both$/.test(kind) ? "arrow" : "none";
+    let forward = "arrow";
+
+    if (/open$/.test(kind)) {
+      forward = "none";
+    } else if (kind === "circle") {
+      forward = "circle";
+    } else if (kind === "cross") {
+      forward = "cross";
+    }
+
+    const named = (value, fallback) =>
+      (typeof value === "string" && END_BY_NAME.has(value) ? value : fallback);
+
+    return asked
+      ? [named(asked[0], back), named(asked[1], forward)]
+      : [back, forward];
+  }
+
+  // The markers a drawing actually needs, defined once each. Every end style in
+  // every edge, and nothing else: a diagram of plain arrows carries one marker.
+  function markerDefs(edges, id) {
+    const wanted = new Set();
+
+    for (const edge of edges || []) {
+      for (const end of endsOf(edge)) {
+        wanted.add(end);
+      }
+    }
+
+    return [...wanted]
+      .map((name) => END_BY_NAME.get(name))
+      .filter((one) => one && one.d)
+      .map((one) => `<marker id="${id(one.name)}" viewBox="0 0 10 10"`
+        + ` refX="${one.refX}" refY="5" markerWidth="7" markerHeight="7"`
+        + ` orient="auto-start-reverse">`
+        + `<path class="dd-head${one.fill ? "" : " dd-head-hollow"}" d="${one.d}"/></marker>`)
+      .join("");
+  }
+
   function edgeMarkup(edge, index, layout, arrowId, spread) {
     const route = routeEdge(layout, edge, spread);
     if (!route) {
       return "";
     }
 
-    // "open" and "dotted-open" and "thick-open" are the lines that end in
-    // nothing; everything else ends in an arrowhead.
-    const head = /open$/.test(edge.kind) ? "" : ` marker-end="url(#${arrowId})"`;
+    /* Both ends, each named. A line with an arrow on it is the ordinary case
+     * and it costs one marker; a line that is a UML generalisation or an ERD
+     * "many" costs the same, which is the point of doing it this way rather
+     * than drawing the shapes into the path.
+     */
+    const [back, forward] = endsOf(edge);
+    const head = (back === "none" ? "" : ` marker-start="url(#${arrowId(back)})"`)
+      + (forward === "none" ? "" : ` marker-end="url(#${arrowId(forward)})"`);
     const label = String(edge.label || "").trim();
     const width = (label.length * LABEL_CHAR) + 10;
     const badge = label
@@ -595,7 +685,9 @@
     const edges = Array.isArray(model?.edges) ? model.edges : [];
     const bounds = Model.layoutBounds(layout);
     drawCounter += 1;
-    const arrowId = `dd-arrow-${drawCounter}`;
+    // One name per end style per drawing: two diagrams on a page must not share
+    // a marker id, and one diagram must not define the same marker twice.
+    const arrowId = (name) => `dd-end-${name}-${drawCounter}`;
 
     const pad = Number(options.pad) || 0;
     const width = bounds.w + pad;
@@ -610,9 +702,7 @@
     const view = options.viewport ? viewOf(options.view) : null;
     const moved = view ? `translate(${round(view.x)},${round(view.y)}) scale(${view.scale})` : "";
 
-    const defs = `<defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="9" refY="5"`
-      + ` markerWidth="7" markerHeight="7" orient="auto-start-reverse">`
-      + `<path class="dd-head" d="M0,0 L10,5 L0,10 z"/></marker>`
+    const defs = `<defs>${markerDefs(edges, arrowId)}`
       + (options.grid
         ? `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}"`
           + ` patternUnits="userSpaceOnUse"${view ? ` patternTransform="${moved}"` : ""}>`
@@ -719,6 +809,8 @@
     renderSource,
     nodeBody,
     paintOf,
+    endsOf,
+    END_KINDS,
     marksMarkup,
     frameMarkup,
     marqueeMarkup,
