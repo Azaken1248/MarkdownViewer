@@ -226,7 +226,15 @@
 
     try {
       const source = state.source;
-      const content = documentWith(await currentDocument(), source);
+      const document_ = await currentDocument();
+
+      // Found before the block is rewritten, because rewriting it is what makes
+      // the address that found it stop matching.
+      const target = state.kind === "doc"
+        ? VisualEditor.findDiagram(document_, state.address)
+        : null;
+
+      const content = documentWith(document_, source);
       if (content === null) {
         say("The block this diagram came from is no longer in the document. Copy the source before leaving.", "bad");
         return;
@@ -247,12 +255,20 @@
       }
 
       markSaved(content, source);
-      // The block moved if the fence changed length, and the address has to
-      // move with it or the next save will not find it.
-      if (state.kind === "doc") {
-        const found = VisualEditor.findDiagram(state.document, state.address);
-        if (found) {
-          moveAddressTo(VisualEditor.diagramAddress(found));
+
+      /* The address is half an index and half a hash of what is in the block,
+       * so saving the block is what makes it stop matching. It has to be taken
+       * again from what was actually written, by the block it was written to —
+       * looking it up by the address it already has is looking for a body that
+       * has just been replaced, which finds nothing, which left the address
+       * stale and made the *second* save say the block was gone.
+       */
+      if (target) {
+        const now = VisualEditor.diagramFences(content)
+          .find((one) => one.index === target.index);
+
+        if (now) {
+          moveAddressTo(VisualEditor.diagramAddress(now));
           window.history.replaceState(null, "", `${window.location.pathname}#${state.address}`);
         }
       }
@@ -315,9 +331,24 @@
     elements.save = document.getElementById("diagramSave");
     elements.back = document.getElementById("diagramBack");
     elements.title = document.getElementById("diagramTitle");
+    elements.theme = document.getElementById("diagramTheme");
 
     elements.save.addEventListener("click", () => void save());
     elements.back.addEventListener("click", goBack);
+
+    /* The theme switch. The same three-state cycle as the library's, because it
+     * is the same cycle — it lives in theme-boot.js, which every page with a
+     * theme already loads, so the two cannot drift apart.
+     *
+     * The canvas draws in the theme's own colours through CSS custom
+     * properties, so nothing here has to be redrawn: the paper, the boxes and
+     * the arrows all follow immediately.
+     */
+    ThemeSwitch.dress(elements.theme);
+    elements.theme?.addEventListener("click", () => {
+      ThemeSwitch.apply(ThemeSwitch.META[ThemeSwitch.preference()].next);
+      ThemeSwitch.dress(elements.theme);
+    });
 
     // A tab closing with an unsaved diagram in it gets the browser's own
     // warning. Autosave usually means there is nothing to warn about, which is

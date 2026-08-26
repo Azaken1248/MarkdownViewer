@@ -55,6 +55,9 @@ const BROWSER_GLOBALS = {
   renderMathInElement: "readonly",
   svgPanZoom: "readonly",
 
+  // The theme cycle, set up by theme-boot.js in <head> on every page that has
+  // one — including the diagram page, which loads none of the rest of this.
+  ThemeSwitch: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.

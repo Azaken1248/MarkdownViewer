@@ -1381,72 +1381,24 @@ function syncBodyLock() {
    this only takes over once the user touches the toggle.
    -------------------------------------------------------------------------- */
 
-const THEME_STORAGE_KEY = "mdviewer.theme";
-// Dark first: it is the app's long-standing look, so the default never
-// surprises anyone who has not asked for a change.
-const THEME_CYCLE = ["dark", "light", "auto"];
-const THEME_META = {
-  dark: { icon: "ph-moon", label: "Dark theme", next: "light" },
-  light: { icon: "ph-sun", label: "Light theme", next: "auto" },
-  auto: { icon: "ph-circle-half", label: "Theme follows your system", next: "dark" }
-};
-const THEME_COLORS = { dark: "#06090a", light: "#f4f8f7" };
+/* The cycle, the icons and the writing-down all live in theme-boot.js, which
+ * runs on every page that has a theme — including the diagram page, which does
+ * not load this file. What is here is what only this page has to do about it:
+ * say so out loud, and redraw the Mermaid on the screen.
+ */
+const THEME_META = ThemeSwitch.META;
 
-function themePreference() {
-  const stored = document.documentElement.dataset.themePreference;
-  return THEME_CYCLE.includes(stored) ? stored : "dark";
-}
-
-// The concrete theme in force, with "auto" already resolved.
-function activeThemeName() {
-  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
-}
-
-function resolveThemePreference(preference) {
-  if (preference !== "auto") {
-    return preference;
-  }
-
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
-}
+const themePreference = () => ThemeSwitch.preference();
+const activeThemeName = () => ThemeSwitch.active();
 
 function syncThemeToggleUI() {
-  if (!elements.themeToggleBtn) {
-    return;
-  }
-
-  const preference = themePreference();
-  const meta = THEME_META[preference];
-  const icon = elements.themeToggleBtn.querySelector("i");
-  if (icon) {
-    icon.className = `ph ${meta.icon}`;
-  }
-
-  // Say what it is now and what the click does — an icon alone cannot.
-  const label = `${meta.label}. Switch to ${THEME_META[meta.next].label.toLowerCase()}`;
-  elements.themeToggleBtn.setAttribute("aria-label", label);
-  elements.themeToggleBtn.title = label;
-  delete elements.themeToggleBtn.dataset.tip;
+  ThemeSwitch.dress(elements.themeToggleBtn);
 }
 
 async function applyThemePreference(preference, { announce = false } = {}) {
-  const next = THEME_CYCLE.includes(preference) ? preference : "dark";
   const resolvedBefore = activeThemeName();
-  const resolved = resolveThemePreference(next);
-
-  document.documentElement.dataset.themePreference = next;
-  document.documentElement.dataset.theme = resolved;
-
-  try {
-    window.localStorage.setItem(THEME_STORAGE_KEY, next);
-  } catch {
-    // Private mode. The choice still holds for this page session.
-  }
-
-  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-  if (themeColorMeta) {
-    themeColorMeta.setAttribute("content", THEME_COLORS[resolved]);
-  }
+  const next = ThemeSwitch.CYCLE.includes(preference) ? preference : "dark";
+  const resolved = ThemeSwitch.apply(next);
 
   syncThemeToggleUI();
 

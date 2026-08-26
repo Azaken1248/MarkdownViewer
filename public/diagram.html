@@ -24,17 +24,17 @@
 
   <!-- Absolute, not relative: this page is served for every /diagram/... address,
        so a relative path would resolve against the document's own folder. -->
-  <script src="/js/theme-boot.js?v=64"></script>
-  <link rel="stylesheet" href="/css/app.css?v=91" />
+  <script src="/js/theme-boot.js?v=65"></script>
+  <link rel="stylesheet" href="/css/app.css?v=92" />
 
   <!-- Nothing here renders markdown, so none of the rendering libraries are
        loaded: no marked, no DOMPurify, no Mermaid. The page splits a document
        into blocks to find one fence, and draws a diagram itself. -->
   <script src="/js/visual-editor.js?v=65" defer></script>
   <script src="/js/diagram-model.js?v=85" defer></script>
-  <script src="/js/diagram-draw.js?v=89" defer></script>
-  <script src="/js/diagram-editor.js?v=17" defer></script>
-  <script src="/js/diagram-page.js?v=2" defer></script>
+  <script src="/js/diagram-draw.js?v=90" defer></script>
+  <script src="/js/diagram-editor.js?v=18" defer></script>
+  <script src="/js/diagram-page.js?v=3" defer></script>
 </head>
 
 <body>
@@ -45,12 +45,20 @@
       </button>
       <span class="diagram-page-title" id="diagramTitle"></span>
       <span class="diagram-page-status" id="diagramStatus" role="status" aria-live="polite"></span>
+
+      <!-- Cycles dark -> light -> auto, the same as the library's own. Label
+           and icon are set from script, since the starting state comes from
+           storage. -->
+      <button class="icon-btn" id="diagramTheme" type="button" aria-label="Switch theme">
+        <i class="ph ph-moon" aria-hidden="true"></i>
+      </button>
+
       <button class="btn btn-primary" id="diagramSave" type="button" disabled>
         <i class="ph ph-floppy-disk" aria-hidden="true"></i><span>Save</span>
       </button>
     </header>
 
-    <main class="diagram-page-canvas ve-embed is-builder-open" id="diagramCanvas"></main>
+    <main class="diagram-page-canvas ve-embed" id="diagramCanvas"></main>
   </div>
 </body>
 

@@ -67,7 +67,11 @@ async function boot(dom, { cookie, origin }) {
     return { ok: response.ok, status: response.status, json: () => response.json() };
   };
 
-  for (const file of ["visual-editor.js", "diagram-model.js", "diagram-draw.js", "diagram-editor.js", "diagram-page.js"]) {
+  // theme-boot.js first, and for the same reason the page loads it in <head>:
+  // it settles the theme before anything paints, and it is where the switch the
+  // bar wires up lives.
+  for (const file of ["theme-boot.js", "visual-editor.js", "diagram-model.js",
+    "diagram-draw.js", "diagram-editor.js", "diagram-page.js"]) {
     window.eval(fs.readFileSync(path.join(ROOT, "js", file), "utf8"));
   }
 
@@ -202,6 +206,39 @@ async function run(server, cookie) {
     check("nothing is saveable until something is changed",
       page.document.getElementById("diagramSave").disabled, true);
 
+    /* The theme. This page loads none of app.js, so it used to have no way to
+     * change the theme at all — the whole cycle lived in a file it does not
+     * load. It lives in theme-boot.js now, which every page with a theme runs
+     * before it paints, so there is one cycle rather than two to disagree.
+     */
+    const themeButton = page.document.getElementById("diagramTheme");
+    const themeNow = () => page.document.documentElement.dataset.theme;
+    const wanted = () => page.document.documentElement.dataset.themePreference;
+
+    check("the page has a way to change the theme", Boolean(themeButton), true);
+    check("...saying what it is now and what pressing it does",
+      /dark theme\. switch to light/i.test(themeButton.getAttribute("aria-label")), true);
+    check("...starting where the library starts", [wanted(), themeNow()], ["dark", "dark"]);
+
+    themeButton.dispatchEvent(new page.window.MouseEvent("click", { bubbles: true }));
+    check("pressing it goes to the next one", [wanted(), themeNow()], ["light", "light"]);
+    check("...and says so", themeButton.querySelector("i").className, "ph ph-sun");
+
+    themeButton.dispatchEvent(new page.window.MouseEvent("click", { bubbles: true }));
+    check("...and then to following the system", wanted(), "auto");
+    // "Auto" is a preference, not a palette. What goes on the page has to be
+    // one of the two real ones or the stylesheet has nothing to paint with.
+    check("...which is put on the page as whichever one that turns out to be",
+      ["dark", "light"].includes(themeNow()), true);
+
+    // Written down under the same name the library uses, or the two pages
+    // disagree about the theme the moment you move between them.
+    check("...and the choice is kept where the library keeps it",
+      page.window.localStorage.getItem("mdviewer.theme"), "auto");
+
+    themeButton.dispatchEvent(new page.window.MouseEvent("click", { bubbles: true }));
+    check("...and round to the start again", wanted(), "dark");
+
     // Move a box. That is an edit to the layout comments and nothing else, and
     // it is the smallest edit the canvas can make.
     dragBox(page.window, "A", 60, 40);
@@ -221,6 +258,30 @@ async function run(server, cookie) {
       saved.body.content.endsWith("```\n\nAfter the diagram.\n"), true);
     check("...and it is still a mermaid fence",
       (saved.body.content.match(/```/g) || []).length, 2);
+
+    /* And again. The address is half an index and half a hash of what is in the
+     * block, so saving the block is what makes it stop matching — and the
+     * address has to be taken again from what was actually written. Looked up
+     * by the address it already had, it found a body that had just been
+     * replaced, found nothing, and left the address pointing at a block that no
+     * longer existed. Which the second save then said out loud.
+     */
+    dragBox(page.window, "A", 20, 0);
+    await settle();
+    check("a second edit is saveable too",
+      page.document.getElementById("diagramSave").disabled, false);
+
+    await saveAndWait(page);
+    check("...and saving it does not say the block has gone",
+      /no longer in the document/.test(page.document.getElementById("diagramStatus").textContent),
+      false);
+
+    const twice = await server.request("GET", "/api/docs/deploy.md", undefined, { Cookie: cookie });
+    check("...and the second edit reaches the file too",
+      twice.body.content !== saved.body.content, true);
+    check("...with the document still whole around it",
+      twice.body.content.startsWith("# Deployment\n\nBefore the diagram.\n\n```mermaid\n")
+        && twice.body.content.endsWith("```\n\nAfter the diagram.\n"), true);
   }
 
   console.log("=== a stash belongs to one document ===");
@@ -920,10 +981,12 @@ async function run(server, cookie) {
     const { window } = page;
     const canvas = page.document.querySelector(".ve-diagram-canvas");
     const menu = () => canvas.querySelector(".ve-diagram-menu");
-    const labels = () => [...canvas.querySelectorAll(".ve-diagram-menu-item")]
-      .map((one) => one.firstChild.textContent.trim());
-    const clickItem = (text) => [...canvas.querySelectorAll(".ve-diagram-menu-item")]
-      .find((one) => one.firstChild.textContent.trim() === text)
+    // The library's own menu markup: an icon, the label in a span, the
+    // keystroke in a kbd. Read the span, which is the label and nothing else.
+    const labels = () => [...canvas.querySelectorAll(".ve-diagram-menu .context-item")]
+      .map((one) => one.querySelector("span").textContent.trim());
+    const clickItem = (text) => [...canvas.querySelectorAll(".ve-diagram-menu .context-item")]
+      .find((one) => one.querySelector("span").textContent.trim() === text)
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     const boxes = () => [...canvas.querySelectorAll(".dd-node")].map((one) => one.getAttribute("data-id"));
     const ringed = () => canvas.querySelectorAll(".dd-ring").length;
@@ -944,18 +1007,32 @@ async function run(server, cookie) {
     check("...instead of the browser's own", stopped.defaultPrevented, true);
     check("...about the box, so it holds it", ringed(), 1);
     check("...offering what a box can do",
-      ["Edit text", "Duplicate", "Copy", "Delete"].every((one) => labels().includes(one)), true);
+      ["Rename box", "Duplicate box", "Copy box", "Delete box"]
+        .every((one) => labels().includes(one)), true);
     check("...and saying which keys do the same",
-      [...canvas.querySelectorAll(".ve-diagram-menu-keys")].map((one) => one.textContent)
+      [...canvas.querySelectorAll(".ve-diagram-menu kbd")].map((one) => one.textContent)
         .includes("Ctrl+D"), true);
+
+    /* It is the library's menu, not one that looks nearly like it: the same
+     * markup the file tree opens, so the same stylesheet dresses both and they
+     * cannot drift apart.
+     */
+    check("...in the same menu the rest of the app opens",
+      menu().classList.contains("context-menu"), true);
+    check("...with an icon on every item, as that menu has",
+      [...canvas.querySelectorAll(".ve-diagram-menu .context-item")]
+        .every((one) => Boolean(one.querySelector("i.ph"))), true);
+    check("...and a delete that looks like one",
+      [...canvas.querySelectorAll(".ve-diagram-menu .context-item.danger")]
+        .map((one) => one.querySelector("span").textContent), ["Delete box"]);
 
     /* Copy leaves the paper exactly as it was, so if the list has gone it is
      * because choosing put it away — and not because a redraw swept it off. */
-    clickItem("Copy");
+    clickItem("Copy box");
     check("choosing something puts the list away", Boolean(menu()), false);
 
     rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
-    clickItem("Duplicate");
+    clickItem("Duplicate box");
     check("choosing something does it", boxes().length, 3);
     check("...and the list is gone after that too", Boolean(menu()), false);
 
@@ -965,30 +1042,31 @@ async function run(server, cookie) {
 
     rightClick(canvas.querySelector(".dd-edge"));
     check("right-clicking an arrow is about the arrow",
-      labels().includes("Edit label") && labels().includes("Delete arrow"), true);
+      labels().includes("Rename arrow") && labels().includes("Delete arrow"), true);
     check("...and does not offer what only a box can do",
-      labels().includes("Edit text"), false);
+      labels().includes("Rename box"), false);
 
-    clickItem("Turn it round");
+    clickItem("Reverse arrow");
     await saveAndWait(page);
     const turned = (await server.request("GET", "/api/docs/menu.mmd", undefined, { Cookie: cookie })).body.content;
     check("an arrow can be turned round", turned.includes("B --> A"), true);
 
     rightClick(canvas);
     check("right-clicking the paper is about the diagram",
-      labels().includes("Select all") && labels().includes("Copy the diagram as Mermaid"), true);
-    check("...and offers nothing that needs a box", labels().includes("Duplicate"), false);
+      labels().includes("Select all boxes") && labels().includes("Copy diagram as Mermaid"), true);
+    check("...and offers nothing that needs a box",
+      labels().some((one) => one.startsWith("Duplicate")), false);
 
-    clickItem("Select all");
+    clickItem("Select all boxes");
     check("...and select all from it selects all", ringed(), 2);
 
     // With several held, the list speaks about all of them.
     rightClick(canvas.querySelector('.dd-node[data-id="A"]'));
-    check("with a handful held, the list is about the handful",
-      labels().includes("Delete them"), true);
-    check("...and drops what only makes sense for one", labels().includes("Edit text"), false);
+    check("with a handful held, the list says how many it is about",
+      labels().includes("Delete 2 boxes"), true);
+    check("...and drops what only makes sense for one", labels().includes("Rename box"), false);
 
-    clickItem("Delete them");
+    clickItem("Delete 2 boxes");
     check("...and does it to all of them", boxes().length, 0);
     canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
 
@@ -1024,7 +1102,7 @@ async function run(server, cookie) {
     box().dispatchEvent(finger("pointerdown", 200, 200));
     await new Promise((r) => setTimeout(r, 700));
     check("a finger held still opens the same list", Boolean(menu()), true);
-    check("...about the box under it", labels().includes("Edit text"), true);
+    check("...about the box under it", labels().includes("Rename box"), true);
     canvas.dispatchEvent(finger("pointerup", 200, 200));
 
     // A press that turns into a drag was a drag all along.
@@ -1541,9 +1619,34 @@ async function run(server, cookie) {
     check("...and the tool is still on", tool.getAttribute("aria-pressed"), "true");
 
     // The whole reason for it being a mode: the second arrow costs the same as
-    // the first.
+    // the first. And the second arrow out of the same box has to be an arrow —
+    // the first one is lying under the drag by then.
     drag("A", "C");
     check("...so the next drag is the next arrow", joined(), ["A->B", "A->C"]);
+    check("...rather than a corner put into the one already there",
+      canvas.querySelectorAll(".dd-via").length, 0);
+
+    /* A tap that goes nowhere has drawn nothing. The circle on a selected box
+     * grows a new box when it is clicked, and the tool borrows that gesture —
+     * so without saying otherwise, every tap on a box while the tool was on
+     * made another box.
+     */
+    const boxes = () => canvas.querySelectorAll(".dd-node").length;
+    const was = boxes();
+    const [tapX, tapY] = middleOf("B");
+    canvas.querySelector('.dd-node[data-id="B"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", at(tapX, tapY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(tapX, tapY)));
+    check("a tap that goes nowhere draws nothing and makes nothing",
+      [boxes(), joined().length], [was, 2]);
+
+    // And a drag that reaches empty paper has reached no box to join to.
+    canvas.querySelector('.dd-node[data-id="B"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", at(tapX, tapY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(tapX + 400, tapY + 400)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(tapX + 400, tapY + 400)));
+    check("...and neither does one let go over nothing",
+      [boxes(), joined().length], [was, 2]);
 
     await saveAndWait(page);
     const written = (await server.request("GET", "/api/docs/joining.mmd",
@@ -1833,12 +1936,16 @@ async function run(server, cookie) {
     check("...after the box it is now inside, whatever the file's order",
       painted(), ["Hall", "Chair"]);
 
-    // Carrying the outer one is the same rule read the other way: what is being
-    // carried is in front, even when what it is in front of is its own content.
+    /* Carrying the outer one is where the rule stops. A box lifted over its own
+     * contents hides them for the whole length of the drag, which is worse than
+     * the problem being solved — so a box with something inside it stays in its
+     * layer and you can still see what you are moving.
+     */
     const [hall, hallX, hallY] = grab("Hall");
     hall.dispatchEvent(new window.MouseEvent("pointerdown", at(hallX, hallY)));
     canvas.dispatchEvent(new window.MouseEvent("pointermove", at(hallX + 20, hallY)));
-    check("...and so is a box carried over what is inside it", painted(), ["Chair", "Hall"]);
+    check("...but a box carried over what is inside it stays behind it",
+      painted(), ["Hall", "Chair"]);
     canvas.dispatchEvent(new window.MouseEvent("pointerup", at(hallX + 20, hallY)));
     await new Promise((r) => setTimeout(r, 300));
 
@@ -1847,6 +1954,49 @@ async function run(server, cookie) {
     await new Promise((r) => setTimeout(r, 300));
     check("a box carried back out is drawn beside what it was inside",
       canvas.querySelectorAll(".dd-nodes").length, 1);
+
+    /* A box that holds nothing is not held back by a box that is inside
+     * something else.
+     *
+     * "Holds something" cannot be "there is a box deeper than me somewhere in
+     * the diagram", or one nested box anywhere would pin every plain box in the
+     * drawing to its layer. It has to be about this box and that one.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "beside.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ Sign 700,100 80x40",
+        "    %% @ Hall 100,100 320x220",
+        "    %% @ Chair 160,160 80x40",
+        "    Sign[Sign]",
+        "    Hall[Hall]",
+        "    Chair[Chair]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const near = await openPage({ url: `${origin}/diagram/file/beside.mmd`, cookie, origin });
+    const nearby = near.document.querySelector(".ve-diagram-canvas");
+    const order = () => [...nearby.querySelectorAll(".dd-node")].map((one) => one.dataset.id);
+    const spot = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+        .exec(nearby.querySelector(`.dd-node[data-id="${id}"]`).getAttribute("transform"));
+      return [Number(found[1]) + 10, Number(found[2]) + 10];
+    };
+
+    check("a plain box beside a container is drawn in the first layer",
+      order(), ["Sign", "Hall", "Chair"]);
+
+    const [signX, signY] = spot("Sign");
+    nearby.querySelector('.dd-node[data-id="Sign"]').dispatchEvent(
+      new near.window.MouseEvent("pointerdown",
+        { clientX: signX, clientY: signY, bubbles: true }));
+    nearby.dispatchEvent(new near.window.MouseEvent("pointermove",
+      { clientX: signX - 400, clientY: signY, bubbles: true }));
+    check("...and carrying it forward is not stopped by somebody else's contents",
+      order()[order().length - 1], "Sign");
+    nearby.dispatchEvent(new near.window.MouseEvent("pointerup",
+      { clientX: signX - 400, clientY: signY, bubbles: true }));
 
     // The file has no opinion about any of this: where a box is, is what says
     // what it is inside, and where it is was already written down.

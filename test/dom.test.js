@@ -380,6 +380,11 @@ async function run(server) {
   // in scope before app.js runs, exactly as the two <script> tags arrange.
   window.eval(coreSource);
 
+  // The theme, settled before anything paints — and the cycle app.js switches
+  // it with, which lives here because the diagram page needs it too and loads
+  // none of app.js.
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "theme-boot.js"), "utf8"));
+
   // Block splitting for the visual editor, loaded before app.js as the page
   // loads it.
   window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
@@ -1671,6 +1676,7 @@ async function run(server) {
     check("...as the document on screen rather than the one on disk", across, typed);
     check("...and does not open a canvas in the block instead",
       doc.querySelectorAll("#docContent .ve-diagram-canvas").length, 0);
+
 
     // Left behind, it would be picked up by an edit weeks later and quietly
     // undo everything in between. The block after this one takes it properly.

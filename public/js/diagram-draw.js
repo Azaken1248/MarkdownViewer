@@ -1240,6 +1240,7 @@
     endsOf,
     shapeOf,
     edgeMarks,
+    surrounds,
     sideTowards,
     pathCurved,
     wayPoints,

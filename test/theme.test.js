@@ -9,6 +9,9 @@ const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
 const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
 const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const boot = fs.readFileSync(path.join(PUBLIC_DIR, "js", "theme-boot.js"), "utf8");
+const diagramHtml = fs.readFileSync(path.join(PUBLIC_DIR, "diagram.html"), "utf8");
+const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
+const errorHtml = fs.readFileSync(path.join(PUBLIC_DIR, "error.html"), "utf8");
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -143,9 +146,25 @@ check("the preference survives a storage throw", /catch \(error\) \{[\s\S]{0,120
 
 console.log("=== the toggle ===");
 check("the button exists", html.includes('id="themeToggleBtn"'), true);
-check("it cycles all three modes", /THEME_CYCLE = \["dark", "light", "auto"\]/.test(js), true);
-check("its label says both the state and the next state", js.includes("Switch to ${THEME_META[meta.next].label.toLowerCase()}"), true);
-check("theme-color meta follows the theme", js.includes('meta[name="theme-color"]'), true);
+
+/* The cycle lives in the boot script, not in app.js.
+ *
+ * The diagram page has a theme and a switch for it, and loads none of app.js —
+ * so keeping the cycle there meant either that page had no switch, or a second
+ * copy of the cycle for the two to disagree about. The boot script already runs
+ * on every page that has a theme.
+ */
+check("it cycles all three modes", /CYCLE = \["dark", "light", "auto"\]/.test(boot), true);
+check("its label says both the state and the next state",
+  boot.includes("Switch to ${META[meta.next].label.toLowerCase()}"), true);
+check("theme-color meta follows the theme", boot.includes('meta[name="theme-color"]'), true);
+check("...and app.js does not keep a second copy of any of it",
+  /THEME_CYCLE|THEME_COLORS|THEME_STORAGE_KEY/.test(js), false);
+check("every page with a theme loads the script that holds the cycle",
+  [html, diagramHtml, shareHtml, errorHtml].every((one) => one.includes("theme-boot.js")), true);
+check("...and the diagram page has a switch of its own",
+  diagramHtml.includes('id="diagramTheme"'), true);
+
 check("the system listener cannot override an explicit choice",
   /if \(themePreference\(\) === "auto"\) \{/.test(js), true);
 

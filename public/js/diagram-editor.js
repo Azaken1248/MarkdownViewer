@@ -961,6 +961,15 @@
       hold(event);
     }
 
+    /* What is being carried is drawn in front of what it is carried over — but
+     * not in front of what it is carrying.
+     *
+     * A box dragged into a bigger one has to be visible on the way in, or it
+     * looks like it was dropped and lost. A box with something inside it is the
+     * other way round: lifted over its own contents it hides them for the whole
+     * drag, which is worse than the problem being solved. So a container stays
+     * in its layer and everything else comes forward.
+     */
     function carryToFront(ids) {
       const layers = drawing()?.querySelectorAll(".dd-nodes");
       const top = layers?.[layers.length - 1];
@@ -968,9 +977,14 @@
         return;
       }
 
+      const depths = DiagramDraw.nestingDepths(model.nodes, model.layout);
+      const holds = (id) => model.nodes.some((one) =>
+        one.id !== id && depths.get(one.id) > (depths.get(id) || 0)
+        && DiagramDraw.surrounds(model.layout[id], model.layout[one.id]));
+
       for (const one of ids) {
         const box = drawing()?.querySelector(`.dd-node[data-id="${one}"]`);
-        if (box) {
+        if (box && !holds(one)) {
           top.append(box);
         }
       }
@@ -1234,6 +1248,26 @@
       }
 
       const point = pointIn(event.clientX, event.clientY);
+
+      /* Armed, a drag from a box is an arrow out of it and nothing else.
+       *
+       * Asked before the handles and before the line, because both of those are
+       * ways of doing something to a box that has already been chosen — and the
+       * whole point of the tool is the boxes that have not. Selecting the one
+       * being dragged from would put its own arrows under the next drag, so
+       * drawing the second arrow bent the first.
+       */
+      if (arrowTool) {
+        const from = event.target.closest?.(".dd-node")?.getAttribute("data-id")
+          || boxAt(point);
+
+        if (from) {
+          beginGesture("connect", from, point, event);
+          gesture.tool = true;
+          return;
+        }
+      }
+
       const handle = event.target.closest?.("[data-role]");
 
       if (handle && selectedId) {
@@ -1279,17 +1313,6 @@
       }
 
       const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
-
-      /* Armed, a drag from a box is an arrow out of it, whatever else that box
-       * is or is not. The same gesture the circle on a selected box already
-       * uses, so what it draws, where it lets go, and what it does on empty
-       * paper are all already decided.
-       */
-      if (arrowTool && id) {
-        select(id);
-        beginGesture("connect", id, point, event);
-        return;
-      }
 
       const adding = Boolean(event.shiftKey);
 
@@ -1499,14 +1522,23 @@
           return;
         }
 
+        /* The circle on a box grows a new box out of it: clicked, beside it;
+         * dragged to empty paper, where it was let go.
+         *
+         * The tool does neither. It is armed to draw an arrow between two boxes
+         * that are already there, so a drag that reached neither has drawn
+         * nothing — and growing a box out of a tap would be answering a
+         * question nobody asked, over and over, for as long as it is on.
+         */
+        if (held.tool) {
+          return;
+        }
+
         if (!held.moved) {
-          // The circle, clicked rather than dragged: grow a new box out of this
-          // one, already joined, ready to be named.
           addBox({ joinFrom: held.id });
           return;
         }
 
-        // Dragged to empty paper: the same thing, put down where it was let go.
         addBox({ joinFrom: held.id, x: point.x, y: point.y });
         return;
       }
@@ -1594,26 +1626,35 @@
         return;
       }
 
+      /* The library's own menu, not one that looks nearly like it.
+       *
+       * This was a hand-rolled copy: same idea, different radius, different
+       * shadow, a different hover colour, no icons, and the keystroke in a
+       * plain span rather than a kbd. Two menus in one app that are almost the
+       * same is worse than either of them, so this is the same markup the file
+       * tree opens and the same stylesheet rules dress it.
+       */
       menu = document.createElement("div");
-      menu.className = "ve-diagram-menu";
+      menu.className = "context-menu ve-diagram-menu";
       menu.setAttribute("role", "menu");
 
       for (const item of shown) {
         if (item === "-") {
-          const rule = document.createElement("div");
-          rule.className = "ve-diagram-menu-rule";
+          const rule = document.createElement("hr");
+          rule.className = "context-sep";
           menu.append(rule);
           continue;
         }
 
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "ve-diagram-menu-item";
+        button.className = item.danger ? "context-item danger" : "context-item";
         button.setAttribute("role", "menuitem");
-        button.textContent = item.label;
+        button.innerHTML = `<i class="ph ${item.icon || "ph-dot"}" aria-hidden="true"></i><span></span>`;
+        button.querySelector("span").textContent = item.label;
+
         if (item.keys) {
-          const keys = document.createElement("span");
-          keys.className = "ve-diagram-menu-keys";
+          const keys = document.createElement("kbd");
           keys.textContent = item.keys;
           button.append(keys);
         }
@@ -1693,8 +1734,9 @@
       if (target.kind === "edge") {
         const edge = model.edges[target.index];
         return [
-          { label: "Edit label", run: () => editEdge(target.index) },
-          { label: "Turn it round", run: () => {
+          { label: "Rename arrow", icon: "ph-text-t", keys: "F2",
+            run: () => editEdge(target.index) },
+          { label: "Reverse arrow", icon: "ph-arrows-left-right", run: () => {
             const was = edge.from;
             edge.from = edge.to;
             edge.to = was;
@@ -1702,8 +1744,14 @@
             paintLists();
             drawAtOnce();
           } },
+          { label: "Straighten arrow", icon: "ph-line-segment", run: () => {
+            delete edge.waypoints;
+            delete edge.sides;
+            write();
+            drawAtOnce();
+          } },
           "-",
-          { label: "Delete arrow", keys: "Del", run: () => {
+          { label: "Delete arrow", icon: "ph-trash", keys: "Del", danger: true, run: () => {
             model.edges = model.edges.filter((other) => other !== edge);
             write();
             paintLists();
@@ -1713,47 +1761,68 @@
         ];
       }
 
+      /* One naming rule, so a menu read twice reads the same way both times:
+       * the verb, then what it is being done to, and the same word for the same
+       * thing everywhere. "Copy as Mermaid" and "Copy the diagram as Mermaid"
+       * were the same item written two ways in two menus.
+       */
       if (target.kind === "node") {
+        const them = many ? `${selection.length} boxes` : "box";
+
         return [
-          many ? null : { label: "Edit text", run: () => editNode(target.id) },
-          many ? null : { label: "Draw an arrow from here", run: () => {
+          many ? null : { label: "Rename box", icon: "ph-text-t", keys: "F2",
+            run: () => editNode(target.id) },
+          many ? null : { label: "Draw arrow from here", icon: "ph-arrow-up-right", run: () => {
             armedFrom = target.id;
             say("Tap another box to join it.");
           } },
           "-",
-          { label: many ? "Duplicate them" : "Duplicate", keys: "Ctrl+D", run: duplicateSelection },
-          { label: "Cut", keys: "Ctrl+X", run: cutSelection },
-          { label: "Copy", keys: "Ctrl+C", run: copySelection },
-          { label: "Copy as Mermaid", run: () => copyOutside(selectionSource()) },
+          { label: `Duplicate ${them}`, icon: "ph-copy", keys: "Ctrl+D", run: duplicateSelection },
+          { label: `Cut ${them}`, icon: "ph-scissors", keys: "Ctrl+X", run: cutSelection },
+          { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: copySelection },
+          { label: `Copy ${them} as Mermaid`, icon: "ph-code",
+            run: () => copyOutside(selectionSource()) },
           "-",
-          { label: "Bring to front", run: () => restack(selection, true) },
-          { label: "Send to back", run: () => restack(selection, false) },
+          { label: "Bring to front", icon: "ph-stack-simple",
+            run: () => restack(selection, true) },
+          { label: "Send to back", icon: "ph-stack-simple",
+            run: () => restack(selection, false) },
           "-",
-          { label: many ? "Delete them" : "Delete", keys: "Del", run: () => removeSteps(selection) }
+          { label: `Delete ${them}`, icon: "ph-trash", keys: "Del", danger: true,
+            run: () => removeSteps(selection) }
         ];
       }
 
       return [
-        { label: "Paste", keys: "Ctrl+V", run: pasteClipboard },
-        { label: "Add a box here", run: () => addBox({ x: point.x, y: point.y }) },
+        { label: "Add box here", icon: "ph-plus-square",
+          run: () => addBox({ x: point.x, y: point.y }) },
+        { label: "Paste", icon: "ph-clipboard", keys: "Ctrl+V", run: pasteClipboard },
         "-",
-        { label: "Select all", keys: "Ctrl+A", run: () => choose(model.nodes.map((item) => item.id)) },
-        holding ? { label: "Select none", keys: "Esc", run: () => select(null) } : null,
-        "-",
-        viewport ? { label: "Fit the whole diagram", run: () => fitView() } : null,
+        { label: arrowTool ? "Stop drawing arrows" : "Draw arrows",
+          icon: "ph-arrow-up-right",
+          keys: arrowTool ? "V" : "A",
+          run: () => useArrowTool(!arrowTool) },
         viewport
           ? {
             label: handTool ? "Stop moving about" : "Drag to move about",
+            icon: "ph-hand",
             keys: handTool ? "V" : "H",
             run: () => useHand(!handTool)
           }
           : null,
-        {
-          label: arrowTool ? "Stop drawing arrows" : "Draw arrows",
-          keys: arrowTool ? "V" : "A",
-          run: () => useArrowTool(!arrowTool)
-        },
-        { label: "Copy the diagram as Mermaid", run: () => copyOutside(sourceNow()) }
+        "-",
+        { label: "Select all boxes", icon: "ph-selection-all", keys: "Ctrl+A",
+          run: () => choose(model.nodes.map((item) => item.id)) },
+        holding
+          ? { label: "Select none", icon: "ph-selection-slash", keys: "Esc",
+            run: () => select(null) }
+          : null,
+        viewport
+          ? { label: "Fit diagram to the window", icon: "ph-corners-out", run: () => fitView() }
+          : null,
+        "-",
+        { label: "Copy diagram as Mermaid", icon: "ph-code",
+          run: () => copyOutside(sourceNow()) }
       ];
     }
 
