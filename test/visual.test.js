@@ -1460,6 +1460,39 @@ console.log("=== a line has two ends, and the file says so in real Mermaid ===")
   // same picture.
   check("a hollow ending is drawn hollow", (uml.match(/dd-head dd-head-hollow/g) || []).length, 2);
 
+  /* Boxes are drawn after arrows, so an arrowhead that reaches the box it
+   * points at is an arrowhead with its tip painted over — and a box's border is
+   * centred on its edge, so half of it is outside the box doing exactly that.
+   * The line stops short instead.
+   */
+  const meeting = { A: { x: 100, y: 100, w: 80, h: 40 }, B: { x: 100, y: 300, w: 80, h: 40 } };
+  const headed = DD.routeEdge(meeting, { from: "A", to: "B", kind: "arrow" }, 0);
+  check("a line with a head on it stops short of the box",
+    headed.d, "M140,140 L140,298");
+  check("...though the route it took still reaches it",
+    headed.points[headed.points.length - 1], [140, 300]);
+  check("...and the head is anchored at its own far edge, wholly behind that",
+    /refX="10"/.test(plain) && !/refX="9"/.test(plain), true);
+
+  // Only where there is something to clear. A plain line held two pixels off
+  // the box would be a gap in every diagram, for arrowheads that are not there.
+  check("a line with nothing on it still meets the box",
+    DD.routeEdge(meeting, { from: "A", to: "B", kind: "open" }, 0).d, "M140,140 L140,300");
+  check("a line with a head at each end stops short at each end",
+    DD.routeEdge(meeting, { from: "A", to: "B", kind: "both" }, 0).d, "M140,142 L140,298");
+
+  /* Two boxes touching leave the line no length to be shortened by. Taking two
+   * pixels off a segment that has none would point the arrow backwards, and off
+   * a route that is a single point would be arithmetic on a segment that is not
+   * there.
+   */
+  const touching = { A: { x: 100, y: 100, w: 80, h: 40 }, B: { x: 100, y: 140, w: 80, h: 40 } };
+  check("a line with no length at all is left where it is",
+    DD.routeEdge(touching, { from: "A", to: "B", kind: "arrow" }, 0).d, "M140,140");
+  const hair = { A: { x: 100, y: 100, w: 80, h: 40 }, B: { x: 100, y: 141, w: 80, h: 40 } };
+  check("...and so is one with less length than the clearance",
+    DD.routeEdge(hair, { from: "A", to: "B", kind: "arrow" }, 0).d, "M140,140 L140,141");
+
   const shut = DD.render({
     direction: "TD",
     nodes: [{ id: "A", shape: "rect", text: "A" }, { id: "B", shape: "rect", text: "B" }],

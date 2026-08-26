@@ -1236,6 +1236,35 @@ async function run(server, cookie) {
     check("...while the comment still says which end is which",
       /ends=diamond,triangle/.test(both), true);
 
+    /* Dragging a box re-routes its arrows in place rather than redrawing the
+     * whole diagram, and a re-route that draws a different line from the one a
+     * redraw would draw is a tip that hides itself for the length of the drag
+     * and comes back when you let go.
+     */
+    const lineOf = () => canvas.querySelector(".dd-edge .dd-line").getAttribute("d");
+    const held = groupOf("B");
+    const place = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(held.getAttribute("transform"));
+    const at = (px, py) => ({ clientX: px, clientY: py, bubbles: true });
+    const grabX = Number(place[1]) + 10;
+    const grabY = Number(place[2]) + 10;
+
+    held.dispatchEvent(new window.MouseEvent("pointerdown", at(grabX, grabY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(grabX, grabY + 40)));
+    // The re-route happens on the next frame, the way every other one does.
+    await new Promise((done) => window.requestAnimationFrame(
+      () => window.requestAnimationFrame(done)));
+    const dragged = lineOf();
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(grabX, grabY + 40)));
+    await new Promise((r) => setTimeout(r, 300));
+
+    check("an arrow re-routed by a drag is the same line a redraw would give",
+      dragged, lineOf());
+    // B is now at y=340 and wears a shape at each end of the line, so the line
+    // runs from two pixels below A to two pixels above B.
+    check("...which is one that stops short of the box at either end",
+      dragged, "M140,142 L140,338");
+    dragBox(window, "B", 0, -40);
+
     /* And the controls have to be able to read all that back. A panel that
      * always opens saying "solid arrow" is a panel that quietly undoes the
      * line the moment anything else about it is changed.

@@ -510,7 +510,59 @@
     }
 
     const points = routeBetween(from, to, obstaclesFor(layout, edge.from, edge.to), spread);
-    return { points, d: pathData(points), mid: midpoint(points) };
+    return { points, d: pathData(stopShort(points, edge)), mid: midpoint(points) };
+  }
+
+  /* How far short of the box a line stops when there is a shape drawn at that
+   * end.
+   *
+   * A box's border is centred on its edge, so half of it is drawn outside the
+   * box — over the arrowhead, if the arrowhead is right up against it. And the
+   * boxes are drawn after the arrows, so what is drawn over wins. Two pixels
+   * clears the ordinary 1.5px border, the 2.5px one a box being pointed at
+   * wears, and the 4px one a box can be given.
+   *
+   * Only where there is something to clear: a plain line still meets the box it
+   * joins, or every line in every diagram would hold itself two pixels away for
+   * the sake of arrowheads that are not there.
+   */
+  const END_CLEARANCE = 2;
+
+  function pullBack(points, amount) {
+    const last = points.length - 1;
+    if (last < 1) {
+      return points;
+    }
+
+    const [x1, y1] = points[last - 1];
+    const [x2, y2] = points[last];
+    const length = Math.hypot(x2 - x1, y2 - y1);
+
+    // A segment shorter than the clearance is one where moving the end back
+    // would put it behind its own start.
+    if (!(length > amount)) {
+      return points;
+    }
+
+    const left = (length - amount) / length;
+    const shorter = points.slice();
+    shorter[last] = [x1 + ((x2 - x1) * left), y1 + ((y2 - y1) * left)];
+    return shorter;
+  }
+
+  function stopShort(points, edge) {
+    const [back, forward] = endsOf(edge);
+    let drawn = points;
+
+    if (forward !== "none") {
+      drawn = pullBack(drawn, END_CLEARANCE);
+    }
+
+    if (back !== "none") {
+      drawn = pullBack([...drawn].reverse(), END_CLEARANCE).reverse();
+    }
+
+    return drawn;
   }
 
   /* How far off the middle each arrow leaves its box.
@@ -555,29 +607,30 @@
    * layout comment while still writing the nearest real link, so the file reads
    * correctly wherever else it is rendered.
    *
-   * Each is drawn in a 10x10 marker box pointing along the line. `refX` is how
-   * far back from the line's end the shape sits: a filled head touches the box
-   * it points at, and a hollow one has to stop short of it or the outline is
-   * cut in half by the box's own edge.
+   * Each is drawn in a 10x10 marker box pointing along the line, and all of them
+   * are anchored at x=10 — their far edge — so the whole shape sits behind the
+   * point the line stops at rather than reaching past it. Boxes are drawn after
+   * arrows, so anything reaching past that point is painted over by the box it
+   * points at, which is how an arrow ends up with its tip cut off.
    */
+  const END_ANCHOR = 10;
+
   const END_KINDS = [
     { name: "none", label: "Nothing" },
-    { name: "arrow", label: "Arrow", refX: 9, fill: true, d: "M0,0 L10,5 L0,10 z" },
-    { name: "open-arrow", label: "Open arrow", refX: 9, fill: false,
-      d: "M0,0 L10,5 L0,10" },
-    { name: "circle", label: "Circle", refX: 10, fill: true,
+    { name: "arrow", label: "Arrow", fill: true, d: "M0,0 L10,5 L0,10 z" },
+    { name: "open-arrow", label: "Open arrow", fill: false, d: "M0,0 L10,5 L0,10" },
+    { name: "circle", label: "Circle", fill: true,
       d: "M0,5 A 5,5 0 1 0 10,5 A 5,5 0 1 0 0,5 z" },
-    { name: "cross", label: "Cross", refX: 10, fill: false, d: "M1,1 L9,9 M9,1 L1,9" },
+    { name: "cross", label: "Cross", fill: false, d: "M1,1 L9,9 M9,1 L1,9" },
     // UML: a hollow triangle is "is a", a hollow diamond is "has a", a filled
     // diamond is "is made of".
-    { name: "triangle", label: "Triangle (is a)", refX: 10, fill: false,
-      d: "M0,0 L10,5 L0,10 z" },
-    { name: "diamond", label: "Diamond (has a)", refX: 10, fill: false,
+    { name: "triangle", label: "Triangle (is a)", fill: false, d: "M0,0 L10,5 L0,10 z" },
+    { name: "diamond", label: "Diamond (has a)", fill: false,
       d: "M0,5 L5,0 L10,5 L5,10 z" },
-    { name: "diamond-filled", label: "Solid diamond (made of)", refX: 10, fill: true,
+    { name: "diamond-filled", label: "Solid diamond (made of)", fill: true,
       d: "M0,5 L5,0 L10,5 L5,10 z" },
     // ERD: the fork that says "many of these".
-    { name: "crow", label: "Crow's foot (many)", refX: 10, fill: false,
+    { name: "crow", label: "Crow's foot (many)", fill: false,
       d: "M10,0 L0,5 L10,10 M0,5 L10,5" }
   ];
 
@@ -627,7 +680,7 @@
       .map((name) => END_BY_NAME.get(name))
       .filter((one) => one && one.d)
       .map((one) => `<marker id="${id(one.name)}" viewBox="0 0 10 10"`
-        + ` refX="${one.refX}" refY="5" markerWidth="7" markerHeight="7"`
+        + ` refX="${END_ANCHOR}" refY="5" markerWidth="7" markerHeight="7"`
         + ` orient="auto-start-reverse">`
         + `<path class="dd-head${one.fill ? "" : " dd-head-hollow"}" d="${one.d}"/></marker>`)
       .join("");
@@ -647,6 +700,7 @@
     const [back, forward] = endsOf(edge);
     const head = (back === "none" ? "" : ` marker-start="url(#${arrowId(back)})"`)
       + (forward === "none" ? "" : ` marker-end="url(#${arrowId(forward)})"`);
+
     const label = String(edge.label || "").trim();
     const width = (label.length * LABEL_CHAR) + 10;
     const badge = label
