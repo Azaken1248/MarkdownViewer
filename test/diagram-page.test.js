@@ -1159,7 +1159,7 @@ async function run(server, cookie) {
         "flowchart TD",
         "    %% layout v1",
         "    %% @ A 100,100 80x40",
-        "    %% @ B 100,300 80x40",
+        "    %% @ B 300,300 80x40",
         "    A[One]",
         "    B[Two]",
         "    A --> B"
@@ -1198,10 +1198,13 @@ async function run(server, cookie) {
      */
     check("the arrow offers what is at its back", Boolean(control("Arrow start")), true);
     check("...how it is drawn", Boolean(control("Line style")), true);
+    check("...what shape it is drawn in", Boolean(control("Line shape")), true);
     check("...and what is at its point", Boolean(control("Arrow end")), true);
     check("a plain arrow starts with nothing behind it and an arrow ahead",
       [control("Arrow start").value, control("Line style").value, control("Arrow end").value],
       ["none", "solid", "arrow"]);
+    check("...drawn the way every line has always been drawn",
+      control("Line shape").value, "angled");
 
     // An ending Mermaid has no words for. The file gets the nearest link it
     // does have, and the exact ending beside it.
@@ -1236,6 +1239,28 @@ async function run(server, cookie) {
     check("...while the comment still says which end is which",
       /ends=diamond,triangle/.test(both), true);
 
+    /* The shape of the line is a separate question again, and a quiet one: it
+     * is not something Mermaid has an opinion about, so it goes in the layout
+     * comment and leaves the link alone.
+     */
+    choose("Line shape", "curved");
+    await new Promise((r) => setTimeout(r, 300));
+    check("a curved line is drawn with curves in it",
+      /Q[\d.]+,[\d.]+/.test(canvas.querySelector(".dd-edge .dd-line").getAttribute("d")), true);
+
+    await saveAndWait(page);
+    const bendy = await written();
+    check("...which the file says in the layout comment", /route=curved/.test(bendy), true);
+    check("...and the link it is drawn on is untouched",
+      /^\s*A <-\.-> B\s*$/m.test(bendy), true);
+
+    choose("Line shape", "straight");
+    await new Promise((r) => setTimeout(r, 300));
+    check("a straight line is one segment",
+      (canvas.querySelector(".dd-edge .dd-line").getAttribute("d").match(/[LQ]/g) || []).length, 1);
+
+    choose("Line shape", "curved");
+
     /* Dragging a box re-routes its arrows in place rather than redrawing the
      * whole diagram, and a re-route that draws a different line from the one a
      * redraw would draw is a tip that hides itself for the length of the drag
@@ -1261,8 +1286,15 @@ async function run(server, cookie) {
       dragged, lineOf());
     // B is now at y=340 and wears a shape at each end of the line, so the line
     // runs from two pixels below A to two pixels above B.
-    check("...which is one that stops short of the box at either end",
-      dragged, "M140,142 L140,338");
+    /* B is now at 300,340 and the line wears a shape at each end, so it leaves
+     * A two pixels down and arrives at B two pixels short — and it is curved,
+     * so the re-route has to draw the curve as well. A drag that quietly
+     * straightened every corner would be a diagram that changed shape for as
+     * long as it was being worked on.
+     */
+    check("...which is one that stops short of the box at either end, curves and all",
+      dragged,
+      "M140,142 L140,228 Q140,240 152,240 L328,240 Q340,240 340,252 L340,338");
     dragBox(window, "B", 0, -40);
 
     /* And the controls have to be able to read all that back. A panel that
@@ -1272,8 +1304,21 @@ async function run(server, cookie) {
     tap("B");
     tap("A");
     check("reopening the arrow shows the line it actually is",
-      [control("Arrow start").value, control("Line style").value, control("Arrow end").value],
-      ["diamond", "dotted", "triangle"]);
+      [control("Arrow start").value, control("Line style").value,
+        control("Line shape").value, control("Arrow end").value],
+      ["diamond", "dotted", "curved", "triangle"]);
+
+    /* And put back to the ordinary shape it says nothing at all — not even
+     * beside the ends, which do need writing down. An arrow drawn the way every
+     * arrow has always been drawn has nothing to say about it.
+     */
+    choose("Line shape", "angled");
+    await saveAndWait(page);
+    const ordinary = await written();
+    check("a line put back to the ordinary shape says nothing about its shape",
+      /route=/.test(ordinary), false);
+    check("...while what does need saying is still said",
+      /ends=diamond,triangle/.test(ordinary), true);
 
     /* And back to an ordinary arrow. The comment has to go with it: a file that
      * kept saying `ends=none,arrow` would carry a layout line for every arrow

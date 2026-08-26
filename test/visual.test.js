@@ -1547,6 +1547,124 @@ console.log("=== a line has two ends, and the file says so in real Mermaid ===")
     DM.parseFlowchart(written).edges[0].ends, ["diamond", "triangle"]);
 }
 
+console.log("=== a line is drawn in the shape it is asked for ===");
+{
+  /* One route, three ways of drawing it. The corners a line turns to get round
+   * a box are worked out once; curved is those same corners softened, which is
+   * why turning a line curved cannot walk it through anything.
+   *
+   * Straight is the one that really is a different route, and the one that goes
+   * through whatever is in the way — which is what asking for a straight line
+   * between two boxes means.
+   */
+  const bent = { A: { x: 100, y: 100, w: 80, h: 40 }, B: { x: 300, y: 300, w: 80, h: 40 } };
+  const angled = DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow" }, 0);
+  check("a line with nothing said about it is angled, as it always was",
+    angled.d, "M140,140 L140,220 L340,220 L340,298");
+  check("...and saying so outright changes nothing",
+    DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow", route: "angled" }, 0).d, angled.d);
+  check("...and so does asking for a shape there is no such thing as",
+    DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow", route: "swooshy" }, 0).d, angled.d);
+
+  const curved = DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow", route: "curved" }, 0);
+  check("curved turns each corner into a curve",
+    curved.d, "M140,140 L140,208 Q140,220 152,220 L328,220 Q340,220 340,232 L340,298");
+  check("...and starts and ends exactly where the angled one did",
+    [curved.d.startsWith("M140,140"), curved.d.endsWith("L340,298")], [true, true]);
+  check("...and goes through the same corners", curved.points, angled.points);
+
+  const straight = DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow", route: "straight" }, 0);
+  check("straight is one segment", (straight.d.match(/[LQ]/g) || []).length, 1);
+  check("...leaving each box where the line between them meets it",
+    straight.d, "M160,140 L318.6,298.6");
+
+  const square = { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 200, w: 80, h: 40 } };
+  check("a curved line with no corners in it is the line",
+    DD.routeEdge(square, { from: "A", to: "B", kind: "arrow", route: "curved" }, 0).d,
+    "M40,40 L40,198");
+
+  // And two boxes touching leave a route that is one point, which is not a line
+  // and must not be drawn as one going nowhere.
+  const met = { A: { x: 0, y: 0, w: 80, h: 40 }, B: { x: 0, y: 40, w: 80, h: 40 } };
+  check("a curved line with no length at all is a point",
+    DD.routeEdge(met, { from: "A", to: "B", kind: "arrow", route: "curved" }, 0).d, "M40,40");
+
+  /* The corner itself, on points rather than through a route, because the two
+   * ways of getting it wrong are both about the arms either side of it and a
+   * route long enough to be worth drawing has arms long enough to hide both.
+   *
+   * Never more than half of either arm: a corner rounded past the middle of its
+   * own arm eats into the corner next to it and the line doubles back on
+   * itself.
+   */
+  check("a corner between short arms is rounded by what the arms allow",
+    DD.pathCurved([[0, 0], [10, 0], [10, 10]]), "M0,0 L5,0 Q10,0 10,5 L10,10");
+  check("...and one between long arms by as much as a corner ever is",
+    DD.pathCurved([[0, 0], [100, 0], [100, 100]]),
+    "M0,0 L88,0 Q100,0 100,12 L100,100");
+
+  // A corner with no length on one side of it is not a corner, and rounding it
+  // would be a division by nothing — which reaches the file as the word NaN.
+  check("a corner with no arm to it is left as a corner",
+    DD.pathCurved([[0, 0], [0, 0], [0, 40]]), "M0,0 L0,0 L0,40");
+  check("...rather than drawn as arithmetic that did not work",
+    /NaN/.test(DD.pathCurved([[0, 0], [0, 0], [0, 40]])), false);
+
+  // Two lines between the same two boxes have to leave from two places or they
+  // are one line, the same as the angled router already does with its lanes.
+  const lane = DD.routeEdge(bent, { from: "A", to: "B", kind: "arrow", route: "straight" }, 16);
+  check("a second straight line between the same two boxes is beside the first",
+    lane.d === straight.d, false);
+
+  /* The file. The shape is nobody else's business, so it goes in the layout
+   * comment — and the default is left off it, or every arrow in every diagram
+   * would grow a line saying it is drawn the way it has always been drawn.
+   */
+  const written = DM.serializeFlowchart(DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 0,0 80x40",
+    "    %% @ B 0,200 80x40",
+    "    %% edge 0 route=curved",
+    "    A[a]",
+    "    B[b]",
+    "    A --> B"
+  ].join("\n") + "\n"));
+  check("a shape survives being written and read back",
+    /%% edge 0 route=curved/.test(written), true);
+
+  const plainly = DM.parseFlowchart(written);
+  plainly.edges[0].route = "angled";
+  check("...and the one everything already is, is not written at all",
+    /%% edge 0/.test(DM.serializeFlowchart(plainly)), false);
+
+  // Not even on a line that has a comment anyway for some other reason, or
+  // every arrow that ends in a triangle also says how it is drawn.
+  plainly.edges[0].ends = ["none", "triangle"];
+  const alongside = DM.serializeFlowchart(plainly);
+  check("...nor beside something else that did need writing down",
+    [/ends=none,triangle/.test(alongside), /route=/.test(alongside)], [true, false]);
+
+  const nonsense = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 0,0 80x40",
+    "    %% @ B 0,200 80x40",
+    "    %% edge 0 route=swooshy",
+    "    A[a]",
+    "    B[b]",
+    "    A --> B"
+  ].join("\n") + "\n");
+  check("a shape nothing can draw is not drawn", DD.shapeOf({ route: "swooshy" }), "angled");
+  check("...and an edge with nothing said about it is angled too",
+    [DD.shapeOf({}), DD.shapeOf()], ["angled", "angled"]);
+  check("...nor is it read out of a file as one", nonsense.edges[0].route, undefined);
+  // Dropped rather than carried, the same as a malformed side or ending: this
+  // is a value of a thing the editor owns, not a thing it has no controls for.
+  check("...and the line is drawn the way everything else is",
+    DD.shapeOf(nonsense.edges[0]), "angled");
+}
+
 console.log("=== a box inside a box is drawn inside it, not under it ===");
 {
   /* Boxes used to be drawn in the order the file lists them, which is fine

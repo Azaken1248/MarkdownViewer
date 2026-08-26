@@ -468,6 +468,93 @@
     .map(([x, y], index) => `${index === 0 ? "M" : "L"}${round(x)},${round(y)}`)
     .join(" ");
 
+  /* --- What shape the line is drawn in --------------------------------------
+   *
+   * Three, and the route is the same route in all three: the corners a line
+   * turns to get round a box are worked out once, and then drawn square, drawn
+   * round, or ignored in favour of the shortest way there. Which means turning
+   * a line curved cannot walk it through something, because the curve is the
+   * same line with its corners softened.
+   *
+   * Straight is the one that really is a different route, and it is the one
+   * that goes through whatever is in the way. That is what asking for a
+   * straight line means.
+   */
+  const CORNER = 12;
+
+  function pathCurved(points) {
+    if (points.length < 3) {
+      return pathData(points);
+    }
+
+    let d = `M${round(points[0][0])},${round(points[0][1])}`;
+
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const [px, py] = points[index - 1];
+      const [x, y] = points[index];
+      const [nx, ny] = points[index + 1];
+      const before = Math.hypot(x - px, y - py);
+      const after = Math.hypot(nx - x, ny - y);
+
+      // A corner between two segments one of which has no length is not a
+      // corner, and rounding it is a division by nothing.
+      if (before === 0 || after === 0) {
+        d += ` L${round(x)},${round(y)}`;
+        continue;
+      }
+
+      // Never more than half of either arm, or two corners close together eat
+      // into each other and the line doubles back.
+      const radius = Math.min(CORNER, before / 2, after / 2);
+      d += ` L${round(x + (((px - x) / before) * radius))},`
+        + `${round(y + (((py - y) / before) * radius))}`
+        + ` Q${round(x)},${round(y)}`
+        + ` ${round(x + (((nx - x) / after) * radius))},`
+        + `${round(y + (((ny - y) / after) * radius))}`;
+    }
+
+    const last = points[points.length - 1];
+    return `${d} L${round(last[0])},${round(last[1])}`;
+  }
+
+  const middleOf = (box) => [box.x + (box.w / 2), box.y + (box.h / 2)];
+
+  // Where a ray from a point inside a box leaves it. The point is inside rather
+  // than the middle because two straight lines between the same two boxes have
+  // to leave from two different places or they are one line.
+  function leaves(box, from, towards) {
+    const dx = towards[0] - from[0];
+    const dy = towards[1] - from[1];
+
+    const reach = Math.min(
+      dx === 0 ? Infinity : Math.max((box.x - from[0]) / dx, ((box.x + box.w) - from[0]) / dx),
+      dy === 0 ? Infinity : Math.max((box.y - from[1]) / dy, ((box.y + box.h) - from[1]) / dy));
+
+    return Number.isFinite(reach)
+      ? [from[0] + (dx * reach), from[1] + (dy * reach)]
+      : [from[0], from[1]];
+  }
+
+  function straightBetween(a, b, spread) {
+    const here = middleOf(a);
+    const there = middleOf(b);
+    const length = Math.hypot(there[0] - here[0], there[1] - here[1]) || 1;
+
+    // Two boxes joined twice get two lines, side by side, the same way the
+    // angled router gives them two lanes.
+    const off = spread || 0;
+    const across = [(-(there[1] - here[1]) / length) * off,
+      ((there[0] - here[0]) / length) * off];
+    const from = [here[0] + across[0], here[1] + across[1]];
+    const to = [there[0] + across[0], there[1] + across[1]];
+
+    return [leaves(a, from, to), leaves(b, to, from)];
+  }
+
+  const shapeOf = (edge) => (edge?.route === "curved" || edge?.route === "straight"
+    ? edge.route
+    : "angled");
+
   // Halfway along, measured rather than guessed, so a label on a route that
   // goes the long way round is on the part of it that goes the long way round.
   function midpoint(points) {
@@ -509,8 +596,17 @@
       return null;
     }
 
-    const points = routeBetween(from, to, obstaclesFor(layout, edge.from, edge.to), spread);
-    return { points, d: pathData(stopShort(points, edge)), mid: midpoint(points) };
+    const shape = shapeOf(edge);
+    const points = shape === "straight" && from !== to
+      ? straightBetween(from, to, spread)
+      : routeBetween(from, to, obstaclesFor(layout, edge.from, edge.to), spread);
+
+    const drawn = stopShort(points, edge);
+    return {
+      points,
+      d: shape === "curved" ? pathCurved(drawn) : pathData(drawn),
+      mid: midpoint(points)
+    };
   }
 
   /* How far short of the box a line stops when there is a shape drawn at that
@@ -920,6 +1016,8 @@
     nodeBody,
     paintOf,
     endsOf,
+    shapeOf,
+    pathCurved,
     nestingDepths,
     END_KINDS,
     marksMarkup,

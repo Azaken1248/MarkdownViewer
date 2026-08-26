@@ -164,6 +164,22 @@
     return table[forward] || table.forward;
   }
 
+  /* The three shapes a line can be drawn in.
+   *
+   * Not a Mermaid idea at all — Mermaid draws a link however its renderer feels
+   * like — so this lives in the layout comment with the rest of what is ours,
+   * and a file that has never been near this editor is angled, which is what it
+   * has always been drawn as.
+   */
+  const ROUTE_SHAPES = [
+    ["angled", "Angled"],
+    ["curved", "Curved"],
+    ["straight", "Straight"]
+  ];
+
+  const ROUTE_DEFAULT = "angled";
+  const ROUTE_NAMES = new Set(ROUTE_SHAPES.map(([name]) => name));
+
   const SHAPE_BY_NAME = new Map(SHAPES.map((shape) => [shape.name, shape]));
 
   /* The same shapes, grouped by opener and longest opener first.
@@ -357,7 +373,7 @@
   }
 
   const NODE_ATTRS = ["kind", "icon", "image", "layer", "z"];
-  const EDGE_ATTRS = ["sides", "via", "ends", "class"];
+  const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {
     const points = [];
@@ -1047,6 +1063,12 @@
         edge.ends = attributes.ends.split(",");
       }
 
+      // The default is not written down, so a file saying it is a file somebody
+      // wrote by hand, and it still means the same thing.
+      if (ROUTE_NAMES.has(attributes.route)) {
+        edge.route = attributes.route;
+      }
+
       if (attributes.class) {
         edge.class = attributes.class;
       }
@@ -1210,6 +1232,7 @@
         sides: edge.sides ? edge.sides.join(",") : "",
         via: edge.waypoints ? writePoints(edge.waypoints) : "",
         ends: edge.ends ? edge.ends.join(",") : "",
+        route: edge.route && edge.route !== ROUTE_DEFAULT ? edge.route : "",
         class: edge.class || "",
         ...(edge.extra || {})
       });
@@ -1315,7 +1338,8 @@
   const pad = (depth) => "    ".repeat(Math.max(1, depth));
 
   function hasEdgeExtras(edge) {
-    return Boolean(edge.sides || edge.waypoints || edge.ends || edge.class || edge.extra);
+    return Boolean(edge.sides || edge.waypoints || edge.ends || edge.class || edge.extra
+      || (edge.route && edge.route !== ROUTE_DEFAULT));
   }
 
   // Every class name the diagram uses, defined or not, in the order the file
@@ -1784,6 +1808,8 @@
     SHAPES,
     SHAPE_CHOICES,
     EDGE_KINDS,
+    ROUTE_SHAPES,
+    ROUTE_DEFAULT,
     LINE_STYLES,
     lineStyleOf,
     linkFor,

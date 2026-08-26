@@ -2491,16 +2491,23 @@
       const ends = DiagramDraw.endsOf(edge);
       const endChoices = DiagramDraw.END_KINDS.map((one) => [one.name, one.label]);
 
-      // The three read left to right the way the line does: what is at its
-      // back, how it is drawn, what is at its point.
+      /* Four, reading left to right the way the line does: what is at its back,
+       * how it is drawn, what shape it is drawn in, what is at its point.
+       *
+       * The middle two are both "how it is drawn" and sit together for that
+       * reason — one is what the line is made of and the other is the path it
+       * takes to get there.
+       */
       const back = chooser("ve-diagram-kind", "Arrow start", endChoices, ends[0]);
       const style = chooser("ve-diagram-kind", "Line style",
         DiagramModel.LINE_STYLES, DiagramModel.lineStyleOf(edge.kind));
+      const shape = chooser("ve-diagram-kind", "Line shape",
+        DiagramModel.ROUTE_SHAPES, DiagramDraw.shapeOf(edge));
       const forward = chooser("ve-diagram-kind", "Arrow end", endChoices, ends[1]);
 
       const line = document.createElement("div");
       line.className = "ve-diagram-ends";
-      line.append(back, style, forward);
+      line.append(back, style, shape, forward);
 
       const label = document.createElement("input");
       label.type = "text";
@@ -2528,6 +2535,19 @@
           commit();
         });
       }
+
+      /* The shape is nobody else's business — Mermaid draws a link however its
+       * own renderer feels like — so it goes in the layout comment.
+       *
+       * Said plainly, default and all. Whether the default is worth writing
+       * down is the file's question and the file answers it: the writer leaves
+       * it off, and there is one place that decides so rather than two that
+       * have to agree.
+       */
+      shape.addEventListener("change", () => {
+        edge.route = shape.value;
+        commit();
+      });
 
       label.addEventListener("input", () => {
         edge.label = label.value;
