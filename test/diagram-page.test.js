@@ -494,6 +494,103 @@ async function run(server, cookie) {
     page.window.close();
   }
 
+  console.log("=== the panel names what it is showing you ===");
+  {
+    /* Every control here used to sit in a row with two others and no words at
+     * all, which left a menu of six shapes and a menu of three border weights
+     * looking like the same unlabelled menu twice — and the label field, the
+     * one thing anybody types into, sharing its line with a menu and a delete
+     * button in a column narrower than any of the three wanted.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "panel.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 120x80 kind=table",
+        "    %% @ C 300,300 120x60 kind=table",
+        "    A[One]",
+        '    B["Two<br/>a<br/>b"]',
+        "    C[Three]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/panel.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(found[1]) + 10;
+      const y = Number(found[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const captions = () => [...inspector.querySelectorAll(".ve-diagram-field-name")]
+      .map((one) => one.textContent);
+
+    tap("A");
+    check("a panel about a box says so at the top",
+      inspector.querySelector(".ve-diagram-picked .ve-diagram-legend").textContent, "Box");
+    check("...with the way to remove it up there, since it is not a property of it",
+      Boolean(inspector.querySelector(".ve-diagram-picked > .ve-diagram-drop")), true);
+    check("...and every control below it named",
+      captions(), ["Label", "Shape", "Fill", "Border"]);
+
+    // A label wrapping its control is also the label that control answers to,
+    // so the caption is a way into the field rather than a word beside it. A
+    // group of buttons is not something a label can point at, so those keep the
+    // group's own aria-label and get a plain box.
+    const holder = (name) => [...inspector.querySelectorAll(".ve-diagram-field")]
+      .find((one) => one.querySelector(".ve-diagram-field-name").textContent === name);
+    check("a caption over one control is that control's own label",
+      [holder("Label").tagName, holder("Shape").tagName], ["LABEL", "LABEL"]);
+    check("...and a caption over a group of buttons is not, because it cannot be",
+      [holder("Fill").tagName, holder("Fill").querySelector("[role=group]")
+        .getAttribute("aria-label")], ["DIV", "Colour"]);
+
+    /* The field grows with what is typed into it. A box can hold a paragraph,
+     * and a field that shows one line of it and scrolls the rest is a field you
+     * cannot read your own diagram in.
+     */
+    const label = holder("Label").querySelector(".ve-diagram-text");
+    check("the label field starts at the one line the box has", label.rows, 1);
+    label.value = "One\ntwo\nthree";
+    label.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("...and grows by the line as it is filled", label.rows, 3);
+    check("...up to a point, since the panel holds more than this field", (() => {
+      label.value = new Array(40).fill("x").join("\n");
+      label.dispatchEvent(new window.Event("input", { bubbles: true }));
+      return label.rows;
+    })(), 10);
+
+    // A table is rows of text, and rows line up under each other or they are
+    // not rows — which the panel's own font cannot do and a monospaced one does
+    // without being asked.
+    tap("B");
+    check("a table says it is one", 
+      inspector.querySelector(".ve-diagram-picked .ve-diagram-legend").textContent, "Table");
+    check("...and calls its label what it is", captions()[0], "Rows");
+    check("...in a font its rows line up in",
+      inspector.querySelector(".ve-diagram-text").classList.contains("ve-diagram-rowsy"),
+      true);
+    check("...showing the three rows it has",
+      inspector.querySelector(".ve-diagram-text").rows, 3);
+
+    // An empty table is still a table, and a table showing one line looks like
+    // a box that happens to have a divider. The floor is what says, before a
+    // word is typed into it, that rows are what goes in here.
+    tap("C");
+    check("...and a table of one row still looks like a table",
+      inspector.querySelector(".ve-diagram-text").rows, 3);
+
+    page.window.close();
+  }
+
   console.log("=== the diagram is somewhere you are looking at part of ===");
   {
     await server.request("POST", "/api/docs",

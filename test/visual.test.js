@@ -2092,6 +2092,41 @@ console.log("=== the previews are actually on the screen ===");
   // against: positioned against anything further out and it drifts.
   check("the zoom sits on the paper",
     [region("zoom").position, region("stage").position], ["absolute", "relative"]);
+
+  /* A control is capped by the row it shares. The flow menu shares no row — it
+   * is on a bar with nine other things — and it was wearing the panel field's
+   * `max-width: 40%`, which squeezed "Left to right" down to a few letters and
+   * an ellipsis. The panel's own fields have the opposite problem: each owns
+   * its line now, so a cap at a fraction of a row it no longer shares leaves
+   * half the line empty.
+   *
+   * Both are the cascade rather than a rule, so both are computed.
+   */
+  const controls = new JSDOM(`<style>${stylesheet}</style>
+    <div class="ve-diagram-bar">
+      <label class="ve-diagram-flow"><span>Flow</span>
+        <select class="ve-diagram-kind ve-diagram-direction" id="flow"></select>
+      </label>
+    </div>
+    <div class="ve-diagram-inspector">
+      <label class="ve-diagram-field"><span class="ve-diagram-field-name">Shape</span>
+        <select class="ve-diagram-shape" id="shape"></select>
+      </label>
+      <label class="ve-diagram-field"><span class="ve-diagram-field-name">Label</span>
+        <textarea class="ve-diagram-text" id="label"></textarea>
+      </label>
+    </div>`);
+  const control = (id) =>
+    controls.window.getComputedStyle(controls.window.document.getElementById(id));
+
+  check("the flow menu is not capped at a fraction of the bar it sits on",
+    control("flow").maxWidth, "none");
+  check("...and is wide enough for the longest thing it can say",
+    control("flow").minWidth, "8.5rem");
+  check("a field in the panel takes the whole line it owns",
+    [control("shape").width, control("shape").maxWidth], ["100%", "none"]);
+  check("...the one anybody types into included",
+    [control("label").width, control("label").maxWidth], ["100%", "none"]);
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

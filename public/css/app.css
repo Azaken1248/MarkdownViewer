@@ -3531,6 +3531,7 @@ body.page-editing #dockEdit {
 
 .ve-diagram-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -3579,9 +3580,19 @@ body.page-editing #dockEdit {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   color: var(--fg-subtle);
-  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* The bar's one word and the panel's captions are the same kind of word — the
+   name of the control beside it — and reading as two kinds of word is what
+   makes a screen look assembled out of parts. */
+.ve-diagram-flow > span {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 /* Arranging the whole diagram again is not a shape, so it is not on the rail
@@ -4176,11 +4187,15 @@ body.page-editing #dockEdit {
   pointer-events: none;
 }
 
+/* A line at the top of the panel saying what can be done to what is picked.
+   Quiet, because it is a reminder rather than an instruction, and it is there
+   on every selection. */
 .ve-diagram-hint {
   margin: 0;
-  padding: 8px 10px 0;
+  padding: 12px 12px 10px;
   color: var(--fg-subtle);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .ve-diagram-hint[hidden] {
@@ -4188,13 +4203,73 @@ body.page-editing #dockEdit {
 }
 
 .ve-diagram-inspector {
-  padding: 8px 10px 10px;
+  padding: 4px 12px 12px;
+}
+
+/* What has been picked, and the one thing you can do to it that is not a
+   property of it. A panel that opens with a heading is a panel you can tell at
+   a glance is about something. */
+.ve-diagram-picked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.ve-diagram-picked > .ve-diagram-legend {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ve-diagram-picked > .ve-diagram-drop {
+  margin-right: -6px;
+}
+
+/* One control per line, with its name over it. Three of them crammed across a
+   column narrower than any of them wanted is what made this panel look
+   assembled rather than designed — and left a menu of six shapes and a menu of
+   three border weights looking like the same unlabelled menu twice. */
+.ve-diagram-field {
+  display: block;
+  margin: 0 0 10px;
+}
+
+.ve-diagram-field-name {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ve-diagram-field > .ve-diagram-colours {
+  padding: 0;
+}
+
+.ve-diagram-field > .ve-diagram-border {
+  gap: 8px;
 }
 
 .ve-diagram-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
+  margin-top: 14px;
+}
+
+/* Side by side, two of these are two half-width buttons with their words cut
+   off. Stacked, they are two buttons that say what they do. */
+.ve-diagram-actions > .ve-diagram-add {
+  justify-content: center;
+  margin: 0;
 }
 
 /* Armed: the next box tapped is the one this arrow points at. */
@@ -4204,8 +4279,13 @@ body.page-editing #dockEdit {
   color: var(--accent);
 }
 
+/* Everything in the diagram at once, for when tapping one thing at a time is
+   not how you want to work. Under a rule, because it is a second panel inside
+   the first rather than more of the one above it. */
 .ve-diagram-all {
-  padding: 0 10px 10px;
+  margin-top: 4px;
+  padding: 8px 12px 14px;
+  border-top: 1px solid var(--border-muted);
 }
 
 .ve-diagram-all > summary {
@@ -4263,6 +4343,17 @@ body.page-editing #dockEdit {
     "ends  ends  ends"
     "label label label";
   align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+
+/* Three lines of controls with nothing between one arrow and the next reads as
+   nine controls rather than as three arrows. */
+.ve-diagram-arrow + .ve-diagram-arrow {
+  margin-top: 2px;
 }
 
 .ve-diagram-arrow > .ve-diagram-pick:first-child {
@@ -4307,18 +4398,58 @@ body.page-editing #dockEdit {
   font-weight: 400;
 }
 
+/* The menus get the caret they are missing. A select styled by hand keeps the
+   platform arrow only if it is left alone, and everything else about these has
+   been taken over — so it is drawn here, once, and the space for it reserved on
+   the right. */
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-pick {
+  appearance: none;
+  padding-right: 24px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: right 12px center, right 8px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* The label field.
+ *
+ * This is the one control in the panel anybody types into, and the thing they
+ * type is the words on the box — so it is the field that should read as the
+ * diagram rather than as a form. It carries the box's own type size, grows by
+ * the line as it is filled, and never by being dragged: a resize grip in a
+ * panel this narrow drags the panel apart. */
 .ve-diagram-text {
-  /* A textarea for a label that is usually one line and sometimes a table's
-     worth of rows. It grows by the row count the field is given, and never by
-     being dragged: a resize grip in a row of controls drags the row apart. */
   resize: none;
-  font-family: inherit;
-  line-height: 1.4;
-  padding-top: 7px;
   flex: 1 1 auto;
   /* A flex item's floor is its content, and an input's content is its size
      attribute — 20 characters — which is wider than a phone. */
   min-width: 0;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.ve-diagram-text::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-text:hover:not(:focus) {
+  border-color: var(--border-strong);
+}
+
+/* A table's rows line up under each other or they are not rows. Which the
+   font the rest of the panel is set in cannot do, and a monospaced one does
+   without being asked. */
+.ve-diagram-rowsy {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
 }
 
 .ve-diagram-shape,
@@ -4326,6 +4457,35 @@ body.page-editing #dockEdit {
 .ve-diagram-pick {
   flex: 0 1 auto;
   max-width: 40%;
+}
+
+/* The cap above is what a control is worth in a row it shares with two others.
+   Neither of these shares a row.
+
+   The flow menu is on a bar with nine other things, and 40% of that bar
+   squeezed "Left to right" down to about three letters and an ellipsis. Wide
+   enough for the longest thing it can say, and it never shrinks. */
+.ve-diagram-bar .ve-diagram-direction {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 8.5rem;
+  max-width: none;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-color: var(--border-muted);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+/* A panel field owns its line, so a cap at a fraction of a row it no longer
+   shares leaves most of that line empty. */
+.ve-diagram-field > .ve-diagram-text,
+.ve-diagram-field > .ve-diagram-shape,
+.ve-diagram-field > .ve-diagram-kind {
+  display: block;
+  width: 100%;
+  max-width: none;
 }
 
 /* A line is three choices — what is at its back, how it is drawn, what is at

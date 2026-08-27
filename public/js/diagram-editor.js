@@ -2870,24 +2870,86 @@
       at.h = Math.max(at.h, size.h);
     }
 
-    // The label, as lines. One line for most boxes; a title and its rows for a
-    // table. Newlines here are the <br/> Mermaid understands.
+    /* The label, as lines. One line for most boxes; a title and its rows for a
+     * table. Newlines here are the <br/> Mermaid understands.
+     *
+     * It grows with what is typed into it, up to a point. A box can hold a
+     * paragraph and a table can hold a dozen rows, and a field that shows two
+     * of them and scrolls the rest is a field you cannot read your own diagram
+     * in. The cap is there because the panel has more in it than this.
+     */
+    const LABEL_ROWS_MAX = 10;
+
     const labelField = (item) => {
+      const rows = item.kind === "table" ? 3 : 1;
       const field = document.createElement("textarea");
-      field.className = "ve-diagram-text";
-      field.rows = item.kind === "table" ? 3 : 1;
+      field.className = `ve-diagram-text${item.kind === "table" ? " ve-diagram-rowsy" : ""}`;
       field.value = DiagramModel.textRows(item.text).join("\n");
-      field.placeholder = item.id;
+      field.placeholder = item.kind === "table" ? "Title\nRow\nRow" : item.id;
       field.setAttribute("aria-label", item.kind === "table" ? "Table rows" : "Step label");
+
+      const fit = () => {
+        field.rows = Math.min(LABEL_ROWS_MAX,
+          Math.max(rows, field.value.split("\n").length));
+      };
+
+      fit();
 
       field.addEventListener("input", () => {
         item.text = DiagramModel.joinRows(field.value.split("\n"));
+        fit();
         grow(item);
         renameEverywhere(item.id, stepLabel(item));
         commit();
       });
 
       return field;
+    };
+
+    /* A control with its name written over it.
+     *
+     * Every control in this panel used to sit in a row with two others and no
+     * words at all, which left a menu of six shapes and a menu of three border
+     * weights looking like the same unlabelled menu twice. A label wrapping the
+     * control is also the label the control answers to, so tapping the word
+     * puts the caret in the field — which is why a single control gets a
+     * <label> and a group of buttons, which no label can point at, gets a plain
+     * box and keeps the group's own aria-label.
+     */
+    const FIELD_TAGS = new Set(["INPUT", "SELECT", "TEXTAREA"]);
+
+    const captioned = (name, control) => {
+      const holder = document.createElement(
+        FIELD_TAGS.has(control.tagName) ? "label" : "div");
+      holder.className = "ve-diagram-field";
+
+      const caption = document.createElement("span");
+      caption.className = "ve-diagram-field-name";
+      caption.textContent = name;
+
+      holder.append(caption, control);
+      return holder;
+    };
+
+    /* What has been picked, and the one thing you can do to it that is not a
+     * property of it. A panel that opens with a heading is a panel you can tell
+     * at a glance is about something.
+     */
+    const heading = (words, extra) => {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-picked";
+
+      const name = document.createElement("span");
+      name.className = "ve-diagram-legend";
+      name.textContent = words;
+
+      row.append(name);
+
+      if (extra) {
+        row.append(extra);
+      }
+
+      return row;
     };
 
     // A select with a fixed list of choices, which the arrow row wants three of.
@@ -3278,7 +3340,11 @@
          */
         if (selection.length > 1) {
           say(`${selection.length} boxes held. Colour them, or drag them about.`);
-          inspector.append(colourRow([...selection]), borderRow([...selection]));
+          inspector.append(
+            heading(`${selection.length} boxes`),
+            captioned("Fill", colourRow([...selection])),
+            captioned("Border", borderRow([...selection]))
+          );
           return;
         }
 
@@ -3294,14 +3360,9 @@
         ? "Now tap the step this one should point at."
         : "Double-click a box, or press Enter, to type into it.");
 
-      const line = document.createElement("div");
-      line.className = "ve-diagram-row ve-diagram-selected";
-
       const name = labelField(item);
       const drop = dropButton(`Remove ${stepLabel(item)}`);
       drop.addEventListener("click", () => removeStep(item.id));
-
-      line.append(name, shapeSelect(item), drop);
 
       const actions = document.createElement("div");
       actions.className = "ve-diagram-actions";
@@ -3326,7 +3387,19 @@
       actions.append(step, connect);
 
       const out = model.edges.filter((edge) => edge.from === item.id);
-      inspector.append(line, colourRow([item.id]), borderRow([item.id]), actions);
+
+      /* One thing per line, each with its name over it. Three controls crammed
+       * across a column narrower than any of them wanted is what made this
+       * panel look assembled rather than designed.
+       */
+      inspector.append(
+        heading(item.kind === "table" ? "Table" : "Box", drop),
+        captioned(item.kind === "table" ? "Rows" : "Label", name),
+        captioned("Shape", shapeSelect(item)),
+        captioned("Fill", colourRow([item.id])),
+        captioned("Border", borderRow([item.id])),
+        actions
+      );
 
       if (out.length > 0) {
         const legend = document.createElement("div");
