@@ -2536,7 +2536,12 @@
       const item = {
         id,
         shape: options.shape || "rect",
-        text: kind === "table" ? "Thing<br/>field: type" : `Step ${model.nodes.length + 1}`
+        // A table arrives as a table: a heading and a grid of empty cells, so
+        // that what lands on the paper is the thing that was dragged off the
+        // rail rather than a box with one word in it and a rule underneath.
+        text: kind === "table"
+          ? DiagramModel.joinCells([["Table"], ["", ""], ["", ""]])
+          : `Step ${model.nodes.length + 1}`
       };
 
       // What a box is belongs to the box. Where it is belongs to the layout.
@@ -2934,6 +2939,73 @@
       holder.append(caption, control);
       return holder;
     };
+
+    /* One field per cell.
+     *
+     * A grid typed into a single box as lines of pipes is a grid you have to
+     * hold in your head to edit: which of these words is in the second column
+     * is a question you answer by counting. The panel lays the cells out the
+     * way the table is drawn, so the field you type into is in the place on
+     * the screen that the words will appear in.
+     *
+     * The title spans the whole of it, the same way it is drawn.
+     */
+    const cellField = (item, row, column, label) => {
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "ve-diagram-cell";
+      field.setAttribute("aria-label", label);
+      field.value = (DiagramModel.textCells(item.text || item.id)[row] || [])[column] || "";
+
+      field.addEventListener("input", () => {
+        /* A pipe is the wall between two cells, so it cannot be inside one.
+         * Taken out of the field rather than only out of what is stored: a
+         * field showing a character the diagram does not have is a field that
+         * has quietly stopped being what it says it is.
+         */
+        if (field.value.includes("|")) {
+          const at = Math.max(0, (field.selectionStart || 1) - 1);
+          field.value = field.value.replace(/\|/g, "");
+          field.setSelectionRange(at, at);
+        }
+
+        const grid = DiagramModel.textCells(item.text || item.id);
+        while (grid.length <= row) {
+          grid.push([]);
+        }
+
+        grid[row][column] = field.value;
+        item.text = DiagramModel.joinCells(grid);
+        grow(item);
+        renameEverywhere(item.id, stepLabel(item));
+        commit();
+      });
+
+      return field;
+    };
+
+    function cellGrid(item) {
+      const grid = DiagramModel.textCells(item.text || item.id);
+      const columns = DiagramModel.columnsOf(grid);
+
+      const box = document.createElement("div");
+      box.className = "ve-diagram-cells";
+      box.style.setProperty("--dd-columns", String(columns));
+
+      const title = cellField(item, 0, 0, "Table title");
+      title.className = "ve-diagram-cell ve-diagram-cell-title";
+      title.placeholder = "Title";
+      box.append(title);
+
+      for (let row = 1; row < grid.length; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          box.append(cellField(item, row, column,
+            `Row ${row}, column ${column + 1}`));
+        }
+      }
+
+      return box;
+    }
 
     /* A count with a way up and a way down.
      *
@@ -3446,7 +3518,16 @@
         ? "Now tap the step this one should point at."
         : "Double-click a box, or press Enter, to type into it.");
 
-      const name = labelField(item);
+      /* A box is a label, and a table is a grid of cells. Both are the words
+       * the thing on the paper says, so both go in the same place under the
+       * same caption — it is only that one of them has a shape.
+       */
+      const table = item.kind === "table";
+      const cells = table ? cellGrid(item) : null;
+      const name = table
+        ? cells.querySelector(".ve-diagram-cell-title")
+        : labelField(item);
+
       const drop = dropButton(`Remove ${stepLabel(item)}`);
       drop.addEventListener("click", () => removeStep(item.id));
 
@@ -3479,11 +3560,11 @@
        * panel look assembled rather than designed.
        */
       inspector.append(
-        heading(item.kind === "table" ? "Table" : "Box", drop),
-        captioned(item.kind === "table" ? "Cells" : "Label", name)
+        heading(table ? "Table" : "Box", drop),
+        captioned(table ? "Cells" : "Label", table ? cells : name)
       );
 
-      if (item.kind === "table") {
+      if (table) {
         inspector.append(tableSize(item));
       }
 

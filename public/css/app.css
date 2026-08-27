@@ -2190,11 +2190,11 @@ button.crumb:focus-visible {
   fill: none;
 }
 
-/* The lines between cells, drawn fainter than the rule under the title: one
-   says where the table's heading ends and the others divide what is under it,
-   and a grid drawn as heavily as its heading reads as neither. */
+/* The lines between cells, drawn a little fainter than the rule under the
+   title: one says where the table's heading ends and the others divide what is
+   under it, and a grid drawn as heavily as its heading reads as neither. */
 .dd .dd-cell-rule {
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 .dd .dd-text {
@@ -4261,6 +4261,48 @@ body.page-editing #dockEdit {
   padding: 0;
 }
 
+/* The cells, laid out the way the table is drawn: the field you type into is
+   in the place on the screen the words will appear in. A grid typed into one
+   box as lines of pipes is a grid you have to hold in your head to edit. */
+.ve-diagram-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--dd-columns, 1), minmax(0, 1fr));
+  gap: 3px;
+}
+
+/* The title spans the whole of it, the same way it is drawn. */
+.ve-diagram-cell-title {
+  grid-column: 1 / -1;
+  font-weight: 600;
+}
+
+.ve-diagram-cell {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.ve-diagram-cell::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-cell:hover:not(:focus) {
+  border-color: var(--border-strong);
+}
+
+.ve-diagram-cell:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
 /* Rows and columns are one answer to one question about a table, so they sit
    on one line and share it evenly. */
 .ve-diagram-grid-size {
@@ -4680,6 +4722,10 @@ body.page-editing #dockEdit {
 
   .ve-diagram-step {
     width: 38px;
+    min-height: 38px;
+  }
+
+  .ve-diagram-cell {
     min-height: 38px;
   }
 

@@ -1430,18 +1430,24 @@
     return grid.reduce((most, cells) => Math.max(most, cells.length), 1);
   }
 
-  /* A grid of exactly this many rows and columns.
+  /* A table's grid, of exactly this many rows and columns.
    *
    * Rows and cells are added empty and removed from the end, so growing and
    * shrinking are each other's undo for as long as nothing was typed into what
    * was dropped.
+   *
+   * The first row is the title and spans the whole table, so it is one cell
+   * however many columns there are. Padded to the width of the rest it would
+   * be written out as "Person |", which says there is an empty cell beside the
+   * title — and there is no beside, that is what spanning means.
    */
   function resizeGrid(grid, rows, columns) {
     const out = [];
 
     for (let row = 0; row < rows; row += 1) {
       const from = grid[row] || [];
-      out.push(Array.from({ length: columns }, (ignored, cell) => from[cell] || ""));
+      const wide = row === 0 ? 1 : columns;
+      out.push(Array.from({ length: wide }, (ignored, cell) => from[cell] || ""));
     }
 
     return out;

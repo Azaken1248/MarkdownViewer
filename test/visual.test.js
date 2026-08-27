@@ -1993,11 +1993,23 @@ console.log("=== a table is rows of cells, and the file says so in the label ===
    * what was dropped.
    */
   check("growing a grid fills the new cells with nothing",
-    DM.resizeGrid([["a"]], 2, 2), [["a", ""], ["", ""]]);
+    DM.resizeGrid([["T"]], 3, 2), [["T"], ["", ""], ["", ""]]);
   check("...and shrinking it takes them off the end",
-    DM.resizeGrid([["a", "b"], ["c", "d"]], 1, 1), [["a"]]);
+    DM.resizeGrid([["T"], ["a", "b"], ["c", "d"]], 2, 1), [["T"], ["a"]]);
   check("...so one undoes the other while the new cells are still empty",
-    DM.resizeGrid(DM.resizeGrid([["a", "b"]], 3, 4), 1, 2), [["a", "b"]]);
+    DM.resizeGrid(DM.resizeGrid([["T"], ["a", "b"]], 4, 3), 2, 2),
+    [["T"], ["a", "b"]]);
+
+  /* The first row is the title and spans the whole table, so it is one cell
+   * however many columns there are. Padded to the width of the rest it would be
+   * written out as "Person |", which says there is an empty cell beside the
+   * title — and there is no beside, that is what spanning means.
+   */
+  check("the title stays one cell however wide the table gets",
+    DM.resizeGrid([["Person"], ["a"]], 2, 4), [["Person"], ["a", "", "", ""]]);
+  check("...so it is written as a title rather than as a title and a gap",
+    DM.joinCells(DM.resizeGrid([["Person"], ["a"]], 2, 2)),
+    "Person<br/>a |");
 
   // A pipe is one of the characters that cannot be left bare in a Mermaid
   // label, and the row break already forced the quotes.
@@ -2050,14 +2062,25 @@ console.log("=== a table with columns is drawn as a grid ===");
   check("a cell is written inside the column it is in",
     /<tspan x="110" y="51">string<\/tspan>/.test(grid), true);
 
-  /* One column is a list and needs no lines drawn through it — which is the
-   * class box this has always drawn, and it still draws it.
+  /* Every row and every column a table has is drawn. A table whose structure
+   * you have to infer from where the words happen to sit is a box with a list
+   * in it, and the lines are the whole difference between the two — so one
+   * column still gets the lines between its rows.
    */
   const list = table("Person<br/>name<br/>age", 200, 126);
-  check("a table of one column keeps the list it always was",
-    /dd-cell-rule/.test(list), false);
+  const listRules = [...list.matchAll(/<line class="dd-rule dd-cell-rule"[^/]*\/>/g)]
+    .map((one) => one[0]);
+  check("a table of one column has no line down it", 
+    listRules.filter((one) => /y2="126"/.test(one)).length, 0);
+  check("...and still has the line between its two rows",
+    listRules, ['<line class="dd-rule dd-cell-rule" x1="0" y1="76" x2="200" y2="76"/>']);
   check("...under the rule its title has always had",
     /<line class="dd-rule" x1="0" y1="26" x2="200" y2="26"\/>/.test(list), true);
+
+  // One row under the title has nothing to be divided from, so a table of one
+  // row is a heading with a cell under it and no lines drawn through either.
+  check("a table of one row is drawn with no lines through it at all",
+    /dd-cell-rule/.test(table("Person<br/>only", 200, 66)), false);
 
   // A cell with nothing in it is not written at all: an empty tspan still
   // takes a line's worth of nothing and is one more thing to escape.
@@ -2255,6 +2278,24 @@ console.log("=== the previews are actually on the screen ===");
     [control("shape").width, control("shape").maxWidth], ["100%", "none"]);
   check("...the one anybody types into included",
     [control("label").width, control("label").maxWidth], ["100%", "none"]);
+
+  /* A table's cells are laid out the way the table is drawn, so the field you
+   * type into is in the place on the screen the words will appear in. Which is
+   * a grid of as many columns as the table has — a row of fields that wraps
+   * where it runs out of room is a row of fields in nobody's column.
+   */
+  const cells = new JSDOM(`<style>${stylesheet}</style>
+    <div class="ve-diagram-cells" id="cells" style="--dd-columns: 3">
+      <input class="ve-diagram-cell ve-diagram-cell-title" id="title"/>
+      <input class="ve-diagram-cell"/>
+    </div>`);
+  const laid = (id) => cells.window.getComputedStyle(cells.window.document.getElementById(id));
+
+  check("the cells are laid out as a grid", laid("cells").display, "grid");
+  check("...of as many columns as the table has",
+    laid("cells").gridTemplateColumns, "repeat(var(--dd-columns, 1), minmax(0, 1fr))");
+  check("...with the title spanning the whole of it, the way it is drawn",
+    laid("title").gridColumn, "1 / -1");
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

@@ -510,7 +510,7 @@ async function run(server, cookie) {
         "    %% @ B 300,100 120x80 kind=table",
         "    %% @ C 300,300 120x60 kind=table",
         "    A[One]",
-        '    B["Two<br/>a<br/>b"]',
+        '    B["Two<br/>a | x<br/>b"]',
         "    C[Three]",
         "    A --> B"
       ].join("\n") + "\n" },
@@ -568,27 +568,35 @@ async function run(server, cookie) {
       return label.rows;
     })(), 10);
 
-    // A table is rows of text, and rows line up under each other or they are
-    // not rows — which the panel's own font cannot do and a monospaced one does
-    // without being asked.
+    /* A table is a grid, and a grid typed into one box as lines of pipes is a
+     * grid you have to hold in your head to edit: which of these words is in
+     * the second column is a question you answer by counting. So a table gets
+     * one field per cell, laid out the way it is drawn.
+     */
     tap("B");
-    check("a table says it is one", 
+    check("a table says it is one",
       inspector.querySelector(".ve-diagram-picked .ve-diagram-legend").textContent, "Table");
-    check("...and calls its label what it is", captions()[0], "Cells");
+    check("...and calls its words what they are", captions()[0], "Cells");
     check("...and offers the two numbers a table has",
       captions().slice(1, 3), ["Rows", "Columns"]);
-    check("...in a font its rows line up in",
-      inspector.querySelector(".ve-diagram-text").classList.contains("ve-diagram-rowsy"),
-      true);
-    check("...showing the three rows it has",
-      inspector.querySelector(".ve-diagram-text").rows, 3);
+    check("...typed one cell at a time rather than as lines of pipes",
+      [Boolean(inspector.querySelector(".ve-diagram-cells")),
+        inspector.querySelector(".ve-diagram-text")], [true, null]);
 
-    // An empty table is still a table, and a table showing one line looks like
-    // a box that happens to have a divider. The floor is what says, before a
-    // word is typed into it, that rows are what goes in here.
-    tap("C");
-    check("...and a table of one row still looks like a table",
-      inspector.querySelector(".ve-diagram-text").rows, 3);
+    // A field per cell, plus the title, which spans the table the same way it
+    // is drawn.
+    const fields = () => [...inspector.querySelectorAll(".ve-diagram-cell")]
+      .map((one) => one.value);
+    // Five fields for a title and a two-by-two grid, and the row that was
+    // written with only one cell in it gets the empty one it is short.
+    check("one field per cell, with the words already in them",
+      fields(), ["Two", "a", "x", "b", ""]);
+    check("...the title spanning the whole of it",
+      inspector.querySelector(".ve-diagram-cell").classList
+        .contains("ve-diagram-cell-title"), true);
+    check("...and the panel laid out in as many columns as the table has",
+      inspector.querySelector(".ve-diagram-cells").style
+        .getPropertyValue("--dd-columns"), "2");
 
     page.window.close();
   }
@@ -646,6 +654,27 @@ async function run(server, cookie) {
     check("a table says how many rows and columns it has", counts(), [3, 2]);
     check("...and is drawn with a line between each of them", rules(), 2);
 
+    /* A table dragged off the rail arrives as a table.
+     *
+     * It used to arrive as a heading with one line under it, which is one
+     * column and one row — a shape with no grid in it to see. Whatever is
+     * dropped on the paper has to be the thing that was picked up.
+     */
+    const shape = [...page.document.querySelectorAll(".ve-diagram-tool")]
+      .find((one) => one.dataset.kind === "table");
+    shape.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+    shape.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 300));
+
+    check("a table dropped on the paper is a table", counts(), [3, 2]);
+    const fresh = [...canvas.querySelectorAll(".dd-node")].pop();
+    check("...with its rows and its columns drawn",
+      fresh.querySelectorAll(".dd-cell-rule").length, 2);
+    check("...and nothing written in it but its heading",
+      [...fresh.querySelectorAll("tspan")].map((one) => one.textContent), ["Table"]);
+
+    tap("A");
+
     /* The size it was given in the file, which is bigger than a table of these
      * cells needs. Read before anything is pressed, because the question below
      * is what the steppers do to a size somebody chose by hand.
@@ -687,12 +716,14 @@ async function run(server, cookie) {
     check("...but not the width, because a box here grows and never shrinks",
       boxOf()[0], grew);
 
-    /* One column is a list, not a grid, and a list needs no lines drawn
-     * through it — which is the class box this could always draw.
+    /* One column has no line down it — there is nothing on either side of one
+     * to divide — but it still has the lines between its rows. A table whose
+     * structure you have to infer from where the words happen to sit is a box
+     * with a list in it.
      */
     fewer("Columns");
-    check("a table of one column is a list again", counts(), [3, 1]);
-    check("...with nothing drawn through it", rules(), 0);
+    check("a table of one column has no line down it", counts(), [3, 1]);
+    check("...but still has the one between its rows", rules(), 1);
     check("...and the second cell of every row gone with the column",
       cells(), ["name", "age"]);
 
@@ -703,12 +734,34 @@ async function run(server, cookie) {
     check("...though the way up is still open",
       stepper("Columns").querySelectorAll(".ve-diagram-step")[1].disabled, false);
 
-    // A pipe cannot be left bare in a Mermaid label, and the row break already
-    // forced the quotes — so a grid reaches the file as the label it is.
+    /* Typing into a cell puts the words in that cell, and a pipe typed into one
+     * is taken out again: it is the wall between two cells, so it cannot be
+     * inside one. The label reaches the file quoted, which the row break
+     * already required of it.
+     */
     more("Columns");
-    const field = inspector.querySelector(".ve-diagram-text");
-    field.value = "Person\nname | string\nage | int";
-    field.dispatchEvent(new window.Event("input", { bubbles: true }));
+    const field = (at) => inspector.querySelectorAll(".ve-diagram-cell")[at];
+    const type = (at, words) => {
+      field(at).value = words;
+      field(at).dispatchEvent(new window.Event("input", { bubbles: true }));
+    };
+
+    type(0, "Person");
+    type(1, "name");
+    type(2, "string");
+    type(3, "age");
+    type(4, "int");
+
+    // Typing redraws on a pause, the same as typing anywhere else here does.
+    await new Promise((done) => setTimeout(done, 300));
+    check("typing into a cell puts the words in that cell",
+      cells(), ["name", "string", "age", "int"]);
+
+    type(2, "str|ing");
+    await new Promise((done) => setTimeout(done, 300));
+    check("...and a pipe typed into one is taken back out of it",
+      [field(2).value, cells()[1]], ["string", "string"]);
+
     await saveAndWait(page);
     const written = (await server.request("GET", "/api/docs/grid.mmd",
       undefined, { Cookie: cookie })).body.content;

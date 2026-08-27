@@ -137,9 +137,9 @@
    * half underneath its text — which is what makes the rules between the rows
    * land where the rows actually are at any size.
    *
-   * One column is a list and needs no lines drawn through it, which is the
-   * class box this has always been able to draw. Two or more is a grid, and a
-   * grid without its lines is cells you cannot tell the rows of.
+   * Every row and every column it has is drawn. A table whose structure you
+   * have to infer from where the words happen to sit is a box with a list in
+   * it, and the lines are the whole difference between the two.
    */
   function tableMarkup(grid, w, h) {
     const title = (grid[0] || [])[0] || "";
@@ -160,21 +160,22 @@
         return `<tspan x="${round(x)}" y="${round(y)}">${escapeText(words)}</tspan>`;
       }).join(""));
 
-    // The rules of the grid: down between the columns, across between the rows.
-    // Never round the outside — the box's own border is already there.
-    const lines = columns > 1
-      ? Array.from({ length: columns - 1 }, (ignored, cell) =>
-        `<line class="dd-rule dd-cell-rule" x1="${round((cell + 1) * wide)}"`
-        + ` y1="${TABLE_TITLE}" x2="${round((cell + 1) * wide)}" y2="${round(h)}"/>`)
-        .join("")
-        + body.slice(1).map((ignored, line) =>
-          `<line class="dd-rule dd-cell-rule" x1="0" y1="${round(TABLE_TITLE + ((line + 1) * tall))}"`
-          + ` x2="${round(w)}" y2="${round(TABLE_TITLE + ((line + 1) * tall))}"/>`).join("")
-      : "";
+    /* The rules of the grid: down between the columns, across between the rows.
+     * Never round the outside — the box's own border is already there, and the
+     * rule under the title is drawn separately because it is a heading rather
+     * than one more row.
+     */
+    const down = Array.from({ length: columns - 1 }, (ignored, cell) =>
+      `<line class="dd-rule dd-cell-rule" x1="${round((cell + 1) * wide)}"`
+      + ` y1="${TABLE_TITLE}" x2="${round((cell + 1) * wide)}" y2="${round(h)}"/>`).join("");
+
+    const across = body.slice(1).map((ignored, line) =>
+      `<line class="dd-rule dd-cell-rule" x1="0" y1="${round(TABLE_TITLE + ((line + 1) * tall))}"`
+      + ` x2="${round(w)}" y2="${round(TABLE_TITLE + ((line + 1) * tall))}"/>`).join("");
 
     return `${rect(w, h, RADIUS)}`
       + `<line class="dd-rule" x1="0" y1="${TABLE_TITLE}" x2="${round(w)}" y2="${TABLE_TITLE}"/>`
-      + lines
+      + down + across
       + `<text class="dd-text dd-title" text-anchor="middle" dominant-baseline="middle">`
       + `<tspan x="${round(w / 2)}" y="${round(TABLE_TITLE / 2)}">${escapeText(title)}</tspan></text>`
       + (cells.length > 0
