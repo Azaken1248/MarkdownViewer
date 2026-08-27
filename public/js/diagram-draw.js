@@ -44,7 +44,6 @@
    * properly means laying the text out, which means a browser, which is not
    * something a function that returns a string is allowed to need.
    */
-  const ROW_CHAR = 6;
   const ELLIPSIS = "…";
 
   let drawCounter = 0;
@@ -180,7 +179,7 @@
    * have to infer from where the words happen to sit is a box with a list in
    * it, and the lines are the whole difference between the two.
    */
-  function tableMarkup(grid, w, h, spacing) {
+  function tableMarkup(grid, w, h, spacing, char) {
     const title = (grid[0] || [])[0] || "";
     const body = grid.slice(1);
     const columns = Model.columnsOf(grid);
@@ -198,7 +197,7 @@
 
         return cellText("dd-row", (cell * wide) + spacing.pad,
           spacing.title + (line * tall) + (tall / 2), "start",
-          clip(words, room, ROW_CHAR));
+          clip(words, room, char));
       }).join(""));
 
     /* The rules of the grid: down between the columns, across between the rows.
@@ -218,17 +217,18 @@
       + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
       + cellText("dd-title", w / 2, spacing.title / 2, "middle",
-        clip(title, w - (spacing.pad * 2), ROW_CHAR))
+        clip(title, w - (spacing.pad * 2), char))
       + cells.join("");
   }
 
   // The inside of a box, in its own coordinates. Separate from the group around
   // it because resizing one redraws exactly this and nothing else.
-  function nodeBody(node, at) {
+  function nodeBody(node, at, classes) {
     const words = node.text || node.id;
 
     return node.kind === "table"
-      ? tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node))
+      ? tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
+        charWidthOf(node, classes))
       : shapeMarkup(node.shape, at.w, at.h)
         + centredText(Model.textRows(words), at.w, at.h);
   }
@@ -251,6 +251,27 @@
   const WIDTH_RE = /^[0-9.]+(?:px)?$/i;
   const DASH_RE = /^[0-9.,\s]+$/;
 
+  /* The type. Held to the three generic families and nothing else: a classDef
+   * comes out of a file, and a font name out of a file is a string on its way
+   * into a style attribute. The three that every renderer has are also the
+   * three anyone means — a diagram set in sans, in serif, or in the font code
+   * is written in.
+   */
+  const SIZE_RE = /^[0-9]{1,3}(?:\.[0-9]+)?px$/i;
+  const WEIGHT_RE = /^(?:normal|bold|[1-9]00)$/i;
+  const FAMILY_RE = /^(?:sans-serif|serif|monospace)$/i;
+  const STYLE_RE = /^(?:normal|italic)$/i;
+
+  // The size a label is set in unless it says otherwise. Written here rather
+  // than only in the stylesheet because clipping a word to its cell means
+  // knowing how wide the word is, and there is a check that holds the two
+  // together.
+  const TEXT_SIZE = 13;
+  // Roughly how wide a character is, as a share of the size it is set in. An
+  // approximation, and it only has to be one: it decides where a word is cut
+  // off, and a cut half a character early is a cut nobody can see.
+  const CHAR_RATIO = 0.48;
+
   // Which declaration goes where. A classDef speaks CSS, and the two names that
   // do not line up are `color`, which is the text rather than the shape, and
   // `fill`, which SVG has and CSS text does not.
@@ -259,14 +280,18 @@
     ["stroke", "--dd-stroke", COLOUR_RE],
     ["color", "--dd-text", COLOUR_RE],
     ["stroke-width", "--dd-stroke-width", WIDTH_RE],
-    ["stroke-dasharray", "--dd-dash", DASH_RE]
+    ["stroke-dasharray", "--dd-dash", DASH_RE],
+    ["font-size", "--dd-font-size", SIZE_RE],
+    ["font-weight", "--dd-font-weight", WEIGHT_RE],
+    ["font-family", "--dd-font-family", FAMILY_RE],
+    ["font-style", "--dd-font-style", STYLE_RE]
   ];
 
   /* What a box is actually wearing: every class it names, in the order it names
    * them, and then its own inline style — which is what `style A fill:#f00`
    * means in Mermaid, and it wins because it is about that one box.
    */
-  function paintOf(node, classes) {
+  function wornBy(node, classes) {
     const worn = {};
 
     for (const name of node.classes || []) {
@@ -274,6 +299,21 @@
     }
 
     Object.assign(worn, node.style || {});
+    return worn;
+  }
+
+  // How wide a character is on this box, which is what says where a word is too
+  // long for the cell it is in. A box set in a bigger font runs out of room
+  // sooner, and a box that keeps the same clipping at every size is a box whose
+  // words go over the wall the moment anyone enlarges them.
+  function charWidthOf(node, classes) {
+    const said = wornBy(node, classes)["font-size"];
+    const size = SIZE_RE.test(String(said || "").trim()) ? parseFloat(said) : TEXT_SIZE;
+    return size * CHAR_RATIO;
+  }
+
+  function paintOf(node, classes) {
+    const worn = wornBy(node, classes);
 
     let out = "";
     for (const [key, property, allowed] of PAINTED) {
@@ -292,7 +332,7 @@
     return `<g class="dd-node${node.kind === "table" ? " dd-node-table" : ""}"`
       + ` data-id="${escapeText(node.id)}"`
       + (paint ? ` style="${escapeText(paint)}"` : "")
-      + ` transform="translate(${round(at.x)},${round(at.y)})">${nodeBody(node, at)}</g>`;
+      + ` transform="translate(${round(at.x)},${round(at.y)})">${nodeBody(node, at, classes)}</g>`;
   }
 
   /* What is drawn on the box being worked on.
@@ -1358,6 +1398,7 @@
     STANDOFF,
     CLEARANCE,
     LINE_HEIGHT,
-    GRIPS
+    GRIPS,
+    TEXT_SIZE
   };
 })(typeof window === "undefined" ? globalThis : window);

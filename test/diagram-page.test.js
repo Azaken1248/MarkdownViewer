@@ -539,7 +539,7 @@ async function run(server, cookie) {
     check("...with the way to remove it up there, since it is not a property of it",
       Boolean(inspector.querySelector(".ve-diagram-picked > .ve-diagram-drop")), true);
     check("...and every control below it named",
-      captions(), ["Label", "Shape", "Fill", "Border"]);
+      captions(), ["Label", "Shape", "Fill", "Border", "Font"]);
 
     // A label wrapping its control is also the label that control answers to,
     // so the caption is a way into the field rather than a word beside it. A
@@ -579,6 +579,8 @@ async function run(server, cookie) {
     check("...and calls its words what they are", captions()[0], "Cells");
     check("...and offers the two numbers a table has",
       captions().slice(1, 3), ["Rows", "Columns"]);
+    check("...and the spacing that goes with them",
+      captions().slice(3, 5), ["Padding", "Spacing"]);
     check("...typed one cell at a time rather than as lines of pipes",
       [Boolean(inspector.querySelector(".ve-diagram-cells")),
         inspector.querySelector(".ve-diagram-text")], [true, null]);
@@ -2006,6 +2008,101 @@ async function run(server, cookie) {
       /^\s*A --> B\s*$/m.test(back), true);
     check("...and grows no comment saying what it already says",
       /ends=/.test(back), false);
+  }
+
+  console.log("=== the type a box is set in is a classDef like everything else ===");
+  {
+    /* Every font control goes the way a colour and a border go: into a classDef,
+     * which every Mermaid renderer reads. There is no control here for anything
+     * Mermaid cannot say, because a size the file cannot keep is a size that
+     * goes away the next time the diagram is opened somewhere else.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "type.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x60",
+        "    A[One]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/type.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = () => canvas.querySelector('.dd-node[data-id="A"]');
+
+    const tap = () => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf().getAttribute("transform"));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf().dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    const menu = (label) => [...inspector.querySelectorAll(".ve-diagram-kind")]
+      .find((one) => one.getAttribute("aria-label") === label);
+    const pick = (label, value) => {
+      const one = menu(label);
+      one.value = value;
+      one.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    const mark = (label) => [...inspector.querySelectorAll(".ve-diagram-mark")]
+      .find((one) => one.getAttribute("aria-label") === label);
+    const setOf = (property) => groupOf().style.getPropertyValue(property);
+
+    tap();
+    check("a box offers a font, a size and the two switches",
+      [Boolean(menu("Font")), Boolean(menu("Text size")),
+        Boolean(mark("Bold")), Boolean(mark("Italic"))], [true, true, true, true]);
+    check("...and starts wearing none of them",
+      [menu("Font").value, menu("Text size").value,
+        mark("Bold").getAttribute("aria-pressed")], ["Default", "Normal", "false"]);
+
+    pick("Font", "Mono");
+    check("choosing a font sets the box in it", setOf("--dd-font-family"), "monospace");
+    // The panel is redrawn from what the box is wearing, so the menu has to
+    // come back saying what was just chosen rather than what it opened saying.
+    check("...and the menu says so afterwards", menu("Font").value, "Mono");
+
+    pick("Text size", "Large");
+    check("...and a size beside it, without taking the font off",
+      [setOf("--dd-font-size"), setOf("--dd-font-family")], ["16px", "monospace"]);
+    check("...with both menus saying what they are",
+      [menu("Font").value, menu("Text size").value], ["Mono", "Large"]);
+
+    mark("Bold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a switch goes on", setOf("--dd-font-weight"), "700");
+    check("...and says it is on", mark("Bold").getAttribute("aria-pressed"), "true");
+
+    mark("Italic").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("...and the other is a switch of its own",
+      [setOf("--dd-font-style"), setOf("--dd-font-weight")], ["italic", "700"]);
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/type.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    // The name is whichever one was free; what matters is that all four
+    // declarations are on one class and the box is wearing it.
+    const named = (/classDef (ddC\d+) ([^\n]+)/.exec(written) || []);
+    check("all four reach the file as one classDef, which is real Mermaid",
+      named[2], "font-family:monospace,font-size:16px,font-weight:700,font-style:italic");
+    check("...with a line saying which box wears it",
+      new RegExp(`class A ${named[1]}`).test(written), true);
+
+    // Off again takes that one declaration off and leaves the rest alone, the
+    // same way clearing a colour leaves the dashed border behind.
+    mark("Bold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a switch goes off again",
+      [setOf("--dd-font-weight"), setOf("--dd-font-style")], ["", "italic"]);
+
+    pick("Font", "Default");
+    check("...and Default is a choice rather than the absence of one",
+      [setOf("--dd-font-family"), setOf("--dd-font-size")], ["", "16px"]);
+
+    page.window.close();
   }
 
   console.log("=== a box can be dashed, and thick, and red, all at once ===");

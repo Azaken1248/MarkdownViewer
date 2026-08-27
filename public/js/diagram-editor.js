@@ -78,6 +78,36 @@
     ["Thick", { "stroke-width": "4px" }]
   ];
 
+  /* The type. Every one of these is a classDef declaration, which is real
+   * Mermaid — so a diagram set in bold serif is set in bold serif on GitHub
+   * too, rather than only here. Which is why there is no font control that is
+   * not one of these: a size Mermaid cannot say is a size the file cannot keep.
+   *
+   * The three generic families and nothing else. A font name out of a file is a
+   * string on its way into a style attribute, and the three every renderer has
+   * are also the three anyone means.
+   */
+  const DIAGRAM_FAMILIES = [
+    ["Default", {}],
+    ["Sans", { "font-family": "sans-serif" }],
+    ["Serif", { "font-family": "serif" }],
+    ["Mono", { "font-family": "monospace" }]
+  ];
+
+  const DIAGRAM_SIZES = [
+    ["Normal", {}],
+    ["Small", { "font-size": "11px" }],
+    ["Large", { "font-size": "16px" }],
+    ["Huge", { "font-size": "20px" }]
+  ];
+
+  // Two switches rather than two menus of two: bold and italic are the things
+  // people reach for a keystroke to do, and a menu is not what that reaches.
+  const DIAGRAM_MARKS = [
+    ["Bold", "font-weight", "700", "ph-text-b"],
+    ["Italic", "font-style", "italic", "ph-text-italic"]
+  ];
+
   const DIAGRAM_COLOUR_KEYS = ["fill", "stroke", "color"];
   const DIAGRAM_CLASS_PREFIX = "ddC";
   const DIAGRAM_CLASS_RE = /^ddC\d+$/;
@@ -3615,6 +3645,64 @@
       return row;
     }
 
+    /* The type a box is set in: a family, a size, and the two switches.
+     *
+     * All of it goes the same way a colour and a border go — into a classDef,
+     * which every Mermaid renderer reads. There is no control here for anything
+     * Mermaid cannot say, because a size the file cannot keep is a size that
+     * goes away the next time the diagram is opened somewhere else.
+     */
+    function fontRow(ids) {
+      const holder = document.createElement("div");
+      holder.className = "ve-diagram-font";
+
+      const declarations = ids.length === 1 ? styleOf(nodeById(ids[0])) : {};
+      const named = (offered) => offered.map(([name]) => [name, name]);
+
+      const family = chooser("ve-diagram-kind", "Font",
+        named(DIAGRAM_FAMILIES), wearing(declarations, DIAGRAM_FAMILIES, ["font-family"]));
+      const size = chooser("ve-diagram-kind", "Text size",
+        named(DIAGRAM_SIZES), wearing(declarations, DIAGRAM_SIZES, ["font-size"]));
+
+      // A patch that always names its own key, so choosing "Default" takes the
+      // family off rather than leaving the old one behind unmentioned.
+      const patchFrom = (offered, name, keys) => {
+        const found = offered.find(([one]) => one === name);
+        const part = found ? found[1] : {};
+        return Object.fromEntries(keys.map((key) => [key, part[key] ?? null]));
+      };
+
+      family.addEventListener("change", () =>
+        restyle(ids, patchFrom(DIAGRAM_FAMILIES, family.value, ["font-family"])));
+      size.addEventListener("change", () =>
+        restyle(ids, patchFrom(DIAGRAM_SIZES, size.value, ["font-size"])));
+
+      const menus = document.createElement("div");
+      menus.className = "ve-diagram-row ve-diagram-border";
+      menus.append(family, size);
+
+      const marks = document.createElement("div");
+      marks.className = "ve-diagram-marks";
+      marks.setAttribute("role", "group");
+      marks.setAttribute("aria-label", "Text style");
+
+      for (const [label, key, value, icon] of DIAGRAM_MARKS) {
+        const on = declarations[key] === value;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `ve-diagram-mark${on ? " is-on" : ""}`;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.addEventListener("click", () => restyle(ids, { [key]: on ? null : value }));
+        marks.append(button);
+      }
+
+      holder.append(menus, marks);
+      return holder;
+    }
+
     /* A darker version of a colour, for the stroke and the text.
      *
      * Mixed towards black rather than scaled, so a pale fill gives a stroke that
@@ -3648,7 +3736,8 @@
           inspector.append(
             heading(`${selection.length} boxes`),
             captioned("Fill", colourRow([...selection])),
-            captioned("Border", borderRow([...selection]))
+            captioned("Border", borderRow([...selection])),
+            captioned("Font", fontRow([...selection]))
           );
           return;
         }
@@ -3719,6 +3808,7 @@
         captioned("Shape", shapeSelect(item)),
         captioned("Fill", colourRow([item.id])),
         captioned("Border", borderRow([item.id])),
+        captioned("Font", fontRow([item.id])),
         actions
       );
 

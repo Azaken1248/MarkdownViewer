@@ -2197,17 +2197,28 @@ button.crumb:focus-visible {
   opacity: 0.7;
 }
 
+/* The type a diagram is set in. Every one of these is a classDef declaration,
+   which is real Mermaid — so a diagram set in bold serif is set in bold serif
+   on GitHub too, rather than only here.
+
+   One size for every label, so that the drawing has one number to measure a
+   word against when it decides whether it fits. There is a check holding that
+   number and this one together. */
 .dd .dd-text {
   fill: var(--dd-text, var(--fg));
-  font-size: 13px;
+  font-size: var(--dd-font-size, 13px);
+  font-weight: var(--dd-font-weight, 400);
+  font-family: var(--dd-font-family, inherit);
+  font-style: var(--dd-font-style, normal);
 }
 
+/* A heading is bolder than what is under it, unless the box has been told what
+   weight to be — in which case it was told, and this is not an argument. */
 .dd .dd-title {
-  font-weight: 600;
+  font-weight: var(--dd-font-weight, 600);
 }
 
 .dd .dd-row {
-  font-size: 12.5px;
   fill: var(--dd-text, var(--fg-muted));
 }
 
@@ -4321,6 +4332,46 @@ body.page-editing #dockEdit {
   box-shadow: 0 0 0 2px var(--accent-muted);
 }
 
+/* The type: a family and a size on one line, the two switches under them. */
+.ve-diagram-font {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ve-diagram-marks {
+  display: flex;
+  gap: 4px;
+}
+
+/* Switches rather than menus of two. Bold and italic are the things people
+   reach for a keystroke to do, and a menu is not what that reaches. */
+.ve-diagram-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ve-diagram-mark:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.ve-diagram-mark.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
 /* Rows and columns are one answer to one question about a table, so they sit
    on one line and share it evenly. */
 .ve-diagram-grid-size {
@@ -4744,6 +4795,11 @@ body.page-editing #dockEdit {
   }
 
   .ve-diagram-cell {
+    min-height: 38px;
+  }
+
+  .ve-diagram-mark {
+    width: 40px;
     min-height: 38px;
   }
 

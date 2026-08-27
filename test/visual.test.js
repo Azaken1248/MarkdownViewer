@@ -2090,6 +2090,76 @@ console.log("=== a table with columns is drawn as a grid ===");
     (gappy.match(/<text class="dd-text/g) || []).length, 3);
 }
 
+console.log("=== the type a diagram is set in is real Mermaid ===");
+{
+  const paint = (node, classes) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", ...node }],
+    edges: [],
+    classes,
+    layout: { A: { x: 0, y: 0, w: 120, h: 40 } }
+  }, { natural: true });
+
+  /* Every font control is a classDef declaration, which every Mermaid renderer
+   * reads — so a diagram set in bold serif is set in bold serif on GitHub as
+   * well, rather than only here. There is no control for anything Mermaid
+   * cannot say, because a size the file cannot keep is a size that goes away
+   * the next time the diagram is opened somewhere else.
+   */
+  const worn = paint({ text: "a", classes: ["big"] },
+    { big: { "font-size": "20px", "font-weight": "700",
+      "font-family": "serif", "font-style": "italic" } });
+
+  check("what a box is set in reaches the drawing as it was written",
+    /--dd-font-size:20px;--dd-font-weight:700;--dd-font-family:serif;--dd-font-style:italic;/
+      .test(worn), true);
+
+  /* Held to what a font control can say. A classDef comes out of a file and a
+   * font name out of a file is a string on its way into a style attribute, so
+   * anything that is not plainly one of the three generic families is dropped
+   * and the box is set the way everything else is.
+   */
+  const odd = paint({ text: "a", classes: ["odd"] },
+    { odd: { "font-family": "url(evil)", "font-size": "20em",
+      "font-weight": "heavy", "font-style": "oblique 40deg" } });
+  check("...and anything else is not written at all",
+    /--dd-font/.test(odd), false);
+
+  // The size decides where a word is cut off as well as how it looks, so a box
+  // set larger runs out of room sooner.
+  const long = (classes) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table",
+      text: "T<br/>a long field name | b", classes: classes ? ["big"] : [] }],
+    edges: [],
+    classes: { big: { "font-size": "20px" } },
+    layout: { A: { x: 0, y: 0, w: 200, h: 66 } }
+  }, { natural: true });
+
+  const cutAt = (drawn) => (/<\/title>([^<]*)</.exec(drawn) || [])[1] || "";
+  check("a box set larger runs out of room sooner",
+    [cutAt(long(false)), cutAt(long(true))], ["a long fiel…", "a long \u2026"]);
+
+  /* One size for every label, and the drawing has to know what it is to measure
+   * a word against it. It is written in two places — the stylesheet sets it and
+   * the drawing measures by it — so this is the check that holds them together.
+   */
+  const stylesheet = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+  const set = new JSDOM(`<style>${stylesheet}</style>
+    <svg class="dd"><text class="dd-text" id="one">x</text>
+    <text class="dd-text dd-row" id="row">x</text></svg>`);
+  const typed = (id) => set.window.getComputedStyle(set.window.document.getElementById(id));
+
+  check("the size the stylesheet sets is the size the drawing measures by",
+    typed("one").fontSize, `var(--dd-font-size, ${DD.TEXT_SIZE}px)`);
+  check("...and a row in a table is set in the same one, so there is one number",
+    typed("row").fontSize, typed("one").fontSize);
+  check("...with what a box was told to be beating it",
+    [typed("one").fontWeight, typed("one").fontFamily, typed("one").fontStyle],
+    ["var(--dd-font-weight, 400)", "var(--dd-font-family, inherit)",
+      "var(--dd-font-style, normal)"]);
+}
+
 console.log("=== a box is gripped by any of its edges ===");
 {
   /* Eight grips: four corners and four sides. A box with only the diagonal one
@@ -2232,7 +2302,7 @@ console.log("=== a word too long for its cell stops at the wall ===");
   check("a word too long for its cell is cut off",
     /&#8230;|…/.test(tight), true);
   check("...and marked where it was cut",
-    /<\/title>a very long …<\/text>/.test(tight), true);
+    /<\/title>a very long…<\/text>/.test(tight), true);
   check("...keeping what it said in full, for resting on",
     /<title>a very long field name indeed<\/title>/.test(tight), true);
 
@@ -2242,7 +2312,7 @@ console.log("=== a word too long for its cell stops at the wall ===");
   check("a heading too long for the table is cut too",
     /<title>a very long heading indeed that will not fit<\/title>/.test(heading), true);
   check("...against the whole width, because that is what it spans",
-    /<\/title>a very long heading indeed th…<\/text>/.test(heading), true);
+    /<\/title>a very long heading indeed …<\/text>/.test(heading), true);
 
   // A cell with room for nothing but the mark gets the mark, and one without
   // room for even that gets nothing: a mark drawn over the wall is the thing
