@@ -175,14 +175,30 @@
   // What the palette offers. A table is not a Mermaid shape — it is an ordinary
   // box whose label has rows in it and whose layout line says to rule a line
   // under the first one — so it travels with the shapes but is spelled as a kind.
+  /* The shapes, each with a picture of itself.
+   *
+   * Drawn here rather than named from an icon set: this row is about shape and
+   * nothing else, so the one thing a button on it has to show is the outline it
+   * will put on the paper. An icon font's nearest square is not that.
+   */
   const DIAGRAM_PALETTE = [
-    { shape: "rect", kind: "box", label: "Box" },
-    { shape: "round", kind: "box", label: "Rounded" },
-    { shape: "diamond", kind: "box", label: "Decision" },
-    { shape: "stadium", kind: "box", label: "Stadium" },
-    { shape: "circle", kind: "box", label: "Circle" },
-    { shape: "rect", kind: "table", label: "Table" }
+    { shape: "rect", kind: "box", label: "Box", glyph: '<rect x="1" y="2" width="16" height="10"/>' },
+    { shape: "round", kind: "box", label: "Rounded",
+      glyph: '<rect x="1" y="2" width="16" height="10" rx="3"/>' },
+    { shape: "diamond", kind: "box", label: "Decision",
+      glyph: '<path d="M9,1 L17,7 L9,13 L1,7 z"/>' },
+    { shape: "stadium", kind: "box", label: "Stadium",
+      glyph: '<rect x="1" y="2" width="16" height="10" rx="5"/>' },
+    { shape: "circle", kind: "box", label: "Circle", glyph: '<circle cx="9" cy="7" r="5.5"/>' },
+    { shape: "rect", kind: "table", label: "Table",
+      glyph: '<rect x="1" y="2" width="16" height="10"/><path d="M1,5.5 H17"/>' }
   ];
+
+  // One picture of a shape, at the size a label sits beside.
+  const shapeGlyph = (glyph) =>
+    '<svg class="ve-diagram-glyph" viewBox="0 0 18 14" width="18" height="14"'
+    + ' fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">'
+    + `${glyph}</svg>`;
 
   /* Put a diagram canvas inside an element.
    *
@@ -1120,8 +1136,16 @@
       }
     }
 
-    // The arrow being drawn, which is not an arrow yet and so is not in the model
-    // yet either. It is one element, made once and moved.
+    /* The arrow being drawn, which is not an arrow yet and so is not in the model
+     * yet either. It is one element, made once and moved.
+     *
+     * Drawn inside the view, with the guides and the band, because both of its
+     * ends are places in the diagram: the box it starts at is where the model
+     * says, and the point it ends at is a pointer already converted back
+     * through the view. Hung off the svg instead, the line was drawn in screen
+     * pixels from a diagram-coordinate start — so it began somewhere the box
+     * was not, and swung about that spot as the pointer moved.
+     */
     function drawDraft(point) {
       const svg = drawing();
       const at = boxOf(gesture.id);
@@ -1134,7 +1158,7 @@
         draft = document.createElementNS(SVG_NS, "path");
         draft.setAttribute("class", "dd-draft");
         draft.setAttribute("fill", "none");
-        svg.appendChild(draft);
+        (svg.querySelector(".dd-view") || svg).appendChild(draft);
       }
 
       draft.setAttribute("d", `M${at.x + (at.w / 2)},${at.y + (at.h / 2)} L${point.x},${point.y}`);
@@ -2625,7 +2649,8 @@
       button.className = "ve-diagram-tool";
       button.dataset.shape = choice.shape;
       button.dataset.kind = choice.kind;
-      button.textContent = choice.label;
+      button.innerHTML = `${shapeGlyph(choice.glyph)}<span></span>`;
+      button.querySelector("span").textContent = choice.label;
       button.title = `Add a ${choice.label.toLowerCase()} — drag it onto the diagram`;
 
       let ghost = null;
@@ -2712,10 +2737,13 @@
       palette.appendChild(button);
     }
 
+    /* Tidy is not a shape, so it is not on the rail of shapes. It is a thing
+     * done to the whole diagram, which is what the bar along the top is for.
+     */
     const tidy = document.createElement("button");
     tidy.type = "button";
-    tidy.className = "ve-diagram-tool ve-diagram-tidy";
-    tidy.textContent = "Tidy";
+    tidy.className = "ve-diagram-tidy";
+    tidy.innerHTML = '<i class="ph ph-tree-structure" aria-hidden="true"></i><span>Tidy</span>';
     tidy.title = "Arrange every box again, following the flow direction";
     tidy.addEventListener("click", () => {
       model.layout = DiagramModel.autoLayout(model);
@@ -2723,8 +2751,6 @@
       paintLists();
       drawAtOnce();
     });
-
-    palette.appendChild(tidy);
 
     /* --- Selecting ---------------------------------------------------------- */
 
@@ -3437,13 +3463,21 @@
 
     all.append(allSummary, stepsLegend, nodeRows, arrowsLegend, edgeRows, addArrow);
 
-    /* --- Putting it together ---------------------------------------------- */
+    /* --- Putting it together ------------------------------------------------
+     *
+     * A bar across the top, a rail of shapes down one side, a panel of
+     * properties down the other, and the paper filling everything left over.
+     * Which is the shape every drawing tool has: what you can do to the whole
+     * diagram along the top, what you can put into it on one side, and what is
+     * true of the thing you have picked on the other.
+     *
+     * On a phone the same three things are stacked instead — the rail becomes a
+     * strip under the bar and the panel becomes a tray along the bottom — so
+     * nothing moves anywhere unfamiliar, it is only folded differently.
+     */
 
-    const head = document.createElement("div");
-    head.className = "ve-embed-head ve-diagram-head";
-
-    const title = document.createElement("span");
-    title.textContent = settings.title || "diagram";
+    const bar = document.createElement("div");
+    bar.className = "ve-diagram-bar";
 
     const flowLabel = document.createElement("label");
     flowLabel.className = "ve-diagram-flow";
@@ -3452,7 +3486,23 @@
     flowText.textContent = "Flow";
     flowLabel.append(flowText, flowControl());
 
-    head.append(title, flowLabel);
+    // A group is a run of buttons that belong together, with a hairline between
+    // one group and the next. The host's own bar names the diagram, so naming it
+    // again here would be the same words twice on one screen; an editor with no
+    // host to name it says so itself.
+    const group = (...items) => {
+      const holder = document.createElement("div");
+      holder.className = "ve-diagram-group";
+      holder.append(...items);
+      return holder;
+    };
+
+    if (!viewport) {
+      const title = document.createElement("span");
+      title.className = "ve-diagram-name";
+      title.textContent = settings.title || "diagram";
+      bar.append(title);
+    }
 
     /* The zoom, which is a readout as much as a control.
      *
@@ -3461,6 +3511,7 @@
      * buttons can only ever get near.
      */
     let zoomField = null;
+    let steps = null;
     // Replaced with the real thing when there are buttons to keep in step.
     let showSteps = () => {};
 
@@ -3474,10 +3525,13 @@
       const zoom = document.createElement("div");
       zoom.className = "ve-diagram-zoom";
 
-      const stepButton = (label, icon, run) => {
+      // One button, wherever it appears: the bar, the zoom cluster, either. A
+      // second kind that looks nearly the same as the first is the thing that
+      // makes a panel look assembled rather than designed.
+      const iconButton = (label, icon, run) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "ve-diagram-zoom-step";
+        button.className = "ve-diagram-icon";
         button.title = label;
         button.setAttribute("aria-label", label);
         button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
@@ -3516,7 +3570,7 @@
        * other thing a drag can mean needs somewhere to be said. Held: the space
        * bar. Switched on: this.
        */
-      handButton = stepButton("Hand — drag to move about (H)", "ph-hand",
+      handButton = iconButton("Hand — drag to move about (H)", "ph-hand",
         () => useHand(!handTool));
       handButton.setAttribute("aria-pressed", "false");
 
@@ -3524,29 +3578,33 @@
        * arrow — over and over, without selecting anything first, which is the
        * whole of why it is a mode rather than a button that does it once.
        */
-      arrowButton = stepButton("Arrow — drag between boxes to join them (A)",
+      arrowButton = iconButton("Arrow — drag between boxes to join them (A)",
         "ph-arrow-up-right", () => useArrowTool(!arrowTool));
       arrowButton.setAttribute("aria-pressed", "false");
 
+      /* The zoom sits on the paper, at the corner furthest from everything
+       * else. It is about the view rather than about the diagram, so it
+       * belongs to the window it changes rather than to the bar of things that
+       * change the drawing.
+       */
       zoom.append(
-        handButton,
-        arrowButton,
-        stepButton("Zoom out", "ph-minus", () => zoomToCentre(1 / ZOOM_PER_NOTCH ** 2)),
+        iconButton("Zoom out", "ph-minus", () => zoomToCentre(1 / ZOOM_PER_NOTCH ** 2)),
         zoomField,
-        stepButton("Zoom in", "ph-plus", () => zoomToCentre(ZOOM_PER_NOTCH ** 2)),
-        stepButton("Fit the whole diagram", "ph-corners-out", () => fitView())
+        iconButton("Zoom in", "ph-plus", () => zoomToCentre(ZOOM_PER_NOTCH ** 2)),
+        iconButton("Fit the whole diagram", "ph-corners-out", () => fitView())
       );
+      stage.append(zoom);
 
       // The keystroke is the one people use, but a canvas that only offers undo
       // to those who know the keystroke is a canvas that has hidden it.
-      const steps = document.createElement("div");
-      steps.className = "ve-diagram-zoom ve-diagram-steps";
+      steps = document.createElement("div");
+      steps.className = "ve-diagram-group ve-diagram-steps";
 
-      const back = stepButton("Undo", "ph-arrow-counter-clockwise", () => {
+      const back = iconButton("Undo", "ph-arrow-counter-clockwise", () => {
         undo();
         showSteps();
       });
-      const forward = stepButton("Redo", "ph-arrow-clockwise", () => {
+      const forward = iconButton("Redo", "ph-arrow-clockwise", () => {
         redo();
         showSteps();
       });
@@ -3557,10 +3615,35 @@
       };
 
       steps.append(back, forward);
-      head.append(steps, zoom);
+      bar.append(group(handButton, arrowButton));
     }
 
-    const parts = [head, palette, stage, hint, inspector, all];
+    bar.append(group(tidy), flowLabel);
+
+    // Undo and redo go last and sit at the far end, away from everything that
+    // makes a change — the two buttons that take one back are not two more of
+    // the buttons that make one.
+    if (steps) {
+      bar.append(steps);
+    }
+
+    const rail = document.createElement("aside");
+    rail.className = "ve-diagram-rail";
+    rail.append(palette);
+
+    const side = document.createElement("aside");
+    side.className = "ve-diagram-side";
+    side.append(hint, inspector, all);
+
+    const body = document.createElement("div");
+    body.className = "ve-diagram-body";
+    body.append(rail, stage, side);
+
+    const shell = document.createElement("div");
+    shell.className = "ve-diagram-shell";
+    shell.append(bar, body);
+
+    const parts = [shell];
 
     // A host with somewhere to go back to gets a way back. The page has nowhere
     // to close to — the editor is the whole of it — so it gets no button.

@@ -289,17 +289,24 @@ console.log("=== the diagram builder fits a phone ===");
   // diagram, and a drawn diagram above it — three separate ways to be wider
   // than the screen, on the one screen where that is not survivable.
 
-  // An arrow is from, how it is drawn, a label, to, and a way to remove it. On
-  // one line that is five controls in 360px; the connection reads across the
-  // top and how it is drawn goes underneath.
-  check("an arrow row stops being one line", /\.ve-diagram-arrow \{\s*display: grid;/.test(phone), true);
-  check("...with the label given a cell of its own", /grid-area: label;/.test(phone), true);
+  /* An arrow is from, how it is drawn, a label, to, and a way to remove it. Five
+   * controls will not fit across the panel at any width it is ever given — it
+   * is a column beside the paper on a laptop and a tray under it on a phone,
+   * and neither is wide — so this is the sheet's own layout rather than the
+   * phone's, and the phone tier no longer says anything about it.
+   */
+  check("an arrow row is never one line",
+    /\.ve-diagram-arrow \{\s*display: grid;/.test(rules), true);
+  check("...with the label given a cell of its own", /grid-area: label;/.test(rules), true);
   // How a line is drawn is three selects of its own, and three selects beside a
-  // label is four things in 360px. They take the width and the label drops.
+  // label is four things across a 300px column. They take the width and the
+  // label drops.
   check("...and the line's own three a row of their own",
-    /\.ve-diagram-arrow > \.ve-diagram-ends \{\s*grid-area: ends;/.test(phone), true);
+    /\.ve-diagram-arrow > \.ve-diagram-ends \{\s*grid-area: ends;/.test(rules), true);
   check("...and the step menus no longer capped at a fraction of a row",
-    /\.ve-diagram-arrow > \.ve-diagram-pick \{\s*max-width: none;/.test(phone), true);
+    /\.ve-diagram-arrow > \.ve-diagram-pick \{\s*max-width: none;/.test(rules), true);
+  check("...and the phone tier keeps no second copy of it",
+    /\.ve-diagram-arrow/.test(phone), false);
 
   // A text input's content is its size attribute — twenty characters — and a
   // flex item's floor is its content, so a label field without this is a field
@@ -326,11 +333,36 @@ console.log("=== the diagram builder fits a phone ===");
     /\.ve-diagram-canvas \{[\s\S]{0,120}?max-height: \d+dvh;/.test(rules), true);
   check("...less of it on a phone", /\.ve-diagram-canvas \{\s*max-height: 46dvh;/.test(phone), true);
 
-  // The palette is a row of shapes directly above the drawing. Wrapping it
-  // would push the diagram off the screen, and letting a touch drag scroll it
-  // would take away the gesture it exists for.
+  /* The four regions fold rather than rearrange: the rail of shapes becomes a
+   * strip under the bar, the panel becomes a tray along the bottom, and the
+   * paper keeps the middle. Which is what makes the phone the same editor as
+   * the laptop rather than a second one that has to be learnt.
+   */
+  check("the regions stack instead of sitting beside each other",
+    /\.ve-diagram-body \{\s*flex-direction: column;/.test(phone), true);
+  check("...the rail becomes a strip, so its edge moves with it",
+    /\.ve-diagram-rail \{[\s\S]{0,120}?border-bottom: 1px solid/.test(phone), true);
+  check("...and the panel becomes a tray along the bottom",
+    /\.ve-diagram-side \{[\s\S]{0,160}?border-top: 1px solid/.test(phone), true);
+
+  // A tray that grows with what is selected must not be able to squeeze the
+  // diagram down to nothing, so each of them has a share of the screen.
+  check("the tray takes a share of the screen rather than all of it",
+    /\.ve-diagram-side \{[\s\S]{0,120}?max-height: \d+dvh;/.test(phone), true);
+  check("...and the paper keeps a floor under it",
+    /\.ve-diagram-body > \.ve-diagram-stage \{\s*flex: 1 0 \d+dvh;/.test(phone), true);
+
+  // The palette is a column of shapes beside the drawing, and a row of them
+  // above it on a phone. Wrapping it would push the diagram off the screen,
+  // and letting a touch drag scroll it would take away the gesture it exists
+  // for.
   check("the shape palette scrolls rather than wrapping",
     /\.ve-diagram-palette \{[\s\S]{0,200}?overflow-x: auto;/.test(rules), true);
+  check("...as a row, once there is no room for a column beside the paper",
+    /\.ve-diagram-palette \{[\s\S]{0,120}?flex-direction: row;/.test(phone), true);
+  check("...with the shapes down to their pictures, which is the half that says"
+    + " what they are",
+    /\.ve-diagram-tool > span \{\s*display: none;/.test(phone), true);
   check("a shape can be dragged off it with a finger",
     /\.ve-diagram-tool \{[\s\S]{0,320}?touch-action: none;/.test(rules), true);
 
@@ -363,6 +395,9 @@ console.log("=== the diagram builder fits a phone ===");
   check("...and so does the button that removes a row", size(".ve-diagram-drop", "height"), 38);
   check("...and the one that adds one", size(".ve-diagram-add", "min-height"), 38);
   check("...and the shapes on the palette", size(".ve-diagram-tool", "min-height"), 38);
+  check("...and every button on the bar", size(".ve-diagram-icon", "height"), 38);
+  check("...including the one that arranges the diagram",
+    size(".ve-diagram-tidy", "min-height"), 38);
 
   // Both handles are dragged with a finger. The drawing is at its own scale,
   // so these numbers are screen pixels as well as diagram units.

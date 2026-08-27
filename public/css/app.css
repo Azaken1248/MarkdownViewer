@@ -3475,28 +3475,136 @@ body.page-editing #dockEdit {
 
 /* --- The diagram canvas ----------------------------------------------------
 
-   The canvas and the panel beside it, on the page a diagram opens on. It used
+   The canvas and everything around it, on the page a diagram opens on. It used
    to open inside a document block as well, in a strip a few hundred pixels
    tall; everything it has grown since — a palette, an inspector, a zoom bar,
    arrows drawn by dragging — wants room, so there is one way in and it goes to
    the page.
 
+   Four regions, and each one holds a different kind of thing:
+
+     bar     across the top, what is done to the whole diagram
+     rail    down one side, what can be put into it
+     stage   the paper, taking everything left over
+     side    down the other side, what is true of what is selected
+
+   On a phone the same four are stacked — the rail folds into a strip under the
+   bar and the panel into a tray along the bottom — so nothing moves anywhere
+   unfamiliar, it is only folded differently.
+
    The panel is plain flow layout on purpose: it is redrawn on every step added
    or removed, and it has to stay cheap on a phone. */
-.ve-diagram-head {
+.ve-diagram-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ve-diagram-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The shapes. A column beside the paper, so the row of them is never the thing
+   deciding how wide the window has to be. */
+.ve-diagram-rail {
+  flex: 0 0 auto;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-muted);
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+
+/* What is true of what is picked. Given a width rather than asked to work one
+   out: it is redrawn every time the selection changes, and a panel that
+   resizes itself as its contents change is a panel the paper jumps about
+   beside. */
+.ve-diagram-side {
+  flex: 0 0 clamp(272px, 26vw, 340px);
+  overflow-y: auto;
+  border-left: 1px solid var(--border-muted);
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+
+.ve-diagram-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--raised);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ve-diagram-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* A run of buttons that belong together, with a hairline between one run and
+   the next. Which is what tells hand-and-arrow from undo-and-redo without a
+   word being written on the bar. */
+.ve-diagram-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.ve-diagram-group + .ve-diagram-group,
+.ve-diagram-group + .ve-diagram-flow {
+  padding-left: 8px;
+  border-left: 1px solid var(--border-muted);
+}
+
+/* An editor with no host to name the diagram names it itself. The page has a
+   bar of its own that does, and the same words twice on one screen is one of
+   them wasted. */
+.ve-diagram-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 .ve-diagram-flow {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  /* The head is small caps; the control in it must not be. */
-  text-transform: none;
-  letter-spacing: normal;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+}
+
+/* Arranging the whole diagram again is not a shape, so it is not on the rail
+   of shapes — but it is a button, and there is one kind of button here. */
+.ve-diagram-tidy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-tidy:hover {
+  border-color: var(--border);
+  color: var(--fg);
 }
 
 
@@ -3523,25 +3631,32 @@ body.page-editing #dockEdit {
 /* The shapes to drag onto the paper, and the button that arranges everything
    again. A row that scrolls rather than wraps: it sits directly above the
    canvas and a second line of it would push the drawing off a phone screen. */
+/* A column beside the paper, a row above it on a phone. Either way it scrolls
+   rather than wrapping: a palette that grows a second line pushes the diagram
+   down the screen every time a shape is added to it. */
 .ve-diagram-palette {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
   overflow-x: auto;
-  border-bottom: 1px dashed var(--border-muted);
   scrollbar-width: thin;
 }
 
 .ve-diagram-tool {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
   min-height: 32px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
+  padding: 5px 9px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--raised);
-  color: var(--fg);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
   font-size: 12px;
+  text-align: left;
   cursor: grab;
   /* The whole point of this row is that a shape can be dragged out of it, and
      a touch drag that scrolls the row instead is not that. */
@@ -3551,12 +3666,20 @@ body.page-editing #dockEdit {
 
 .ve-diagram-tool:hover {
   background: var(--raised-hover);
-  border-color: var(--border-strong);
+  border-color: var(--border-muted);
+  color: var(--fg);
 }
 
-.ve-diagram-tidy {
-  margin-left: auto;
-  cursor: pointer;
+/* The picture of the shape, which is the half of the button that says what it
+   does. Never squeezed: a flex child with a drawing in it will give up its
+   width to the words beside it before it gives up anything else. */
+.ve-diagram-glyph {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-tool:hover .ve-diagram-glyph {
+  color: var(--accent);
 }
 
 /* What follows the finger between the palette and the paper. Fixed to the
@@ -3585,11 +3708,12 @@ body.page-editing #dockEdit {
   touch-action: none;
 }
 
-/* A window has to be given a height to be a window. The drawing inside it is
-   100% of the canvas, and 100% of a box that is only as tall as its contents is
-   nothing at all — so a viewport in a document is told how much of the screen
-   it may have. The page says so for itself, further down, and is not in here. */
-.ve-embed .ve-diagram-canvas:has(> .dd-viewport) {
+/* A window has to be given a height to be a window. The editor is a column of
+   flexible parts all the way down, and a column that ends in "as tall as its
+   contents" is a viewport of no height at all — so an editor inside a document
+   is told how much of the screen it may have. The page it opens on gives it
+   the window instead, and is not in here. */
+.ve-embed .ve-diagram-shell {
   height: 60dvh;
 }
 
@@ -3673,7 +3797,7 @@ body.page-editing #dockEdit {
 
 /* The hand, switched on. The only thing in the bar that stays pressed, so it
    is the only one that says so. */
-.ve-diagram-zoom-step.is-on {
+.ve-diagram-icon.is-on {
   background: var(--accent-emphasis);
   border-color: var(--accent-emphasis);
   color: var(--fg-on-emphasis);
@@ -3734,29 +3858,37 @@ body.page-editing #dockEdit {
   margin-left: auto;
 }
 
+/* The zoom sits on the paper, at the corner furthest from everything else. It
+   is about the view rather than about the diagram, so it belongs to the window
+   it changes rather than to the bar of things that change the drawing. */
 .ve-diagram-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
+  padding: 3px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
 }
 
-/* Undo and redo sit to the left of the zoom, and only the zoom pushes itself
-   to the right — so the two groups stay together at that end of the strip. */
+/* Undo and redo sit at the far end of the bar, away from everything that makes
+   a change — the two buttons that take one back are not two more of the ones
+   that make one. */
 .ve-diagram-steps {
   margin-left: auto;
 }
 
-.ve-diagram-steps + .ve-diagram-zoom {
-  margin-left: 8px;
-}
-
-.ve-diagram-zoom-step:disabled {
+.ve-diagram-icon:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.ve-diagram-zoom-step {
+.ve-diagram-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3770,7 +3902,7 @@ body.page-editing #dockEdit {
   cursor: pointer;
 }
 
-.ve-diagram-zoom-step:hover {
+.ve-diagram-icon:hover {
   border-color: var(--border);
   color: var(--fg);
 }
@@ -3837,25 +3969,16 @@ body.page-editing #dockEdit {
 /* The whole of what is left, and it scrolls itself: an editor whose canvas
    pushes the save button off the bottom of the window is an editor you cannot
    save from. */
+/* The editor is the whole of what is left under the bar, and nothing in it
+   scrolls the page: the rail scrolls, the panel scrolls, the paper pans. A
+   page that scrolled as well would be one where the Save button can be pushed
+   off the bottom of the window. */
 .diagram-page-canvas {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: auto;
-}
-
-/* The canvas is the page. It takes what is left after the bar and does not
-   grow past it, because a viewport that pushes the Save button off the bottom
-   of the window is a viewport you cannot save from. */
-.diagram-page-canvas .ve-diagram-stage {
-  flex: 1;
-  min-height: 0;
-}
-
-.diagram-page-canvas .ve-diagram-canvas {
-  max-height: none;
-  height: 100%;
+  overflow: hidden;
 }
 
 .diagram-page-empty {
@@ -3896,6 +4019,28 @@ body.page-editing #dockEdit {
 .ve-diagram-canvas:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* The paper takes what the two sides leave, and takes it all: the cap above is
+   what a canvas is worth inside a document, and this is a canvas that is the
+   window. Written after that rule rather than merely more specific than it —
+   an override that reads as one is an override that survives being moved.
+
+   min-width because a flex child defaults to the width of its contents, and
+   the contents of this one is a diagram of no fixed size: without it a wide
+   drawing pushes the panel beside it off the screen. */
+.ve-diagram-body > .ve-diagram-stage {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ve-diagram-body > .ve-diagram-stage > .ve-diagram-canvas {
+  flex: 1;
+  min-width: 0;
+  max-height: none;
+  border-bottom: none;
 }
 
 .ve-diagram-canvas svg {
@@ -4099,6 +4244,53 @@ body.page-editing #dockEdit {
   gap: 6px;
 }
 
+/* An arrow is five controls: what it comes from, what it goes to, a way to
+   remove it, how the line is drawn, and what it says. Five will not fit across
+   a panel, and the panel is a narrow column at every size — it is a column
+   beside the paper on a laptop and a tray under it on a phone, and neither is
+   ever wide. So the connection reads across the top, how it is drawn goes
+   under that, and the label takes the line below.
+
+   This used to be the phone's layout only, from when the panel was the full
+   width of the screen under the drawing. The panel is never that now, and a
+   layout that only holds at one width is a layout that has to be got wrong at
+   the others. */
+.ve-diagram-arrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "from  to    drop"
+    "ends  ends  ends"
+    "label label label";
+  align-items: center;
+}
+
+.ve-diagram-arrow > .ve-diagram-pick:first-child {
+  grid-area: from;
+}
+
+.ve-diagram-arrow > .ve-diagram-ends {
+  grid-area: ends;
+}
+
+.ve-diagram-arrow > .ve-diagram-text {
+  grid-area: label;
+}
+
+.ve-diagram-arrow > .ve-diagram-pick:nth-last-child(2) {
+  grid-area: to;
+}
+
+.ve-diagram-arrow > .ve-diagram-drop {
+  grid-area: drop;
+}
+
+/* In a grid the cells decide the widths, and a percentage cap on a select would
+   fight them. */
+.ve-diagram-arrow > .ve-diagram-pick {
+  max-width: none;
+}
+
 .ve-diagram-text,
 .ve-diagram-shape,
 .ve-diagram-kind,
@@ -4244,6 +4436,17 @@ body.page-editing #dockEdit {
     min-height: 38px;
     padding: 8px 12px;
     font-size: 13px;
+  }
+
+  /* The bar and the zoom are the two places a finger has to hit something
+     26px wide, and a bar of them is the row most often missed. */
+  .ve-diagram-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ve-diagram-tidy {
+    min-height: 38px;
   }
 
   /* Both handles are dragged with a finger, so both have to be a finger wide.
@@ -4851,47 +5054,64 @@ body.page-editing #dockEdit {
     max-height: 46dvh;
   }
 
-  .ve-embed .ve-diagram-canvas:has(> .dd-viewport) {
+  .ve-embed .ve-diagram-shell {
     height: 46dvh;
   }
 
-  .ve-diagram-arrow {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-    grid-template-areas:
-      "from  to    drop"
-      "ends  ends  ends"
-      "label label label";
+  /* The same four regions, folded rather than rearranged: the rail becomes a
+     strip under the bar, the panel becomes a tray along the bottom, and the
+     paper keeps the middle. Nothing has moved anywhere it was not, which is
+     what makes the phone the same editor rather than a second one. */
+  .ve-diagram-body {
+    flex-direction: column;
+  }
+
+  .ve-diagram-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--border-muted);
+  }
+
+  /* A row again, and it scrolls: a strip of shapes that wraps to a second line
+     pushes the diagram down the screen every time a shape is added to it. */
+  .ve-diagram-palette {
+    flex-direction: row;
     align-items: center;
+    padding: 6px 8px;
   }
 
-  .ve-diagram-arrow > .ve-diagram-pick:first-child {
-    grid-area: from;
+  /* The words go, the shape stays. Six labelled buttons will not fit across a
+     phone, and the picture is the half that says which shape it is. */
+  .ve-diagram-tool > span {
+    display: none;
   }
 
-  /* Three selects will not fit beside a label on a phone, so they take the
-     width to themselves and the label takes the line under them. */
-  .ve-diagram-arrow > .ve-diagram-ends {
-    grid-area: ends;
+  .ve-diagram-tool {
+    justify-content: center;
+    min-width: 38px;
+    padding: 5px;
   }
 
-  .ve-diagram-arrow > .ve-diagram-text {
-    grid-area: label;
+  /* The tray takes a share of the screen rather than a width, and the paper
+     keeps a floor under it — a panel that grows with what is selected must not
+     be able to squeeze the diagram down to nothing. */
+  .ve-diagram-side {
+    flex: 0 1 auto;
+    max-height: 40dvh;
+    border-left: none;
+    border-top: 1px solid var(--border-muted);
   }
 
-  .ve-diagram-arrow > .ve-diagram-pick:nth-last-child(2) {
-    grid-area: to;
+  .ve-diagram-body > .ve-diagram-stage {
+    flex: 1 0 34dvh;
   }
 
-  .ve-diagram-arrow > .ve-diagram-drop {
-    grid-area: drop;
+  /* Out of the way of a thumb resting at the bottom corner, and out of the way
+     of the tray. */
+  .ve-diagram-zoom {
+    right: 8px;
+    bottom: 8px;
   }
 
-  /* In a grid the cells decide the widths, and a percentage cap on a select
-     would fight them. */
-  .ve-diagram-arrow > .ve-diagram-pick {
-    max-width: none;
-  }
 }
 
 /* A phone on its side is about 390px tall, and a third of that was chrome.

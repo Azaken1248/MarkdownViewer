@@ -2039,6 +2039,59 @@ console.log("=== the previews are actually on the screen ===");
     painted("back").fill, "var(--canvas)");
   check("...with the lines faint enough to be paper rather than graph paper",
     [painted("line").stroke, painted("line").opacity], ["var(--border)", "0.55"]);
+
+  /* The editor is four regions, and each one holds one kind of thing: the bar
+   * across the top is what is done to the whole diagram, the rail down one side
+   * is what can be put into it, the panel down the other is what is true of
+   * what is picked, and the paper takes everything left over.
+   *
+   * Computed rather than matched as text, because what went wrong last time was
+   * a cascade and not a rule: the canvas carried a 60dvh cap meant for a strip
+   * inside a document, and on a page where the editor is the whole window that
+   * cap left the paper two thirds of the height it had been given and the rest
+   * of the page scrolling under it.
+   */
+  const editor = new JSDOM(`<style>${stylesheet}</style>
+    <main class="diagram-page-canvas" id="host">
+      <div class="ve-diagram-shell" id="shell">
+        <div class="ve-diagram-bar" id="bar"></div>
+        <div class="ve-diagram-body" id="body">
+          <aside class="ve-diagram-rail" id="rail">
+            <div class="ve-diagram-palette" id="palette"></div>
+          </aside>
+          <div class="ve-diagram-stage" id="stage">
+            <div class="ve-diagram-canvas" id="paper"></div>
+            <div class="ve-diagram-zoom" id="zoom"></div>
+          </div>
+          <aside class="ve-diagram-side" id="side"></aside>
+        </div>
+      </div>
+    </main>`);
+  const region = (id) =>
+    editor.window.getComputedStyle(editor.window.document.getElementById(id));
+
+  check("the bar is across the top and the two rails are beside each other",
+    [region("shell").flexDirection, region("body").flexDirection], ["column", ""]);
+  check("the paper takes what the rails leave",
+    [region("stage").flex, region("paper").flex], ["1 1 0%", "1 1 0%"]);
+  check("...all of it, rather than the strip's share of a document",
+    region("paper").maxHeight, "none");
+  check("...and can be narrower than the diagram on it, so the panel stays put",
+    [region("stage").minWidth, region("paper").minWidth], ["0", "0"]);
+
+  /* One scroller per region. The page cannot scroll — a page that scrolls is a
+   * page whose Save button can be pushed off the bottom — so the rail and the
+   * panel each scroll themselves, and the paper pans instead of scrolling.
+   */
+  check("nothing scrolls the page the editor is on", region("host").overflow, "hidden");
+  check("...the rail scrolls itself", region("rail").overflowY, "auto");
+  check("...and so does the panel", region("side").overflowY, "auto");
+
+  // The zoom is about the view rather than about the diagram, so it belongs to
+  // the window it changes. Which only works if the paper is what it is measured
+  // against: positioned against anything further out and it drifts.
+  check("the zoom sits on the paper",
+    [region("zoom").position, region("stage").position], ["absolute", "relative"]);
 }
 
 console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);

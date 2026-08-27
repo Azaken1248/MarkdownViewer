@@ -430,6 +430,70 @@ async function run(server, cookie) {
       saved.includes("shadow=soft"), true);
   }
 
+  console.log("=== the editor is a bar, two rails and the paper between them ===");
+  {
+    /* Where a control is says what it does to.
+     *
+     * The bar along the top is what is done to the whole diagram, the rail is
+     * what can be put into it, the panel is what is true of what is picked,
+     * and the zoom is about the window rather than about the drawing — so the
+     * zoom is on the paper and nothing else is. A control in the wrong region
+     * is a control nobody looks for twice.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "regions.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    A[One]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/regions.mmd`, cookie, origin });
+    const where = (selector) => {
+      const found = page.document.querySelector(selector);
+      if (!found) return null;
+      for (const region of ["bar", "rail", "stage", "side"]) {
+        if (found.closest(`.ve-diagram-${region}`)) return region;
+      }
+
+      return "loose";
+    };
+
+    check("there is one of each region",
+      ["shell", "bar", "rail", "stage", "side"]
+        .map((one) => page.document.querySelectorAll(`.ve-diagram-${one}`).length),
+      [1, 1, 1, 1, 1]);
+
+    check("the shapes are on the rail", where(".ve-diagram-palette"), "rail");
+    check("...the paper is the stage", where(".ve-diagram-canvas"), "stage");
+    check("...what is true of a box is in the panel",
+      [where(".ve-diagram-inspector"), where(".ve-diagram-hint")], ["side", "side"]);
+    check("...the whole diagram's own controls are on the bar",
+      [where(".ve-diagram-tidy"), where(".ve-diagram-flow"), where(".ve-diagram-steps")],
+      ["bar", "bar", "bar"]);
+    check("...as are the two tools that change what a drag means",
+      [...page.document.querySelectorAll(".ve-diagram-icon[aria-pressed]")]
+        .every((one) => one.closest(".ve-diagram-bar")), true);
+    check("...and the zoom is on the paper, because it is about the window",
+      where(".ve-diagram-zoom"), "stage");
+
+    // The page's own bar names the diagram. Naming it again here would be the
+    // same words twice on one screen.
+    check("the editor does not name a diagram its host has already named",
+      page.document.querySelector(".ve-diagram-name"), null);
+
+    // Six shapes, each showing the outline it puts on the paper. An icon font's
+    // nearest square is not that, so these are drawn here.
+    const shapes = [...page.document.querySelectorAll(".ve-diagram-tool")];
+    check("every shape on the rail shows a picture of itself",
+      shapes.length > 0 && shapes.every((one) => one.querySelector("svg.ve-diagram-glyph")),
+      true);
+    check("...and still says what it is", shapes[0].textContent, "Box");
+
+    page.window.close();
+  }
+
   console.log("=== the diagram is somewhere you are looking at part of ===");
   {
     await server.request("POST", "/api/docs",
@@ -580,7 +644,7 @@ async function run(server, cookie) {
 
     /* --- fit -------------------------------------------------------------- */
 
-    const fit = [...page.document.querySelectorAll(".ve-diagram-zoom-step")].pop();
+    const fit = [...page.document.querySelectorAll(".ve-diagram-zoom .ve-diagram-icon")].pop();
     fit.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     // The diagram is 120 wide by 360 tall and its top-left corner is at
     // (100, 100). In a 900x600 window that fits at life size, centred — which
@@ -1569,7 +1633,7 @@ async function run(server, cookie) {
     const joined = () => [...canvas.querySelectorAll(".dd-edge")]
       .map((one) => `${one.dataset.from}->${one.dataset.to}`);
 
-    const tool = [...page.document.querySelectorAll(".ve-diagram-zoom-step[aria-pressed]")]
+    const tool = [...page.document.querySelectorAll(".ve-diagram-bar .ve-diagram-icon[aria-pressed]")]
       .find((one) => /Arrow/i.test(one.getAttribute("title") || ""));
 
     const middleOf = (id) => {
@@ -1613,6 +1677,32 @@ async function run(server, cookie) {
     check("switching it on says so", tool.getAttribute("aria-pressed"), "true");
     check("...and the canvas says so too",
       canvas.classList.contains("is-joining"), true);
+
+    /* The line you drag is drawn in the diagram, not on the window.
+     *
+     * Both of its ends are places in the diagram — the box the model puts at
+     * 100,100 and a pointer already converted back through the view — so it
+     * belongs inside the group the view transform is on, beside the guides and
+     * the band. Hung off the svg root instead it began where the box was not,
+     * and swung about that spot instead of following the pointer.
+     */
+    const [aX, aY] = middleOf("A");
+    canvas.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", at(aX, aY)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(aX + 150, aY + 90)));
+    await new Promise((done) => window.requestAnimationFrame(
+      () => window.requestAnimationFrame(done)));
+
+    const draft = canvas.querySelector(".dd-draft");
+    check("a drag draws a line to follow the pointer", Boolean(draft), true);
+    check("...in the diagram rather than over the window",
+      draft.parentNode === canvas.querySelector(".dd-view"), true);
+    check("...starting at the middle of the box it came from and ending under"
+      + " the pointer", draft.getAttribute("d"), "M140,120 L290,210");
+
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(aX + 150, aY + 90)));
+    check("...and letting go over nothing takes the line away with it",
+      [canvas.querySelector(".dd-draft"), arrows()], [null, 0]);
 
     drag("A", "B");
     check("a drag between two boxes is an arrow", joined(), ["A->B"]);
@@ -1667,7 +1757,7 @@ async function run(server, cookie) {
      * takes the whole canvas: a drag that is both an arrow and a pan is
      * neither.
      */
-    const hand = [...page.document.querySelectorAll(".ve-diagram-zoom-step[aria-pressed]")]
+    const hand = [...page.document.querySelectorAll(".ve-diagram-bar .ve-diagram-icon[aria-pressed]")]
       .find((one) => /Hand/i.test(one.getAttribute("title") || ""));
     canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "h", bubbles: true }));
     check("reaching for the hand puts the arrow tool away",
