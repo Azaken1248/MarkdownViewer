@@ -2090,6 +2090,54 @@ console.log("=== a table with columns is drawn as a grid ===");
     (gappy.match(/<text class="dd-text/g) || []).length, 3);
 }
 
+console.log("=== a box is gripped by any of its edges ===");
+{
+  /* Eight grips: four corners and four sides. A box with only the diagonal one
+   * is a box you cannot make wider without also making it taller.
+   *
+   * Each sits on what it drags — the middle of a side, the point of a corner —
+   * because a handle that is not on the thing it moves is a handle you have to
+   * be told about.
+   */
+  const marks = DD.marksMarkup({ x: 100, y: 200, w: 80, h: 40 });
+  const grips = [...marks.matchAll(
+    /data-grip="(\w+)" cx="(-?\d+)" cy="(-?\d+)"/g)]
+    .map((one) => [one[1], Number(one[2]), Number(one[3])]);
+
+  check("every side and every corner has one", grips.map((one) => one[0]),
+    ["nw", "n", "ne", "w", "e", "sw", "s", "se"]);
+  check("...the corners on the corners",
+    grips.filter(([name]) => name.length === 2).map(([, x, y]) => [x, y]),
+    [[100, 200], [180, 200], [100, 240], [180, 240]]);
+  check("...and the sides in the middle of their sides",
+    grips.filter(([name]) => name.length === 1).map(([, x, y]) => [x, y]),
+    [[140, 200], [100, 220], [180, 220], [140, 240]]);
+
+  // Circles rather than squares: a handle grown for a finger has to grow about
+  // its own middle, and a square given a bigger width grows down and to the
+  // right, off the corner it was marking.
+  check("a grip is a circle, so growing one keeps it where it was",
+    /<circle class="dd-handle dd-resize"/.test(marks), true);
+
+  /* The cursor is the only thing that says which way a grip goes before it is
+   * dragged. Computed rather than matched as text: a rule that lands on the
+   * wrong grip is a cascade problem and a regex cannot see a cascade.
+   */
+  const stylesheet = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+  const held = new JSDOM(`<style>${stylesheet}</style>
+    <svg class="dd dd-editing">${DD.GRIPS.map(([name]) =>
+    `<circle class="dd-handle dd-resize" id="g-${name}" data-grip="${name}"/>`).join("")}</svg>`);
+  const aims = (name) =>
+    held.window.getComputedStyle(held.window.document.getElementById(`g-${name}`)).cursor;
+
+  check("a corner grip points along its diagonal",
+    [aims("nw"), aims("se"), aims("ne"), aims("sw")],
+    ["nwse-resize", "nwse-resize", "nesw-resize", "nesw-resize"]);
+  check("...and a side grip across the edge it drags",
+    [aims("n"), aims("s"), aims("e"), aims("w")],
+    ["ns-resize", "ns-resize", "ew-resize", "ew-resize"]);
+}
+
 console.log("=== a table is spaced out the way it was asked to be ===");
 {
   const table = (node, w, h) => DD.render({

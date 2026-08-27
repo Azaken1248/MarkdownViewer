@@ -4148,8 +4148,26 @@ body.page-editing #dockEdit {
   touch-action: none;
 }
 
+/* Eight grips: four corners and four sides. The cursor is the only thing that
+   says which way a given one goes, and a box you can only resize diagonally is
+   a box you cannot make wider without also making it taller. */
 .dd-editing .dd-resize {
   cursor: nwse-resize;
+}
+
+.dd-editing .dd-resize[data-grip="ne"],
+.dd-editing .dd-resize[data-grip="sw"] {
+  cursor: nesw-resize;
+}
+
+.dd-editing .dd-resize[data-grip="n"],
+.dd-editing .dd-resize[data-grip="s"] {
+  cursor: ns-resize;
+}
+
+.dd-editing .dd-resize[data-grip="e"],
+.dd-editing .dd-resize[data-grip="w"] {
+  cursor: ew-resize;
 }
 
 /* An arrow is drawn 1.6px wide and is 1.6px wide to a finger too, so each one
@@ -4736,9 +4754,11 @@ body.page-editing #dockEdit {
     r: 13px;
   }
 
+  /* A grip grown for a finger grows about its own middle, which is why these
+     are circles: a square given a bigger width grows down and to the right,
+     off the corner it was marking. */
   .dd-editing .dd-resize {
-    width: 18px;
-    height: 18px;
+    r: 9px;
   }
 }
 

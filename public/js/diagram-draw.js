@@ -349,9 +349,33 @@
       + ` width="${round(box.w)}" height="${round(box.h)}"/>`;
   }
 
+  /* The eight grips, and which edges each one drags.
+   *
+   * -1 is the left or the top edge, 1 the right or the bottom, 0 an axis this
+   * grip leaves alone. Which is the whole of what tells a corner from a side:
+   * a corner moves two edges and a side moves one.
+   */
+  const GRIPS = [
+    ["nw", -1, -1], ["n", 0, -1], ["ne", 1, -1],
+    ["w", -1, 0], ["e", 1, 0],
+    ["sw", -1, 1], ["s", 0, 1], ["se", 1, 1]
+  ];
+
+  const RESIZE_R = 5;
+
   function marksMarkup(at) {
     const cx = at.x + at.w + HANDLE + 2;
     const cy = at.y + (at.h / 2);
+
+    /* A grip sits on the edge it drags, and a corner grip on the corner. Circles
+     * rather than squares, because a handle grown for a finger has to grow about
+     * its own middle — a square given a bigger width grows down and to the
+     * right, off the corner it was marking.
+     */
+    const grips = GRIPS.map(([name, gx, gy]) =>
+      `<circle class="dd-handle dd-resize" data-role="resize" data-grip="${name}"`
+      + ` cx="${round(at.x + ((gx + 1) / 2 * at.w))}"`
+      + ` cy="${round(at.y + ((gy + 1) / 2 * at.h))}" r="${RESIZE_R}"/>`).join("");
 
     return `<g class="dd-marks">`
       + `<rect class="dd-ring" x="${round(at.x - RING_PAD)}" y="${round(at.y - RING_PAD)}"`
@@ -359,8 +383,7 @@
       + `<circle class="dd-handle dd-connect" data-role="connect"`
       + ` cx="${round(cx)}" cy="${round(cy)}" r="${HANDLE}"/>`
       + `<path class="dd-handle-mark" d="M${round(cx - 4)},${round(cy)} h8 M${round(cx)},${round(cy - 4)} v8"/>`
-      + `<rect class="dd-handle dd-resize" data-role="resize"`
-      + ` x="${round(at.x + at.w - 6)}" y="${round(at.y + at.h - 6)}" width="12" height="12" rx="3"/>`
+      + grips
       + `</g>`;
   }
 
@@ -1334,6 +1357,7 @@
     shapeMarkup,
     STANDOFF,
     CLEARANCE,
-    LINE_HEIGHT
+    LINE_HEIGHT,
+    GRIPS
   };
 })(typeof window === "undefined" ? globalThis : window);

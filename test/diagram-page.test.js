@@ -841,6 +841,182 @@ async function run(server, cookie) {
     page.window.close();
   }
 
+  console.log("=== a box is resized by any of its edges, and lines up doing it ===");
+  {
+    /* A box had one grip, on its bottom-right corner, so making it wider always
+     * made it taller as well. And a resize was the one drag that snapped to
+     * nothing: a box could be dragged to within a pixel of lining up with its
+     * neighbour and there was nothing to say so.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "grips.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 100x100",
+        // Off the grid on purpose, both of them: a box whose edges are all
+        // multiples of ten is a box that cannot tell snapping to the grid from
+        // lining up with a neighbour.
+        "    %% @ B 403,344 100x100",
+        // Three pixels from A's left edge, at the point below where a side grip
+        // is dragged — near enough to line up with, if that edge were moving.
+        "    %% @ C 153,700 20x100",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/grips.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const at = (x, y) => ({
+      clientX: (x * view().scale) + view().x,
+      clientY: (y * view().scale) + view().y,
+      bubbles: true
+    });
+
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const boxOf = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const rect = groupOf(id).querySelector("rect");
+      return [Number(spot[1]), Number(spot[2]),
+        Number(rect.getAttribute("width")), Number(rect.getAttribute("height"))];
+    };
+
+    const grip = (name) => canvas.querySelector(`.dd-resize[data-grip="${name}"]`);
+    const guides = () => canvas.querySelectorAll(".dd-guides .dd-guide").length;
+
+    let letGoAt = [0, 0];
+    const drag = (name, dx, dy, { hold = false } = {}) => {
+      const one = grip(name);
+      const x = Number(one.getAttribute("cx"));
+      const y = Number(one.getAttribute("cy"));
+      letGoAt = [x + dx, y + dy];
+      one.dispatchEvent(new window.MouseEvent("pointerdown", at(x, y)));
+      canvas.dispatchEvent(new window.MouseEvent("pointermove", at(...letGoAt)));
+      if (!hold) {
+        canvas.dispatchEvent(new window.MouseEvent("pointerup", at(...letGoAt)));
+      }
+    };
+
+    // Let go where the hand actually is. Releasing somewhere else is a resize to
+    // somewhere else: the size is settled from the point the drag ended at.
+    const letGo = () => canvas.dispatchEvent(
+      new window.MouseEvent("pointerup", at(...letGoAt)));
+
+    groupOf("A").dispatchEvent(new window.MouseEvent("pointerdown", at(150, 150)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(150, 150)));
+    check("a box starts where the file put it", boxOf("A"), [100, 100, 100, 100]);
+
+    // A side grip drags one edge. The other three stay exactly where they were,
+    // which is the whole of what makes it a side rather than a corner.
+    drag("e", 60, 0);
+    check("dragging the right edge makes it wider and nothing else",
+      boxOf("A"), [100, 100, 160, 100]);
+
+    drag("s", 0, 40);
+    check("...and the bottom edge taller and nothing else",
+      boxOf("A"), [100, 100, 160, 140]);
+
+    /* The left and the top move the box as well as resize it: the edge you are
+     * dragging is the one that moves, so the one you are not has to stay put.
+     */
+    drag("w", -50, 0);
+    check("dragging the left edge moves that edge, not the right one",
+      boxOf("A"), [50, 100, 210, 140]);
+
+    drag("n", -30, -30);
+    check("...and the top edge the same, ignoring the across it was given",
+      boxOf("A"), [50, 70, 210, 170]);
+
+    // A corner drags two edges at once, which is what it always did.
+    drag("se", -60, -50);
+    check("a corner still drags both of its edges",
+      boxOf("A"), [50, 70, 150, 120]);
+
+    /* A box that has hit its smallest must not walk. The edge being dragged is
+     * the one that gives way, so the edge that is not being dragged stays where
+     * it is however far the hand keeps going.
+     */
+    drag("w", 900, 0);
+    check("a box dragged past its smallest stops at its smallest",
+      boxOf("A"), [150, 70, page.window.DiagramEditor.MIN_BOX, 120]);
+    check("...with the edge that was not being dragged still where it was",
+      boxOf("A")[0] + boxOf("A")[2], 200);
+
+    drag("n", 0, 900);
+    check("...and the same going the other way, on the other axis",
+      boxOf("A"), [150, 165, 50, 25]);
+
+    /* Lining up. The same six lines a move is snapped to, but only the edge
+     * being dragged may be put on one of them: snapping an edge that is not
+     * moving would move it, which is a resize that also drags the box sideways.
+     *
+     * Both boxes to line up against are off the grid, so a line that came from
+     * the grid and a line that came from a neighbour are telling apart.
+     */
+    const frame = () => new Promise((done) => window.requestAnimationFrame(
+      () => window.requestAnimationFrame(done)));
+
+    check("nothing is being lined up before anything is dragged", guides(), 0);
+
+    // The bottom edge to within three of B's top, and the left edge left alone
+    // three from C's — one of those is moving and the other is not.
+    drag("s", 0, 344 - 190 - 3, { hold: true });
+    await frame();
+
+    check("an edge dragged near another box's edge snaps onto it, rather than"
+      + " onto the grid it would otherwise land on",
+      boxOf("A")[1] + boxOf("A")[3], 344);
+    check("...and the edge that is not being dragged stays exactly where it was",
+      boxOf("A")[0], 150);
+    check("...with one line drawn, about the edge that moved",
+      guides(), 1);
+    check("...which is the line across, since it is the bottom edge that moved",
+      [...canvas.querySelectorAll(".dd-guides .dd-guide")]
+        .every((one) => one.getAttribute("y1") === one.getAttribute("y2")), true);
+
+    letGo();
+    check("letting go takes the lines away", guides(), 0);
+
+    /* A box cannot line up with itself.
+     *
+     * Every edge of the box being resized is within nothing of where it already
+     * is, so a box allowed to line up with itself is a box whose edges snap
+     * back the moment they are nudged — and a small resize becomes impossible.
+     * A's top is at 165, off the grid, with nothing else near it.
+     */
+    drag("n", 0, 4);
+    check("a small drag moves the edge rather than snapping it back to itself",
+      boxOf("A"), [150, 170, 50, 174]);
+
+    // And the same the other way about: a right edge to a neighbour's left.
+    drag("e", 403 - 200 - 3, 0, { hold: true });
+    await frame();
+    check("a right edge lines up with a left one just as well",
+      boxOf("A")[0] + boxOf("A")[2], 403);
+    check("...saying so with the line down", guides(), 1);
+
+    letGo();
+
+    // With nothing to line up against, the grid catches the edge — which is
+    // what keeps a diagram tidy where no neighbour is near enough to help.
+    drag("s", 0, 23);
+    check("an edge with nothing near it lands on the grid",
+      boxOf("A")[1] + boxOf("A")[3], 370);
+
+    drag("e", 23, 0);
+    check("...going across as well as down",
+      boxOf("A")[0] + boxOf("A")[2], 430);
+
+    page.window.close();
+  }
+
   console.log("=== the diagram is somewhere you are looking at part of ===");
   {
     await server.request("POST", "/api/docs",
@@ -1169,8 +1345,16 @@ async function run(server, cookie) {
 
     tap("A");
     check("tapping a box selects it, and only it", [ringed(), framed()], [1, 0]);
+    // One to draw an arrow with, and eight to resize by: four corners and four
+    // sides, because a box you can only resize diagonally is a box you cannot
+    // make wider without also making it taller.
     check("...with the handles that belong to one box",
-      canvas.querySelectorAll(".dd-marks [data-role]").length, 2);
+      [canvas.querySelectorAll(".dd-marks [data-role=connect]").length,
+        canvas.querySelectorAll(".dd-marks [data-role=resize]").length], [1, 8]);
+    check("...one on every side and one on every corner",
+      [...canvas.querySelectorAll(".dd-marks [data-role=resize]")]
+        .map((one) => one.dataset.grip),
+      ["nw", "n", "ne", "w", "e", "sw", "s", "se"]);
 
     tap("B", { shiftKey: true });
     check("shift adds a second", [ringed(), framed()], [2, 1]);

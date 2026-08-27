@@ -911,17 +911,110 @@
       holder.innerHTML = DiagramDraw.guidesMarkup(guides);
     }
 
-    function resizeTo(id, w, h) {
+    // Which edges a grip drags: -1 the left or the top, 1 the right or the
+    // bottom, 0 an axis it leaves alone. Read off the drawing's own list, so
+    // there is one place that says what a grip means.
+    const GRIP_EDGES = new Map(DiagramDraw.GRIPS.map(([name, gx, gy]) => [name, [gx, gy]]));
+
+    /* Resizing, lined up with what is already there.
+     *
+     * The same six lines a move is snapped to — a box's left, centre and right,
+     * its top, middle and bottom — but only the edges being dragged may be put
+     * on one of them. Snapping an edge that is not moving would move it, which
+     * is a resize that also drags the box sideways.
+     *
+     * The moving edges are handed over as a box of no size, so that its left,
+     * centre and right are all the one line there is to line up. Everything
+     * else about lining up is the same arithmetic a move uses, and is not
+     * written twice.
+     */
+    function guidedResize(id, from, grip, dx, dy) {
+      const [gx, gy] = GRIP_EDGES.get(grip) || [1, 1];
+
+      let left = from.x;
+      let right = from.x + from.w;
+      let top = from.y;
+      let bottom = from.y + from.h;
+
+      if (gx > 0) {
+        right += dx;
+      } else if (gx < 0) {
+        left += dx;
+      }
+
+      if (gy > 0) {
+        bottom += dy;
+      } else if (gy < 0) {
+        top += dy;
+      }
+
+      // A box cannot line up with itself: every edge of it is within nothing of
+      // where it already is, so one that could would snap back the moment it
+      // was nudged, and a small resize would be impossible.
+      const others = model.nodes
+        .filter((item) => item.id !== id)
+        .map((item) => boxOf(item.id))
+        .filter(Boolean);
+
+      const edge = { x: gx > 0 ? right : left, y: gy > 0 ? bottom : top, w: 0, h: 0 };
+      const lined = DiagramModel.alignGuides(edge, others, GUIDE_WITHIN / view.scale);
+
+      const held = { x: false, y: false };
+      for (const one of lined.guides) {
+        held[one.axis] = true;
+      }
+
+      /* A line on a real box beats a line on the grid, the same way it does for
+       * a move. An axis this grip does not drag needs no answer at all — the
+       * edge it would be about is not being written back below.
+       */
+      const put = {
+        x: held.x ? lined.x : snap(edge.x),
+        y: held.y ? lined.y : snap(edge.y)
+      };
+
+      if (gx > 0) {
+        right = put.x;
+      } else if (gx < 0) {
+        left = put.x;
+      }
+
+      if (gy > 0) {
+        bottom = put.y;
+      } else if (gy < 0) {
+        top = put.y;
+      }
+
+      /* A box that has hit its smallest must not walk. The edge being dragged is
+       * the one that gives way, so the edge that is not being dragged stays
+       * exactly where it was.
+       */
+      const w = Math.max(DIAGRAM_MIN_BOX, right - left);
+      const h = Math.max(DIAGRAM_MIN_BOX / 2, bottom - top);
+
+      return {
+        at: {
+          x: gx < 0 ? right - w : left,
+          y: gy < 0 ? bottom - h : top,
+          w,
+          h
+        },
+        // Only lines about an edge that moved. A grip that drags one edge and
+        // draws a guide about the other is explaining something that is not
+        // happening.
+        guides: lined.guides.filter((one) => (one.axis === "x" ? gx : gy) !== 0)
+      };
+    }
+
+    function resizeTo(id, box) {
       const at = boxOf(id);
       if (!at) {
         return;
       }
 
-      // A position may be negative; a size may not.
-      at.w = Math.max(DIAGRAM_MIN_BOX, snap(w));
-      at.h = Math.max(DIAGRAM_MIN_BOX / 2, snap(h));
+      Object.assign(at, box);
       // A shape has to be drawn again to be a different size, and the handles
-      // move with its corner, so this one is a redraw.
+      // move with its edges, so this one is a redraw.
       drawAtOnce();
     }
 
@@ -1109,8 +1202,10 @@
       }
 
       if (gesture.kind === "resize" && gesture.from) {
-        resizeTo(gesture.id, gesture.from.w + (point.x - gesture.origin.x),
-          gesture.from.h + (point.y - gesture.origin.y));
+        const sized = guidedResize(gesture.id, gesture.from, gesture.grip,
+          point.x - gesture.origin.x, point.y - gesture.origin.y);
+        resizeTo(gesture.id, sized.at);
+        drawGuides(sized.guides);
         return;
       }
 
@@ -1312,6 +1407,10 @@
         }
 
         beginGesture(role === "resize" ? "resize" : "connect", selectedId, point, event);
+        if (gesture) {
+          gesture.grip = handle.getAttribute("data-grip") || "se";
+        }
+
         return;
       }
 
@@ -1604,8 +1703,8 @@
       }
 
       if (held.kind === "resize" && held.from) {
-        resizeTo(held.id, held.from.w + (point.x - held.origin.x),
-          held.from.h + (point.y - held.origin.y));
+        resizeTo(held.id, guidedResize(held.id, held.from, held.grip,
+          point.x - held.origin.x, point.y - held.origin.y).at);
       }
 
       write();

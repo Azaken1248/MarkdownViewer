@@ -402,7 +402,10 @@ console.log("=== the diagram builder fits a phone ===");
   // Both handles are dragged with a finger. The drawing is at its own scale,
   // so these numbers are screen pixels as well as diagram units.
   check("the handle that draws an arrow is a finger wide", size(".dd-editing .dd-connect", "r"), 13);
-  check("...and so is the one that resizes a box", size(".dd-editing .dd-resize", "width"), 18);
+  // Circles, both of them: a handle grown for a finger has to grow about its
+  // own middle, or it comes away from the corner it was marking.
+  check("...and so are the eight that resize a box",
+    size(".dd-editing .dd-resize", "r"), 9);
 }
 
 console.log("=== touch targets in the header ===");
