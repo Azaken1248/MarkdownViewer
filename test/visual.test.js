@@ -2056,11 +2056,12 @@ console.log("=== a table with columns is drawn as a grid ===");
   check("a taller table has taller rows, not a blank half",
     /x1="0" y1="126" x2="200" y2="126"/.test(tall), true);
   check("...and its cells sit in the middle of the rows they are in",
-    [...tall.matchAll(/<tspan x="10" y="(\d+)">/g)].map((one) => one[1]), ["76", "176"]);
+    [...tall.matchAll(/<text class="dd-text dd-row" x="10" y="(\d+)"/g)].map((one) => one[1]),
+    ["76", "176"]);
 
   // A cell is in its own column, so the second one starts where the first ends.
   check("a cell is written inside the column it is in",
-    /<tspan x="110" y="51">string<\/tspan>/.test(grid), true);
+    /<text class="dd-text dd-row" x="110" y="51"[^>]*>string<\/text>/.test(grid), true);
 
   /* Every row and every column a table has is drawn. A table whose structure
    * you have to infer from where the words happen to sit is a box with a list
@@ -2086,7 +2087,125 @@ console.log("=== a table with columns is drawn as a grid ===");
   // takes a line's worth of nothing and is one more thing to escape.
   const gappy = table("T<br/>a | <br/> | d", 200, 126);
   check("an empty cell is not written",
-    (gappy.match(/<tspan/g) || []).length, 3);
+    (gappy.match(/<text class="dd-text/g) || []).length, 3);
+}
+
+console.log("=== a table is spaced out the way it was asked to be ===");
+{
+  const table = (node, w, h) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", ...node }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h } }
+  }, { natural: true });
+
+  /* Two numbers anyone would want to change about a table: how far the words
+   * sit from the walls of a cell, and how much room a row gets. Both have a
+   * standard, and the file only mentions one when it is departed from.
+   */
+  check("a table nobody has spaced out has a standard to be spaced out by",
+    DM.tableMetrics({}), { title: 26, pad: 10, gap: 20 });
+  check("...and one that has been keeps what it was given",
+    DM.tableMetrics({ pad: 4, gap: 32 }), { title: 26, pad: 4, gap: 32 });
+  check("...within what a cell can hold, so nothing written by hand can break it",
+    [DM.tableMetrics({ pad: 900, gap: -4 }), DM.tableMetrics({ pad: "x" })],
+    [{ title: 26, pad: 24, gap: 10 }, { title: 26, pad: 10, gap: 20 }]);
+
+  // The title band never moves. It is a heading rather than a row, and a
+  // heading that changes size with the rows under it stops reading as one.
+  check("the heading is the same height however the rows are spaced",
+    [DM.tableMetrics({ gap: 10 }).title, DM.tableMetrics({ gap: 50 }).title], [26, 26]);
+
+  // Padding is where the words start, so it is the one thing that moves them.
+  check("padding is how far a cell's words sit from its wall",
+    /<text class="dd-text dd-row" x="4"/.test(
+      table({ text: "T<br/>a | b", pad: 4 }, 200, 66)), true);
+  check("...and the same padding again on a table nobody has touched",
+    /<text class="dd-text dd-row" x="10"/.test(
+      table({ text: "T<br/>a | b" }, 200, 66)), true);
+
+  // Spacing is a row's worth of height, so it is what the table is measured by.
+  const heightOf = (node) => DM.measureNode({ shape: "rect", kind: "table", ...node }).h;
+  check("spacing is how much room each row gets",
+    [heightOf({ text: "T<br/>a<br/>b" }), heightOf({ text: "T<br/>a<br/>b", gap: 40 })],
+    [70, 110]);
+  // A table of nothing but a heading is the shortest a box is allowed to be,
+  // whatever its rows would have been given.
+  check("...counted for the rows and not for the heading",
+    heightOf({ text: "T", gap: 40 }), 50);
+
+  // And padding is room a column has to have, so it is what a column's floor
+  // is measured by.
+  const widthOf = (node) => DM.measureNode({ shape: "rect", kind: "table", ...node }).w;
+  check("padding is room a column has to have either side of its words",
+    [widthOf({ text: "T<br/>a | b" }), widthOf({ text: "T<br/>a | b", pad: 20 })],
+    [140, 180]);
+
+  // Written down only when it is not the standard: the file says what was
+  // chosen rather than what everything happens to be.
+  const written = (node) => DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", text: "T<br/>a", ...node }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 140, h: 60 } }
+  });
+
+  check("a table spaced the standard way says nothing about it",
+    /pad=|gap=/.test(written({ pad: 10, gap: 20 })), false);
+  check("...and one spaced any other way says so",
+    /kind=table pad=4 gap=32/.test(written({ pad: 4, gap: 32 })), true);
+  check("...and says it in a way that comes back",
+    (() => {
+      const node = DM.parseFlowchart(written({ pad: 4, gap: 32 })).nodes[0];
+      return [node.pad, node.gap];
+    })(), [4, 32]);
+}
+
+console.log("=== a word too long for its cell stops at the wall ===");
+{
+  const table = (text, w) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", text }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h: 66 } }
+  }, { natural: true });
+
+  /* A word wider than the cell it is in is a word written over the wall into
+   * the next one, which is worse than not being able to read all of it. So it
+   * is cut to what fits and marked, and what it said in full is hung off the
+   * text as a <title> — resting on it says the rest.
+   */
+  const wide = table("T<br/>short | short", 400);
+  check("a word that fits is written as it is",
+    /<text class="dd-text dd-row" x="10"[^>]*>short<\/text>/.test(wide), true);
+  check("...and says nothing more about itself", /<title>/.test(wide), false);
+
+  const tight = table("T<br/>a very long field name indeed | b", 200);
+  check("a word too long for its cell is cut off",
+    /&#8230;|…/.test(tight), true);
+  check("...and marked where it was cut",
+    /<\/title>a very long …<\/text>/.test(tight), true);
+  check("...keeping what it said in full, for resting on",
+    /<title>a very long field name indeed<\/title>/.test(tight), true);
+
+  // The heading spans the whole table, so it is cut against the whole width
+  // rather than against a column.
+  const heading = table("a very long heading indeed that will not fit<br/>a | b", 200);
+  check("a heading too long for the table is cut too",
+    /<title>a very long heading indeed that will not fit<\/title>/.test(heading), true);
+  check("...against the whole width, because that is what it spans",
+    /<\/title>a very long heading indeed th…<\/text>/.test(heading), true);
+
+  // A cell with room for nothing but the mark gets the mark, and one without
+  // room for even that gets nothing: a mark drawn over the wall is the thing
+  // this exists to stop. Both keep what they said, for resting on.
+  const narrow = table("T<br/>abcdef | b", 56);
+  check("a cell with room for nothing but the mark gets the mark",
+    /<title>abcdef<\/title>…<\/text>/.test(narrow), true);
+
+  const none = table("T<br/>abcdef | b", 30);
+  check("...and one without room for even that writes nothing over the wall",
+    /<title>abcdef<\/title><\/text>/.test(none), true);
 }
 
 console.log("=== a table is measured by its columns ===");

@@ -37,8 +37,15 @@
   // Twice the snapping step, so every other line is drawn and the paper does
   // not turn into a grey wash.
   const GRID_STEP = 20;
-  const TABLE_TITLE = 26;
-  const TABLE_PAD = 10;
+  /* Roughly how wide a character is, at the two sizes text is set in here.
+   *
+   * An approximation, and it only has to be one: it decides where a word is cut
+   * off, and a cut half a character early is a cut nobody can see. Measuring it
+   * properly means laying the text out, which means a browser, which is not
+   * something a function that returns a string is allowed to need.
+   */
+  const ROW_CHAR = 6;
+  const ELLIPSIS = "…";
 
   let drawCounter = 0;
 
@@ -130,6 +137,38 @@
     return `<text class="dd-text" text-anchor="middle" dominant-baseline="middle">${spans.join("")}</text>`;
   }
 
+  /* What fits, and what was there before it was cut.
+   *
+   * A word wider than the cell it is in is a word written over the wall into
+   * the next one, which is worse than not being able to read all of it — so it
+   * is cut to what fits and marked with an ellipsis. What it said in full is
+   * kept, and hung off the text as a <title> so that resting on it says the
+   * rest.
+   */
+  function clip(words, room, char) {
+    const text = String(words);
+    if (text.length * char <= room) {
+      return { text, full: "" };
+    }
+
+    // Room for the ellipsis and nothing else, or not even that.
+    const fits = Math.floor(room / char) - 1;
+    if (fits <= 0) {
+      return { text: room >= char ? ELLIPSIS : "", full: text };
+    }
+
+    return { text: text.slice(0, fits) + ELLIPSIS, full: text };
+  }
+
+  // One cell, written where it goes. Its own <text> rather than a tspan in a
+  // shared one, because a <title> belongs to the element it describes.
+  function cellText(kind, x, y, anchor, cut) {
+    return `<text class="dd-text ${kind}" x="${round(x)}" y="${round(y)}"`
+      + ` text-anchor="${anchor}" dominant-baseline="middle">`
+      + (cut.full ? `<title>${escapeText(cut.full)}</title>` : "")
+      + `${escapeText(cut.text)}</text>`;
+  }
+
   /* A table: a title across the top, over a rule, and a grid under it.
    *
    * The body is shared out evenly rather than stacked from the top, so a table
@@ -141,12 +180,14 @@
    * have to infer from where the words happen to sit is a box with a list in
    * it, and the lines are the whole difference between the two.
    */
-  function tableMarkup(grid, w, h) {
+  function tableMarkup(grid, w, h, spacing) {
     const title = (grid[0] || [])[0] || "";
     const body = grid.slice(1);
     const columns = Model.columnsOf(grid);
     const wide = w / columns;
-    const tall = body.length > 0 ? (h - TABLE_TITLE) / body.length : 0;
+    const tall = body.length > 0 ? (h - spacing.title) / body.length : 0;
+    // What a cell has to write in, once the padding either side is taken off.
+    const room = wide - (spacing.pad * 2);
 
     const cells = body.flatMap((row, line) =>
       Array.from({ length: columns }, (ignored, cell) => {
@@ -155,9 +196,9 @@
           return "";
         }
 
-        const x = (cell * wide) + TABLE_PAD;
-        const y = TABLE_TITLE + (line * tall) + (tall / 2);
-        return `<tspan x="${round(x)}" y="${round(y)}">${escapeText(words)}</tspan>`;
+        return cellText("dd-row", (cell * wide) + spacing.pad,
+          spacing.title + (line * tall) + (tall / 2), "start",
+          clip(words, room, ROW_CHAR));
       }).join(""));
 
     /* The rules of the grid: down between the columns, across between the rows.
@@ -167,20 +208,18 @@
      */
     const down = Array.from({ length: columns - 1 }, (ignored, cell) =>
       `<line class="dd-rule dd-cell-rule" x1="${round((cell + 1) * wide)}"`
-      + ` y1="${TABLE_TITLE}" x2="${round((cell + 1) * wide)}" y2="${round(h)}"/>`).join("");
+      + ` y1="${spacing.title}" x2="${round((cell + 1) * wide)}" y2="${round(h)}"/>`).join("");
 
     const across = body.slice(1).map((ignored, line) =>
-      `<line class="dd-rule dd-cell-rule" x1="0" y1="${round(TABLE_TITLE + ((line + 1) * tall))}"`
-      + ` x2="${round(w)}" y2="${round(TABLE_TITLE + ((line + 1) * tall))}"/>`).join("");
+      `<line class="dd-rule dd-cell-rule" x1="0" y1="${round(spacing.title + ((line + 1) * tall))}"`
+      + ` x2="${round(w)}" y2="${round(spacing.title + ((line + 1) * tall))}"/>`).join("");
 
     return `${rect(w, h, RADIUS)}`
-      + `<line class="dd-rule" x1="0" y1="${TABLE_TITLE}" x2="${round(w)}" y2="${TABLE_TITLE}"/>`
+      + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
-      + `<text class="dd-text dd-title" text-anchor="middle" dominant-baseline="middle">`
-      + `<tspan x="${round(w / 2)}" y="${round(TABLE_TITLE / 2)}">${escapeText(title)}</tspan></text>`
-      + (cells.length > 0
-        ? `<text class="dd-text dd-row" text-anchor="start" dominant-baseline="middle">${cells.join("")}</text>`
-        : "");
+      + cellText("dd-title", w / 2, spacing.title / 2, "middle",
+        clip(title, w - (spacing.pad * 2), ROW_CHAR))
+      + cells.join("");
   }
 
   // The inside of a box, in its own coordinates. Separate from the group around
@@ -189,7 +228,7 @@
     const words = node.text || node.id;
 
     return node.kind === "table"
-      ? tableMarkup(Model.textCells(words), at.w, at.h)
+      ? tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node))
       : shapeMarkup(node.shape, at.w, at.h)
         + centredText(Model.textRows(words), at.w, at.h);
   }
@@ -1295,7 +1334,6 @@
     shapeMarkup,
     STANDOFF,
     CLEARANCE,
-    TABLE_TITLE,
     LINE_HEIGHT
   };
 })(typeof window === "undefined" ? globalThis : window);

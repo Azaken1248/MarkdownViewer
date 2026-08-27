@@ -3015,7 +3015,7 @@
      * is something the panel says rather than something you work out by
      * counting the pipes in the field above.
      */
-    const stepper = (name, value, least, most, set) => {
+    const stepper = (name, value, least, most, set, by = 1) => {
       const box = document.createElement("div");
       box.className = "ve-diagram-stepper";
       box.setAttribute("role", "group");
@@ -3037,8 +3037,11 @@
       count.className = "ve-diagram-count";
       count.textContent = String(value);
 
-      box.append(step(`One fewer ${name.toLowerCase()}`, "ph-minus", value - 1), count,
-        step(`One more ${name.toLowerCase()}`, "ph-plus", value + 1));
+      // Fewer of a thing you count, less of an amount you set — which is the
+      // whole difference between the two kinds of stepper here.
+      const what = name.toLowerCase();
+      box.append(step(`${by === 1 ? "Fewer" : "Less"} ${what}`, "ph-minus", value - by),
+        count, step(`More ${what}`, "ph-plus", value + by));
 
       return box;
     };
@@ -3068,6 +3071,51 @@
       paintLists();
       paintInspector();
       drawAtOnce();
+    }
+
+    /* How the table is spaced out: how far the words sit from the walls of a
+     * cell, and how much room a row gets.
+     *
+     * The box moves by exactly the amount the change made — not to what the
+     * table now needs, and not merely enough to hold it. Snapping to what it
+     * needs would take a table somebody had dragged roomy and shrink it to the
+     * minimum the moment they touched a stepper; only growing would mean
+     * asking for shorter rows and getting the same table back, which is asking
+     * for nothing. Moving by the difference keeps the room they left and gives
+     * them what they asked for.
+     */
+    function respace(item, patch) {
+      const at = boxOf(item.id);
+      const was = DiagramModel.measureNode(item);
+
+      Object.assign(item, patch);
+
+      const now = DiagramModel.measureNode(item);
+      if (at) {
+        at.w = Math.max(now.w, at.w + (now.w - was.w));
+        at.h = Math.max(now.h, at.h + (now.h - was.h));
+      }
+
+      write();
+      paintInspector();
+      drawAtOnce();
+    }
+
+    function tableSpacing(item) {
+      const spacing = DiagramModel.tableMetrics(item);
+
+      const row = document.createElement("div");
+      row.className = "ve-diagram-row ve-diagram-grid-size";
+      row.append(
+        captioned("Padding", stepper("Padding", spacing.pad,
+          DiagramModel.TABLE_PAD.least, DiagramModel.TABLE_PAD.most,
+          (to) => respace(item, { pad: to }), 2)),
+        captioned("Spacing", stepper("Spacing", spacing.gap,
+          DiagramModel.TABLE_GAP.least, DiagramModel.TABLE_GAP.most,
+          (to) => respace(item, { gap: to }), 5))
+      );
+
+      return row;
     }
 
     // The two of them, side by side: they are one answer to one question about
@@ -3565,7 +3613,7 @@
       );
 
       if (table) {
-        inspector.append(tableSize(item));
+        inspector.append(tableSize(item), tableSpacing(item));
       }
 
       inspector.append(

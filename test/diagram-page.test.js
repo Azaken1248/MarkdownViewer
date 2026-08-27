@@ -614,7 +614,11 @@ async function run(server, cookie) {
         "flowchart TD",
         "    %% layout v1",
         "    %% @ A 100,100 200x120 kind=table",
-        '    A["Person<br/>name | string<br/>age | int"]'
+        // Deliberately shorter than the three rows in it need: a box can be
+        // dragged smaller than its contents, and the steppers have to cope.
+        "    %% @ B 100,400 200x40 kind=table",
+        '    A["Person<br/>name | string<br/>age | int"]',
+        '    B["T<br/>a | b<br/>c | d"]'
       ].join("\n") + "\n" },
       { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
 
@@ -635,18 +639,20 @@ async function run(server, cookie) {
     const steppers = () => [...inspector.querySelectorAll(".ve-diagram-stepper")];
     const stepper = (name) => steppers()
       .find((one) => one.getAttribute("aria-label") === name);
-    const counts = () => steppers()
-      .map((one) => Number(one.querySelector(".ve-diagram-count").textContent));
+    const count = (name) =>
+      Number(stepper(name).querySelector(".ve-diagram-count").textContent);
+    const counts = () => [count("Rows"), count("Columns")];
+    const spacing = () => [count("Padding"), count("Spacing")];
     const press = (name, which) => stepper(name)
       .querySelectorAll(".ve-diagram-step")[which]
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     const fewer = (name) => press(name, 0);
     const more = (name) => press(name, 1);
-    const cells = () => [...groupOf("A").querySelectorAll(".dd-row tspan")]
+    const cells = () => [...groupOf("A").querySelectorAll(".dd-row")]
       .map((one) => one.textContent);
     const rules = () => groupOf("A").querySelectorAll(".dd-cell-rule").length;
-    const boxOf = () => {
-      const at = groupOf("A").querySelector("rect");
+    const boxOf = (id = "A") => {
+      const at = groupOf(id).querySelector("rect");
       return [Number(at.getAttribute("width")), Number(at.getAttribute("height"))];
     };
 
@@ -671,7 +677,7 @@ async function run(server, cookie) {
     check("...with its rows and its columns drawn",
       fresh.querySelectorAll(".dd-cell-rule").length, 2);
     check("...and nothing written in it but its heading",
-      [...fresh.querySelectorAll("tspan")].map((one) => one.textContent), ["Table"]);
+      [...fresh.querySelectorAll(".dd-text")].map((one) => one.textContent), ["Table"]);
 
     tap("A");
 
@@ -733,6 +739,70 @@ async function run(server, cookie) {
       stepper("Columns").querySelectorAll(".ve-diagram-step")[0].disabled, true);
     check("...though the way up is still open",
       stepper("Columns").querySelectorAll(".ve-diagram-step")[1].disabled, false);
+
+    /* How the table is spaced out: how far the words sit from the walls of a
+     * cell, and how much room a row gets.
+     *
+     * Both are statements about size, so the box follows them exactly rather
+     * than only growing — which is the opposite of what adding a row does, and
+     * for the opposite reason. A row is a thing to hold, and a box keeps
+     * whatever size it was dragged to as long as it can hold it; asking for
+     * shorter rows and getting the same table back is asking for nothing.
+     */
+    check("a table says how it is spaced out", spacing(), [10, 20]);
+
+    const wordsAt = () =>
+      Number(groupOf("A").querySelector(".dd-row").getAttribute("x"));
+    check("...with its words that far in from the wall", wordsAt(), 10);
+
+    more("Padding");
+    check("more padding is more room before the words start", spacing()[0], 12);
+    await new Promise((done) => setTimeout(done, 300));
+    check("...which is where they start", wordsAt(), 12);
+
+    fewer("Padding");
+    fewer("Padding");
+    check("and less is less", spacing()[0], 8);
+    await new Promise((done) => setTimeout(done, 300));
+    check("...there too", wordsAt(), 8);
+
+    /* The box moves by the amount the change made, rather than to what the
+     * table now needs: this one was dragged roomier than it needs to be, and a
+     * stepper that snapped it to the minimum would take that away the moment it
+     * was touched.
+     */
+    const before = boxOf()[1];
+    more("Spacing");
+    check("more spacing is more room for every row", spacing()[1], 25);
+    await new Promise((done) => setTimeout(done, 300));
+    check("...and a taller table to put them in", boxOf()[1] - before, 10);
+
+    fewer("Spacing");
+    fewer("Spacing");
+    await new Promise((done) => setTimeout(done, 300));
+    check("...and asking for less gives a shorter one, since asking for shorter"
+      + " rows and getting the same table back is asking for nothing",
+      before - boxOf()[1], 10);
+
+    // Back to where it started, so what follows measures what it means to.
+    more("Spacing");
+    more("Padding");
+    await new Promise((done) => setTimeout(done, 300));
+    check("and back to the standard, which is the one the file leaves out",
+      [spacing(), boxOf()[1]], [[10, 20], before]);
+
+    /* A box can be dragged smaller than what is in it, so the difference the
+     * stepper moves by has to stop somewhere: a table already too short for its
+     * rows, asked for shorter ones, must not be walked down towards nothing.
+     */
+    tap("B");
+    check("a table can be shorter than the rows in it", boxOf("B")[1], 40);
+    fewer("Spacing");
+    await new Promise((done) => setTimeout(done, 300));
+    check("...and asking for less spacing takes it no further down than what"
+      + " those rows need", boxOf("B")[1], 60);
+
+    tap("A");
 
     /* Typing into a cell puts the words in that cell, and a pipe typed into one
      * is taken out again: it is the wall between two cells, so it cannot be

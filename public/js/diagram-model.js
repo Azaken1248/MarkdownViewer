@@ -246,10 +246,37 @@
   const PAD_Y = 18;
   const MIN_WIDTH = 90;
   const MIN_HEIGHT = 44;
-  // A table is never narrower than this, and never narrower than this per
-  // column: a column too narrow to read a word in is not a column.
+  // A table is never narrower than this, and every column needs room for a word
+  // plus whatever padding is set either side of it.
   const TABLE_MIN_WIDTH = 140;
-  const TABLE_MIN_COLUMN = 70;
+  const TABLE_MIN_TEXT = 50;
+
+  /* How a table is spaced out, and the two numbers anyone would want to change
+   * about it: how far the words sit from the walls of a cell, and how much room
+   * a row gets. Both live on the node, both are written in the layout comment,
+   * and both have a standard the file only mentions when it is departed from.
+   *
+   * The title band is not one of them. It is the same height whatever else is
+   * set, because it is a heading rather than a row — and a heading that changes
+   * size with the rows under it stops reading as one.
+   */
+  const TABLE_TITLE = 26;
+  const TABLE_PAD = { least: 2, most: 24, standard: 10 };
+  const TABLE_GAP = { least: 10, most: 50, standard: 20 };
+
+  const withinBounds = (value, bounds) => (Number.isFinite(Number(value))
+    ? Math.min(bounds.most, Math.max(bounds.least, Math.round(Number(value))))
+    : bounds.standard);
+
+  // Everything a table is laid out by, asked once so that the drawing and the
+  // measurement can never disagree about it.
+  function tableMetrics(node) {
+    return {
+      title: TABLE_TITLE,
+      pad: withinBounds(node?.pad, TABLE_PAD),
+      gap: withinBounds(node?.gap, TABLE_GAP)
+    };
+  }
   const RANK_GAP = 90;
   const SIBLING_GAP = 40;
   const MARGIN = 30;
@@ -1033,7 +1060,7 @@
           }
         }
 
-        for (const key of ["layer", "z"]) {
+        for (const key of ["layer", "z", "pad", "gap"]) {
           if (at.attributes[key] !== undefined && /^-?\d+$/.test(at.attributes[key])) {
             node[key] = Number(at.attributes[key]);
           }
@@ -1220,6 +1247,14 @@
           image: node.image || "",
           layer: Number.isFinite(node.layer) ? String(node.layer) : "",
           z: Number.isFinite(node.z) ? String(node.z) : "",
+          /* Written only when it is not the standard. The file says what was
+           * chosen rather than what everything happens to be, and there is one
+           * place that decides so rather than two that have to agree.
+           */
+          pad: Number.isFinite(node.pad) && node.pad !== TABLE_PAD.standard
+            ? String(node.pad) : "",
+          gap: Number.isFinite(node.gap) && node.gap !== TABLE_GAP.standard
+            ? String(node.gap) : "",
           ...(node.extra || {})
         });
 
@@ -1466,9 +1501,10 @@
     let height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT) + PAD_Y);
 
     if (kind === "table") {
-      /* Every column needs room to be read in, whatever is in it, so a table is
-       * at least so wide per column — which is what makes another column widen
-       * the table rather than divide the width it already had.
+      /* Every column needs room to be read in, whatever is in it — a word, and
+       * the padding either side of it — so a table is at least so wide per
+       * column. Which is what makes another column widen the table rather than
+       * divide the width it already had.
        *
        * Nothing here adds the cells up. The measure above is of the longest
        * line, and a line already contains the " | " between each pair of cells:
@@ -1477,11 +1513,15 @@
        * only ever arithmetic nobody read.
        */
       const columns = columnsOf(textCells(node?.text ?? node?.id ?? ""));
+      const spacing = tableMetrics(node);
 
-      width = Math.max(width, TABLE_MIN_WIDTH, columns * TABLE_MIN_COLUMN);
-      // The title sits above a rule, so it is a row's worth of height that the
-      // rows themselves do not get.
-      height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT) + PAD_Y + 6);
+      width = Math.max(width, TABLE_MIN_WIDTH,
+        columns * (TABLE_MIN_TEXT + (spacing.pad * 2)));
+      /* Exactly what the drawing gives it: a title band, which is a heading
+       * rather than a row, and a row's worth of spacing for each row under it.
+       */
+      height = Math.max(MIN_HEIGHT,
+        spacing.title + (Math.max(0, rows.length - 1) * spacing.gap));
     } else if (node?.shape === "diamond") {
       // A diamond only holds text across its middle.
       width *= 1.35;
@@ -1913,6 +1953,9 @@
     joinCells,
     columnsOf,
     resizeGrid,
+    tableMetrics,
+    TABLE_PAD,
+    TABLE_GAP,
     snap,
     parseFlowchart,
     serializeFlowchart,
