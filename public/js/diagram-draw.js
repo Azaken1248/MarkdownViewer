@@ -130,33 +130,67 @@
     return `<text class="dd-text" text-anchor="middle" dominant-baseline="middle">${spans.join("")}</text>`;
   }
 
-  // A class box: a title over a rule, then one row per line, left aligned the
-  // way a list of fields is read.
-  function tableMarkup(rows, w, h) {
-    const title = rows[0] || "";
-    const rest = rows.slice(1);
-    const lines = rest.map((row, index) => {
-      const y = TABLE_TITLE + TABLE_PAD + (index * LINE_HEIGHT) + (LINE_HEIGHT / 2);
-      return `<tspan x="${TABLE_PAD}" y="${round(y)}">${escapeText(row)}</tspan>`;
-    });
+  /* A table: a title across the top, over a rule, and a grid under it.
+   *
+   * The body is shared out evenly rather than stacked from the top, so a table
+   * dragged taller is a table with taller rows rather than one with a blank
+   * half underneath its text — which is what makes the rules between the rows
+   * land where the rows actually are at any size.
+   *
+   * One column is a list and needs no lines drawn through it, which is the
+   * class box this has always been able to draw. Two or more is a grid, and a
+   * grid without its lines is cells you cannot tell the rows of.
+   */
+  function tableMarkup(grid, w, h) {
+    const title = (grid[0] || [])[0] || "";
+    const body = grid.slice(1);
+    const columns = Model.columnsOf(grid);
+    const wide = w / columns;
+    const tall = body.length > 0 ? (h - TABLE_TITLE) / body.length : 0;
+
+    const cells = body.flatMap((row, line) =>
+      Array.from({ length: columns }, (ignored, cell) => {
+        const words = row[cell] || "";
+        if (words === "") {
+          return "";
+        }
+
+        const x = (cell * wide) + TABLE_PAD;
+        const y = TABLE_TITLE + (line * tall) + (tall / 2);
+        return `<tspan x="${round(x)}" y="${round(y)}">${escapeText(words)}</tspan>`;
+      }).join(""));
+
+    // The rules of the grid: down between the columns, across between the rows.
+    // Never round the outside — the box's own border is already there.
+    const lines = columns > 1
+      ? Array.from({ length: columns - 1 }, (ignored, cell) =>
+        `<line class="dd-rule dd-cell-rule" x1="${round((cell + 1) * wide)}"`
+        + ` y1="${TABLE_TITLE}" x2="${round((cell + 1) * wide)}" y2="${round(h)}"/>`)
+        .join("")
+        + body.slice(1).map((ignored, line) =>
+          `<line class="dd-rule dd-cell-rule" x1="0" y1="${round(TABLE_TITLE + ((line + 1) * tall))}"`
+          + ` x2="${round(w)}" y2="${round(TABLE_TITLE + ((line + 1) * tall))}"/>`).join("")
+      : "";
 
     return `${rect(w, h, RADIUS)}`
       + `<line class="dd-rule" x1="0" y1="${TABLE_TITLE}" x2="${round(w)}" y2="${TABLE_TITLE}"/>`
+      + lines
       + `<text class="dd-text dd-title" text-anchor="middle" dominant-baseline="middle">`
       + `<tspan x="${round(w / 2)}" y="${round(TABLE_TITLE / 2)}">${escapeText(title)}</tspan></text>`
-      + (lines.length > 0
-        ? `<text class="dd-text dd-row" text-anchor="start" dominant-baseline="middle">${lines.join("")}</text>`
+      + (cells.length > 0
+        ? `<text class="dd-text dd-row" text-anchor="start" dominant-baseline="middle">${cells.join("")}</text>`
         : "");
   }
 
   // The inside of a box, in its own coordinates. Separate from the group around
   // it because resizing one redraws exactly this and nothing else.
   function nodeBody(node, at) {
-    const rows = Model.textRows(node.text || node.id);
+    const words = node.text || node.id;
 
     return node.kind === "table"
-      ? tableMarkup(rows, at.w, at.h)
-      : shapeMarkup(node.shape, at.w, at.h) + centredText(rows, at.w, at.h);
+      ? tableMarkup(Model.textCells(words), at.w, at.h)
+      : shapeMarkup(node.shape, at.w, at.h)
+        + centredText(Model.textRows(words), at.w, at.h);
   }
 
   /* --- Colour ---------------------------------------------------------------

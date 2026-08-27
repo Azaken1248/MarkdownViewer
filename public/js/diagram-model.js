@@ -246,6 +246,10 @@
   const PAD_Y = 18;
   const MIN_WIDTH = 90;
   const MIN_HEIGHT = 44;
+  // A table is never narrower than this, and never narrower than this per
+  // column: a column too narrow to read a word in is not a column.
+  const TABLE_MIN_WIDTH = 140;
+  const TABLE_MIN_COLUMN = 70;
   const RANK_GAP = 90;
   const SIBLING_GAP = 40;
   const MARGIN = 30;
@@ -1393,6 +1397,56 @@
     return rows.map((row) => String(row).trim()).join(ROW_BREAK);
   }
 
+  /* A table's rows are cells, separated by a pipe.
+   *
+   * In the label, where the rows already are, rather than in a comment beside
+   * it. Two reasons. A renderer that knows nothing about this app shows
+   * "Name | Type" on a line, which is what that row says; and the number of
+   * columns is then something the text answers rather than something a second
+   * line has to keep agreeing with it about. A pipe forces the label to be
+   * quoted, which the row break already did.
+   */
+  const CELL_BREAK = " | ";
+  const CELL_SPLIT_RE = /\s*\|\s*/;
+
+  function textCells(text) {
+    return textRows(text).map((row) => row.split(CELL_SPLIT_RE));
+  }
+
+  function joinCells(grid) {
+    return joinRows(grid.map((cells) =>
+      cells.map((cell) => String(cell ?? "").trim()).join(CELL_BREAK)));
+  }
+
+  /* How many columns a grid has: as many as its widest row. A row with fewer
+   * cells than that is a row with empty ones on the end, which is a thing a
+   * table is allowed to be.
+   *
+   * Never none. A grid of no rows has no widest row to ask, and a table of no
+   * columns is not a table — it is a division by zero in everything that lays
+   * one out.
+   */
+  function columnsOf(grid) {
+    return grid.reduce((most, cells) => Math.max(most, cells.length), 1);
+  }
+
+  /* A grid of exactly this many rows and columns.
+   *
+   * Rows and cells are added empty and removed from the end, so growing and
+   * shrinking are each other's undo for as long as nothing was typed into what
+   * was dropped.
+   */
+  function resizeGrid(grid, rows, columns) {
+    const out = [];
+
+    for (let row = 0; row < rows; row += 1) {
+      const from = grid[row] || [];
+      out.push(Array.from({ length: columns }, (ignored, cell) => from[cell] || ""));
+    }
+
+    return out;
+  }
+
   /* How big a box has to be to hold what is written in it.
    *
    * Only ever a starting size. Everything here can be dragged to another one,
@@ -1406,10 +1460,22 @@
     let height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT) + PAD_Y);
 
     if (kind === "table") {
+      /* Every column needs room to be read in, whatever is in it, so a table is
+       * at least so wide per column — which is what makes another column widen
+       * the table rather than divide the width it already had.
+       *
+       * Nothing here adds the cells up. The measure above is of the longest
+       * line, and a line already contains the " | " between each pair of cells:
+       * three characters, which is more than a cell saves by not having them.
+       * A sum of the columns is therefore never the larger of the two and was
+       * only ever arithmetic nobody read.
+       */
+      const columns = columnsOf(textCells(node?.text ?? node?.id ?? ""));
+
+      width = Math.max(width, TABLE_MIN_WIDTH, columns * TABLE_MIN_COLUMN);
       // The title sits above a rule, so it is a row's worth of height that the
       // rows themselves do not get.
       height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT) + PAD_Y + 6);
-      width = Math.max(width, 140);
     } else if (node?.shape === "diamond") {
       // A diamond only holds text across its middle.
       width *= 1.35;
@@ -1837,6 +1903,10 @@
     hasLayout,
     textRows,
     joinRows,
+    textCells,
+    joinCells,
+    columnsOf,
+    resizeGrid,
     snap,
     parseFlowchart,
     serializeFlowchart,

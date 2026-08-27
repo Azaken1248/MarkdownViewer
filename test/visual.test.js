@@ -1955,6 +1955,134 @@ console.log("=== ...for every diagram in the real library ===");
   check("no diagram the builder opens comes back different", drifted.slice(0, 5), []);
 }
 
+console.log("=== a table is rows of cells, and the file says so in the label ===");
+{
+  /* Where a table's columns live.
+   *
+   * In the label, beside the rows that were already there, rather than in a
+   * comment of their own. A renderer that knows nothing about this app shows
+   * "Name | Type" on a line, which is what that row says — and the number of
+   * columns is something the text answers rather than something a second line
+   * has to keep agreeing with it about.
+   */
+  check("a row splits into its cells",
+    DM.textCells("Person<br/>name | string<br/>age | int"),
+    [["Person"], ["name", "string"], ["age", "int"]]);
+  check("...however much space is left around the pipe",
+    DM.textCells("a|b<br/>c   |   d"), [["a", "b"], ["c", "d"]]);
+  check("...and a table of one column is still a grid of one column",
+    DM.textCells("Just<br/>a<br/>list"), [["Just"], ["a"], ["list"]]);
+
+  check("and joins back the way it came",
+    DM.joinCells([["Person"], ["name", "string"]]),
+    "Person<br/>name | string");
+  check("...so the label survives being read and written",
+    DM.joinCells(DM.textCells("Person<br/>name | string<br/>age | int")),
+    "Person<br/>name | string<br/>age | int");
+
+  // As many columns as the widest row has. A row with fewer than that has
+  // empty cells on the end, which is a thing a table is allowed to be.
+  check("a table has as many columns as its widest row",
+    DM.columnsOf([["a"], ["b", "c", "d"], ["e", "f"]]), 3);
+  // A grid of no rows has no widest row to ask, and a table of no columns is a
+  // division by zero in everything that lays one out.
+  check("...and never none at all", DM.columnsOf([]), 1);
+
+  /* Rows and cells are added empty and taken off the end, so growing and
+   * shrinking are each other's undo for as long as nothing was typed into
+   * what was dropped.
+   */
+  check("growing a grid fills the new cells with nothing",
+    DM.resizeGrid([["a"]], 2, 2), [["a", ""], ["", ""]]);
+  check("...and shrinking it takes them off the end",
+    DM.resizeGrid([["a", "b"], ["c", "d"]], 1, 1), [["a"]]);
+  check("...so one undoes the other while the new cells are still empty",
+    DM.resizeGrid(DM.resizeGrid([["a", "b"]], 3, 4), 1, 2), [["a", "b"]]);
+
+  // A pipe is one of the characters that cannot be left bare in a Mermaid
+  // label, and the row break already forced the quotes.
+  const written = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", text: "Person<br/>name | string" }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 160, h: 60 } }
+  });
+  check("a table's cells reach the file as the label they are",
+    /A\["Person<br\/>name \| string"\]/.test(written), true);
+  check("...and come back as the same grid",
+    DM.textCells(DM.parseFlowchart(written).nodes[0].text),
+    [["Person"], ["name", "string"]]);
+}
+
+console.log("=== a table with columns is drawn as a grid ===");
+{
+  const table = (text, w, h) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", text }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h } }
+  }, { natural: true });
+
+  const grid = table("Person<br/>name | string<br/>age | int", 200, 126);
+  const rules = [...grid.matchAll(/<line class="dd-rule dd-cell-rule"[^/]*\/>/g)]
+    .map((one) => one[0]);
+
+  // Two columns is one line down the middle; two body rows is one line across
+  // between them. Both start under the title, which spans the whole width.
+  check("a grid is drawn with a line between its columns",
+    rules.filter((one) => /x1="100" y1="26" x2="100" y2="126"/.test(one)).length, 1);
+  check("...and one between its rows",
+    rules.filter((one) => /x1="0" y1="76" x2="200" y2="76"/.test(one)).length, 1);
+  check("...and no more than that", rules.length, 2);
+
+  /* The body is shared out evenly rather than stacked from the top, so a table
+   * dragged taller is a table with taller rows rather than one with a blank
+   * half underneath its text. Which is the whole reason the rules land where
+   * the rows are at any size.
+   */
+  const tall = table("Person<br/>name | string<br/>age | int", 200, 226);
+  check("a taller table has taller rows, not a blank half",
+    /x1="0" y1="126" x2="200" y2="126"/.test(tall), true);
+  check("...and its cells sit in the middle of the rows they are in",
+    [...tall.matchAll(/<tspan x="10" y="(\d+)">/g)].map((one) => one[1]), ["76", "176"]);
+
+  // A cell is in its own column, so the second one starts where the first ends.
+  check("a cell is written inside the column it is in",
+    /<tspan x="110" y="51">string<\/tspan>/.test(grid), true);
+
+  /* One column is a list and needs no lines drawn through it — which is the
+   * class box this has always drawn, and it still draws it.
+   */
+  const list = table("Person<br/>name<br/>age", 200, 126);
+  check("a table of one column keeps the list it always was",
+    /dd-cell-rule/.test(list), false);
+  check("...under the rule its title has always had",
+    /<line class="dd-rule" x1="0" y1="26" x2="200" y2="26"\/>/.test(list), true);
+
+  // A cell with nothing in it is not written at all: an empty tspan still
+  // takes a line's worth of nothing and is one more thing to escape.
+  const gappy = table("T<br/>a | <br/> | d", 200, 126);
+  check("an empty cell is not written",
+    (gappy.match(/<tspan/g) || []).length, 3);
+}
+
+console.log("=== a table is measured by its columns ===");
+{
+  const size = (text) => DM.measureNode({ shape: "rect", kind: "table", text });
+
+  check("a table is at least as wide as a table", size("A<br/>b").w, 140);
+
+  /* Every column needs room to be read in, whatever is in it — which is what
+   * makes another column widen the table rather than divide the width it
+   * already had.
+   */
+  check("...and at least so wide per column",
+    [3, 4, 5].map((many) => size(`A<br/>${new Array(many).fill("x").join(" | ")}`).w),
+    [210, 280, 350]);
+  check("...and wider still once the cells themselves no longer fit",
+    size("A<br/>a very long cell indeed | another long one").w > 280, true);
+}
+
 console.log("=== a new step needs an id nothing is using ===");
 {
   check("the first id on an empty diagram", DM.nextNodeId({ nodes: [] }), "n1");

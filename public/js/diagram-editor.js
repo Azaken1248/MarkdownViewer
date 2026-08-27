@@ -2885,7 +2885,11 @@
       const field = document.createElement("textarea");
       field.className = `ve-diagram-text${item.kind === "table" ? " ve-diagram-rowsy" : ""}`;
       field.value = DiagramModel.textRows(item.text).join("\n");
-      field.placeholder = item.kind === "table" ? "Title\nRow\nRow" : item.id;
+      // A line is a row and a pipe is the wall between two cells, which is a
+      // thing a placeholder can say and a caption cannot.
+      field.placeholder = item.kind === "table"
+        ? "Title\nName | Type\nid | int"
+        : item.id;
       field.setAttribute("aria-label", item.kind === "table" ? "Table rows" : "Step label");
 
       const fit = () => {
@@ -2930,6 +2934,88 @@
       holder.append(caption, control);
       return holder;
     };
+
+    /* A count with a way up and a way down.
+     *
+     * Rows and columns are the two things about a table you change by one at a
+     * time, and typing a number to say "one more row" is a strange way to ask
+     * for one more row. The count reads as well as sets, so the table's shape
+     * is something the panel says rather than something you work out by
+     * counting the pipes in the field above.
+     */
+    const stepper = (name, value, least, most, set) => {
+      const box = document.createElement("div");
+      box.className = "ve-diagram-stepper";
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", name);
+
+      const step = (label, icon, to) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ve-diagram-step";
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.disabled = to < least || to > most;
+        button.addEventListener("click", () => set(to));
+        return button;
+      };
+
+      const count = document.createElement("span");
+      count.className = "ve-diagram-count";
+      count.textContent = String(value);
+
+      box.append(step(`One fewer ${name.toLowerCase()}`, "ph-minus", value - 1), count,
+        step(`One more ${name.toLowerCase()}`, "ph-plus", value + 1));
+
+      return box;
+    };
+
+    /* A table is so many rows by so many columns, and nothing else about it is
+     * a number. Twenty-four and eight because a box on a diagram holding more
+     * than that is a spreadsheet somebody has drawn by hand.
+     */
+    const TABLE_MAX_ROWS = 24;
+    const TABLE_MAX_COLUMNS = 8;
+
+    function resizeTable(item, rows, columns) {
+      const grid = DiagramModel.textCells(item.text || item.id);
+      item.text = DiagramModel.joinCells(
+        DiagramModel.resizeGrid(grid, rows, columns));
+
+      /* The box grows to hold what is in it, and never shrinks.
+       *
+       * A size somebody dragged is a size somebody chose, and taking a row off
+       * a table was not a request to undo that. Nothing is lost by leaving it:
+       * the body is shared out evenly, so a table with one row fewer is a table
+       * with taller rows rather than one with a blank strip along the bottom.
+       */
+      grow(item);
+      renameEverywhere(item.id, stepLabel(item));
+      write();
+      paintLists();
+      paintInspector();
+      drawAtOnce();
+    }
+
+    // The two of them, side by side: they are one answer to one question about
+    // the table, and a panel that asks it twice down the page reads as two.
+    function tableSize(item) {
+      const grid = DiagramModel.textCells(item.text || item.id);
+      const rows = grid.length;
+      const columns = DiagramModel.columnsOf(grid);
+
+      const row = document.createElement("div");
+      row.className = "ve-diagram-row ve-diagram-grid-size";
+      row.append(
+        captioned("Rows", stepper("Rows", rows, 1, TABLE_MAX_ROWS,
+          (to) => resizeTable(item, to, columns))),
+        captioned("Columns", stepper("Columns", columns, 1, TABLE_MAX_COLUMNS,
+          (to) => resizeTable(item, rows, to)))
+      );
+
+      return row;
+    }
 
     /* What has been picked, and the one thing you can do to it that is not a
      * property of it. A panel that opens with a heading is a panel you can tell
@@ -3394,7 +3480,14 @@
        */
       inspector.append(
         heading(item.kind === "table" ? "Table" : "Box", drop),
-        captioned(item.kind === "table" ? "Rows" : "Label", name),
+        captioned(item.kind === "table" ? "Cells" : "Label", name)
+      );
+
+      if (item.kind === "table") {
+        inspector.append(tableSize(item));
+      }
+
+      inspector.append(
         captioned("Shape", shapeSelect(item)),
         captioned("Fill", colourRow([item.id])),
         captioned("Border", borderRow([item.id])),

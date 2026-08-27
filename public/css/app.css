@@ -2190,6 +2190,13 @@ button.crumb:focus-visible {
   fill: none;
 }
 
+/* The lines between cells, drawn fainter than the rule under the title: one
+   says where the table's heading ends and the others divide what is under it,
+   and a grid drawn as heavily as its heading reads as neither. */
+.dd .dd-cell-rule {
+  opacity: 0.55;
+}
+
 .dd .dd-text {
   fill: var(--dd-text, var(--fg));
   font-size: 13px;
@@ -4254,6 +4261,68 @@ body.page-editing #dockEdit {
   padding: 0;
 }
 
+/* Rows and columns are one answer to one question about a table, so they sit
+   on one line and share it evenly. */
+.ve-diagram-grid-size {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ve-diagram-grid-size > .ve-diagram-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* A count with a way up and a way down. Typing a number to say "one more row"
+   is a strange way to ask for one more row, and the count reads as well as
+   sets — so the table's shape is something the panel says rather than
+   something you work out by counting the pipes in the field above. */
+.ve-diagram-stepper {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+}
+
+.ve-diagram-count {
+  flex: 1;
+  min-width: 2ch;
+  padding: 4px 2px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  text-align: center;
+}
+
+.ve-diagram-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-step:hover:not(:disabled) {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+.ve-diagram-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .ve-diagram-field > .ve-diagram-border {
   gap: 8px;
 }
@@ -4606,6 +4675,11 @@ body.page-editing #dockEdit {
   }
 
   .ve-diagram-tidy {
+    min-height: 38px;
+  }
+
+  .ve-diagram-step {
+    width: 38px;
     min-height: 38px;
   }
 

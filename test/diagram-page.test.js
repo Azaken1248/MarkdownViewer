@@ -574,7 +574,9 @@ async function run(server, cookie) {
     tap("B");
     check("a table says it is one", 
       inspector.querySelector(".ve-diagram-picked .ve-diagram-legend").textContent, "Table");
-    check("...and calls its label what it is", captions()[0], "Rows");
+    check("...and calls its label what it is", captions()[0], "Cells");
+    check("...and offers the two numbers a table has",
+      captions().slice(1, 3), ["Rows", "Columns"]);
     check("...in a font its rows line up in",
       inspector.querySelector(".ve-diagram-text").classList.contains("ve-diagram-rowsy"),
       true);
@@ -587,6 +589,131 @@ async function run(server, cookie) {
     tap("C");
     check("...and a table of one row still looks like a table",
       inspector.querySelector(".ve-diagram-text").rows, 3);
+
+    page.window.close();
+  }
+
+  console.log("=== a table is so many rows by so many columns ===");
+  {
+    /* Rows and columns are the two things about a table you change one at a
+     * time, and typing pipes into a field to say "one more column" is a strange
+     * way to ask for one more column. The count reads as well as sets, so the
+     * shape of the table is something the panel says rather than something you
+     * work out by counting the pipes in the field above it.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "grid.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 200x120 kind=table",
+        '    A["Person<br/>name | string<br/>age | int"]'
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/grid.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: Number(found[1]) + 10, clientY: Number(found[2]) + 10, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: Number(found[1]) + 10, clientY: Number(found[2]) + 10, bubbles: true }));
+    };
+
+    const steppers = () => [...inspector.querySelectorAll(".ve-diagram-stepper")];
+    const stepper = (name) => steppers()
+      .find((one) => one.getAttribute("aria-label") === name);
+    const counts = () => steppers()
+      .map((one) => Number(one.querySelector(".ve-diagram-count").textContent));
+    const press = (name, which) => stepper(name)
+      .querySelectorAll(".ve-diagram-step")[which]
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const fewer = (name) => press(name, 0);
+    const more = (name) => press(name, 1);
+    const cells = () => [...groupOf("A").querySelectorAll(".dd-row tspan")]
+      .map((one) => one.textContent);
+    const rules = () => groupOf("A").querySelectorAll(".dd-cell-rule").length;
+    const boxOf = () => {
+      const at = groupOf("A").querySelector("rect");
+      return [Number(at.getAttribute("width")), Number(at.getAttribute("height"))];
+    };
+
+    tap("A");
+    check("a table says how many rows and columns it has", counts(), [3, 2]);
+    check("...and is drawn with a line between each of them", rules(), 2);
+
+    /* The size it was given in the file, which is bigger than a table of these
+     * cells needs. Read before anything is pressed, because the question below
+     * is what the steppers do to a size somebody chose by hand.
+     */
+    const [wide, high] = boxOf();
+
+    // Rows enough to need more room than the file gave it. A table with room
+    // for another row does not have to grow to hold one.
+    more("Rows");
+    more("Rows");
+    more("Rows");
+    check("asking for rows gives them", counts(), [6, 2]);
+    check("...and the table grows to hold them", boxOf()[1] > high, true);
+    check("...and no wider, since none of that was about its width",
+      boxOf()[0], wide);
+
+    const tall = boxOf()[1];
+    fewer("Rows");
+    check("taking one off again leaves the size it had", boxOf(), [wide, tall]);
+    check("...because the rows share out the height between them rather than"
+      + " stacking from the top",
+      /y1="\d+" x2="200"/.test(groupOf("A").innerHTML), true);
+
+    fewer("Rows");
+    fewer("Rows");
+    more("Columns");
+    check("asking for another column gives it one", counts(), [3, 3]);
+    check("...and draws the line that divides it", rules(), 3);
+    check("...leaving what was already in it where it was",
+      cells(), ["name", "string", "age", "int"]);
+    // Every column needs room to be read in, so another column is a wider
+    // table rather than a division of the width it already had.
+    check("...and widens the table to hold it", boxOf()[0] > wide, true);
+
+    const grew = boxOf()[0];
+    fewer("Columns");
+    check("and taking it away takes it away", counts(), [3, 2]);
+    check("...the cells that were in it included", cells(), ["name", "string", "age", "int"]);
+    check("...but not the width, because a box here grows and never shrinks",
+      boxOf()[0], grew);
+
+    /* One column is a list, not a grid, and a list needs no lines drawn
+     * through it — which is the class box this could always draw.
+     */
+    fewer("Columns");
+    check("a table of one column is a list again", counts(), [3, 1]);
+    check("...with nothing drawn through it", rules(), 0);
+    check("...and the second cell of every row gone with the column",
+      cells(), ["name", "age"]);
+
+    // A table of no columns is not a table, and a way down that goes nowhere
+    // has to look like one rather than quietly doing nothing.
+    check("...and no way down from there",
+      stepper("Columns").querySelectorAll(".ve-diagram-step")[0].disabled, true);
+    check("...though the way up is still open",
+      stepper("Columns").querySelectorAll(".ve-diagram-step")[1].disabled, false);
+
+    // A pipe cannot be left bare in a Mermaid label, and the row break already
+    // forced the quotes — so a grid reaches the file as the label it is.
+    more("Columns");
+    const field = inspector.querySelector(".ve-diagram-text");
+    field.value = "Person\nname | string\nage | int";
+    field.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/grid.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("a grid reaches the file as one quoted label",
+      /A\["Person<br\/>name \| string<br\/>age \| int"\]/.test(written), true);
 
     page.window.close();
   }
