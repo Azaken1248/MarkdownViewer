@@ -307,6 +307,18 @@
       // The page is a window onto the diagram rather than a strip showing it:
       // pan, zoom, and no end to the paper in any direction.
       viewport: true,
+      /* Storing a picture is the page's job, not the editor's: the editor is
+       * handed a source string and some callbacks and knows nothing about what
+       * server is behind it. The store is the one documents already paste into,
+       * so a picture in a diagram and a picture in a document are the same
+       * bytes under the same hash.
+       */
+      upload: async (file) => {
+        const body = new FormData();
+        body.append("image", file, file.name || "image");
+        const payload = await requestJson("/api/assets", { method: "POST", body });
+        return String(payload.url || "");
+      },
       onChange: (body) => {
         state.source = body;
         syncSaveButton();

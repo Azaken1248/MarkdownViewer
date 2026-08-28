@@ -122,12 +122,14 @@
    * on a baseline — a box is resized around its text often enough that the text
    * has to stay in the middle of it without being measured again.
    */
-  function centredText(rows, w, h) {
+  // `from` is where the band the words are centred in begins. Nought for a
+  // label in a box, and the top of the strip under a picture for one there.
+  function centredText(rows, w, h, from = 0) {
     if (rows.length === 0) {
       return "";
     }
 
-    const top = (h / 2) - (((rows.length - 1) * LINE_HEIGHT) / 2);
+    const top = (from + (h / 2)) - (((rows.length - 1) * LINE_HEIGHT) / 2);
     const spans = rows.map((row, index) => {
       const y = top + (index * LINE_HEIGHT);
       return `<tspan x="${round(w / 2)}" y="${round(y)}">${escapeText(row)}</tspan>`;
@@ -223,14 +225,61 @@
 
   // The inside of a box, in its own coordinates. Separate from the group around
   // it because resizing one redraws exactly this and nothing else.
+  /* A picture in a box.
+   *
+   * The address is checked rather than trusted. It comes out of a file, and it
+   * is about to become the href of an <image> — a string that is not plainly
+   * one of this app's own stored assets is a request to somewhere else, made by
+   * anyone who opens the diagram. Content-hash names are the only shape the
+   * store ever hands out, so they are the only shape allowed back in.
+   */
+  const IMAGE_RE = /^\/api\/assets\/[0-9a-f]{64}\.(?:png|jpg|gif|webp|avif)$/;
+  const IMAGE_PAD = 6;
+
+  const imageOf = (node) => (IMAGE_RE.test(String(node?.image || "")) ? node.image : "");
+
+  /* The picture, and the words under it.
+   *
+   * Fitted rather than filled: a picture stretched to the shape of the box it
+   * was dropped in is a picture nobody recognises, so it keeps its own shape
+   * and the box has whatever is left over. The label takes a band along the
+   * bottom, and a box with nothing written in it gives the whole of itself to
+   * the picture.
+   */
+  function pictureMarkup(node, at) {
+    const words = Model.textRows(node.text || "").filter((row) => row !== "");
+    const band = words.length > 0 ? (words.length * LINE_HEIGHT) + 2 : 0;
+    const room = {
+      w: Math.max(0, at.w - (IMAGE_PAD * 2)),
+      h: Math.max(0, at.h - (IMAGE_PAD * 2) - band)
+    };
+
+    const picture = room.w > 0 && room.h > 0
+      ? `<image class="dd-picture" x="${IMAGE_PAD}" y="${IMAGE_PAD}"`
+        + ` width="${round(room.w)}" height="${round(room.h)}"`
+        + ` preserveAspectRatio="xMidYMid meet"`
+        + ` href="${escapeText(imageOf(node))}"/>`
+      : "";
+
+    const label = words.length > 0
+      ? centredText(words, at.w, band, at.h - band)
+      : "";
+
+    return picture + label;
+  }
+
   function nodeBody(node, at, classes) {
     const words = node.text || node.id;
 
-    return node.kind === "table"
-      ? tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
-        charWidthOf(node, classes))
-      : shapeMarkup(node.shape, at.w, at.h)
-        + centredText(Model.textRows(words), at.w, at.h);
+    if (node.kind === "table") {
+      return tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
+        charWidthOf(node, classes));
+    }
+
+    return shapeMarkup(node.shape, at.w, at.h)
+      + (imageOf(node)
+        ? pictureMarkup(node, at)
+        : centredText(Model.textRows(words), at.w, at.h));
   }
 
   /* --- Colour ---------------------------------------------------------------

@@ -403,7 +403,16 @@
     return rest;
   }
 
-  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z"];
+  /* Everything a node line can say that this understands. Anything else is
+   * carried in `extra` and written back untouched, which is what lets a file
+   * written by a later version of this survive being opened by an earlier one.
+   *
+   * A key missing from here is worse than unknown: it is read into the node AND
+   * kept in `extra`, and `extra` is spread last when the line is written — so
+   * the value that was read wins over the value that was changed, and the edit
+   * is thrown away on save. Every key read below has to appear here.
+   */
+  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap"];
   const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {

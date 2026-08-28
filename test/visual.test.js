@@ -2090,6 +2090,87 @@ console.log("=== a table with columns is drawn as a grid ===");
     (gappy.match(/<text class="dd-text/g) || []).length, 3);
 }
 
+console.log("=== a picture in a box ===");
+{
+  const HASH = "a".repeat(64);
+  const HREF = `/api/assets/${HASH}.png`;
+
+  const boxed = (node, w = 160, h = 120) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", ...node }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h } }
+  }, { natural: true });
+
+  /* Fitted rather than filled: a picture stretched to the shape of the box it
+   * was dropped in is a picture nobody recognises, so it keeps its own shape
+   * and the box has whatever is left over.
+   */
+  const shown = boxed({ text: "Cat", image: HREF });
+  check("a box with a picture draws it", /<image class="dd-picture"/.test(shown), true);
+  check("...keeping the picture's own shape rather than the box's",
+    /preserveAspectRatio="xMidYMid meet"/.test(shown), true);
+  check("...inside the box rather than over its edges",
+    /x="6" y="6" width="148" height="86"/.test(shown), true);
+  check("...with the words in the strip under it",
+    /<tspan x="80" y="109">Cat<\/tspan>/.test(shown), true);
+
+  // A box with nothing written in it gives the whole of itself to the picture.
+  const bare = boxed({ text: "", image: HREF });
+  check("a picture with no words under it takes the room they would have had",
+    /width="148" height="108"/.test(bare), true);
+  check("...and nothing is written where they would have been",
+    /<tspan/.test(bare), false);
+
+  // The shape is still drawn, so a picture can be coloured and bordered like
+  // everything else on the paper.
+  check("a picture is in a box, and the box is still a box",
+    /<rect class="dd-shape"/.test(shown), true);
+
+  /* The address is checked rather than trusted. It comes out of a file and is
+   * about to become the href of an <image>: a string that is not plainly one of
+   * this app's own stored assets is a request to somewhere else, made by
+   * everyone who opens the diagram.
+   */
+  const refused = [
+    "https://example.com/tracker.png",
+    "//example.com/tracker.png",
+    "/api/assets/../../etc/passwd",
+    `/api/assets/${HASH}.svg`,
+    `/api/assets/${"z".repeat(64)}.png`,
+    "javascript:alert(1)",
+    `  ${HREF}`
+  ];
+
+  check("an address that is not one of this app's own is not drawn at all",
+    refused.filter((image) => /<image/.test(boxed({ text: "x", image }))), []);
+  check("...and the box is drawn as the box it is",
+    /<tspan[^>]*>x<\/tspan>/.test(boxed({ text: "x", image: refused[0] })), true);
+
+  // Every extension the store hands out is one the drawing will show.
+  check("every kind of picture the store keeps can be drawn",
+    ["png", "jpg", "gif", "webp", "avif"]
+      .filter((ext) => !/<image/.test(boxed({ text: "x", image: `/api/assets/${HASH}.${ext}` }))),
+    []);
+
+  // It travels in the layout comment, which is where everything Mermaid cannot
+  // say already goes.
+  const written = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Cat", image: HREF }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 160, h: 120 } }
+  });
+
+  check("a picture reaches the file beside where the box is",
+    new RegExp(`%% @ A 0,0 160x120 image=${HREF}`).test(written), true);
+
+  const read = DM.parseFlowchart(written).nodes[0];
+  check("...and comes back off it", read.image, HREF);
+  check("...as something the model understood, not as an unknown it is carrying",
+    read.extra, undefined);
+}
+
 console.log("=== the type a diagram is set in is real Mermaid ===");
 {
   const paint = (node, classes) => DD.render({
@@ -2267,6 +2348,28 @@ console.log("=== a table is spaced out the way it was asked to be ===");
     edges: [],
     layout: { A: { x: 0, y: 0, w: 140, h: 60 } }
   });
+
+  /* Anything the model understands has to be listed as understood, or it is
+   * read into the node AND kept as an unknown — and the unknowns are written
+   * last, so the value that was read wins over the value that was changed and
+   * the edit is thrown away on save.
+   *
+   * It cost a released version of the two steppers above: they worked on the
+   * screen and did nothing to any file that already said what it was spaced by.
+   */
+  const said = DM.parseFlowchart("flowchart TD\n    %% layout v1\n"
+    + "    %% @ A 0,0 200x120 kind=table pad=4 gap=30 mystery=1\n    A[\"T<br/>a\"]\n");
+
+  check("a node keeps nothing it understood as an unknown as well",
+    said.nodes[0].extra, { mystery: "1" });
+
+  const changed = { ...said, layout: said.layout };
+  changed.nodes[0].pad = 20;
+  changed.nodes[0].gap = 40;
+  check("...so changing one changes the file, rather than the file changing it back",
+    /pad=20 gap=40/.test(DM.serializeFlowchart(changed)), true);
+  check("...and the one it never understood is still carried",
+    /mystery=1/.test(DM.serializeFlowchart(changed)), true);
 
   check("a table spaced the standard way says nothing about it",
     /pad=|gap=/.test(written({ pad: 10, gap: 20 })), false);
@@ -2471,6 +2574,16 @@ console.log("=== the previews are actually on the screen ===");
    * page whose Save button can be pushed off the bottom — so the rail and the
    * panel each scroll themselves, and the paper pans instead of scrolling.
    */
+  /* Both sides are as wide as they were left, which the editor writes as a
+   * custom property on the body. A width baked into the rule instead is a
+   * panel whose bar moves nothing.
+   */
+  check("a side is as wide as it was left rather than as wide as it was built",
+    [region("rail").flex, region("side").flex],
+    ["0 0 var(--dd-rail, 132px)", "0 0 var(--dd-side, 300px)"]);
+  check("...and can be narrower than what is in it, so the bar can reach",
+    [region("rail").minWidth, region("side").minWidth], ["0", "0"]);
+
   check("nothing scrolls the page the editor is on", region("host").overflow, "hidden");
   check("...the rail scrolls itself", region("rail").overflowY, "auto");
   check("...and so does the panel", region("side").overflowY, "auto");
@@ -2509,8 +2622,17 @@ console.log("=== the previews are actually on the screen ===");
 
   check("the flow menu is not capped at a fraction of the bar it sits on",
     control("flow").maxWidth, "none");
+  /* Room for the longest thing it can say and the caret beside it. It had
+   * neither: the shorthand `background` wiped the caret the rule above draws,
+   * and the padding took back the room that caret needs — so the words ran
+   * under where it should have been.
+   */
   check("...and is wide enough for the longest thing it can say",
-    control("flow").minWidth, "8.5rem");
+    control("flow").minWidth, "9.5rem");
+  check("...with the room the caret needs still reserved beside them",
+    control("flow").paddingRight, "26px");
+  check("...and the caret itself still drawn",
+    /linear-gradient/.test(control("flow").backgroundImage), true);
   check("a field in the panel takes the whole line it owns",
     [control("shape").width, control("shape").maxWidth], ["100%", "none"]);
   check("...the one anybody types into included",

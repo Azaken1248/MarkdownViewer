@@ -2218,6 +2218,12 @@ button.crumb:focus-visible {
   font-weight: var(--dd-font-weight, 600);
 }
 
+/* A picture is fitted rather than filled, so it never covers the box it is in
+   and never needs clipping. Rounded a little, to sit inside a rounded box. */
+.dd .dd-picture {
+  border-radius: 3px;
+}
+
 .dd .dd-row {
   fill: var(--dd-text, var(--fg-muted));
 }
@@ -3526,13 +3532,82 @@ body.page-editing #dockEdit {
 }
 
 /* The shapes. A column beside the paper, so the row of them is never the thing
-   deciding how wide the window has to be. */
+   deciding how wide the window has to be. As wide as it was left: the width is
+   a custom property the editor writes, because how much room somebody wants
+   for the shapes is about their screen rather than about the drawing. */
 .ve-diagram-rail {
-  flex: 0 0 auto;
+  flex: 0 0 var(--dd-rail, 132px);
+  min-width: 0;
   overflow-y: auto;
   border-right: 1px solid var(--border-muted);
   background: var(--surface);
   scrollbar-width: thin;
+}
+
+/* Shut, a region is gone and its bar is all that is left of it — which is what
+   makes it something you can bring back rather than something you have lost. */
+.ve-diagram-body.is-rail-shut > .ve-diagram-rail,
+.ve-diagram-body.is-side-shut > .ve-diagram-side {
+  display: none;
+}
+
+/* Narrow enough that the words no longer fit beside the pictures, the shapes
+   drop to their pictures — the same thing the phone does with the same rail,
+   said once and reached two ways. */
+.ve-diagram-body.is-rail-tight .ve-diagram-tool > span {
+  display: none;
+}
+
+.ve-diagram-body.is-rail-tight .ve-diagram-tool {
+  justify-content: center;
+  padding: 5px;
+}
+
+/* The bar between two regions. Dragged, it moves the edge; the chevron on it
+   takes the region away and brings it back. Wide enough to hit without being
+   wide enough to notice. */
+.ve-diagram-grip {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 7px;
+  margin: 0 -3px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ve-diagram-grip:hover,
+.ve-diagram-grip.is-dragging,
+.ve-diagram-grip:focus-visible {
+  background: var(--accent-muted);
+  outline: none;
+}
+
+/* The chevron. Sits on the bar rather than beside it, so a region that is shut
+   still has the one thing that opens it. */
+.ve-diagram-grip-shut {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 26px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ve-diagram-grip-shut:hover {
+  border-color: var(--border);
+  color: var(--fg);
 }
 
 /* What is true of what is picked. Given a width rather than asked to work one
@@ -3540,7 +3615,8 @@ body.page-editing #dockEdit {
    resizes itself as its contents change is a panel the paper jumps about
    beside. */
 .ve-diagram-side {
-  flex: 0 0 clamp(272px, 26vw, 340px);
+  flex: 0 0 var(--dd-side, 300px);
+  min-width: 0;
   overflow-y: auto;
   border-left: 1px solid var(--border-muted);
   background: var(--surface);
@@ -4332,6 +4408,18 @@ body.page-editing #dockEdit {
   box-shadow: 0 0 0 2px var(--accent-muted);
 }
 
+/* The file picker is a button in the panel, not a control anyone looks at. */
+.ve-diagram-picker {
+  display: none;
+}
+
+/* A picture about to be dropped. The paper says it will take it, because a
+   drag that gives no sign of being noticed is a drag people let go of
+   somewhere else. */
+.ve-diagram-canvas.is-dropping {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 /* The type: a family and a size on one line, the two switches under them. */
 .ve-diagram-font {
   display: flex;
@@ -4648,12 +4736,17 @@ body.page-editing #dockEdit {
 .ve-diagram-bar .ve-diagram-direction {
   flex: 0 0 auto;
   width: auto;
-  min-width: 8.5rem;
+  /* Room for the longest thing it can say and the caret beside it. It had
+     neither: `background` as a shorthand wiped the caret the rule above draws,
+     and `padding: 3px 8px` took back the room that caret needs — so the words
+     ran under where it should have been and the menu looked like a box with
+     the end of its label missing. */
+  min-width: 9.5rem;
   max-width: none;
   min-height: 26px;
-  padding: 3px 8px;
+  padding: 3px 26px 3px 8px;
   border-color: var(--border-muted);
-  background: var(--surface);
+  background-color: var(--surface);
   color: var(--fg);
   font-size: 12px;
 }
@@ -5423,8 +5516,28 @@ body.page-editing #dockEdit {
   }
 
   .ve-diagram-rail {
+    flex: 0 0 auto;
     border-right: none;
     border-bottom: 1px solid var(--border-muted);
+  }
+
+  /* Stacked, the regions are above and below each other, so the bar between
+     two of them lies across rather than down — and there is nothing sideways
+     left to drag, so all it keeps is the chevron. */
+  .ve-diagram-grip {
+    flex: 0 0 auto;
+    height: 14px;
+    margin: -3px 0;
+    cursor: default;
+  }
+
+  .ve-diagram-grip-shut {
+    top: 50%;
+    left: auto;
+    right: 10px;
+    width: 26px;
+    height: 16px;
+    transform: translateY(-50%) rotate(90deg);
   }
 
   /* A row again, and it scrolls: a strip of shapes that wraps to a second line
@@ -5453,6 +5566,7 @@ body.page-editing #dockEdit {
   .ve-diagram-side {
     flex: 0 1 auto;
     max-height: 40dvh;
+    min-width: 0;
     border-left: none;
     border-top: 1px solid var(--border-muted);
   }

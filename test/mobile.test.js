@@ -342,6 +342,17 @@ console.log("=== the diagram builder fits a phone ===");
     /\.ve-diagram-body \{\s*flex-direction: column;/.test(phone), true);
   check("...the rail becomes a strip, so its edge moves with it",
     /\.ve-diagram-rail \{[\s\S]{0,120}?border-bottom: 1px solid/.test(phone), true);
+  /* Stacked, the regions are above and below each other, so the bar between two
+   * of them lies across rather than down — and there is nothing sideways left
+   * to drag, so all it keeps is the chevron that takes a region away.
+   */
+  check("the bar between two regions lies across when they are stacked",
+    /\.ve-diagram-grip \{[\s\S]{0,140}?height: \d+px;/.test(phone), true);
+  check("...with nothing left to drag it by",
+    /\.ve-diagram-grip \{[\s\S]{0,160}?cursor: default;/.test(phone), true);
+  check("...and the chevron turned to match",
+    /\.ve-diagram-grip-shut \{[\s\S]{0,180}?rotate\(90deg\)/.test(phone), true);
+
   check("...and the panel becomes a tray along the bottom",
     /\.ve-diagram-side \{[\s\S]{0,160}?border-top: 1px solid/.test(phone), true);
 

@@ -54,6 +54,14 @@ async function boot(dom, { cookie, origin }) {
     return { x: 0, y: 0, top: 0, left: 0, right: 900, bottom: 600, width: 900, height: 600 };
   };
 
+  /* Node's FormData rather than jsdom's, because the shim below hands the body
+   * to Node's fetch and the two implementations do not recognise each other.
+   * Everything else about the upload is the page's own code.
+   */
+  window.FormData = globalThis.FormData;
+  window.File = globalThis.File;
+  window.Blob = globalThis.Blob;
+
   const requested = [];
   window.fetch = async (input, options = {}) => {
     const target = new URL(String(input), origin);
@@ -83,8 +91,13 @@ async function boot(dom, { cookie, origin }) {
   return { window, document: window.document, requested };
 }
 
-function openPage({ url, cookie, origin, stash = null }) {
+function openPage({ url, cookie, origin, stash = null, panels = null }) {
   const dom = new JSDOM(pageHtml, { url, runScripts: "outside-only", pretendToBeVisual: true });
+  // What the browser was left holding, before the editor is built and reads it.
+  if (panels !== null) {
+    dom.window.localStorage.setItem("azadocs:diagram:panels", panels);
+  }
+
   if (stash !== null) {
     dom.window.sessionStorage.setItem(`azadocs:diagram:${new URL(url).pathname.replace(/^\/diagram\/(?:doc|file)\//, "")}`, stash);
   }
@@ -539,7 +552,7 @@ async function run(server, cookie) {
     check("...with the way to remove it up there, since it is not a property of it",
       Boolean(inspector.querySelector(".ve-diagram-picked > .ve-diagram-drop")), true);
     check("...and every control below it named",
-      captions(), ["Label", "Shape", "Fill", "Border", "Font"]);
+      captions(), ["Label", "Shape", "Fill", "Border", "Font", "Picture"]);
 
     // A label wrapping its control is also the label that control answers to,
     // so the caption is a way into the field rather than a word beside it. A
@@ -1016,6 +1029,123 @@ async function run(server, cookie) {
     check("...going across as well as down",
       boxOf("A")[0] + boxOf("A")[2], 430);
 
+    page.window.close();
+  }
+
+  console.log("=== the two sides move, and go away, and are remembered ===");
+  {
+    /* How much room somebody wants for the shapes is about their screen and
+     * their hands rather than about the drawing, so it is kept in the browser
+     * and not in the file — a diagram that carried it would hand one person's
+     * window to everyone who opened it.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "sides.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 100x60",
+        "    A[One]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin });
+    const { window } = page;
+    const body = page.document.querySelector(".ve-diagram-body");
+    const grip = (which) => page.document.querySelector(`.ve-diagram-grip-${which}`);
+    const shut = (which) => grip(which).querySelector(".ve-diagram-grip-shut");
+    const wide = (which) => body.style.getPropertyValue(`--dd-${which}`);
+
+    check("the two sides start at the width they were given",
+      [wide("rail"), wide("side")], ["132px", "300px"]);
+    check("...with a bar between each of them and the paper",
+      [...body.children].map((one) => one.className.split(" ")[0]),
+      ["ve-diagram-rail", "ve-diagram-grip", "ve-diagram-stage",
+        "ve-diagram-grip", "ve-diagram-side"]);
+
+    // A separator rather than a decoration: an edge that can only be dragged is
+    // an edge that belongs to whoever has a mouse.
+    check("a bar is something the keyboard can reach",
+      [grip("rail").getAttribute("role"), grip("rail").tabIndex], ["separator", 0]);
+
+    const drag = (which, from, to) => {
+      grip(which).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: from, bubbles: true }));
+      grip(which).dispatchEvent(new window.MouseEvent("pointermove",
+        { clientX: to, bubbles: true }));
+      grip(which).dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: to, bubbles: true }));
+    };
+
+    drag("rail", 132, 192);
+    check("dragging the rail's bar to the right widens the rail", wide("rail"), "192px");
+
+    // The rail's edge is on its right and the panel's on its left, so the same
+    // drag widens one and narrows the other.
+    drag("side", 600, 660);
+    check("...and dragging the panel's bar the same way narrows the panel",
+      wide("side"), "240px");
+
+    drag("rail", 192, 9000);
+    check("neither can be dragged wider than it is allowed", wide("rail"), "260px");
+    drag("rail", 260, -9000);
+    check("...nor narrower", wide("rail"), "56px");
+    check("...and a rail too narrow for the words shows the pictures alone",
+      body.classList.contains("is-rail-tight"), true);
+
+    // The arrow keys move it too, by a step rather than by a pixel.
+    grip("rail").dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "ArrowRight", bubbles: true }));
+    check("an arrow key moves the edge as well", wide("rail"), "76px");
+
+    /* Shut, a region is gone and its bar is all that is left of it — which is
+     * what makes it something you can bring back rather than something you
+     * have lost.
+     */
+    shut("side").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the chevron takes a side away", body.classList.contains("is-side-shut"), true);
+    check("...leaving the bar that brings it back",
+      Boolean(grip("side")), true);
+    check("...which says it is the way back",
+      shut("side").getAttribute("aria-expanded"), "false");
+
+    shut("side").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("and brings it back the width it was",
+      [body.classList.contains("is-side-shut"), wide("side")], [false, "240px"]);
+
+    // Kept in the browser, so the next diagram opens the way the last one was
+    // left. A place that will not keep it is a place where the panels still
+    // work, so every read and write of it is allowed to fail.
+    const kept = JSON.parse(window.localStorage.getItem("azadocs:diagram:panels"));
+    check("what was left is written down", [kept.rail, kept.side], [76, 240]);
+
+    const wideOf = (one, which) =>
+      one.document.querySelector(".ve-diagram-body").style.getPropertyValue(`--dd-${which}`);
+
+    const again = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin,
+      panels: window.localStorage.getItem("azadocs:diagram:panels") });
+    check("...and the next diagram opens the way the last one was left",
+      [wideOf(again, "rail"), wideOf(again, "side")], ["76px", "240px"]);
+
+    // Nothing kept, or nothing readable, is the standard widths rather than a
+    // panel that will not open.
+    const fresh = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin });
+    check("a browser holding nothing opens at the widths it was built with",
+      [wideOf(fresh, "rail"), wideOf(fresh, "side")], ["132px", "300px"]);
+
+    const bad = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin,
+      panels: "{not json" });
+    check("...and so does one holding something it cannot read",
+      [wideOf(bad, "rail"), wideOf(bad, "side")], ["132px", "300px"]);
+
+    const daft = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin,
+      panels: JSON.stringify({ rail: 99999, side: -4 }) });
+    check("...and one holding a width no panel may be is held to what it may",
+      [wideOf(daft, "rail"), wideOf(daft, "side")], ["260px", "200px"]);
+
+    daft.window.close();
+    bad.window.close();
+    fresh.window.close();
+    again.window.close();
     page.window.close();
   }
 
@@ -2008,6 +2138,132 @@ async function run(server, cookie) {
       /^\s*A --> B\s*$/m.test(back), true);
     check("...and grows no comment saying what it already says",
       /ends=/.test(back), false);
+  }
+
+  console.log("=== a picture is dropped on the paper where it lands ===");
+  {
+    /* The gesture everybody tries first. The button in the panel is the second
+     * way rather than the only way, and the store a picture goes into is the
+     * one documents already paste into — so a picture in a diagram and a
+     * picture in a document are the same bytes under the same hash.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "shot.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 100x60",
+        "    A[One]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/shot.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const boxes = () => canvas.querySelectorAll(".dd-node").length;
+    const pictures = () => [...canvas.querySelectorAll(".dd-picture")]
+      .map((one) => one.getAttribute("href"));
+
+    const drop = (name, x, y, type = "image/png") => {
+      const file = new window.File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])],
+        name, { type });
+      const event = new window.Event("drop", { bubbles: true, cancelable: true });
+      event.dataTransfer = { files: [file], dropEffect: "" };
+      event.clientX = x;
+      event.clientY = y;
+      canvas.dispatchEvent(event);
+    };
+
+    const sizeOf = (id) => {
+      const rect = canvas.querySelector(`.dd-node[data-id="${id}"] rect`);
+      return [Number(rect.getAttribute("width")), Number(rect.getAttribute("height"))];
+    };
+
+    // The paper says it will take the picture before it is let go: a drag that
+    // gives no sign of being noticed is a drag people let go of somewhere else.
+    const over = new window.Event("dragover", { bubbles: true, cancelable: true });
+    over.dataTransfer = { files: [{ type: "image/png" }], dropEffect: "" };
+    canvas.dispatchEvent(over);
+    check("the paper says it will take a picture being dragged over it",
+      canvas.classList.contains("is-dropping"), true);
+
+    check("a diagram of one box starts with no pictures", [boxes(), pictures()], [1, []]);
+
+    drop("cat.png", 300, 300);
+    await waitFor(window, () => pictures().length > 0,
+      "the picture was never added to the diagram");
+
+    check("a picture dropped on the paper becomes a box on the paper", boxes(), 2);
+    check("...holding the picture, at the address the store gave it",
+      /^\/api\/assets\/[0-9a-f]{64}\.png$/.test(pictures()[0]), true);
+    check("...and the paper stops saying it will take one",
+      canvas.classList.contains("is-dropping"), false);
+    check("...named after the file it came from, without its extension",
+      [...canvas.querySelectorAll(".dd-node")].pop().textContent, "cat");
+
+    // Room to be a picture in. Measured by the words under it instead, a
+    // picture arrives in a box the size of its caption.
+    check("...in a box big enough to be a picture rather than a caption",
+      sizeOf("n1"), [180, 140]);
+
+    // A file that is not a picture is not a picture. The paper takes images;
+    // everything else goes on being whatever the browser would have done with
+    // it, which is not this.
+    const was = boxes();
+    drop("notes.txt", 400, 400, "text/plain");
+    await settle();
+    check("something that is not a picture is not dropped on the paper",
+      [boxes(), pictures().length], [was, 1]);
+
+    // The same bytes are the same hash, so dropping the same picture twice
+    // stores it once — which is what the document store already does.
+    drop("cat.png", 500, 300);
+    await waitFor(window, () => pictures().length > 1,
+      "the second picture was never added");
+    check("the same picture twice is the same picture, stored once",
+      pictures()[0], pictures()[1]);
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/shot.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("a picture reaches the file beside where its box is",
+      (written.match(/image=\/api\/assets\/[0-9a-f]{64}\.png/g) || []).length, 2);
+
+    /* The panel offers the other way in, and a way back out. A box with a
+     * picture offers to replace it; one without offers to add one.
+     */
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const buttons = () => [...inspector.querySelectorAll(".ve-diagram-add")]
+      .map((one) => one.textContent);
+
+    tap("A");
+    check("a box with no picture offers to take one",
+      buttons().includes("Add a picture"), true);
+    check("...and nothing to take off", buttons().includes("Take it off"), false);
+
+    tap("n1");
+    check("a box with a picture offers to replace it",
+      buttons().includes("Replace the picture"), true);
+
+    inspector.querySelectorAll(".ve-diagram-add")
+      .forEach((one) => {
+        if (one.textContent === "Take it off") {
+          one.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+        }
+      });
+
+    check("...and taking it off leaves the box behind", [boxes(), pictures().length], [3, 1]);
+
+    page.window.close();
   }
 
   console.log("=== the type a box is set in is a classDef like everything else ===");

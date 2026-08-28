@@ -1741,6 +1741,42 @@
       drawAtOnce();
     };
 
+    /* A picture dropped on the paper is a picture on the paper, where it was
+     * dropped. Which is the gesture everybody tries first, and the one that
+     * makes the button in the panel a second way rather than the only way.
+     *
+     * Nothing here is a pointer gesture: a file drag is the browser's own, and
+     * it arrives as its own two events whatever the pointer handlers are doing.
+     */
+    const dropped = (event) =>
+      [...(event.dataTransfer?.files || [])].filter((file) =>
+        String(file.type || "").startsWith("image/"));
+
+    canvas.addEventListener("dragover", (event) => {
+      if (!canUpload || dropped(event).length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      canvas.classList.add("is-dropping");
+    });
+
+    canvas.addEventListener("dragleave", () => canvas.classList.remove("is-dropping"));
+
+    canvas.addEventListener("drop", (event) => {
+      canvas.classList.remove("is-dropping");
+
+      const files = dropped(event);
+      if (!canUpload || files.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const point = pointIn(event.clientX, event.clientY);
+      void putPicture(files[0], { x: point.x, y: point.y });
+    });
+
     canvas.addEventListener("pointerup", endGesture);
     canvas.addEventListener("pointercancel", (event) => {
       if (gesture) {
@@ -2668,9 +2704,9 @@
         // A table arrives as a table: a heading and a grid of empty cells, so
         // that what lands on the paper is the thing that was dragged off the
         // rail rather than a box with one word in it and a rule underneath.
-        text: kind === "table"
+        text: options.text ?? (kind === "table"
           ? DiagramModel.joinCells([["Table"], ["", ""], ["", ""]])
-          : `Step ${model.nodes.length + 1}`
+          : `Step ${model.nodes.length + 1}`)
       };
 
       // What a box is belongs to the box. Where it is belongs to the layout.
@@ -2678,9 +2714,19 @@
         item.kind = kind;
       }
 
+      // A picture is not a shape, so it does not decide what the box is — it is
+      // one more thing the box is carrying, like its colour.
+      if (options.image) {
+        item.image = options.image;
+      }
+
       model.nodes.push(item);
 
-      const size = DiagramModel.measureNode(item);
+      /* How big it starts. A picture wants room to be a picture in — measuring
+       * one by the words under it would drop it into a box the size of its
+       * caption.
+       */
+      const size = options.size || DiagramModel.measureNode(item);
       const where = placeFor(options, size);
       model.layout[id] = { x: where.x, y: where.y, w: size.w, h: size.h };
 
@@ -3645,6 +3691,114 @@
       return row;
     }
 
+    /* A picture in a box.
+     *
+     * The uploading is the host's: the editor is handed a source string and
+     * some callbacks and knows nothing about where the diagram came from or
+     * what server is behind it, which is what makes a fence in a document and a
+     * .mmd file the same diagram to it. A host that cannot store a picture
+     * offers no way to add one, rather than a button that fails.
+     */
+    const canUpload = typeof settings.upload === "function";
+
+    const DIAGRAM_IMAGE_BOX = { w: 180, h: 140 };
+
+    // The file's name without its extension, which is what a screenshot tool
+    // gives you and better than nothing under a picture nobody can see.
+    const pictureName = (file) =>
+      String(file?.name || "Picture").replace(/\.[^.]+$/, "").trim() || "Picture";
+
+    async function putPicture(file, where) {
+      if (!canUpload || !file) {
+        return;
+      }
+
+      say("Adding the picture…");
+
+      try {
+        const url = await settings.upload(file);
+        if (!url) {
+          throw new Error("no address");
+        }
+
+        if (where && where.id) {
+          const item = nodeById(where.id);
+          if (!item) {
+            return;
+          }
+
+          item.image = url;
+          write();
+          paintLists();
+          drawAtOnce();
+          paintInspector();
+          return;
+        }
+
+        addBox({
+          shape: "rect",
+          text: pictureName(file),
+          image: url,
+          x: where?.x,
+          y: where?.y,
+          size: DIAGRAM_IMAGE_BOX
+        });
+      } catch {
+        say("That picture could not be added.");
+      }
+    }
+
+    // One file picker, made once and pointed at whatever asked for it.
+    let picker = null;
+    function askForPicture(where) {
+      if (!picker) {
+        picker = document.createElement("input");
+        picker.type = "file";
+        picker.accept = "image/*";
+        picker.className = "ve-diagram-picker";
+        picker.addEventListener("change", () => {
+          const file = picker.files?.[0];
+          picker.value = "";
+          void putPicture(file, picker.dataset.id ? { id: picker.dataset.id } : null);
+        });
+
+        node.append(picker);
+      }
+
+      picker.dataset.id = where?.id || "";
+      picker.click();
+    }
+
+    function pictureRow(item) {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-actions";
+
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "ve-diagram-add";
+      add.innerHTML = `<i class="ph ph-image" aria-hidden="true"></i><span>${
+        item.image ? "Replace the picture" : "Add a picture"}</span>`;
+      add.addEventListener("click", () => askForPicture({ id: item.id }));
+      row.append(add);
+
+      if (item.image) {
+        const drop = document.createElement("button");
+        drop.type = "button";
+        drop.className = "ve-diagram-add";
+        drop.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i><span>Take it off</span>';
+        drop.addEventListener("click", () => {
+          delete item.image;
+          write();
+          drawAtOnce();
+          paintInspector();
+        });
+
+        row.append(drop);
+      }
+
+      return row;
+    }
+
     /* The type a box is set in: a family, a size, and the two switches.
      *
      * All of it goes the same way a colour and a border go — into a classDef,
@@ -3808,9 +3962,14 @@
         captioned("Shape", shapeSelect(item)),
         captioned("Fill", colourRow([item.id])),
         captioned("Border", borderRow([item.id])),
-        captioned("Font", fontRow([item.id])),
-        actions
+        captioned("Font", fontRow([item.id]))
       );
+
+      if (canUpload) {
+        inspector.append(captioned("Picture", pictureRow(item)));
+      }
+
+      inspector.append(actions);
 
       if (out.length > 0) {
         const legend = document.createElement("div");
@@ -4121,7 +4280,165 @@
 
     const body = document.createElement("div");
     body.className = "ve-diagram-body";
-    body.append(rail, stage, side);
+
+    /* How wide the two sides are, and whether they are there at all.
+     *
+     * Kept in the browser rather than in the diagram: how much room somebody
+     * wants for the shapes is about their screen and their hands, not about the
+     * drawing — a diagram that carried it would hand one person's window to
+     * everyone who opened the file. Storage can refuse (a private window, site
+     * data switched off), and a panel that will not open because of that is
+     * worse than one that forgot how wide it was, so every read and write of it
+     * is allowed to fail.
+     */
+    const PANEL_STORE = "azadocs:diagram:panels";
+    const PANELS = {
+      rail: { least: 56, most: 260, standard: 132 },
+      side: { least: 200, most: 520, standard: 300 }
+    };
+
+    const panels = {
+      rail: PANELS.rail.standard,
+      side: PANELS.side.standard,
+      railShut: false,
+      sideShut: false
+    };
+
+    const inBounds = (which, value) => Math.min(PANELS[which].most,
+      Math.max(PANELS[which].least, Math.round(Number(value) || 0)));
+
+    function showPanels() {
+      body.style.setProperty("--dd-rail", `${panels.rail}px`);
+      body.style.setProperty("--dd-side", `${panels.side}px`);
+      body.classList.toggle("is-rail-shut", panels.railShut);
+      body.classList.toggle("is-side-shut", panels.sideShut);
+      // A rail too narrow for the words is a rail of pictures, which is what
+      // the phone already does with it — one rule, reached two ways.
+      body.classList.toggle("is-rail-tight", panels.rail < 108);
+    }
+
+    function rememberPanels() {
+      try {
+        window.localStorage?.setItem(PANEL_STORE, JSON.stringify(panels));
+      } catch {
+        // Somewhere that will not keep it. The panels still work.
+      }
+    }
+
+    try {
+      const kept = JSON.parse(window.localStorage?.getItem(PANEL_STORE) || "null");
+      if (kept && typeof kept === "object") {
+        panels.rail = inBounds("rail", kept.rail ?? panels.rail);
+        panels.side = inBounds("side", kept.side ?? panels.side);
+        panels.railShut = Boolean(kept.railShut);
+        panels.sideShut = Boolean(kept.sideShut);
+      }
+    } catch {
+      // Nothing kept, or nothing readable. The standard widths, then.
+    }
+
+    /* The bar between two regions: drag it to move the edge, press the chevron
+     * to take the region away and bring it back.
+     *
+     * A separator rather than a decoration, so it can be tabbed to and moved
+     * with the arrow keys — an edge that can only be dragged is an edge that
+     * belongs to whoever has a mouse.
+     */
+    function panelGrip(which, side) {
+      const grip = document.createElement("div");
+      grip.className = `ve-diagram-grip ve-diagram-grip-${which}`;
+      grip.setAttribute("role", "separator");
+      grip.setAttribute("aria-orientation", "vertical");
+      grip.tabIndex = 0;
+
+      const shutKey = `${which}Shut`;
+      const what = which === "rail" ? "the shapes" : "the panel";
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ve-diagram-grip-shut";
+      button.innerHTML = '<i class="ph ph-caret-left" aria-hidden="true"></i>';
+
+      const showGrip = () => {
+        const shut = panels[shutKey];
+        grip.setAttribute("aria-valuenow", String(panels[which]));
+        grip.setAttribute("aria-label", `How much room ${what} has`);
+        button.setAttribute("aria-expanded", shut ? "false" : "true");
+        button.title = shut ? `Show ${what}` : `Hide ${what}`;
+        button.setAttribute("aria-label", button.title);
+        // The chevron points the way pressing it moves the edge.
+        const away = which === "rail" ? shut : !shut;
+        button.firstChild.className = `ph ph-caret-${away ? "right" : "left"}`;
+      };
+
+      button.addEventListener("click", () => {
+        panels[shutKey] = !panels[shutKey];
+        showPanels();
+        showGrip();
+        rememberPanels();
+      });
+
+      const widen = (to) => {
+        panels[which] = inBounds(which, to);
+        panels[shutKey] = false;
+        showPanels();
+        showGrip();
+      };
+
+      let dragging = null;
+      grip.addEventListener("pointerdown", (event) => {
+        if (event.target.closest(".ve-diagram-grip-shut")) {
+          return;
+        }
+
+        dragging = { x: event.clientX, from: panels[which] };
+        grip.setPointerCapture?.(event.pointerId);
+        grip.classList.add("is-dragging");
+        event.preventDefault();
+      });
+
+      grip.addEventListener("pointermove", (event) => {
+        if (!dragging) {
+          return;
+        }
+
+        // The rail's edge is on its right and the panel's on its left, so the
+        // same drag widens one and narrows the other.
+        widen(dragging.from + ((event.clientX - dragging.x) * side));
+      });
+
+      const letGo = (event) => {
+        if (!dragging) {
+          return;
+        }
+
+        dragging = null;
+        grip.classList.remove("is-dragging");
+        grip.releasePointerCapture?.(event.pointerId);
+        rememberPanels();
+      };
+
+      grip.addEventListener("pointerup", letGo);
+      grip.addEventListener("pointercancel", letGo);
+
+      grip.addEventListener("keydown", (event) => {
+        const step = { ArrowLeft: -20, ArrowRight: 20 }[event.key];
+        if (step === undefined) {
+          return;
+        }
+
+        event.preventDefault();
+        widen(panels[which] + (step * side));
+        rememberPanels();
+      });
+
+      grip.append(button);
+      showGrip();
+      return grip;
+    }
+
+    body.append(rail, panelGrip("rail", 1), stage, panelGrip("side", -1), side);
+    showPanels();
 
     const shell = document.createElement("div");
     shell.className = "ve-diagram-shell";
