@@ -281,6 +281,7 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
   // The model and the renderer are loaded the way the page loads them: plain
   // scripts, before markdown-core, hanging themselves off the window.
   win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-model.js"), "utf8"));
+  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-icons.js"), "utf8"));
   win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-draw.js"), "utf8"));
   win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8"));
 

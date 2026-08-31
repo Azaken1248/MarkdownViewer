@@ -412,7 +412,7 @@
    * the value that was read wins over the value that was changed, and the edit
    * is thrown away on save. Every key read below has to appear here.
    */
-  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap"];
+  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap", "frame"];
   const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {
@@ -1069,6 +1069,18 @@
           }
         }
 
+        /* A box drawn without its box.
+         *
+         * Mermaid has no way to say "no shape" — every labelled node is written
+         * with brackets of some kind — so this is written as the rectangle it
+         * nearly is and the missing frame is said beside it. Which is the same
+         * bargain the arrow ends already make: the nearest real syntax in the
+         * diagram, and what was actually meant in the comment.
+         */
+        if (at.attributes.frame === "none") {
+          node.frame = "none";
+        }
+
         for (const key of ["layer", "z", "pad", "gap"]) {
           if (at.attributes[key] !== undefined && /^-?\d+$/.test(at.attributes[key])) {
             node[key] = Number(at.attributes[key]);
@@ -1260,6 +1272,7 @@
            * chosen rather than what everything happens to be, and there is one
            * place that decides so rather than two that have to agree.
            */
+          frame: node.frame === "none" ? "none" : "",
           pad: Number.isFinite(node.pad) && node.pad !== TABLE_PAD.standard
             ? String(node.pad) : "",
           gap: Number.isFinite(node.gap) && node.gap !== TABLE_GAP.standard

@@ -13,7 +13,8 @@
     "test": "node test/run.js",
     "images": "node tools/make-embed-images.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "icons": "node tools/make-icon-sprite.js"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "eslint": "^9.15.0",
-    "jsdom": "^25.0.1"
+    "jsdom": "^25.0.1",
+    "lucide-static": "^1.34.0"
   }
 }

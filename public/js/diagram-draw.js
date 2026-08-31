@@ -238,6 +238,53 @@
 
   const imageOf = (node) => (IMAGE_RE.test(String(node?.image || "")) ? node.image : "");
 
+  /* An icon, if it is one this build has.
+   *
+   * Named by set and by name, `lucide:database`, because there will be a second
+   * set and a name on its own would then mean two things. A name this has never
+   * heard of draws nothing at all — which is what a file written by a later
+   * version of this app says, and a box with its words in it is a better answer
+   * to that than a gap where a picture should be.
+   */
+  const ICON_RE = /^lucide:([a-z0-9-]+)$/;
+  const ICON_SIZE = 24;
+
+  function iconBody(node) {
+    const found = ICON_RE.exec(String(node?.icon || ""));
+    return found ? (global.DiagramIcons?.bodyOf(found[1]) || "") : "";
+  }
+
+  /* The icon, drawn as big as the box will let it be and no bigger.
+   *
+   * Lucide's grid is 24 across, so the whole of it is scaled to whatever room
+   * is left over — one transform, rather than 180 icons each drawn to a size
+   * somebody chose. It keeps its own proportions because the scale is the same
+   * both ways, and it is stroked in the box's own text colour because that is
+   * what currentColor means.
+   */
+  function iconMarkup(node, at) {
+    const body = iconBody(node);
+    if (!body) {
+      return "";
+    }
+
+    const words = Model.textRows(node.text || "").filter((row) => row !== "");
+    const band = words.length > 0 ? (words.length * LINE_HEIGHT) + 2 : 0;
+    const room = Math.min(at.w - (IMAGE_PAD * 2), at.h - (IMAGE_PAD * 2) - band);
+
+    if (room <= 0) {
+      return "";
+    }
+
+    const scale = room / ICON_SIZE;
+    const x = (at.w - room) / 2;
+    const y = (at.h - band - room) / 2;
+
+    return `<g class="dd-icon" transform="translate(${round(x)},${round(y)})`
+      + ` scale(${round(scale)})">${body}</g>`
+      + (words.length > 0 ? centredText(words, at.w, band, at.h - band) : "");
+  }
+
   /* The picture, and the words under it.
    *
    * Fitted rather than filled: a picture stretched to the shape of the box it
@@ -276,10 +323,19 @@
         charWidthOf(node, classes));
     }
 
-    return shapeMarkup(node.shape, at.w, at.h)
-      + (imageOf(node)
-        ? pictureMarkup(node, at)
-        : centredText(Model.textRows(words), at.w, at.h));
+    /* What is in the box: a picture, an icon, or its words. A picture beats an
+     * icon because it is the more particular of the two — nobody drops a
+     * photograph on a box meaning to keep the little drawing under it.
+     */
+    const inside = imageOf(node)
+      ? pictureMarkup(node, at)
+      : iconMarkup(node, at) || centredText(Model.textRows(words), at.w, at.h);
+
+    /* A box drawn without its box: an icon or a picture standing on the paper
+     * on its own, which is what most of a technical diagram is. The shape is
+     * the frame; without one there is nothing to draw but what is inside.
+     */
+    return (node.frame === "none" ? "" : shapeMarkup(node.shape, at.w, at.h)) + inside;
   }
 
   /* --- Colour ---------------------------------------------------------------

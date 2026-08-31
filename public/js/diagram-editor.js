@@ -221,7 +221,18 @@
       glyph: '<rect x="1" y="2" width="16" height="10" rx="5"/>' },
     { shape: "circle", kind: "box", label: "Circle", glyph: '<circle cx="9" cy="7" r="5.5"/>' },
     { shape: "rect", kind: "table", label: "Table",
-      glyph: '<rect x="1" y="2" width="16" height="10"/><path d="M1,5.5 H17"/>' }
+      glyph: '<rect x="1" y="2" width="16" height="10"/><path d="M1,5.5 H17"/>' },
+    /* An icon and a picture standing on the paper on their own, which is what
+     * most of a technical diagram is. Both are boxes underneath — they can be
+     * joined, moved and labelled like everything else — but a box drawn without
+     * its box, so what is on the paper is the thing rather than the thing in a
+     * rectangle.
+     */
+    { shape: "rect", kind: "box", label: "Icon", frame: "none", icon: "lucide:database",
+      glyph: '<path d="M9,2 A6,2 0 1 0 9,6 A6,2 0 1 0 9,2"/><path d="M3,4 V10 A6,2 0 0 0 15,10 V4"/>' },
+    { shape: "rect", kind: "box", label: "Picture", frame: "none", picture: true,
+      glyph: '<rect x="1" y="2" width="16" height="10"/><path d="M1,10 L6,6 L11,10"/>'
+        + '<circle cx="12.5" cy="5.5" r="1.2"/>' }
   ];
 
   // One picture of a shape, at the size a label sits beside.
@@ -2714,10 +2725,19 @@
         item.kind = kind;
       }
 
-      // A picture is not a shape, so it does not decide what the box is — it is
-      // one more thing the box is carrying, like its colour.
+      // A picture and an icon are not shapes, so they do not decide what the box
+      // is — they are more things the box is carrying, like its colour. Nor is
+      // the frame, which is only whether the shape is drawn at all.
       if (options.image) {
         item.image = options.image;
+      }
+
+      if (options.icon) {
+        item.icon = options.icon;
+      }
+
+      if (options.frame === "none") {
+        item.frame = "none";
       }
 
       model.nodes.push(item);
@@ -2820,6 +2840,18 @@
      * element rather than anything in the drawing, because until it is let go it
      * is not part of the diagram.
      */
+    /* What a shape on the rail puts on the paper. Everything the entry carries
+     * except the parts that are about the button rather than about the box.
+     */
+    const fromPalette = (choice) => ({
+      shape: choice.shape,
+      kind: choice.kind,
+      frame: choice.frame,
+      icon: choice.icon,
+      text: choice.icon ? "" : undefined,
+      size: choice.icon ? { w: 80, h: 80 } : undefined
+    });
+
     const palette = document.createElement("div");
     palette.className = "ve-diagram-palette";
 
@@ -2848,8 +2880,15 @@
           // Nothing was captured.
         }
 
+        // The picture tool has nothing to put down until there is a picture, so
+        // it asks for one and drops the box where the file lands instead.
+        if (choice.picture) {
+          askForPicture({ frame: "none" });
+          return;
+        }
+
         if (!dragging) {
-          addBox({ shape: choice.shape, kind: choice.kind });
+          addBox(fromPalette(choice));
           return;
         }
 
@@ -2863,7 +2902,7 @@
         }
 
         const point = pointIn(event.clientX, event.clientY);
-        addBox({ shape: choice.shape, kind: choice.kind, x: point.x, y: point.y });
+        addBox({ ...fromPalette(choice), x: point.x, y: point.y });
       };
 
       button.addEventListener("pointerdown", (event) => {
@@ -2978,7 +3017,7 @@
     const stepSelect = (value, label, className) => {
       const picker = document.createElement("select");
       picker.className = className;
-      picker.setAttribute("aria-label", label);
+      named(picker, label);
 
       for (const item of model.nodes) {
         const option = document.createElement("option");
@@ -3001,12 +3040,20 @@
       return button;
     };
 
+    /* Whether the box is drawn at all.
+     *
+     * On the end of the shape menu rather than beside it, because "no shape" is
+     * an answer to "what shape is this" — and a box whose picture is the whole
+     * of it is what most of a technical diagram is made of.
+     */
+    const NO_FRAME = "none";
+
     // The shape menu, with the table on the end of it. A table is a kind rather
     // than a shape, but from here it is one more thing a box can be.
     const shapeSelect = (item) => {
       const shape = document.createElement("select");
       shape.className = "ve-diagram-shape";
-      shape.setAttribute("aria-label", "Step shape");
+      named(shape, "Step shape");
 
       for (const name of diagramShapeChoices(item.shape)) {
         const option = document.createElement("option");
@@ -3020,8 +3067,28 @@
       table.textContent = "Table";
       shape.appendChild(table);
 
-      shape.value = item.kind === "table" ? "table" : item.shape;
+      const bare = document.createElement("option");
+      bare.value = NO_FRAME;
+      bare.textContent = "No frame";
+      shape.appendChild(bare);
+
+      shape.value = item.frame === NO_FRAME
+        ? NO_FRAME
+        : (item.kind === "table" ? "table" : item.shape);
+
       shape.addEventListener("change", () => {
+        // The frame is not a shape, so choosing one puts the frame back and
+        // choosing "no frame" leaves the shape it had underneath it.
+        if (shape.value === NO_FRAME) {
+          item.frame = NO_FRAME;
+          delete item.kind;
+          commit();
+          paintLists();
+          return;
+        }
+
+        delete item.frame;
+
         if (shape.value === "table") {
           item.kind = "table";
         } else {
@@ -3070,7 +3137,7 @@
       field.placeholder = item.kind === "table"
         ? "Title\nName | Type\nid | int"
         : item.id;
-      field.setAttribute("aria-label", item.kind === "table" ? "Table rows" : "Step label");
+      named(field, item.kind === "table" ? "Table rows" : "Step label");
 
       const fit = () => {
         field.rows = Math.min(LABEL_ROWS_MAX,
@@ -3088,6 +3155,21 @@
       });
 
       return field;
+    };
+
+    /* Every field the editor makes gets a name.
+     *
+     * A form control with neither an id nor a name is one the browser will not
+     * autofill and cannot report on, and this panel is nothing but generated
+     * fields — so the name is made from what the control is already called for
+     * a screen reader, and there is one place that does it rather than a dozen
+     * that must remember to.
+     */
+    const named = (control, label) => {
+      control.setAttribute("aria-label", label);
+      control.name = `dd-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+        .replace(/-+$/, "");
+      return control;
     };
 
     /* A control with its name written over it.
@@ -3129,7 +3211,7 @@
       const field = document.createElement("input");
       field.type = "text";
       field.className = "ve-diagram-cell";
-      field.setAttribute("aria-label", label);
+      named(field, label);
       field.value = (DiagramModel.textCells(item.text || item.id)[row] || [])[column] || "";
 
       field.addEventListener("input", () => {
@@ -3337,7 +3419,7 @@
     const chooser = (className, aria, choices, value) => {
       const select = document.createElement("select");
       select.className = className;
-      select.setAttribute("aria-label", aria);
+      named(select, aria);
 
       for (const [name, text] of choices) {
         const choice = document.createElement("option");
@@ -3402,7 +3484,7 @@
       label.className = "ve-diagram-text";
       label.value = edge.label;
       label.placeholder = "label";
-      label.setAttribute("aria-label", "Arrow label");
+      named(label, "Arrow label");
 
       const to = stepSelect(edge.to, "Arrow to", "ve-diagram-pick");
       const drop = dropButton("Remove this arrow");
@@ -3640,7 +3722,7 @@
       custom.type = "color";
       custom.className = "ve-diagram-swatch ve-diagram-swatch-custom";
       custom.title = "Any colour";
-      custom.setAttribute("aria-label", "Any colour");
+      named(custom, "Any colour");
       custom.value = "#8ed9cf";
       custom.addEventListener("change", () => {
         restyle(ids, {
@@ -3739,6 +3821,7 @@
           shape: "rect",
           text: pictureName(file),
           image: url,
+          frame: where?.frame,
           x: where?.x,
           y: where?.y,
           size: DIAGRAM_IMAGE_BOX
@@ -3759,13 +3842,16 @@
         picker.addEventListener("change", () => {
           const file = picker.files?.[0];
           picker.value = "";
-          void putPicture(file, picker.dataset.id ? { id: picker.dataset.id } : null);
+          void putPicture(file, picker.dataset.id
+            ? { id: picker.dataset.id }
+            : { frame: picker.dataset.frame });
         });
 
         node.append(picker);
       }
 
       picker.dataset.id = where?.id || "";
+      picker.dataset.frame = where?.frame || "";
       picker.click();
     }
 
@@ -3797,6 +3883,112 @@
       }
 
       return row;
+    }
+
+    /* The icons, and the search over them.
+     *
+     * Named by set and by name — `lucide:database` — because there will be a
+     * second set one day and a name on its own would then mean two things.
+     * Searched by name too: Lucide's names say what the picture is, which is
+     * why a list of keywords beside them would be a second thing to keep in
+     * step with the first.
+     */
+    const ICON_SET = "lucide";
+    let iconSearch = "";
+
+    const iconName = (item) =>
+      String(item?.icon || "").replace(new RegExp(`^${ICON_SET}:`), "");
+
+    function setIcon(item, name) {
+      if (name) {
+        item.icon = `${ICON_SET}:${name}`;
+      } else {
+        delete item.icon;
+      }
+
+      write();
+      paintLists();
+      drawAtOnce();
+      paintInspector();
+    }
+
+    function iconRow(item) {
+      const holder = document.createElement("div");
+      holder.className = "ve-diagram-icons";
+
+      const worn = iconName(item);
+
+      const find = document.createElement("input");
+      find.type = "search";
+      find.className = "ve-diagram-find";
+      find.placeholder = "Search icons";
+      find.value = iconSearch;
+      named(find, "Search icons");
+
+      const grid = document.createElement("div");
+      grid.className = "ve-diagram-icon-grid";
+      grid.setAttribute("role", "group");
+      grid.setAttribute("aria-label", "Icons");
+
+      const none = document.createElement("div");
+      none.className = "ve-diagram-hint";
+
+      const paintIcons = () => {
+        grid.replaceChildren();
+        const looking = iconSearch.trim().toLowerCase();
+        let shown = 0;
+
+        for (const [title, names] of DiagramIcons.GROUPS) {
+          const found = looking
+            ? names.filter((name) => name.includes(looking))
+            : names;
+
+          if (found.length === 0) {
+            continue;
+          }
+
+          // The groups are kept while nothing is being searched for, so the
+          // storage ones are together rather than scattered through an
+          // alphabet. Searching is already a grouping, so it takes over.
+          if (!looking) {
+            const legend = document.createElement("div");
+            legend.className = "ve-diagram-legend ve-diagram-icon-legend";
+            legend.textContent = title;
+            grid.append(legend);
+          }
+
+          for (const name of found) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `ve-diagram-icon-one${name === worn ? " is-on" : ""}`;
+            button.title = name.replace(/-/g, " ");
+            button.setAttribute("aria-label", button.title);
+            button.setAttribute("aria-pressed", name === worn ? "true" : "false");
+            button.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18"`
+              + ` fill="none" stroke="currentColor" stroke-width="2"`
+              + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+              + `${DiagramIcons.bodyOf(name)}</svg>`;
+            // Wearing it already, pressing it takes it off — which is the only
+            // way a grid of switches can also be a way to say "none of these".
+            button.addEventListener("click", () =>
+              setIcon(item, name === worn ? "" : name));
+            grid.append(button);
+            shown += 1;
+          }
+        }
+
+        none.textContent = shown === 0 ? `No icon is called "${iconSearch.trim()}".` : "";
+        none.hidden = shown > 0;
+      };
+
+      find.addEventListener("input", () => {
+        iconSearch = find.value;
+        paintIcons();
+      });
+
+      paintIcons();
+      holder.append(find, grid, none);
+      return holder;
     }
 
     /* The type a box is set in: a family, a size, and the two switches.
@@ -3969,6 +4161,8 @@
         inspector.append(captioned("Picture", pictureRow(item)));
       }
 
+      inspector.append(captioned("Icon", iconRow(item)));
+
       inspector.append(actions);
 
       if (out.length > 0) {
@@ -3997,7 +4191,7 @@
     const flowControl = () => {
       const flow = document.createElement("select");
       flow.className = "ve-diagram-kind ve-diagram-direction";
-      flow.setAttribute("aria-label", "Diagram direction");
+      named(flow, "Diagram direction");
 
       // TB and TD mean the same thing to Mermaid and only one of them is on the
       // menu, so a diagram written with the other keeps it rather than being
@@ -4185,7 +4379,7 @@
       zoomField = document.createElement("input");
       zoomField.type = "text";
       zoomField.className = "ve-diagram-zoom-value";
-      zoomField.setAttribute("aria-label", "Zoom");
+      named(zoomField, "Zoom");
       zoomField.value = "100%";
 
       const readTyped = () => {

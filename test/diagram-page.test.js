@@ -79,7 +79,7 @@ async function boot(dom, { cookie, origin }) {
   // it settles the theme before anything paints, and it is where the switch the
   // bar wires up lives.
   for (const file of ["theme-boot.js", "visual-editor.js", "diagram-model.js",
-    "diagram-draw.js", "diagram-editor.js", "diagram-page.js"]) {
+    "diagram-icons.js", "diagram-draw.js", "diagram-editor.js", "diagram-page.js"]) {
     window.eval(fs.readFileSync(path.join(ROOT, "js", file), "utf8"));
   }
 
@@ -499,6 +499,30 @@ async function run(server, cookie) {
     // Six shapes, each showing the outline it puts on the paper. An icon font's
     // nearest square is not that, so these are drawn here.
     const shapes = [...page.document.querySelectorAll(".ve-diagram-tool")];
+    /* An icon and a picture on the rail, put down on their own rather than
+     * inside a rectangle: what is on the paper is the thing, which is what most
+     * of a technical diagram is made of.
+     */
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const rail = [...page.document.querySelectorAll(".ve-diagram-tool")]
+      .map((one) => one.textContent);
+    check("the rail offers an icon and a picture as well as the shapes",
+      rail.slice(-2), ["Icon", "Picture"]);
+
+    const icon = [...page.document.querySelectorAll(".ve-diagram-tool")]
+      .find((one) => one.textContent === "Icon");
+    icon.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+    icon.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 300));
+
+    const put = [...canvas.querySelectorAll(".dd-node")].pop();
+    check("an icon put down is an icon and not a rectangle with one in it",
+      [Boolean(put.querySelector(".dd-icon")), Boolean(put.querySelector(".dd-shape"))],
+      [true, false]);
+    check("...and is still a box, so it can be joined and moved like the rest",
+      Boolean(put.getAttribute("data-id")), true);
+
     check("every shape on the rail shows a picture of itself",
       shapes.length > 0 && shapes.every((one) => one.querySelector("svg.ve-diagram-glyph")),
       true);
@@ -552,7 +576,7 @@ async function run(server, cookie) {
     check("...with the way to remove it up there, since it is not a property of it",
       Boolean(inspector.querySelector(".ve-diagram-picked > .ve-diagram-drop")), true);
     check("...and every control below it named",
-      captions(), ["Label", "Shape", "Fill", "Border", "Font", "Picture"]);
+      captions(), ["Label", "Shape", "Fill", "Border", "Font", "Picture", "Icon"]);
 
     // A label wrapping its control is also the label that control answers to,
     // so the caption is a way into the field rather than a word beside it. A
@@ -2138,6 +2162,98 @@ async function run(server, cookie) {
       /^\s*A --> B\s*$/m.test(back), true);
     check("...and grows no comment saying what it already says",
       /ends=/.test(back), false);
+  }
+
+  console.log("=== an icon is picked out of a grid of them ===");
+  {
+    await server.request("POST", "/api/docs",
+      { fileName: "icons.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x100",
+        "    A[Store]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/icons.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = () => canvas.querySelector('.dd-node[data-id="A"]');
+
+    const tap = () => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf().getAttribute("transform"));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf().dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    const grid = () => inspector.querySelector(".ve-diagram-icon-grid");
+    const offered = () => [...grid().querySelectorAll(".ve-diagram-icon-one")]
+      .map((one) => one.getAttribute("aria-label"));
+    const legends = () => [...grid().querySelectorAll(".ve-diagram-icon-legend")]
+      .map((one) => one.textContent);
+    const press = (label) => [...grid().querySelectorAll(".ve-diagram-icon-one")]
+      .find((one) => one.getAttribute("aria-label") === label)
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const find = () => inspector.querySelector(".ve-diagram-find");
+    const search = (words) => {
+      find().value = words;
+      find().dispatchEvent(new window.Event("input", { bubbles: true }));
+    };
+    const drawn = () => Boolean(groupOf().querySelector(".dd-icon"));
+
+    tap();
+    check("a box offers every icon this build has", offered().length > 100, true);
+    check("...in the groups somebody looking for one would think of",
+      legends().slice(0, 2), ["Machines", "Networks"]);
+    check("...wearing none of them", drawn(), false);
+
+    press("database");
+    check("picking one puts it on the box", drawn(), true);
+    check("...and says which one is on", (() => {
+      const on = [...grid().querySelectorAll('.ve-diagram-icon-one[aria-pressed="true"]')];
+      return on.map((one) => one.getAttribute("aria-label"));
+    })(), ["database"]);
+    // The icon's own markup sits between the text nodes, so what the box says
+    // is what is left once that whitespace is taken out.
+    check("...leaving the words underneath it", groupOf().textContent.trim(), "Store");
+
+    /* Searched by name, because Lucide's names say what the picture is — a list
+     * of keywords beside them would be a second thing to keep in step with the
+     * first. Searching is a grouping of its own, so it takes the groups over.
+     */
+    search("cloud");
+    check("searching narrows it to what matches",
+      offered().every((name) => name.includes("cloud")), true);
+    check("...to more than one thing", offered().length > 2, true);
+    check("...and drops the groups, being a grouping itself", legends(), []);
+
+    search("zzz");
+    check("a search that matches nothing says so",
+      [offered(), inspector.querySelector(".ve-diagram-hint:not([hidden])").textContent],
+      [[], 'No icon is called "zzz".']);
+
+    search("");
+    check("clearing it brings them all back", offered().length > 100, true);
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/icons.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("an icon reaches the file beside where its box is",
+      /%% @ A 100,100 120x100 icon=lucide:database/.test(written), true);
+    check("...and the box keeps its label, which is what travels everywhere else",
+      /A\[Store\]/.test(written), true);
+
+    // Wearing it already, pressing it takes it off — the only way a grid of
+    // switches can also be a way to say "none of these".
+    press("database");
+    check("pressing the one that is on takes it off", drawn(), false);
+
+    page.window.close();
   }
 
   console.log("=== a picture is dropped on the paper where it lands ===");

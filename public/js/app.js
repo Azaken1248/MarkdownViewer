@@ -2616,6 +2616,9 @@ function renderUsers() {
     const roleCell = document.createElement("td");
     const roleSelect = document.createElement("select");
     roleSelect.className = "users-role";
+    // A control with neither an id nor a name is one the browser will not
+    // autofill and cannot report on. Every field made here gets one.
+    roleSelect.name = "user-role";
     for (const role of ["viewer", "editor", "admin"]) {
       const option = document.createElement("option");
       option.value = role;
@@ -4167,6 +4170,7 @@ function beginGroupEdit(card, link) {
 
   const input = document.createElement("input");
   input.type = "text";
+  input.name = "link-groups";
   input.value = linkGroupsOf(link).join(", ");
   input.setAttribute("aria-label", `Groups for ${link.title || link.url}`);
   input.placeholder = "osu, APIs";
@@ -5021,6 +5025,7 @@ function beginInlineEdit(labelNode, currentValue, commit) {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "tree-rename-input";
+  input.name = "rename";
   input.value = currentValue;
   input.setAttribute("aria-label", "New name");
 
@@ -6840,6 +6845,7 @@ function renderCodeBlock(block, index) {
 
   const language = document.createElement("input");
   language.className = "ve-code-language";
+  language.name = "code-language";
   language.value = fence.info;
   language.placeholder = "language";
   language.spellcheck = false;
@@ -7019,6 +7025,7 @@ function openEmbedSource(node, block) {
 
   const area = document.createElement("textarea");
   area.className = "ve-embed-source";
+  area.name = "block-source";
   area.value = blockSource(block).replace(/\n+$/, "");
   area.spellcheck = false;
   area.setAttribute("aria-label", `${embedLabel(block)} source`);

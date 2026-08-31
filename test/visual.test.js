@@ -28,6 +28,7 @@ const DM = globalThis.DiagramModel;
 
 // And the drawing, which is what makes writing the layout down worth doing: a
 // diagram that says where its boxes are is one this app can draw itself.
+require(path.join(ROOT, "js", "diagram-icons.js"));
 require(path.join(ROOT, "js", "diagram-draw.js"));
 const DD = globalThis.DiagramDraw;
 
@@ -2088,6 +2089,135 @@ console.log("=== a table with columns is drawn as a grid ===");
   const gappy = table("T<br/>a | <br/> | d", 200, 126);
   check("an empty cell is not written",
     (gappy.match(/<text class="dd-text/g) || []).length, 3);
+}
+
+console.log("=== an icon in a box ===");
+{
+  const boxed = (node, w = 120, h = 100) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", ...node }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h } }
+  }, { natural: true });
+
+  /* Built, not written: the sprite is made by tools/make-icon-sprite.js from
+   * lucide-static and committed, so the app has no request to make and no font
+   * to load — a diagram is drawn into an SVG this builds as a string, and an
+   * icon has to be markup it already has.
+   */
+  const DI = globalThis.DiagramIcons;
+  check("the sprite is a set of icons with names", DI.names().length > 100, true);
+  check("...grouped the way somebody looking for one would think of it",
+    DI.GROUPS[0][0], "Machines");
+  check("...with every grouped name actually in it",
+    DI.GROUPS.flatMap(([, names]) => names).filter((name) => !DI.bodyOf(name)), []);
+  check("...and every icon in it in exactly one group",
+    DI.GROUPS.flatMap(([, names]) => names).length, DI.names().length);
+
+  // Lucide's own markup, with the wrapper taken off: no size, no viewBox, no
+  // stroke. Those belong to the box it is drawn in, and repeating them 180
+  // times would be 180 copies of a decision made once.
+  check("an icon is the inside of its file and nothing else",
+    /viewBox|stroke-width|<svg/.test(DI.bodyOf("database")), false);
+
+  /* Named by set and by name, because there will be a second set one day and a
+   * name on its own would then mean two things.
+   */
+  const worn = boxed({ text: "Store", icon: "lucide:database" });
+  check("a box with an icon draws it", /<g class="dd-icon"/.test(worn), true);
+  check("...scaled to what the box has room for, as one transform",
+    /<g class="dd-icon" transform="translate\(27,6\) scale\(2\.8\)"/.test(worn), true);
+  check("...with the words in the strip under it",
+    /<tspan x="60" y="89">Store<\/tspan>/.test(worn), true);
+
+  // The same proportions both ways, so an icon in a wide box is not a stretched
+  // icon — the scale is one number, not two.
+  const wide = boxed({ text: "", icon: "lucide:database" }, 300, 100);
+  check("an icon in a box of any shape keeps its own",
+    /<g class="dd-icon" transform="translate\(106,6\) scale\(3\.7\)"/.test(wide), true);
+
+  /* A name this build has never heard of draws nothing at all, and the box
+   * falls back to its words — which is what a file written by a later version
+   * of this app says, and a box with its label in it is a better answer to
+   * that than a gap where a picture should be.
+   */
+  const refused = ["lucide:not-an-icon", "database", "lucide:../../etc", "LUCIDE:DATABASE",
+    "material:database", "<script>", "lucide:database "];
+  check("a name this build does not have draws no icon",
+    refused.filter((icon) => /dd-icon/.test(boxed({ text: "x", icon }))), []);
+  check("...and the box says what it says instead",
+    /<tspan[^>]*>x<\/tspan>/.test(boxed({ text: "x", icon: refused[0] })), true);
+
+  // A picture beats an icon: nobody drops a photograph on a box meaning to keep
+  // the little drawing under it.
+  const both = boxed({ text: "x", icon: "lucide:database",
+    image: `/api/assets/${"a".repeat(64)}.png` });
+  check("a box with both a picture and an icon shows the picture",
+    [/<image/.test(both), /dd-icon/.test(both)], [true, false]);
+
+  // It travels in the layout comment, where everything Mermaid cannot say goes.
+  const written = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Store", icon: "lucide:database" }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 120, h: 100 } }
+  });
+  check("an icon reaches the file beside where its box is",
+    /%% @ A 0,0 120x100 icon=lucide:database/.test(written), true);
+
+  const read = DM.parseFlowchart(written).nodes[0];
+  check("...and comes back off it", read.icon, "lucide:database");
+  check("...as something the model understood", read.extra, undefined);
+}
+
+console.log("=== a box drawn without its box ===");
+{
+  const boxed = (node) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", ...node }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 120, h: 100 } }
+  }, { natural: true });
+
+  /* An icon or a picture standing on the paper on its own, which is what most
+   * of a technical diagram is. Still a box underneath — it can be joined, moved
+   * and labelled like everything else — but the shape is the frame, and without
+   * one there is nothing to draw but what is inside.
+   */
+  const bare = boxed({ text: "Store", icon: "lucide:database", frame: "none" });
+  check("a box with no frame draws no shape", /dd-shape/.test(bare), false);
+  check("...and draws what is in it just the same",
+    [/dd-icon/.test(bare), /Store/.test(bare)], [true, true]);
+
+  const framed = boxed({ text: "Store", icon: "lucide:database" });
+  check("...while a box that has one still has it", /dd-shape/.test(framed), true);
+
+  // Only that word. Anything else a file might say is a frame, because a box
+  // is the thing this draws and refusing to draw one on a typo is worse.
+  check("anything but 'none' is a box with a frame",
+    ["", "None", "off", "0", true].filter((frame) =>
+      !/dd-shape/.test(boxed({ text: "x", frame }))), []);
+
+  /* Mermaid has no way to say "no shape" — every labelled node is written with
+   * brackets of some kind — so it goes down as the rectangle it nearly is, and
+   * the missing frame is said beside it. The same bargain the arrow ends make.
+   */
+  const written = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", text: "Store", icon: "lucide:database", frame: "none" }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 120, h: 100 } }
+  });
+
+  check("a frameless box is still a real node in the diagram",
+    /A\[Store\]/.test(written), true);
+  check("...with the frame it has not got said beside it",
+    /icon=lucide:database frame=none/.test(written), true);
+
+  const read = DM.parseFlowchart(written).nodes[0];
+  check("...and comes back the way it went in",
+    [read.frame, read.shape, read.icon], ["none", "rect", "lucide:database"]);
+  check("...as something the model understood", read.extra, undefined);
 }
 
 console.log("=== a picture in a box ===");

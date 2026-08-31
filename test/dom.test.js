@@ -392,6 +392,7 @@ async function run(server) {
   // And the flowchart model the diagram builder is made of, and the drawing it
   // puts on the screen, the same way.
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-model.js"), "utf8"));
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-icons.js"), "utf8"));
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-draw.js"), "utf8"));
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-editor.js"), "utf8"));
 

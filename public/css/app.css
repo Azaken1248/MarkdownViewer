@@ -4420,6 +4420,106 @@ body.page-editing #dockEdit {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
+/* The icons: a search over them, and a grid of them under it. Capped and
+   scrolled, because 180 icons down a panel is a panel with nothing else
+   reachable in it. */
+.ve-diagram-icons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Not a cell, though it looks like one: a table's cells are counted, and a box
+   to search icons in is not one of them. */
+.ve-diagram-find {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.ve-diagram-find::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-find:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.ve-diagram-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 2px;
+  max-height: 190px;
+  padding: 2px;
+  overflow-y: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  scrollbar-width: thin;
+}
+
+/* A group's name takes the whole line above the icons in it, so the storage
+   ones read as a group rather than as the first few of a heap. */
+.ve-diagram-icon-legend {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  padding: 0 2px;
+}
+
+.ve-diagram-icon-legend:first-child {
+  margin-top: 0;
+}
+
+.ve-diagram-icon-one {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.ve-diagram-icon-one:hover {
+  border-color: var(--border-muted);
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* The one being worn. Pressing it again takes it off, which is the only way a
+   grid of switches can also be a way to say "none of these". */
+.ve-diagram-icon-one.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+/* Stroked in the box's own text colour, which is what currentColor means, and
+   never filled: Lucide's whole grid is drawn in strokes. */
+.dd .dd-icon {
+  fill: none;
+  stroke: var(--dd-text, var(--fg));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* The icon is scaled to the box, and a stroke scaled with it is a hairline in
+     a small box and a slab in a large one. */
+  vector-effect: non-scaling-stroke;
+}
+
 /* The type: a family and a size on one line, the two switches under them. */
 .ve-diagram-font {
   display: flex;
@@ -4894,6 +4994,10 @@ body.page-editing #dockEdit {
   .ve-diagram-mark {
     width: 40px;
     min-height: 38px;
+  }
+
+  .ve-diagram-icon-grid {
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
   }
 
   /* Both handles are dragged with a finger, so both have to be a finger wide.
