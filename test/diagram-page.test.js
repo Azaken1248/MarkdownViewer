@@ -72,7 +72,13 @@ async function boot(dom, { cookie, origin }) {
       headers: { ...(options.headers || {}), Cookie: cookie }
     });
 
-    return { ok: response.ok, status: response.status, json: () => response.json() };
+    return {
+      ok: response.ok,
+      status: response.status,
+      json: () => response.json(),
+      // Saving a picture asks for the app's own stylesheet, which is text.
+      text: () => response.text()
+    };
   };
 
   // theme-boot.js first, and for the same reason the page loads it in <head>:
@@ -508,7 +514,8 @@ async function run(server, cookie) {
     const rail = [...page.document.querySelectorAll(".ve-diagram-tool")]
       .map((one) => one.textContent);
     check("the rail offers an icon and a picture as well as the shapes",
-      rail.slice(-2), ["Icon", "Picture"]);
+      ["Icon", "Picture"].filter((one) => rail.includes(one)),
+      ["Icon", "Picture"]);
 
     const icon = [...page.document.querySelectorAll(".ve-diagram-tool")]
       .find((one) => one.textContent === "Icon");
@@ -527,6 +534,48 @@ async function run(server, cookie) {
       shapes.length > 0 && shapes.every((one) => one.querySelector("svg.ve-diagram-glyph")),
       true);
     check("...and still says what it is", shapes[0].textContent, "Box");
+
+    /* The rest of the vocabulary a technical diagram is drawn in, none of
+     * which Mermaid has brackets for. Each is written as the nearest real
+     * shape with the exact one said beside it, so what is dropped here has to
+     * come back out of the file as what was dropped.
+     */
+    const drop = async (label) => {
+      const tool = [...page.document.querySelectorAll(".ve-diagram-tool")]
+        .find((one) => one.textContent === label);
+      tool.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+      tool.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 300));
+      return [...canvas.querySelectorAll(".dd-node")].pop();
+    };
+
+    check("a note put down is a page with its corner turned down",
+      /L[\d.]+,[\d.]+ V/.test((await drop("Note")).querySelector(".dd-shape").getAttribute("d")),
+      true);
+    check("a cloud put down is one closed path rather than a heap of circles",
+      (await drop("Cloud")).querySelectorAll("path.dd-shape, circle.dd-shape").length, 1);
+    check("an actor put down is a figure with limbs",
+      Boolean((await drop("Actor")).querySelector(".dd-actor")), true);
+    check("a queue put down is a cylinder on its side",
+      /A [\d.]+,[\d.]+ 0 0 1/.test((await drop("Queue")).querySelector(".dd-shape").getAttribute("d")),
+      true);
+
+    /* Words on the paper with nothing round them. A heading over a group of
+     * boxes is not itself a step, and drawing a box round it says it is.
+     */
+    const text = await drop("Text");
+    check("text put down is words and no shape",
+      [text.textContent, Boolean(text.querySelector(".dd-shape"))], ["Text", false]);
+
+    await saveAndWait(page);
+    const vocabulary = (await server.request("GET", "/api/docs/regions.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...and each reaches the file as the nearest real shape",
+      ["A[", "((", "([", "[("].every((real) => vocabulary.includes(real)), true);
+    check("...with the exact one said beside it",
+      ["note", "cloud", "actor", "queue"]
+        .filter((name) => new RegExp(`shape=${name}`).test(vocabulary)),
+      ["note", "cloud", "actor", "queue"]);
 
     page.window.close();
   }
@@ -636,6 +685,84 @@ async function run(server, cookie) {
     check("...and the panel laid out in as many columns as the table has",
       inspector.querySelector(".ve-diagram-cells").style
         .getPropertyValue("--dd-columns"), "2");
+
+    page.window.close();
+  }
+
+  console.log("=== a picture of the diagram, for somewhere this app is not ===");
+  {
+    /* The file is the diagram. A picture of it is what you paste into
+     * something that cannot open one — so both are done to the whole diagram,
+     * and both live on the bar.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "picture.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 0,0 120x60",
+        "    %% @ B 0,140 100x60",
+        "    A[One]",
+        "    B[Two]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/picture.mmd`, cookie, origin });
+    const { window } = page;
+
+    const button = (label) => [...page.document.querySelectorAll(".ve-diagram-export")]
+      .find((one) => one.textContent === label);
+
+    check("the bar offers a picture of the diagram in two shapes",
+      [Boolean(button("SVG")), Boolean(button("PNG"))], [true, true]);
+    check("...and says so where the rest of the whole-diagram controls are",
+      Boolean(button("SVG").closest(".ve-diagram-bar")), true);
+
+    /* What is handed over, and under what name. The browser is given a link it
+     * clicks itself, so this is the only place the file is observable.
+     */
+    /* jsdom has no stylesheet and so no theme to read, which is exactly what
+     * the export reads. Put one on the page and it has something true to find.
+     */
+    page.document.documentElement.style.setProperty("--fg", "#e6edf3");
+    page.document.documentElement.style.setProperty("--canvas", "#06090a");
+
+    let handed = null;
+    window.URL.createObjectURL = (blob) => {
+      handed = blob;
+      return "blob:picture";
+    };
+    window.URL.revokeObjectURL = () => {};
+
+    let named = null;
+    const madeLink = window.document.createElement.bind(window.document);
+    window.document.createElement = (tag) => {
+      const made = madeLink(tag);
+      if (tag === "a") {
+        made.click = () => { named = made.download; };
+      }
+
+      return made;
+    };
+
+    button("SVG").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitFor(window, () => handed !== null, "the picture was never handed over");
+
+    check("saving hands over an SVG", handed.type, "image/svg+xml");
+    check("...named after the diagram rather than after nothing",
+      named, "picture.svg");
+
+    const text = await handed.text();
+    check("...carrying the rules it is painted by", text.includes("<style>.dd{"), true);
+    check("...and the theme it was painted in, as the page has it now",
+      /<svg[^>]*style="[^"]*--fg:#e6edf3/.test(text), true);
+    check("...painted on a background, since pale lines on an unknown page is"
+      + " a picture of nothing",
+      text.includes('fill="#06090a"'), true);
+    check("...and needing nothing else to be looked at",
+      /<(?:link|script)\b/.test(text), false);
+    check("...and it is the diagram that was on the screen",
+      (text.match(/<g class="dd-node" data-id=/g) || []).length, 2);
 
     page.window.close();
   }

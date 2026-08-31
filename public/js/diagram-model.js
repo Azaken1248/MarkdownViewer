@@ -66,9 +66,42 @@
     { name: "diamond", open: "{", close: "}", label: "Decision" }
   ];
 
+  /* The shapes this app draws that Mermaid has no brackets for.
+   *
+   * A note, a cloud, an actor and a queue are ordinary vocabulary in a
+   * technical diagram, and Mermaid's shape list stops well short of them. Same
+   * bargain as the arrow ends: the file carries the nearest real shape, so the
+   * diagram still reads as something sensible wherever else it is opened, and
+   * the exact shape is said beside it in the layout comment.
+   *
+   * `nearest` is chosen for what it says rather than for what it looks like. A
+   * queue is a cylinder lying down, so it is written as one; an actor is a
+   * single person, which is nearer a stadium than a rectangle; a cloud is the
+   * roundest thing Mermaid has.
+   */
+  const DRAWN_SHAPES = [
+    { name: "note", nearest: "rect", label: "Note" },
+    { name: "cloud", nearest: "circle", label: "Cloud" },
+    { name: "actor", nearest: "stadium", label: "Actor" },
+    { name: "queue", nearest: "cylinder", label: "Queue" }
+  ];
+
+  const DRAWN_BY_NAME = new Map(DRAWN_SHAPES.map((shape) => [shape.name, shape]));
+
+  /* How much of an actor is its name rather than the figure, and how short one
+   * can get before it stops reading as a person.
+   *
+   * Here rather than in the drawing because both the measuring and the drawing
+   * need it and they have to agree: a figure drawn to one share of the box and
+   * a label placed by another is a label written across somebody's chest.
+   */
+  const ACTOR_BAND = 0.28;
+  const ACTOR_LEAST = 96;
+
   // The shapes worth offering in a menu. The rest still parse and still come
   // back out unchanged; they are just not something anyone goes looking for.
-  const SHAPE_CHOICES = ["rect", "round", "stadium", "diamond", "circle", "hexagon", "cylinder", "subroutine"];
+  const SHAPE_CHOICES = ["rect", "round", "stadium", "diamond", "circle", "hexagon",
+    "cylinder", "subroutine", ...DRAWN_SHAPES.map((shape) => shape.name)];
 
   // Mermaid lets a link be drawn longer by adding dashes — "-->" and "---->"
   // are the same arrow with different rank spacing — so every token here
@@ -413,7 +446,7 @@
    * is thrown away on save. Every key read below has to appear here.
    */
   const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap", "frame",
-    "cells"];
+    "cells", "shape"];
   const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {
@@ -1082,6 +1115,14 @@
           node.frame = "none";
         }
 
+        /* A shape Mermaid has no brackets for. The brackets on the line said
+         * the nearest one it does have — which is what every other renderer
+         * will draw — and this says what was actually meant.
+         */
+        if (DRAWN_BY_NAME.has(at.attributes.shape)) {
+          node.shape = at.attributes.shape;
+        }
+
         const cells = readCellStyles(at.attributes.cells);
         if (Object.keys(cells).length > 0) {
           node.cells = cells;
@@ -1279,6 +1320,7 @@
            * place that decides so rather than two that have to agree.
            */
           frame: node.frame === "none" ? "none" : "",
+          shape: DRAWN_BY_NAME.has(node.shape) ? node.shape : "",
           pad: Number.isFinite(node.pad) && node.pad !== TABLE_PAD.standard
             ? String(node.pad) : "",
           gap: Number.isFinite(node.gap) && node.gap !== TABLE_GAP.standard
@@ -1325,7 +1367,11 @@
     /* --- The diagram ----------------------------------------------------- */
 
     const declare = (node, depth) => {
-      const shape = SHAPE_BY_NAME.get(node.shape) || SHAPE_BY_NAME.get("rect");
+      // One of ours is written as the nearest real shape; the layout comment
+      // beside it says which of ours it actually is.
+      const ours = DRAWN_BY_NAME.get(node.shape);
+      const shape = SHAPE_BY_NAME.get(ours ? ours.nearest : node.shape)
+        || SHAPE_BY_NAME.get("rect");
       // An unnamed box would serialize to nothing between the brackets, which
       // Mermaid reads as a parse error rather than as an empty box.
       const text = String(node.text ?? "").trim() || node.id;
@@ -1692,6 +1738,24 @@
       || node?.shape === "trapezoid-alt") {
       // Slanted sides eat into the width at the top or the bottom.
       width += 34;
+    } else if (node?.shape === "note") {
+      // The folded corner takes a bite out of the top right.
+      width += 16;
+    } else if (node?.shape === "cloud") {
+      // The words sit in the middle band; the bumps are all margin.
+      width *= 1.5;
+      height *= 1.8;
+    } else if (node?.shape === "queue") {
+      // A cylinder lying down: a rounded cap at each end, neither of which is
+      // anywhere to write.
+      width += 44;
+    } else if (node?.shape === "actor") {
+      /* A drawing with its name underneath rather than a box with words in it,
+       * so the height is what the figure needs and the words are extra. Below
+       * a certain size a stick figure stops being one.
+       */
+      width = Math.max(width, 90);
+      height = Math.max(ACTOR_LEAST, height / (1 - ACTOR_BAND));
     }
 
     return { w: snapUp(width), h: snapUp(height) };
@@ -2084,6 +2148,9 @@
   global.DiagramModel = {
     DIRECTIONS,
     SHAPES,
+    DRAWN_SHAPES,
+    ACTOR_BAND,
+    ACTOR_LEAST,
     SHAPE_CHOICES,
     EDGE_KINDS,
     ROUTE_SHAPES,

@@ -111,9 +111,100 @@
         return polygon([[0, 0], [w, 0], [w - slant, h], [slant, h]]);
       case "asymmetric":
         return polygon([[0, 0], [w, 0], [w, h], [0, h], [slant, h / 2]]);
+      case "note":
+        return noteMarkup(w, h);
+      case "cloud":
+        return cloudMarkup(w, h);
+      case "queue":
+        return queueMarkup(w, h);
+      case "actor":
+        return actorMarkup(w, h);
       default:
         return rect(w, h, RADIUS);
     }
+  }
+
+  /* --- The shapes Mermaid has no brackets for ------------------------------
+   *
+   * A note, a cloud, an actor and a queue: ordinary vocabulary in a technical
+   * diagram, and past the end of Mermaid's shape list. The file writes each as
+   * the nearest real shape and says the exact one beside it, so what is drawn
+   * here is the whole of the difference.
+   */
+
+  // A page with its top right corner turned down. The fold is drawn as well as
+  // cut out, because a corner that is merely missing reads as a mistake.
+  function noteMarkup(w, h) {
+    const fold = Math.min(16, w / 4, h / 4);
+
+    return `<path class="dd-shape" d="M0,0 H${round(w - fold)} L${round(w)},${round(fold)}`
+      + ` V${round(h)} H0 Z"/>`
+      + `<path class="dd-rule" fill="none" d="M${round(w - fold)},0 V${round(fold)}`
+      + ` H${round(w)}"/>`;
+  }
+
+  /* A cloud, as one closed path of cubic curves.
+   *
+   * Written on the unit square and multiplied out, rather than as arcs: a
+   * cubic scales by each axis independently and an arc does not, so this is
+   * the same cloud in a box of any shape instead of one that goes lopsided the
+   * wider it is dragged.
+   */
+  const CLOUD_PATH = [
+    [0.15, 1.00],
+    [0.02, 1.00, 0.00, 0.62, 0.10, 0.55],
+    [0.06, 0.36, 0.18, 0.22, 0.32, 0.30],
+    [0.36, 0.05, 0.60, 0.02, 0.62, 0.18],
+    [0.80, 0.14, 0.98, 0.22, 0.88, 0.45],
+    [1.02, 0.55, 0.98, 0.92, 0.85, 1.00]
+  ];
+
+  function cloudMarkup(w, h) {
+    const [start, ...curves] = CLOUD_PATH;
+    const at = (x, y) => `${round(x * w)},${round(y * h)}`;
+
+    const d = `M${at(start[0], start[1])}`
+      + curves.map(([ax, ay, bx, by, x, y]) =>
+        ` C${at(ax, ay)} ${at(bx, by)} ${at(x, y)}`).join("")
+      + " Z";
+
+    return `<path class="dd-shape" d="${d}"/>`;
+  }
+
+  /* A cylinder lying down, open at the left: a queue is a pipe things wait in,
+   * and the seam says which end they go in at.
+   */
+  function queueMarkup(w, h) {
+    const cap = Math.min(16, w / 5);
+    const ry = h / 2;
+
+    return `<path class="dd-shape" d="M${round(cap)},0 H${round(w - cap)}`
+      + ` A ${round(cap)},${round(ry)} 0 0 1 ${round(w - cap)},${round(h)}`
+      + ` H${round(cap)} A ${round(cap)},${round(ry)} 0 0 0 ${round(cap)},0 Z"/>`
+      + `<path class="dd-rule" fill="none" d="M${round(cap)},0`
+      + ` A ${round(cap)},${round(ry)} 0 0 1 ${round(cap)},${round(h)}"/>`;
+  }
+
+  /* A stick figure, in the part of the box its name does not take.
+   *
+   * The share it leaves is Model.ACTOR_BAND, which is also where the label is
+   * put — one number, read twice, because a figure drawn to one share and a
+   * name placed by another is a name written across somebody's chest.
+   */
+  function actorMarkup(w, h) {
+    const top = h * (1 - Model.ACTOR_BAND);
+    const cx = w / 2;
+    const head = top * 0.16;
+    const neck = top * 0.34;
+    const hip = top * 0.68;
+    const reach = Math.min(top * 0.28, w / 2);
+
+    return `<circle class="dd-shape" cx="${round(cx)}" cy="${round(top * 0.17)}"`
+      + ` r="${round(head)}"/>`
+      + `<path class="dd-actor" fill="none" d="M${round(cx)},${round(neck)} V${round(hip)}`
+      + ` M${round(cx - reach)},${round(top * 0.48)} H${round(cx + reach)}`
+      + ` M${round(cx)},${round(hip)} L${round(cx - reach)},${round(top)}`
+      + ` M${round(cx)},${round(hip)} L${round(cx + reach)},${round(top)}"/>`;
   }
 
   /* --- Text --------------------------------------------------------------
@@ -230,6 +321,24 @@
       + cells.join("");
   }
 
+  /* The words on a box: inside it, or under what it draws.
+   *
+   * A stick figure with its name written across its chest is not a labelled
+   * actor, it is a scribble. Shapes that are a drawing rather than a container
+   * keep a band along the bottom for the name, and the share they keep is the
+   * same number the drawing sets itself out by.
+   */
+  function labelMarkup(node, at, rows) {
+    if (node.shape !== "actor" || node.frame === "none") {
+      return centredText(rows, at.w, at.h);
+    }
+
+    const said = rows.filter((row) => row !== "");
+    return said.length > 0
+      ? centredText(said, at.w, at.h * Model.ACTOR_BAND, at.h * (1 - Model.ACTOR_BAND))
+      : "";
+  }
+
   // The inside of a box, in its own coordinates. Separate from the group around
   // it because resizing one redraws exactly this and nothing else.
   /* A picture in a box.
@@ -336,7 +445,7 @@
      */
     const inside = imageOf(node)
       ? pictureMarkup(node, at)
-      : iconMarkup(node, at) || centredText(Model.textRows(words), at.w, at.h);
+      : iconMarkup(node, at) || labelMarkup(node, at, Model.textRows(words));
 
     /* A box drawn without its box: an icon or a picture standing on the paper
      * on its own, which is what most of a technical diagram is. The shape is
@@ -1484,6 +1593,124 @@
       + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
   }
 
+  /* --- Saving a picture of it ----------------------------------------------
+   *
+   * A drawing that can be opened somewhere this app is not.
+   *
+   * On the page a diagram is drawn by markup this file writes, painted by rules
+   * in app.css, in the colours of whichever theme is on. Only the first of
+   * those three is inside the SVG, so an SVG saved as it stands opens elsewhere
+   * as a heap of black shapes on white.
+   *
+   * So an export carries the other two with it: the rules written for `.dd`,
+   * lifted out of the app's own stylesheet rather than written out again here,
+   * and the value of every variable those rules fall back to, read from the
+   * page as it is now. What is saved is what was on the screen, in the theme it
+   * was on the screen in.
+   */
+
+  /* Every rule in the stylesheet that is about the drawing, and only the ones
+   * at the top of it.
+   *
+   * Scanned rather than matched with a pattern: a stylesheet is nested, and a
+   * regular expression that walks one is a regular expression that quietly
+   * takes every other rule. What is inside a @media is about the screen it is
+   * being read on, and a saved file has no screen.
+   */
+  function exportRules(css) {
+    const text = String(css || "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const out = [];
+
+    let depth = 0;
+    let from = 0;
+    let opened = 0;
+    let selector = "";
+
+    for (let at = 0; at < text.length; at += 1) {
+      if (text[at] === "{") {
+        if (depth === 0) {
+          selector = text.slice(from, at).trim();
+          opened = at;
+        }
+
+        depth += 1;
+      } else if (text[at] === "}") {
+        depth -= 1;
+
+        if (depth === 0) {
+          if (!selector.startsWith("@") && selector.includes(".dd")) {
+            const body = text.slice(opened + 1, at).trim().replace(/\s+/g, " ");
+            out.push(`${selector.replace(/\s+/g, " ")}{${body}}`);
+          }
+
+          from = at + 1;
+        }
+      }
+    }
+
+    return out.join("\n");
+  }
+
+  /* The theme, as far as those rules reach into it.
+   *
+   * Gathered from the rules rather than listed here, so a rule that starts
+   * falling back to one more variable takes it with it and nobody has to
+   * remember. `--dd-*` are the box's own, set on the group as it is drawn, and
+   * pinning them at the root would paint every box the same colour.
+   */
+  const EXPORT_VAR_RE = /var\((--[a-z0-9-]+)/gi;
+
+  function exportPalette(rules, read) {
+    const names = new Set();
+    for (const [, name] of String(rules || "").matchAll(EXPORT_VAR_RE)) {
+      if (!name.startsWith("--dd-")) {
+        names.add(name);
+      }
+    }
+
+    let out = "";
+    for (const name of [...names].sort()) {
+      const value = String(read(name) || "").trim();
+      if (value) {
+        out += `${name}:${value};`;
+      }
+    }
+
+    return out;
+  }
+
+  /* The whole of it: the drawing, the rules it needs, and the colours those
+   * rules ask for, in one file that stands on its own.
+   *
+   * A background is painted rather than left transparent. A diagram saved out
+   * of a dark theme is pale lines, and pale lines on whatever the reader's
+   * document happens to be is a picture of nothing.
+   */
+  function exportSvg(model, options = {}) {
+    const layout = options.layout || Model.ensureLayout(model);
+    const bounds = Model.layoutBounds(layout);
+    const rules = exportRules(options.css);
+    const palette = exportPalette(rules, options.read || (() => ""));
+
+    const drawn = render(model, { natural: true, layout, label: options.label });
+    const opens = drawn.indexOf(">");
+
+    const back = COLOUR_RE.test(String(options.background || "").trim())
+      ? `<rect x="${round(bounds.x)}" y="${round(bounds.y)}"`
+        + ` width="${round(bounds.w)}" height="${round(bounds.h)}"`
+        + ` fill="${escapeText(String(options.background).trim())}"/>`
+      : "";
+
+    return `${drawn.slice(0, opens)}${palette ? ` style="${escapeText(palette)}"` : ""}>`
+      + `<style>${rules}</style>${back}${drawn.slice(opens + 1)}`;
+  }
+
+  // How big the saved picture is, which is how big the diagram is.
+  function exportSize(model, layout) {
+    const bounds = Model.layoutBounds(layout || Model.ensureLayout(model));
+    return { w: Math.max(1, Math.round(bounds.w)), h: Math.max(1, Math.round(bounds.h)) };
+  }
+
   /* What this can draw.
    *
    * The parser understands more than the drawing does, deliberately: reading a
@@ -1539,6 +1766,10 @@
     pathData,
     midpoint,
     shapeMarkup,
+    exportRules,
+    exportPalette,
+    exportSvg,
+    exportSize,
     STANDOFF,
     CLEARANCE,
     LINE_HEIGHT,

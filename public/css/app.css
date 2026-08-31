@@ -2190,6 +2190,15 @@ button.crumb:focus-visible {
   fill: none;
 }
 
+/* The limbs of a stick figure. The shape's own stroke rather than the fainter
+   rule between parts of one: an actor's arms are the actor, not a seam in it. */
+.dd .dd-actor {
+  stroke: var(--dd-stroke, var(--accent-emphasis));
+  stroke-width: var(--dd-stroke-width, 1.5px);
+  stroke-linecap: round;
+  fill: none;
+}
+
 /* The lines between cells, drawn a little fainter than the rule under the
    title: one says where the table's heading ends and the others divide what is
    under it, and a grid drawn as heavily as its heading reads as neither. */
@@ -4580,6 +4589,32 @@ body.page-editing #dockEdit {
   color: var(--fg-subtle);
   font-size: 11.5px;
   line-height: 1.4;
+}
+
+/* Saving a picture. Words rather than an icon: "SVG" and "PNG" are the whole
+   of what the two buttons differ by, and no drawing says which is which. */
+.ve-diagram-export {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.ve-diagram-export:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+.ve-diagram-export:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Rows and columns are one answer to one question about a table, so they sit

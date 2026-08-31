@@ -2170,6 +2170,107 @@ console.log("=== an icon in a box ===");
   check("...as something the model understood", read.extra, undefined);
 }
 
+console.log("=== the shapes Mermaid has no brackets for ===");
+{
+  const one = (shape, text = "Ada", at = { x: 0, y: 0, w: 160, h: 100 }) => ({
+    direction: "TD",
+    nodes: [{ id: "A", shape, text }],
+    edges: [],
+    layout: { A: at }
+  });
+  const drawn = (shape, text, at) => DD.render(one(shape, text, at), { natural: true });
+
+  /* Same bargain as the arrow ends: the file carries the nearest real shape,
+   * so the diagram still reads as something sensible wherever else it is
+   * opened, and the exact shape is said beside it in the layout comment.
+   */
+  const brackets = { note: "A[Ada]", cloud: "A((Ada))", actor: "A([Ada])", queue: "A[(Ada)]" };
+  for (const [shape, real] of Object.entries(brackets)) {
+    const written = DM.serializeFlowchart(one(shape));
+    check(`a ${shape} is written as the nearest real shape`,
+      written.includes(`    ${real}`), true);
+    check(`...with what it actually is said beside it`,
+      new RegExp(`@ A [^\n]*shape=${shape}`).test(written), true);
+    check(`...and read back as itself`,
+      DM.parseFlowchart(written).nodes[0].shape, shape);
+  }
+
+  // A shape name this build has never heard of is not a shape. The attribute
+  // comes out of a file and is about to pick which markup is drawn.
+  const odd = DM.parseFlowchart([
+    "flowchart TD",
+    "    %% layout v1",
+    "    %% @ A 0,0 160x100 shape=trapdoor",
+    "    A[Ada]"
+  ].join("\n") + "\n");
+  check("a shape nothing here draws is not taken from the file",
+    odd.nodes[0].shape, "rect");
+
+  // A page with its corner turned down. Drawn as well as cut out: a corner
+  // that is merely missing reads as a mistake.
+  const note = drawn("note");
+  check("a note is a page with its corner turned down",
+    /d="M0,0 H144 L160,16 V100 H0 Z"/.test(note), true);
+  check("...and the fold is drawn, not only cut out",
+    /class="dd-rule"[^>]*d="M144,0 V16 H160"/.test(note), true);
+
+  /* Written on the unit square and multiplied out, so it is the same cloud in
+   * a box of any shape rather than one that goes lopsided the wider it gets.
+   */
+  const cloudPath = (svg) => /class="dd-shape" d="([^"]*)"/.exec(svg)[1];
+  const wide = cloudPath(drawn("cloud", "Ada", { x: 0, y: 0, w: 320, h: 100 }));
+  const tall = cloudPath(drawn("cloud"));
+  const numbers = (d) => d.match(/-?[\d.]+/g).map(Number);
+  check("a cloud drawn twice as wide is twice as wide",
+    numbers(wide).filter((ignored, at) => at % 2 === 0),
+    numbers(tall).filter((ignored, at) => at % 2 === 0).map((x) => x * 2));
+  check("...and no taller for it",
+    numbers(wide).filter((ignored, at) => at % 2 === 1),
+    numbers(tall).filter((ignored, at) => at % 2 === 1));
+  check("...and closed, because a cloud is a shape and not a squiggle",
+    / Z"/.test(drawn("cloud")), true);
+
+  // A cylinder lying down, open at the left: a queue is a pipe things wait in,
+  // and the seam says which end they go in at.
+  const queue = drawn("queue");
+  check("a queue is a cylinder on its side", /A 16,50 0 0 1 144,100/.test(queue), true);
+  check("...with a seam at the end things go in", /class="dd-rule"[^>]*A 16,50 0 0 1 16,100/.test(queue), true);
+
+  /* A stick figure with its name across its chest is not a labelled actor, it
+   * is a scribble. The figure and the label share out the height by one number
+   * that both of them read.
+   */
+  const actor = drawn("actor");
+  const band = 100 * (1 - DM.ACTOR_BAND);
+  check("an actor is a figure and a name under it",
+    /class="dd-actor"/.test(actor), true);
+  check("...with the name below everything the figure uses",
+    Number(/<tspan x="80" y="([\d.]+)"/.exec(actor)[1]) > band, true);
+  check("...and the figure inside what the name leaves it",
+    Number(/class="dd-actor"[^>]*L100.2,([\d.]+)"/.exec(actor)[1]), band);
+  // Without a frame there is no figure, so there is nothing to sit under.
+  const bare = DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "actor", text: "Ada", frame: "none" }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 160, h: 100 } }
+  }, { natural: true });
+  check("an actor with no frame is words in the middle like anything else",
+    /<tspan x="80" y="50">/.test(bare), true);
+
+  /* Only ever a starting size, but a starting size that holds the thing. An
+   * actor measured like a box is a head and no legs.
+   */
+  check("an actor starts tall enough to be a person",
+    DM.measureNode({ shape: "actor", text: "Ada" }).h >= DM.ACTOR_LEAST, true);
+  check("...and a queue wide enough for the caps that hold nothing",
+    DM.measureNode({ shape: "queue", text: "Ada" }).w
+      > DM.measureNode({ shape: "rect", text: "Ada" }).w, true);
+  check("...and a cloud roomy enough that its words are not in a bump",
+    DM.measureNode({ shape: "cloud", text: "Ada" }).h
+      > DM.measureNode({ shape: "rect", text: "Ada" }).h, true);
+}
+
 console.log("=== a box drawn without its box ===");
 {
   const boxed = (node) => DD.render({
@@ -2668,6 +2769,104 @@ console.log("=== a table is measured by its columns ===");
     [210, 280, 350]);
   check("...and wider still once the cells themselves no longer fit",
     size("A<br/>a very long cell indeed | another long one").w > 280, true);
+}
+
+console.log("=== a picture of the diagram, for somewhere this app is not ===");
+{
+  const stylesheet = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+  const model = {
+    direction: "TD",
+    nodes: [{ id: "A", shape: "note", text: "Ada" }, { id: "B", shape: "actor", text: "Bo" }],
+    edges: [{ from: "A", to: "B", kind: "arrow" }],
+    layout: { A: { x: 0, y: 0, w: 120, h: 60 }, B: { x: 0, y: 140, w: 100, h: 100 } }
+  };
+
+  /* On the page a diagram is markup this app writes, painted by rules in
+   * app.css, in the colours of whichever theme is on. Only the first of those
+   * is inside the SVG — so a file saved as it stands opens elsewhere as black
+   * shapes on white, and an export has to carry the other two with it.
+   */
+  const rules = DD.exportRules(stylesheet);
+  check("the rules the drawing is painted by come out of the app's own stylesheet",
+    rules.includes(".dd .dd-shape{"), true);
+  check("...every one of them", rules.split("\n").length > 20, true);
+  check("...and nothing that is not about the drawing",
+    rules.split("\n").every((rule) => rule.includes(".dd")), true);
+
+  /* Scanned rather than matched with a pattern. A stylesheet is nested, and a
+   * regular expression that walks one takes every other rule — which is the
+   * kind of wrong that still looks like it works.
+   */
+  const pair = ".dd .one{fill:red}\n.dd .two{fill:blue}\n.dd .three{fill:green}";
+  check("two rules in a row are both taken, not every other one",
+    DD.exportRules(pair).split("\n").length, 3);
+  // What is inside a @media is about the screen it is being read on, and a
+  // saved file has no screen.
+  check("...and a rule that only applies to a narrow screen is left behind",
+    DD.exportRules("@media (max-width: 40em){.dd .one{fill:red}}"), "");
+  // An at-rule may name a selector in its own prelude, which is the one way a
+  // block that is not a rule can look like one that is.
+  check("...and an at-rule that names the drawing is still an at-rule",
+    DD.exportRules("@supports selector(.dd){color:red}"), "");
+  check("...as is a comment that happens to mention one",
+    DD.exportRules("/* .dd .one{fill:red} */"), "");
+
+  /* Gathered from the rules rather than listed anywhere, so a rule that starts
+   * falling back to one more variable takes it with it.
+   */
+  /* Every name answered, so that a variable left out of the picture is one this
+   * decided to leave out rather than one the theme had nothing to say about.
+   */
+  const asked = DD.exportPalette(".dd{color:var(--fg)} .dd .a{fill:var(--dd-fill, var(--canvas))}",
+    (name) => ({ "--fg": "#111", "--canvas": "#fff" })[name] || "#abcabc");
+  check("the theme travels with the picture", asked, "--canvas:#fff;--fg:#111;");
+  /* `--dd-*` are the box's own, set on the group as it is drawn. Pinning them
+   * at the root would paint every box in the diagram the same colour.
+   */
+  check("...but not the ones each box sets for itself",
+    asked.includes("--dd-fill"), false);
+  check("...and a variable the theme has nothing to say about is left out",
+    DD.exportPalette(".dd{color:var(--nope)}", () => ""), "");
+
+  const saved = DD.exportSvg(model, {
+    css: stylesheet,
+    read: (name) => (name === "--canvas" ? "#0b0f12" : "#ff0000"),
+    background: "#0b0f12",
+    label: "Ada and Bo"
+  });
+
+  check("a saved picture carries its own rules", saved.includes("<style>.dd{"), true);
+  check("...and its own colours", /<svg[^>]*style="[^"]*--canvas:#0b0f12/.test(saved), true);
+  check("...and a background, because pale lines on an unknown page is a"
+    + " picture of nothing",
+    /<rect x="0" y="0" width="150" height="270" fill="#0b0f12"\/>/.test(saved), true);
+  check("...behind the diagram rather than over it",
+    saved.indexOf('fill="#0b0f12"/>') < saved.indexOf('<g class="dd-nodes"'), true);
+  check("...and is one file, needing nothing else to be looked at",
+    /<(?:link|script)\b/.test(saved), false);
+  check("...at the size of the diagram", DD.exportSize(model, model.layout),
+    { w: 150, h: 270 });
+  check("...and still says what it is", saved.includes('aria-label="Ada and Bo"'), true);
+
+  /* A colour out of the theme is about to become a fill attribute, and a theme
+   * is a stylesheet somebody can write. What is not plainly a colour is not
+   * painted at all — escaping it would keep it out of the markup's way, but it
+   * would still be a fill nobody chose.
+   */
+  const odd = DD.exportSvg(model,
+    { css: "", read: () => "", background: 'red"/><script>x' });
+  check("a background that is not plainly a colour is not painted",
+    /<rect x="0" y="0"[^>]*fill=/.test(odd), false);
+  check("...and nothing of it reaches the markup",
+    odd.includes("<script"), false);
+
+  /* A copy nothing compares is a copy that goes stale. These are the classes
+   * the drawing actually writes, so an export that stopped carrying the rules
+   * for one of them would be an export missing that part of the picture.
+   */
+  const drawn = ["dd-shape", "dd-rule", "dd-text", "dd-actor", "dd-icon", "dd-edge"];
+  check("every class the drawing writes is a class the picture carries the rule for",
+    drawn.filter((name) => !rules.includes(`.dd-${name.slice(3)}`)), []);
 }
 
 console.log("=== a new step needs an id nothing is using ===");

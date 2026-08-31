@@ -125,7 +125,10 @@
   }
 
   function diagramShapeLabel(name) {
-    return (DiagramModel.SHAPES.find((shape) => shape.name === name) || {}).label || name;
+    const found = DiagramModel.SHAPES.find((shape) => shape.name === name)
+      || DiagramModel.DRAWN_SHAPES.find((shape) => shape.name === name);
+
+    return (found || {}).label || name;
   }
 
   // The shapes in the menu, plus whichever one this step already has. A trapezoid
@@ -232,7 +235,29 @@
       glyph: '<path d="M9,2 A6,2 0 1 0 9,6 A6,2 0 1 0 9,2"/><path d="M3,4 V10 A6,2 0 0 0 15,10 V4"/>' },
     { shape: "rect", kind: "box", label: "Picture", frame: "none", picture: true,
       glyph: '<rect x="1" y="2" width="16" height="10"/><path d="M1,10 L6,6 L11,10"/>'
-        + '<circle cx="12.5" cy="5.5" r="1.2"/>' }
+        + '<circle cx="12.5" cy="5.5" r="1.2"/>' },
+    /* Words on the paper with nothing round them. A heading over a group of
+     * boxes, or a note about one, is not itself a step — and drawing a box
+     * round it says it is.
+     */
+    { shape: "rect", kind: "box", label: "Text", frame: "none", text: "Text",
+      size: { w: 90, h: 32 },
+      glyph: '<path d="M2,3 H16 M9,3 V11 M6,11 H12"/>' },
+    /* The shapes Mermaid has no brackets for. Each is written as the nearest
+     * real one so the file still reads elsewhere, with the exact shape said
+     * beside it.
+     */
+    { shape: "note", kind: "box", label: "Note",
+      glyph: '<path d="M1,2 H13 L17,6 V12 H1 Z"/><path d="M13,2 V6 H17"/>' },
+    { shape: "cloud", kind: "box", label: "Cloud",
+      glyph: '<path d="M4,12 A3,3 0 0 1 3.4,6.6 A3.5,3.5 0 0 1 9,4.4'
+        + ' A3,3 0 0 1 14.6,6.4 A2.8,2.8 0 0 1 14,12 Z"/>' },
+    { shape: "actor", kind: "box", label: "Actor",
+      glyph: '<circle cx="9" cy="3.5" r="2"/><path d="M9,5.5 V9 M5.5,7 H12.5'
+        + ' M9,9 L6.5,13 M9,9 L11.5,13"/>' },
+    { shape: "queue", kind: "box", label: "Queue",
+      glyph: '<path d="M4,2 H14 A2.5,5 0 0 1 14,12 H4 A2.5,5 0 0 0 4,2 Z"/>'
+        + '<path d="M4,2 A2.5,5 0 0 1 4,12"/>' }
   ];
 
   // One picture of a shape, at the size a label sits beside.
@@ -2843,13 +2868,20 @@
     /* What a shape on the rail puts on the paper. Everything the entry carries
      * except the parts that are about the button rather than about the box.
      */
+    /* What is dropped on the paper is what was picked up.
+     *
+     * Whatever the entry says about itself and nothing more: an entry that
+     * carries its own words or its own size says so, and everything else takes
+     * the ordinary ones. An icon has no words because the picture is the whole
+     * of it.
+     */
     const fromPalette = (choice) => ({
       shape: choice.shape,
       kind: choice.kind,
       frame: choice.frame,
       icon: choice.icon,
-      text: choice.icon ? "" : undefined,
-      size: choice.icon ? { w: 80, h: 80 } : undefined
+      text: choice.text ?? (choice.icon ? "" : undefined),
+      size: choice.size || (choice.icon ? { w: 80, h: 80 } : undefined)
     });
 
     const palette = document.createElement("div");
@@ -2970,6 +3002,115 @@
       paintLists();
       drawAtOnce();
     });
+
+    /* --- Saving a picture of it ---------------------------------------------
+     *
+     * The file is the diagram; a picture of it is what you paste into
+     * something that cannot open one. Both are done to the whole diagram, so
+     * both live on the bar.
+     */
+    const EXPORT_SCALE = 2;
+
+    /* The app's own stylesheet, as the page actually loaded it.
+     *
+     * Asked for by the href on the page rather than by a path written here, so
+     * it is the cached copy of the version this page is running and not a
+     * second request for whatever is newest. Fetched at the moment of saving
+     * rather than held: a picture is saved rarely, and a copy kept from
+     * start-up is a copy that is wrong after a deploy.
+     */
+    let sheetAsked = null;
+
+    function stylesheetText() {
+      /* The promise is kept rather than the text. Two saves in quick
+       * succession would otherwise each find nothing kept and each go and ask,
+       * and the second would overwrite what the first had already worked out.
+       */
+      if (!sheetAsked) {
+        const link = document.querySelector('link[rel="stylesheet"][href*="app.css"]');
+        sheetAsked = fetch(link ? link.href : "/css/app.css")
+          .then((answer) => (answer.ok ? answer.text() : ""))
+          // A picture with no styling is still a picture of the right shape,
+          // and a better answer than a button that does nothing.
+          .catch(() => "");
+      }
+
+      return sheetAsked;
+    }
+
+    const themeValue = (name) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name);
+
+    async function pictureOfIt() {
+      return DiagramDraw.exportSvg(model, {
+        layout: model.layout,
+        css: await stylesheetText(),
+        read: themeValue,
+        background: themeValue("--canvas").trim(),
+        label: settings.title || "Diagram"
+      });
+    }
+
+    // A name a file manager can hold, taken from what the diagram is called.
+    const savedAs = (extension) => {
+      const said = String(settings.title || "diagram")
+        .replace(/\.[^.]*$/, "")
+        .replace(/[^a-z0-9._-]+/gi, "-")
+        .replace(/^-+|-+$/g, "");
+
+      return `${said || "diagram"}.${extension}`;
+    };
+
+    const handOver = (blob, name) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Revoked on the next turn: revoking it in this one has, in some
+      // browsers, cancelled the download it was for.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    };
+
+    async function saveSvg() {
+      handOver(new Blob([await pictureOfIt()], { type: "image/svg+xml" }),
+        savedAs("svg"));
+    }
+
+    /* A raster of the same picture.
+     *
+     * Drawn at twice the size, because a diagram pasted into a document is
+     * usually looked at on a screen with more pixels than units, and a picture
+     * saved at one to one is a blurred one there.
+     */
+    async function savePng() {
+      const text = await pictureOfIt();
+      const size = DiagramDraw.exportSize(model, model.layout);
+      const picture = document.createElement("img");
+
+      const drawn = new Promise((done, fail) => {
+        picture.onload = () => done();
+        picture.onerror = () => fail(new Error("the drawing could not be rasterised"));
+      });
+
+      picture.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
+      await drawn;
+
+      const paper = document.createElement("canvas");
+      paper.width = size.w * EXPORT_SCALE;
+      paper.height = size.h * EXPORT_SCALE;
+
+      const brush = paper.getContext("2d");
+      brush.scale(EXPORT_SCALE, EXPORT_SCALE);
+      brush.drawImage(picture, 0, 0, size.w, size.h);
+
+      const blob = await new Promise((done) => paper.toBlob(done, "image/png"));
+      if (blob) {
+        handOver(blob, savedAs("png"));
+      }
+    }
 
     /* --- Selecting ---------------------------------------------------------- */
 
@@ -4644,7 +4785,31 @@
       bar.append(group(handButton, arrowButton));
     }
 
-    bar.append(group(tidy), flowLabel);
+    /* A picture of the diagram, for pasting somewhere that cannot open the
+     * file. Two, because one of them keeps its shape at any size and the other
+     * one goes anywhere.
+     */
+    const saveAs = (label, run) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ve-diagram-export";
+      button.textContent = label;
+      button.title = `Save a ${label} picture of this diagram`;
+      button.setAttribute("aria-label", `Save as ${label}`);
+      button.addEventListener("click", () => {
+        button.disabled = true;
+        Promise.resolve(run()).catch(() => {}).then(() => {
+          button.disabled = false;
+        });
+      });
+
+      return button;
+    };
+
+    const pictures = group(saveAs("SVG", saveSvg), saveAs("PNG", savePng));
+    pictures.setAttribute("aria-label", "Save a picture");
+
+    bar.append(group(tidy), pictures, flowLabel);
 
     // Undo and redo go last and sit at the far end, away from everything that
     // makes a change — the two buttons that take one back are not two more of
