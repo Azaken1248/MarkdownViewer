@@ -33,6 +33,16 @@
   // Text metrics, matched to the CSS so the box a label was measured for is the
   // box it is drawn in.
   const LINE_HEIGHT = 20;
+  /* How much room a line of type needs.
+   *
+   * Twenty at the standard size, and the size itself once the type is big
+   * enough that twenty would run the lines into one another: a box set in 32px
+   * with three lines in it is three lines written over each other otherwise.
+   * A line height that does not follow the size is a size control that only
+   * works on boxes with one word in them.
+   */
+  const LEADING = 1.45;
+  const leadFor = (size) => Math.max(LINE_HEIGHT, size * LEADING);
   const LABEL_CHAR = 6.2;
   // Twice the snapping step, so every other line is drawn and the paper does
   // not turn into a grey wash.
@@ -215,14 +225,14 @@
    */
   // `from` is where the band the words are centred in begins. Nought for a
   // label in a box, and the top of the strip under a picture for one there.
-  function centredText(rows, w, h, from = 0) {
+  function centredText(rows, w, h, from = 0, lead = LINE_HEIGHT) {
     if (rows.length === 0) {
       return "";
     }
 
-    const top = (from + (h / 2)) - (((rows.length - 1) * LINE_HEIGHT) / 2);
+    const top = (from + (h / 2)) - (((rows.length - 1) * lead) / 2);
     const spans = rows.map((row, index) => {
-      const y = top + (index * LINE_HEIGHT);
+      const y = top + (index * lead);
       return `<tspan x="${round(w / 2)}" y="${round(y)}">${escapeText(row)}</tspan>`;
     });
 
@@ -328,14 +338,14 @@
    * keep a band along the bottom for the name, and the share they keep is the
    * same number the drawing sets itself out by.
    */
-  function labelMarkup(node, at, rows) {
+  function labelMarkup(node, at, rows, lead) {
     if (node.shape !== "actor" || node.frame === "none") {
-      return centredText(rows, at.w, at.h);
+      return centredText(rows, at.w, at.h, 0, lead);
     }
 
     const said = rows.filter((row) => row !== "");
     return said.length > 0
-      ? centredText(said, at.w, at.h * Model.ACTOR_BAND, at.h * (1 - Model.ACTOR_BAND))
+      ? centredText(said, at.w, at.h * Model.ACTOR_BAND, at.h * (1 - Model.ACTOR_BAND), lead)
       : "";
   }
 
@@ -378,14 +388,14 @@
    * both ways, and it is stroked in the box's own text colour because that is
    * what currentColor means.
    */
-  function iconMarkup(node, at) {
+  function iconMarkup(node, at, lead = LINE_HEIGHT) {
     const body = iconBody(node);
     if (!body) {
       return "";
     }
 
     const words = Model.textRows(node.text || "").filter((row) => row !== "");
-    const band = words.length > 0 ? (words.length * LINE_HEIGHT) + 2 : 0;
+    const band = words.length > 0 ? (words.length * lead) + 2 : 0;
     const room = Math.min(at.w - (IMAGE_PAD * 2), at.h - (IMAGE_PAD * 2) - band);
 
     if (room <= 0) {
@@ -398,7 +408,7 @@
 
     return `<g class="dd-icon" transform="translate(${round(x)},${round(y)})`
       + ` scale(${round(scale)})">${body}</g>`
-      + (words.length > 0 ? centredText(words, at.w, band, at.h - band) : "");
+      + (words.length > 0 ? centredText(words, at.w, band, at.h - band, lead) : "");
   }
 
   /* The picture, and the words under it.
@@ -409,9 +419,9 @@
    * bottom, and a box with nothing written in it gives the whole of itself to
    * the picture.
    */
-  function pictureMarkup(node, at) {
+  function pictureMarkup(node, at, lead = LINE_HEIGHT) {
     const words = Model.textRows(node.text || "").filter((row) => row !== "");
-    const band = words.length > 0 ? (words.length * LINE_HEIGHT) + 2 : 0;
+    const band = words.length > 0 ? (words.length * lead) + 2 : 0;
     const room = {
       w: Math.max(0, at.w - (IMAGE_PAD * 2)),
       h: Math.max(0, at.h - (IMAGE_PAD * 2) - band)
@@ -425,7 +435,7 @@
       : "";
 
     const label = words.length > 0
-      ? centredText(words, at.w, band, at.h - band)
+      ? centredText(words, at.w, band, at.h - band, lead)
       : "";
 
     return picture + label;
@@ -443,9 +453,10 @@
      * icon because it is the more particular of the two — nobody drops a
      * photograph on a box meaning to keep the little drawing under it.
      */
+    const lead = leadFor(sizeOf(node, classes));
     const inside = imageOf(node)
-      ? pictureMarkup(node, at)
-      : iconMarkup(node, at) || labelMarkup(node, at, Model.textRows(words));
+      ? pictureMarkup(node, at, lead)
+      : iconMarkup(node, at, lead) || labelMarkup(node, at, Model.textRows(words), lead);
 
     /* A box drawn without its box: an icon or a picture standing on the paper
      * on its own, which is what most of a technical diagram is. The shape is
@@ -527,10 +538,18 @@
   // long for the cell it is in. A box set in a bigger font runs out of room
   // sooner, and a box that keeps the same clipping at every size is a box whose
   // words go over the wall the moment anyone enlarges them.
-  function charWidthOf(node, classes) {
+  // What size a box is set in: its own, if it named one this file is willing to
+  // write into a style attribute, and the standard otherwise. Both how wide a
+  // character is and how far apart the lines sit are worked out from this one
+  // number, so a box set larger is spaced as well as clipped for the size it is
+  // actually drawn at.
+  function sizeOf(node, classes) {
     const said = wornBy(node, classes)["font-size"];
-    const size = SIZE_RE.test(String(said || "").trim()) ? parseFloat(said) : TEXT_SIZE;
-    return size * CHAR_RATIO;
+    return SIZE_RE.test(String(said || "").trim()) ? parseFloat(said) : TEXT_SIZE;
+  }
+
+  function charWidthOf(node, classes) {
+    return sizeOf(node, classes) * CHAR_RATIO;
   }
 
   /* What one cell of a table wears, checked exactly the way the box's own is.
@@ -1773,6 +1792,8 @@
     STANDOFF,
     CLEARANCE,
     LINE_HEIGHT,
+    LEADING,
+    leadFor,
     GRIPS,
     TEXT_SIZE
   };

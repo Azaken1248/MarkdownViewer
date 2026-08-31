@@ -2472,6 +2472,92 @@ console.log("=== the type a diagram is set in is real Mermaid ===");
       "var(--dd-font-style, normal)"]);
 }
 
+console.log("=== type big enough to need the room ===");
+{
+  /* A size control that only changes the letters is a size control that works
+   * on boxes with one word in them. Two lines set in 32px on twenty-point
+   * spacing are two lines written over one another, and a caption keeping the
+   * band small type needed is a caption written over the picture above it.
+   */
+  const paint = (node, classes, at) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", ...node }],
+    edges: [],
+    classes,
+    layout: { A: { x: 0, y: 0, ...at } }
+  }, { natural: true });
+
+  const apart = (drawn) => {
+    const ys = [...drawn.matchAll(/<tspan x="[\d.-]+" y="([\d.-]+)"/g)]
+      .map((one) => Number(one[1]));
+    return Math.round((ys[1] - ys[0]) * 100) / 100;
+  };
+
+  const room = { w: 200, h: 100 };
+  const two = { text: "one<br/>two", classes: ["big"] };
+  const set = (size) => ({ big: { "font-size": size } });
+
+  check("two lines of ordinary type sit a line apart",
+    apart(paint({ text: "one<br/>two" }, {}, room)), DD.LINE_HEIGHT);
+  check("...and two lines of big type sit as far apart as the type is big",
+    apart(paint(two, set("32px"), room)), Math.round(32 * DD.LEADING * 100) / 100);
+  check("...while type too small to need more room keeps the room it had",
+    apart(paint(two, set("9px"), room)), DD.LINE_HEIGHT);
+
+  /* And the block of them stays in the middle of the box. Lines spaced for big
+   * type but placed for small type are lines that fit and sit too high, which
+   * is the same bug wearing a hat.
+   */
+  const middleOf = (drawn) => {
+    const ys = [...drawn.matchAll(/<tspan x="[\d.-]+" y="([\d.-]+)"/g)]
+      .map((one) => Number(one[1]));
+    return Math.round(((ys[0] + ys[ys.length - 1]) / 2) * 100) / 100;
+  };
+
+  check("...and either way the words sit in the middle of what holds them",
+    [middleOf(paint(two, set("32px"), room)), middleOf(paint(two, {}, room))],
+    [room.h / 2, room.h / 2]);
+
+  /* A size this file would not write into a style attribute is not one it lays
+   * the lines out by either: the box is drawn at the standard size, so it has
+   * to be spaced at the standard size or the words come apart from the room
+   * kept for them.
+   */
+  check("...and a size the drawing will not write is a size it does not space by",
+    apart(paint(two, set("32em"), room)), DD.LINE_HEIGHT);
+
+  // The words under a picture take a band along the bottom, and the band is as
+  // deep as the words in it are tall.
+  const HREF = `/api/assets/${"a".repeat(64)}.png`;
+  const tall = (drawn) => Number(/<image[^>]* height="([\d.]+)"/.exec(drawn)[1]);
+  check("a caption in big type takes the room for it out of the picture",
+    [tall(paint({ text: "one", image: HREF }, {}, room)),
+      tall(paint({ text: "one", image: HREF, classes: ["big"] }, set("32px"), room))],
+    [66, 39.6]);
+
+  // And out of an icon, which is the same band drawn under a different thing.
+  const scaleOf = (drawn) =>
+    Number(/class="dd-icon" transform="translate\([-\d.,]+\) scale\(([\d.]+)\)/
+      .exec(drawn)[1]);
+  check("...and out of an icon, which is the same band under a different thing",
+    [scaleOf(paint({ text: "one", icon: "lucide:database" }, {}, room)),
+      scaleOf(paint({ text: "one", icon: "lucide:database", classes: ["big"] },
+        set("32px"), room))],
+    [2.8, 1.7]);
+
+  /* The measure knows as well. A box measured for ordinary type and then set in
+   * big type is a box its own words no longer fit in — and the measure is the
+   * one thing that could have known.
+   */
+  const box = (font) => DM.measureNode({ id: "A", shape: "rect", text: "hello there" },
+    font ? { font } : {});
+
+  check("a box measured for big type is given the room for it",
+    [box("26px").w > box().w, box("26px").h > box().h], [true, true]);
+  check("...and a size out of the bounds the panel offers is no size at all",
+    [box("400px"), box("20em"), box("0px")], [box(), box(), box()]);
+}
+
 console.log("=== a box is gripped by any of its edges ===");
 {
   /* Eight grips: four corners and four sides. A box with only the diagonal one

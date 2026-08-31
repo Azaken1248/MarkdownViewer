@@ -94,13 +94,6 @@
     ["Mono", { "font-family": "monospace" }]
   ];
 
-  const DIAGRAM_SIZES = [
-    ["Normal", {}],
-    ["Small", { "font-size": "11px" }],
-    ["Large", { "font-size": "16px" }],
-    ["Huge", { "font-size": "20px" }]
-  ];
-
   // Two switches rather than two menus of two: bold and italic are the things
   // people reach for a keystroke to do, and a menu is not what that reaches.
   const DIAGRAM_MARKS = [
@@ -399,6 +392,10 @@
         canvas.append(typing);
         placeEditor();
       }
+
+      // The bar is not in the drawing, but it stands over a box that has just
+      // been drawn somewhere else.
+      placeHud();
     };
 
     /* Moving the view without drawing the diagram again.
@@ -417,6 +414,7 @@
       svg.querySelector(".dd-view")?.setAttribute("transform", moved);
       svg.querySelector("pattern")?.setAttribute("patternTransform", moved);
       placeEditor();
+      placeHud();
       // A menu opened at a point on the diagram is about that point, and the
       // point has just moved out from under it.
       closeMenu();
@@ -2420,13 +2418,6 @@
         applyView();
       }, { passive: false });
 
-      canvas.addEventListener("keyup", (event) => {
-        if (event.key === " " || event.code === "Space") {
-          spaceHeld = false;
-          showGrab();
-        }
-      });
-
       // A canvas that keeps thinking the space bar is down after the window has
       // gone away is a canvas where nothing can be selected any more.
       window.addEventListener("blur", () => {
@@ -2533,26 +2524,53 @@
       event.stopPropagation();
     };
 
-    canvas.addEventListener("keydown", (event) => {
-      if (viewport && (event.key === " " || event.code === "Space")) {
-        // Not while typing into something on the canvas, where a space is a
-        // space.
-        if (!/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
-          answered(event);
-          spaceHeld = true;
-          canvas.classList.add("is-panning-armed");
-        }
+    /* Not while typing. A space is a space, an h is an h, and Backspace takes a
+     * letter off rather than taking the box away.
+     */
+    const typingIn = (target) => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || "")
+      || target?.isContentEditable === true;
 
+    /* A control that uses the key itself keeps it. Enter and Space on a button
+     * are how a button is pressed, and a shortcut that swallowed them would be
+     * a panel nobody could work from the keyboard.
+     */
+    const ACTIVATED_BY_KEY = /^(?:BUTTON|A|SUMMARY)$/;
+
+    // Letting the space bar go, wherever the focus had wandered to while it was
+    // down. A canvas that still thinks the bar is held is a canvas where nothing
+    // can be selected any more.
+    function onKeyUp(event) {
+      if (viewport && (event.key === " " || event.code === "Space")) {
+        spaceHeld = false;
+        showGrab();
+      }
+    }
+
+    function onKey(event) {
+      /* Something nearer the keystroke has already answered it: the field being
+       * typed into, or the grip being widened with the arrow keys.
+       */
+      if (event.defaultPrevented || typingIn(event.target)) {
+        return;
+      }
+
+      if (ACTIVATED_BY_KEY.test(event.target?.tagName || "")
+        && (event.key === "Enter" || event.key === " " || event.code === "Space")) {
+        return;
+      }
+
+      if (viewport && (event.key === " " || event.code === "Space")) {
+        answered(event);
+        spaceHeld = true;
+        canvas.classList.add("is-panning-armed");
         return;
       }
 
       /* The hand and the pointer, on the keys they have in every editor that
-       * offers both. Not while typing into something on the canvas, where an h
-       * is an h and a v is a v.
+       * offers both.
        */
       if (viewport && !(event.ctrlKey || event.metaKey || event.altKey)
-        && /^[hv]$/i.test(event.key)
-        && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
+        && /^[hv]$/i.test(event.key)) {
         answered(event);
         useHand(event.key.toLowerCase() === "h");
 
@@ -2568,12 +2586,10 @@
        * every editor with a toolbox and putting one mode away while leaving
        * another on would be a V that half worked.
        *
-       * Not while typing, and not Ctrl+A, which is select-all and is answered
-       * further up.
+       * Not Ctrl+A, which is select-all and is answered further down.
        */
       if (!(event.ctrlKey || event.metaKey || event.altKey)
-        && /^[av]$/i.test(event.key)
-        && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) {
+        && /^[av]$/i.test(event.key)) {
         answered(event);
         useArrowTool(event.key.toLowerCase() === "a");
         return;
@@ -2722,7 +2738,7 @@
 
       write({ atOnce: false });
       drawSoon();
-    });
+    }
 
     /* --- Making things ------------------------------------------------------ */
 
@@ -3253,7 +3269,7 @@
         return;
       }
 
-      const size = DiagramModel.measureNode(item);
+      const size = DiagramModel.measureNode(item, { font: fontSizeOf(item) });
       at.w = Math.max(at.w, size.w);
       at.h = Math.max(at.h, size.h);
     }
@@ -3778,6 +3794,15 @@
       return {};
     }
 
+    /* What size a box is set in, as the file says it: its class first and then
+     * whatever it says about itself, which is the order the drawing reads them
+     * in. Read back out rather than kept anywhere, so the field showing it and
+     * the box drawing it cannot come apart.
+     */
+    function fontSizeOf(item) {
+      return { ...styleOf(item), ...(item?.style || {}) }["font-size"] || "";
+    }
+
     // Which of an offered set a box is wearing, judged on that set's own keys
     // alone: a red box with a dashed border is still red, and still dashed.
     function wearing(declarations, offered, keys) {
@@ -3805,7 +3830,7 @@
      * The class is swapped rather than added, or a box changed from red to blue
      * would be wearing both and the file would say so.
      */
-    function restyle(ids, patch) {
+    function restyle(ids, patch, options = {}) {
       const ours = new Set(Object.keys(model.classes || {}).filter((name) =>
         DIAGRAM_CLASS_RE.test(name)));
 
@@ -3834,9 +3859,34 @@
       }
 
       forgetUnworn();
+
+      /* Type twice the size needs twice the room. A box that keeps the size it
+       * was measured at while its type is enlarged is a box its own words no
+       * longer fit in. It only ever grows: a box somebody sized by hand is a
+       * box somebody meant, and the type coming back down does not un-mean it.
+       */
+      if (options.fit) {
+        for (const id of ids) {
+          const item = nodeById(id);
+          if (item) {
+            grow(item);
+          }
+        }
+      }
+
       write();
       drawAtOnce();
-      paintInspector();
+
+      /* A repaint takes away the field the caret is in, and a spinner you can
+       * only press once is not a spinner — so the control that asked to keep
+       * the panel keeps it, and every size field on the screen is brought into
+       * step instead.
+       */
+      if (!options.keepPanel) {
+        paintInspector();
+      }
+
+      showSizes();
     }
 
     // Clearing a colour is taking its three declarations off, and nothing else:
@@ -4167,17 +4217,133 @@
      * Mermaid cannot say, because a size the file cannot keep is a size that
      * goes away the next time the diagram is opened somewhere else.
      */
+    /* Every text-size field on the screen at once.
+     *
+     * There are two of them — one in the panel, one on the bar over the box —
+     * and a size changed in either is a size the other is now showing wrongly.
+     * The usual answer, repainting the panel, cannot be used: it takes away the
+     * field the caret is in. So the fields are brought into step where they
+     * stand, and the one being typed into is left alone, because a field that
+     * rewrites itself under the caret is a field you cannot type a two-digit
+     * number into.
+     */
+    const sizeFields = new Map();
+
+    function showSizes() {
+      for (const [field, read] of [...sizeFields]) {
+        // A field belonging to a panel that has since been repainted away.
+        if (!field.isConnected) {
+          sizeFields.delete(field);
+          continue;
+        }
+
+        if (document.activeElement !== field) {
+          field.value = read();
+        }
+      }
+    }
+
+    /* The size of the type, as a number.
+     *
+     * Four named steps were four sizes, and a diagram that wanted a heading at
+     * 28 had to take 20 or nothing. `font-size` is a real classDef declaration
+     * at any value, so the control that writes one is a number field: what is
+     * typed is what the file says and what every other Mermaid renderer draws.
+     *
+     * Blank is not the same as the standard size. A box that says nothing about
+     * its type follows the theme wherever the theme goes; one that says 13 is
+     * 13 for ever.
+     */
+    function sizeField(offered) {
+      const bounds = offered.bounds;
+      const field = document.createElement("input");
+      field.type = "number";
+      field.className = "ve-diagram-size";
+      field.min = String(bounds.least);
+      field.max = String(bounds.most);
+      field.step = "1";
+      field.placeholder = String(DiagramModel.TEXT_SIZE);
+      field.title = offered.label;
+      named(field, offered.label);
+      field.value = offered.read();
+      field.disabled = Boolean(offered.disabled);
+
+      /* Held to the bounds and written back, so the field shows the size the
+       * diagram actually has rather than the one that was typed at it. A field
+       * left saying 400 over a box drawn at 96 is a field that is lying.
+       */
+      field.addEventListener("change", () => {
+        const typed = field.value.trim();
+        const size = Math.round(Number(typed));
+
+        if (typed === "" || !Number.isFinite(size)) {
+          field.value = "";
+          offered.onSize(null);
+          return;
+        }
+
+        const held = Math.min(bounds.most, Math.max(bounds.least, size));
+        field.value = String(held);
+        offered.onSize(held);
+      });
+
+      sizeFields.set(field, offered.read);
+      return field;
+    }
+
+    // The size a handful of boxes are set in: the one they agree on, or nothing
+    // at all, because a field showing one box's size over four is a field that
+    // will set the other three to it the moment it is touched.
+    function sizeShown(ids) {
+      const sizes = new Set(ids.map((id) => fontSizeOf(nodeById(id))));
+      const found = sizes.size === 1 ? /^([0-9.]+)px$/.exec([...sizes][0]) : null;
+      return found ? String(parseFloat(found[1])) : "";
+    }
+
+    function nodeSizeField(ids) {
+      return sizeField({
+        label: "Text size",
+        bounds: DiagramModel.FONT_SIZE,
+        read: () => sizeShown(ids),
+        onSize: (size) => restyle(ids, { "font-size": size === null ? null : `${size}px` },
+          { keepPanel: true, fit: true })
+      });
+    }
+
+    // Bold and italic, for the panel and for the bar over the box. One set of
+    // buttons defined once: two that could disagree about what bold means is
+    // two places to change it and one of them forgotten.
+    function markButtons(ids, declarations, label) {
+      const marks = document.createElement("div");
+      marks.className = "ve-diagram-marks";
+      marks.setAttribute("role", "group");
+      marks.setAttribute("aria-label", label || "Text style");
+
+      for (const [name, key, value, icon] of DIAGRAM_MARKS) {
+        const on = declarations[key] === value;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `ve-diagram-mark${on ? " is-on" : ""}`;
+        button.title = name;
+        button.setAttribute("aria-label", name);
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.addEventListener("click", () => restyle(ids, { [key]: on ? null : value }));
+        marks.append(button);
+      }
+
+      return marks;
+    }
+
     function fontRow(ids) {
       const holder = document.createElement("div");
       holder.className = "ve-diagram-font";
 
       const declarations = ids.length === 1 ? styleOf(nodeById(ids[0])) : {};
-      const named = (offered) => offered.map(([name]) => [name, name]);
+      const listed = (offered) => offered.map(([name]) => [name, name]);
 
       const family = chooser("ve-diagram-kind", "Font",
-        named(DIAGRAM_FAMILIES), wearing(declarations, DIAGRAM_FAMILIES, ["font-family"]));
-      const size = chooser("ve-diagram-kind", "Text size",
-        named(DIAGRAM_SIZES), wearing(declarations, DIAGRAM_SIZES, ["font-size"]));
+        listed(DIAGRAM_FAMILIES), wearing(declarations, DIAGRAM_FAMILIES, ["font-family"]));
 
       // A patch that always names its own key, so choosing "Default" takes the
       // family off rather than leaving the old one behind unmentioned.
@@ -4189,32 +4355,12 @@
 
       family.addEventListener("change", () =>
         restyle(ids, patchFrom(DIAGRAM_FAMILIES, family.value, ["font-family"])));
-      size.addEventListener("change", () =>
-        restyle(ids, patchFrom(DIAGRAM_SIZES, size.value, ["font-size"])));
 
       const menus = document.createElement("div");
       menus.className = "ve-diagram-row ve-diagram-border";
-      menus.append(family, size);
+      menus.append(family, nodeSizeField(ids));
 
-      const marks = document.createElement("div");
-      marks.className = "ve-diagram-marks";
-      marks.setAttribute("role", "group");
-      marks.setAttribute("aria-label", "Text style");
-
-      for (const [label, key, value, icon] of DIAGRAM_MARKS) {
-        const on = declarations[key] === value;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = `ve-diagram-mark${on ? " is-on" : ""}`;
-        button.title = label;
-        button.setAttribute("aria-label", label);
-        button.setAttribute("aria-pressed", on ? "true" : "false");
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
-        button.addEventListener("click", () => restyle(ids, { [key]: on ? null : value }));
-        marks.append(button);
-      }
-
-      holder.append(menus, marks);
+      holder.append(menus, markButtons(ids, declarations));
       return holder;
     }
 
@@ -4238,13 +4384,6 @@
       ["Mono", "m"]
     ];
 
-    const CELL_SIZES = [
-      ["Normal", ""],
-      ["Small", "11"],
-      ["Large", "16"],
-      ["Huge", "20"]
-    ];
-
     const CELL_MARK_BUTTONS = [
       ["Bold", "b", "ph-text-b"],
       ["Italic", "i", "ph-text-italic"]
@@ -4263,12 +4402,6 @@
       const listed = (offered) => offered.map(([name]) => [name, name]);
       const family = chooser("ve-diagram-kind", "Cell font", listed(CELL_FAMILIES),
         CELL_FAMILIES[0][0]);
-      const size = chooser("ve-diagram-kind", "Cell text size", listed(CELL_SIZES),
-        CELL_SIZES[0][0]);
-
-      const menus = document.createElement("div");
-      menus.className = "ve-diagram-row ve-diagram-border";
-      menus.append(family, size);
 
       const marks = document.createElement("div");
       marks.className = "ve-diagram-marks";
@@ -4307,6 +4440,23 @@
         show();
       };
 
+      /* The same number field the box's own type uses, held to what one cell of
+       * a table is allowed to say: a size lives in the file as two digits on
+       * the end of the cell's token, so 48 is as large as a cell can be set.
+       */
+      const size = sizeField({
+        label: "Cell text size",
+        bounds: DiagramModel.CELL_SIZE,
+        read: () => CELL_DIGITS(tokenNow()),
+        disabled: !cellFocus,
+        onSize: (chosen) => change((token) => DiagramModel.cellToken(
+          CELL_LETTERS(token).split(""), chosen === null ? "" : String(chosen)))
+      });
+
+      const menus = document.createElement("div");
+      menus.className = "ve-diagram-row ve-diagram-border";
+      menus.append(family, size);
+
       // A cell is set in one family, so choosing one takes the other two off.
       family.addEventListener("change", () => change((token) => {
         const chosen = (CELL_FAMILIES.find(([name]) => name === family.value) || [])[1] || "";
@@ -4314,11 +4464,6 @@
           .filter((one) => !CELL_FAMILIES.some(([, letter]) => letter === one));
 
         return DiagramModel.cellToken([...kept, chosen], CELL_DIGITS(token));
-      }));
-
-      size.addEventListener("change", () => change((token) => {
-        const chosen = (CELL_SIZES.find(([name]) => name === size.value) || [])[1] || "";
-        return DiagramModel.cellToken(CELL_LETTERS(token).split(""), chosen);
       }));
 
       const buttons = CELL_MARK_BUTTONS.map(([label, letter, icon]) => {
@@ -4356,8 +4501,10 @@
         size.disabled = !aimed;
         family.value = (CELL_FAMILIES.find(([, letter]) =>
           letter && letters.includes(letter)) || CELL_FAMILIES[0])[0];
-        size.value = (CELL_SIZES.find(([, digits]) =>
-          digits && digits === CELL_DIGITS(token)) || CELL_SIZES[0])[0];
+        size.value = CELL_DIGITS(token);
+        // What the cell is if it says nothing: whatever the table around it is
+        // set in, which is the standard unless the table said otherwise.
+        size.placeholder = String(parseFloat(fontSizeOf(item)) || DiagramModel.TEXT_SIZE);
 
         for (const [button, letter] of buttons) {
           const on = aimed && letters.includes(letter);
@@ -4393,7 +4540,115 @@
       return `#${parts.map((one) => one.toString(16).padStart(2, "0")).join("")}`;
     }
 
+    /* --- The bar over the box ----------------------------------------------
+     *
+     * Everything a box wears could be changed from the panel at the side and
+     * nowhere else — which is a long way to go when the box is the thing you are
+     * looking at, and further still on a phone where the panel is shut.
+     *
+     * So the controls reached for while drawing sit over the selection too: the
+     * shape, the colour, the size of the type, bold, italic, and the way out.
+     * They are the same controls, not copies of them — one definition each,
+     * shown in two places — because two sets of swatches that have to agree
+     * about what red is are one set too many.
+     */
+    const HUD_GAP = 12;
+    let hud = null;
+
+    function hudFor(ids) {
+      const bar = document.createElement("div");
+      bar.className = "ve-diagram-hud";
+      bar.setAttribute("role", "toolbar");
+      bar.setAttribute("aria-label", "How this box is drawn");
+
+      const item = ids.length === 1 ? nodeById(ids[0]) : null;
+
+      // A shape menu over four boxes would have to say what four shapes are, so
+      // it is offered for one box and the rest of the bar for any number.
+      if (item) {
+        bar.append(shapeSelect(item));
+      }
+
+      bar.append(colourRow(ids), nodeSizeField(ids),
+        markButtons(ids, item ? styleOf(item) : {}));
+
+      const drop = dropButton(item
+        ? `Remove ${stepLabel(item)}`
+        : `Remove these ${ids.length} boxes`);
+      drop.addEventListener("click", () => removeSteps(ids));
+      bar.append(drop);
+
+      return bar;
+    }
+
+    function paintHud() {
+      hud?.remove();
+      hud = null;
+
+      // Only where there is a window to float it over. In a document the diagram
+      // is drawn at its own size inside the page, and a bar laid over that would
+      // be laid over the words around it too.
+      if (!viewport || selection.length === 0) {
+        return;
+      }
+
+      /* Beside the paper rather than on it.
+       *
+       * A redraw is `canvas.innerHTML = …`, which throws away everything inside
+       * it — so a bar living in there has to be taken out and put back on every
+       * redraw, and an element taken out of the page loses the caret. A size
+       * being typed into would be blurred by the very change it was making.
+       * The stage holds the paper and nothing else moves it, so the bar sits
+       * there and the two coordinate systems still line up.
+       *
+       * It is also why a press on the bar is not a press on the paper: they are
+       * no longer the same tree.
+       */
+      hud = hudFor([...selection]);
+      stage.append(hud);
+      placeHud();
+    }
+
+    function placeHud() {
+      if (!hud) {
+        return;
+      }
+
+      /* Whether there is a bar at all is paintHud's to say; this only says
+       * where it goes. Two places deciding one thing is one place too many, and
+       * the second of them was never reached: a box that stops existing takes
+       * the selection with it, and that is a repaint.
+       */
+      const boxes = selection.map(boxOf).filter(Boolean);
+      if (boxes.length === 0) {
+        return;
+      }
+
+      const left = Math.min(...boxes.map((at) => at.x));
+      const right = Math.max(...boxes.map((at) => at.x + at.w));
+      const top = Math.min(...boxes.map((at) => at.y));
+      const under = Math.max(...boxes.map((at) => at.y + at.h));
+
+      const middle = (((left + right) / 2) * view.scale) + view.x;
+      const over = ((top * view.scale) + view.y) - HUD_GAP;
+      const below = ((under * view.scale) + view.y) + HUD_GAP;
+
+      /* Above the box, and underneath it when the box is against the top of the
+       * window: a bar drawn off the top of the paper is a bar nobody can reach.
+       * Held inside the window sideways for the same reason.
+       */
+      const wide = hud.offsetWidth;
+      const tall = hud.offsetHeight;
+      const y = over - tall >= 0 ? over - tall : below;
+      const x = Math.max(0, Math.min(Math.max(0, canvas.clientWidth - wide),
+        middle - (wide / 2)));
+
+      hud.style.left = `${Math.round(x)}px`;
+      hud.style.top = `${Math.round(y)}px`;
+    }
+
     function paintInspector(options = {}) {
+      paintHud();
       inspector.replaceChildren();
       // The cell fields the type controls aimed at are about to be thrown away,
       // so the aim goes with them rather than outliving them.
@@ -4991,6 +5246,16 @@
     const shell = document.createElement("div");
     shell.className = "ve-diagram-shell";
     shell.append(bar, body);
+
+    /* The keys belong to the whole builder rather than to the paper.
+     *
+     * They were the canvas's, and the canvas had to have the focus — so pressing
+     * Delete after choosing a colour did nothing at all, because the button in
+     * the panel had the focus and the canvas was what was listening. Anything
+     * inside the builder is near enough the diagram to mean the diagram.
+     */
+    shell.addEventListener("keydown", onKey);
+    shell.addEventListener("keyup", onKeyUp);
 
     const parts = [shell];
 

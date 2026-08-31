@@ -1691,17 +1691,37 @@
     return out;
   }
 
+  /* How much bigger than the standard a box's own type is.
+   *
+   * A number out of a file, so it is read rather than believed: anything that
+   * is not a plain size within the bounds the panel offers counts as no size
+   * at all, and the box is measured for the type it will actually be drawn in.
+   */
+  const TEXT_SIZE = 13;
+  const FONT_SIZE = { least: 8, most: 96 };
+
+  function fontScale(said) {
+    const found = /^([0-9]{1,3}(?:\.[0-9]+)?)px$/i.exec(String(said || "").trim());
+    const size = found ? parseFloat(found[1]) : 0;
+    return size >= FONT_SIZE.least && size <= FONT_SIZE.most ? size / TEXT_SIZE : 1;
+  }
+
   /* How big a box has to be to hold what is written in it.
    *
    * Only ever a starting size. Everything here can be dragged to another one,
    * and once it has been, this is not consulted about that box again.
    */
-  function measureNode(node) {
+  function measureNode(node, options = {}) {
     const kind = node?.kind;
     const rows = textRows(node?.text ?? node?.id ?? "");
     const widest = rows.reduce((most, row) => Math.max(most, row.length), 0);
-    let width = Math.max(MIN_WIDTH, (widest * CHAR_WIDTH) + PAD_X);
-    let height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT) + PAD_Y);
+    /* Type twice the size needs twice the room, both ways. A box measured at
+     * the standard size and then set in 32px is a box its own words no longer
+     * fit in — and the measure is the one thing that could have known.
+     */
+    const type = fontScale(options.font);
+    let width = Math.max(MIN_WIDTH, (widest * CHAR_WIDTH * type) + PAD_X);
+    let height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT * type) + PAD_Y);
 
     if (kind === "table") {
       /* Every column needs room to be read in, whatever is in it — a word, and
@@ -2179,6 +2199,9 @@
     resizeGrid,
     CELL_MARKS,
     CELL_SIZE,
+    TEXT_SIZE,
+    FONT_SIZE,
+    fontScale,
     cellKey,
     readCellStyles,
     writeCellStyles,

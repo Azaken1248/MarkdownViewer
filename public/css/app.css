@@ -3854,6 +3854,52 @@ body.page-editing #dockEdit {
   outline: none;
 }
 
+/* The bar over the box.
+   Everything a box wears could be changed from the panel at the side and
+   nowhere else, which is a long way to go when the box is what you are looking
+   at. So the controls reached for while drawing float over the selection as
+   well — the same controls, laid out along a line instead of down a column. */
+.ve-diagram-hud {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  /* Narrower than the bar wants to be is a bar that scrolls, not one that wraps
+     into two lines over the box it is about. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* In a column the swatches wrap; along a line they stay on it. */
+.ve-diagram-hud > .ve-diagram-colours {
+  flex-wrap: nowrap;
+  padding: 0;
+}
+
+.ve-diagram-hud > .ve-diagram-marks,
+.ve-diagram-hud > .ve-diagram-colours,
+.ve-diagram-hud > .ve-diagram-drop {
+  flex: 0 0 auto;
+}
+
+.ve-diagram-hud > .ve-diagram-shape {
+  flex: 0 0 auto;
+  width: 118px;
+  max-width: none;
+}
+
+.ve-diagram-hud > .ve-diagram-size {
+  flex: 0 0 auto;
+  width: 66px;
+}
+
 .dd-viewport {
   display: block;
   width: 100%;
@@ -4810,6 +4856,7 @@ body.page-editing #dockEdit {
 .ve-diagram-text,
 .ve-diagram-shape,
 .ve-diagram-kind,
+.ve-diagram-size,
 .ve-diagram-pick {
   min-height: 32px;
   padding: 4px 8px;
@@ -4939,7 +4986,8 @@ body.page-editing #dockEdit {
 
 /* The border is a dash and a weight, sharing the line evenly. Same reasoning
    as the group above: the cap here is the pair, not the panel. */
-.ve-diagram-border > .ve-diagram-kind {
+.ve-diagram-border > .ve-diagram-kind,
+.ve-diagram-border > .ve-diagram-size {
   flex: 1 1 0;
   max-width: none;
   min-width: 0;
@@ -4948,6 +4996,7 @@ body.page-editing #dockEdit {
 .ve-diagram-text:focus,
 .ve-diagram-shape:focus,
 .ve-diagram-kind:focus,
+.ve-diagram-size:focus,
 .ve-diagram-pick:focus {
   outline: none;
   border-color: var(--accent);
@@ -5051,6 +5100,16 @@ body.page-editing #dockEdit {
   .ve-diagram-mark {
     width: 40px;
     min-height: 38px;
+  }
+
+  /* The bar over the box is where a finger reaches first on a phone — the panel
+     at the side is shut there — so everything on it is a finger wide. */
+  .ve-diagram-hud > .ve-diagram-shape {
+    width: 132px;
+  }
+
+  .ve-diagram-hud > .ve-diagram-size {
+    width: 74px;
   }
 
   .ve-diagram-icon-grid {

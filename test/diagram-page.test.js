@@ -1044,7 +1044,7 @@ async function run(server, cookie) {
 
     menu("Cell font").value = "Mono";
     menu("Cell font").dispatchEvent(new window.Event("change", { bubbles: true }));
-    menu("Cell text size").value = "Small";
+    menu("Cell text size").value = "11";
     menu("Cell text size").dispatchEvent(new window.Event("change", { bubbles: true }));
     check("...and a family and a size are both said about that one cell",
       styleOf(1), "--dd-font-size:11px;--dd-font-family:monospace;");
@@ -2642,13 +2642,23 @@ async function run(server, cookie) {
       .find((one) => one.getAttribute("aria-label") === label);
     const setOf = (property) => groupOf().style.getPropertyValue(property);
 
+    // The size is a number rather than one of four names: a diagram that wants
+    // a heading at 28 had to take 20 or nothing, and `font-size` is a real
+    // classDef declaration at any value.
+    const sizeBox = () => inspector.querySelector(".ve-diagram-size");
+    const setSize = (typed) => {
+      const one = sizeBox();
+      one.value = typed;
+      one.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+
     tap();
     check("a box offers a font, a size and the two switches",
-      [Boolean(menu("Font")), Boolean(menu("Text size")),
+      [Boolean(menu("Font")), Boolean(sizeBox()),
         Boolean(mark("Bold")), Boolean(mark("Italic"))], [true, true, true, true]);
     check("...and starts wearing none of them",
-      [menu("Font").value, menu("Text size").value,
-        mark("Bold").getAttribute("aria-pressed")], ["Default", "Normal", "false"]);
+      [menu("Font").value, sizeBox().value,
+        mark("Bold").getAttribute("aria-pressed")], ["Default", "", "false"]);
 
     pick("Font", "Mono");
     check("choosing a font sets the box in it", setOf("--dd-font-family"), "monospace");
@@ -2656,11 +2666,30 @@ async function run(server, cookie) {
     // come back saying what was just chosen rather than what it opened saying.
     check("...and the menu says so afterwards", menu("Font").value, "Mono");
 
-    pick("Text size", "Large");
+    setSize("16");
     check("...and a size beside it, without taking the font off",
       [setOf("--dd-font-size"), setOf("--dd-font-family")], ["16px", "monospace"]);
-    check("...with both menus saying what they are",
-      [menu("Font").value, menu("Text size").value], ["Mono", "Large"]);
+    check("...with both controls saying what they are",
+      [menu("Font").value, sizeBox().value], ["Mono", "16"]);
+
+    /* Any size, not one of four. Held to the bounds and written back into the
+     * field, so a field left saying 400 over a box drawn at 96 cannot happen.
+     */
+    setSize("29");
+    check("a size nobody offered is still a size", setOf("--dd-font-size"), "29px");
+    setSize("400");
+    check("...and one nothing could be read at is brought back to the largest",
+      [setOf("--dd-font-size"), sizeBox().value], ["96px", "96"]);
+    setSize("1");
+    check("...and one nothing could be read at all, to the smallest",
+      [setOf("--dd-font-size"), sizeBox().value], ["8px", "8"]);
+
+    // Blank is not the standard size. A box that says nothing follows the theme
+    // wherever the theme goes; one that says 13 is 13 for ever.
+    setSize("");
+    check("emptying it says nothing about the size at all",
+      [setOf("--dd-font-size"), setOf("--dd-font-family")], ["", "monospace"]);
+    setSize("16");
 
     mark("Bold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("a switch goes on", setOf("--dd-font-weight"), "700");
@@ -2690,6 +2719,311 @@ async function run(server, cookie) {
     pick("Font", "Default");
     check("...and Default is a choice rather than the absence of one",
       [setOf("--dd-font-family"), setOf("--dd-font-size")], ["", "16px"]);
+
+    page.window.close();
+  }
+
+  console.log("=== the keys are the builder's, not the paper's ===");
+  {
+    /* Every shortcut used to need the canvas itself to have the focus. So
+     * pressing Delete after choosing a colour did nothing at all: the swatch
+     * had the focus and the canvas was what was listening.
+     *
+     * Anything inside the builder is near enough the diagram to mean the
+     * diagram. Except a field, where Backspace takes a letter off a word; and
+     * except the keys a control uses to work itself, because a panel nobody can
+     * press a button in from the keyboard is not an improvement.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "keys.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x60",
+        "    %% @ B 100,300 120x60",
+        "    A[One]",
+        "    B[Two]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/keys.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const rail = page.document.querySelector(".ve-diagram-rail");
+    const boxes = () => canvas.querySelectorAll(".dd-node").length;
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const whereIs = (id) => groupOf(id).getAttribute("transform");
+
+    const press = (where, key, options = {}) => where.dispatchEvent(
+      new window.KeyboardEvent("keydown",
+        { key, bubbles: true, cancelable: true, ...options }));
+
+    const tap = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(whereIs(id));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    tap("A");
+    const swatch = inspector.querySelector(".ve-diagram-swatch");
+    const was = whereIs("A");
+    press(swatch, "ArrowRight");
+    check("an arrow key with the focus in the panel still nudges the box",
+      whereIs("A") === was, false);
+
+    /* Except in a field, where Backspace takes a letter off a word. An editor
+     * that also took the box away is an editor nothing can be renamed in.
+     */
+    press(inspector.querySelector(".ve-diagram-text"), "Backspace");
+    check("...but a key typed into a field belongs to the field", boxes(), 2);
+
+    press(rail.querySelector("button"), "a");
+    check("...and a letter with the focus on the rail still picks the tool up",
+      canvas.classList.contains("is-joining"), true);
+    press(rail.querySelector("button"), "Escape");
+    check("...and Escape still puts it down", canvas.classList.contains("is-joining"), false);
+
+    /* Enter and Space on a button are how a button is pressed. A shortcut that
+     * swallowed them would be a panel that cannot be worked from the keyboard
+     * at all — so the control that uses the key keeps it.
+     */
+    tap("A");
+    press(rail.querySelector("button"), "Enter");
+    check("Enter on a button belongs to the button",
+      canvas.querySelector(".ve-diagram-inline"), null);
+    press(rail.querySelector("button"), " ");
+    check("...and so does the space bar",
+      canvas.classList.contains("is-panning-armed"), false);
+
+    press(inspector, " ");
+    check("...while the space bar anywhere else arms the hand",
+      canvas.classList.contains("is-panning-armed"), true);
+    inspector.dispatchEvent(new window.KeyboardEvent("keyup",
+      { key: " ", bubbles: true }));
+    check("...and letting it go puts the hand away",
+      canvas.classList.contains("is-panning-armed"), false);
+
+    press(inspector, "Enter");
+    const inline = canvas.querySelector(".ve-diagram-inline");
+    check("Enter with the focus in the panel opens the box for typing",
+      Boolean(inline), true);
+    press(inline, "Backspace");
+    check("...and Backspace in what you are typing into is a letter, not the box",
+      boxes(), 2);
+    press(inline, "Escape");
+
+    // The grip is moved with the arrow keys, and a grip that also moved the box
+    // it is beside would be a grip nobody could use.
+    const grip = page.document.querySelector(".ve-diagram-grip-side");
+    const body = page.document.querySelector(".ve-diagram-body");
+    const wide = body.style.getPropertyValue("--dd-side");
+    const stood = whereIs("A");
+    press(grip, "ArrowLeft");
+    check("a key the grip has already answered is not the diagram's as well",
+      [body.style.getPropertyValue("--dd-side") === wide, whereIs("A")],
+      [false, stood]);
+
+    tap("A");
+    press(inspector.querySelector(".ve-diagram-swatch"), "Delete");
+    check("Delete with the focus in the panel takes the box away", boxes(), 1);
+
+    page.window.close();
+  }
+
+  console.log("=== a bar over the box, so a box is dressed where it stands ===");
+  {
+    /* Everything a box wears could be changed from the panel at the side and
+     * nowhere else, which is a long way to go when the box is the thing you are
+     * looking at. The controls reached for while drawing sit over the selection
+     * as well — and they are the same controls, not copies of them, because two
+     * sets of swatches that have to agree about what red is are one set too
+     * many.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "overbox.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 120x60",
+        "    %% @ B 100,300 120x60",
+        "    A[One]",
+        "    B[Two]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/overbox.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const bar = () => page.document.querySelector(".ve-diagram-hud");
+    const at = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      return { x: Number(spot[1]), y: Number(spot[2]) };
+    };
+
+    const tap = (id, options = {}) => {
+      const spot = at(id);
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: spot.x + 10, clientY: spot.y + 10, bubbles: true, ...options }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: spot.x + 10, clientY: spot.y + 10, bubbles: true, ...options }));
+    };
+
+    /* The bar is laid over the drawing in the window's own coordinates, and the
+     * box is drawn in the diagram's — so where the bar should be is the box put
+     * through the view the diagram is being looked at from.
+     */
+    const seenAt = (id) => {
+      const said = /translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      const view = { x: Number(said[1]), y: Number(said[2]), scale: Number(said[3]) };
+      const spot = at(id);
+      return { x: (spot.x * view.scale) + view.x, y: (spot.y * view.scale) + view.y };
+    };
+
+    const topOf = () => Number(bar().style.top.replace("px", ""));
+
+    check("nothing is held, so there is no bar", bar(), null);
+
+    tap("A");
+    check("a box held gets a bar over it", Boolean(bar()), true);
+    check("...carrying what a box is dressed in: its shape, its colour, its"
+      + " size, its two switches, and the way out",
+      [Boolean(bar().querySelector(".ve-diagram-shape")),
+        Boolean(bar().querySelector(".ve-diagram-swatch")),
+        Boolean(bar().querySelector(".ve-diagram-size")),
+        bar().querySelectorAll(".ve-diagram-mark").length,
+        Boolean(bar().querySelector(".ve-diagram-drop"))],
+      [true, true, true, 2, true]);
+
+    // Over the box rather than on it: a bar drawn across what it is about is a
+    // bar you have to move to see your own diagram.
+    check("...standing above the box it is about",
+      Math.round(topOf()), Math.round(seenAt("A").y) - 12);
+
+    const swatchOn = (where, index) =>
+      [...where.querySelectorAll(".ve-diagram-swatch")][index]
+        .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    /* A pointer that lands on the bar has landed on the bar. Without that it
+     * lands on the paper underneath as well, which is a press on empty paper —
+     * and empty paper means "let go of that box", so the bar goes away under
+     * the finger reaching for it.
+     */
+    bar().querySelector(".ve-diagram-swatch").dispatchEvent(
+      new window.MouseEvent("pointerdown", { clientX: 0, clientY: 0, bubbles: true }));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup",
+      { clientX: 0, clientY: 0, bubbles: true }));
+    check("...and a press on the bar is not also a press on the paper under it",
+      Boolean(bar()), true);
+
+    swatchOn(bar(), 1);
+    check("a colour chosen on the bar paints the box",
+      /--dd-fill:/.test(groupOf("A").getAttribute("style") || ""), true);
+    check("...and the panel at the side says the same thing, being the same"
+      + " control shown twice",
+      inspector.querySelector(".ve-diagram-swatch.is-on")
+        .getAttribute("aria-label"),
+      bar().querySelector(".ve-diagram-swatch.is-on").getAttribute("aria-label"));
+
+    /* The size is on both, and a size changed on one that left the other saying
+     * the old number would be two controls disagreeing about one diagram.
+     */
+    const sizeOn = (where) => where.querySelector(".ve-diagram-size");
+    const typedInto = sizeOn(bar());
+    typedInto.value = "24";
+    typedInto.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("a size set on the bar reaches the box",
+      groupOf("A").style.getPropertyValue("--dd-font-size"), "24px");
+    check("...and the field in the panel comes into step with it",
+      sizeOn(inspector).value, "24");
+    /* Without the panel being repainted under the caret. A field thrown away
+     * and made again between one press of the spinner and the next is a spinner
+     * you can only press once.
+     */
+    check("...and the field being typed into is still the field being typed into",
+      typedInto.isConnected, true);
+
+    /* A number half typed is not a number. The field the caret is in is left
+     * alone while the others are brought into step, or a two-digit size cannot
+     * be typed at all: the first digit lands, the diagram changes, and the
+     * field is rewritten before the second one arrives.
+     */
+    typedInto.focus();
+    typedInto.value = "3";
+    sizeOn(inspector).value = "30";
+    sizeOn(inspector).dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and a number half typed is not overwritten while it is being typed",
+      [typedInto.value, groupOf("A").style.getPropertyValue("--dd-font-size")],
+      ["3", "30px"]);
+    typedInto.blur();
+    sizeOn(bar()).value = "24";
+    sizeOn(bar()).dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    /* Type twice the size needs twice the room. A box that keeps the size it
+     * was measured at while its type is enlarged is a box its own words no
+     * longer fit in.
+     */
+    const tallAs = () => Number(groupOf("A").querySelector(".dd-shape")
+      .getAttribute("height"));
+    const held = tallAs();
+    sizeOn(bar()).value = "48";
+    sizeOn(bar()).dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and the box grows to hold type that size", tallAs() > held, true);
+
+    sizeOn(inspector).value = "11";
+    sizeOn(inspector).dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("and it works the other way round too", sizeOn(bar()).value, "11");
+
+    /* The bar is laid over the drawing rather than drawn into it, so a redraw
+     * has to leave it where it is — and it has to follow the box it is about.
+     */
+    const stood = topOf();
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "ArrowDown", shiftKey: true, bubbles: true, cancelable: true }));
+    await new Promise((done) => setTimeout(done, 300));
+    check("the bar survives the diagram being drawn again", Boolean(bar()), true);
+    check("...and comes down with the box it is about", topOf() > stood, true);
+
+    /* Above the box, and underneath it when the box is against the top of the
+     * window: a bar drawn off the top of the paper is a bar nobody can reach.
+     */
+    canvas.dispatchEvent(new window.WheelEvent("wheel",
+      { deltaY: seenAt("A").y + 40, bubbles: true, cancelable: true }));
+    check("a box against the top of the window gets its bar underneath it",
+      Math.round(topOf()) > Math.round(seenAt("A").y), true);
+    canvas.dispatchEvent(new window.WheelEvent("wheel",
+      { deltaY: -200, bubbles: true, cancelable: true }));
+
+    // A shape menu over four boxes would have to say what four shapes are, so
+    // it is offered for one box and the rest of the bar for any number.
+    tap("B", { shiftKey: true });
+    check("two boxes held share a bar",
+      [Boolean(bar()), Boolean(bar().querySelector(".ve-diagram-shape")),
+        Boolean(bar().querySelector(".ve-diagram-swatch"))],
+      [true, false, true]);
+
+    /* A size field over four boxes that showed one of their sizes would set the
+     * other three to it the moment anybody touched it. Two boxes that disagree
+     * have no one size, so the field says nothing rather than picking a side.
+     */
+    check("...and the size says nothing while the two of them disagree",
+      sizeOn(bar()).value, "");
+
+    swatchOn(bar(), 2);
+    check("...and a colour chosen on it paints both of them",
+      [/--dd-fill:/.test(groupOf("A").getAttribute("style") || ""),
+        /--dd-fill:/.test(groupOf("B").getAttribute("style") || "")],
+      [true, true]);
+
+    bar().querySelector(".ve-diagram-drop")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the way out on the bar takes both away, and the bar with them",
+      [canvas.querySelectorAll(".dd-node").length, bar()], [0, null]);
 
     page.window.close();
   }
