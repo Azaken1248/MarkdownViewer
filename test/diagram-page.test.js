@@ -877,6 +877,96 @@ async function run(server, cookie) {
     check("a grid reaches the file as one quoted label",
       /A\["Person<br\/>name \| string<br\/>age \| int"\]/.test(written), true);
 
+    /* The type one cell is set in.
+     *
+     * Everything else on this panel dresses a whole node, because a classDef
+     * dresses a whole node and that is all Mermaid can be told. A table is the
+     * one place where that is not the grain of the thing — the header row wants
+     * to be bold and the id column wants to be mono — so the controls are aimed
+     * at whichever cell has the caret, and say which one that is.
+     */
+    const strip = () => [...inspector.querySelectorAll(".ve-diagram-font")]
+      .find((one) => one.querySelector(".ve-diagram-aimed"));
+    const aimed = () => strip().querySelector(".ve-diagram-aimed").textContent;
+    const mark = (label) => strip().querySelector(`[aria-label="${label} cell"]`);
+    const menu = (label) => strip().querySelector(`[aria-label="${label}"]`);
+    const styleOf = (at) => groupOf("A").querySelectorAll(".dd-row")[at]
+      .getAttribute("style") || "";
+
+    check("a table has controls for the type one of its cells is set in",
+      Boolean(strip()), true);
+    check("...switched off while no cell has the caret",
+      [mark("Bold").disabled, menu("Cell font").disabled], [true, true]);
+    check("...and saying what they are waiting for",
+      /Click into a cell/.test(aimed()), true);
+
+    field(1).focus();
+    check("clicking into a cell aims them at it", aimed(), "Row 1, column 1.");
+    check("...and switches them on", mark("Bold").disabled, false);
+
+    mark("Bold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("a cell told to be bold says so on the button",
+      mark("Bold").getAttribute("aria-pressed"), "true");
+    check("...and is drawn bold", styleOf(0), "--dd-font-weight:700;");
+    check("...and no other cell is", styleOf(1), "");
+
+    field(2).focus();
+    check("the caret moving moves what the controls are about",
+      [aimed(), mark("Bold").getAttribute("aria-pressed")],
+      ["Row 1, column 2.", "false"]);
+
+    menu("Cell font").value = "Mono";
+    menu("Cell font").dispatchEvent(new window.Event("change", { bubbles: true }));
+    menu("Cell text size").value = "Small";
+    menu("Cell text size").dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and a family and a size are both said about that one cell",
+      styleOf(1), "--dd-font-size:11px;--dd-font-family:monospace;");
+
+    // A cell is set in one family, so choosing another takes the first off
+    // rather than leaving the diagram wearing both.
+    menu("Cell font").value = "Serif";
+    menu("Cell font").dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("choosing another family takes the first one off",
+      styleOf(1), "--dd-font-size:11px;--dd-font-family:serif;");
+
+    menu("Cell font").value = "Default";
+    menu("Cell font").dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and choosing none takes it off without taking the size with it",
+      styleOf(1), "--dd-font-size:11px;");
+
+    field(3).focus();
+    mark("Italic").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    await saveAndWait(page);
+    const dressed = (await server.request("GET", "/api/docs/grid.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("what the cells wear reaches the file beside the table",
+      /cells=1\.0:b;1\.1:11;2\.0:i/.test(dressed), true);
+
+    /* A row taken off takes its cells' type with it. Keeping it would mean
+     * that adding the row back later brings an old italic with it out of
+     * nowhere, and it would leave the file dressing a row nobody can see.
+     */
+    fewer("Rows");
+    await saveAndWait(page);
+    const shorter = (await server.request("GET", "/api/docs/grid.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("a row taken off takes what its cells wore with it",
+      /cells=1\.0:b;1\.1:11(?: |$)/m.test(shorter), true);
+
+    /* And is gone from the diagram, not merely left out of the file.
+     *
+     * Only left out, it would still be sitting in the table — so asking for
+     * the row back would hand you a cell already italic, which nobody asked
+     * for and nothing on the panel explains.
+     */
+    more("Rows");
+    await saveAndWait(page);
+    const back = (await server.request("GET", "/api/docs/grid.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...so asking for the row back does not bring the old italic with it",
+      /2\.0:i/.test(back), false);
+
     page.window.close();
   }
 

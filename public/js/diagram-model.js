@@ -412,7 +412,8 @@
    * the value that was read wins over the value that was changed, and the edit
    * is thrown away on save. Every key read below has to appear here.
    */
-  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap", "frame"];
+  const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap", "frame",
+    "cells"];
   const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {
@@ -1081,6 +1082,11 @@
           node.frame = "none";
         }
 
+        const cells = readCellStyles(at.attributes.cells);
+        if (Object.keys(cells).length > 0) {
+          node.cells = cells;
+        }
+
         for (const key of ["layer", "z", "pad", "gap"]) {
           if (at.attributes[key] !== undefined && /^-?\d+$/.test(at.attributes[key])) {
             node[key] = Number(at.attributes[key]);
@@ -1277,6 +1283,8 @@
             ? String(node.pad) : "",
           gap: Number.isFinite(node.gap) && node.gap !== TABLE_GAP.standard
             ? String(node.gap) : "",
+          cells: writeCellStyles(node.cells,
+            textCells(node.text ?? node.id ?? "")),
           ...(node.extra || {})
         });
 
@@ -1485,6 +1493,133 @@
    */
   function columnsOf(grid) {
     return grid.reduce((most, cells) => Math.max(most, cells.length), 1);
+  }
+
+  /* The type one cell is set in.
+   *
+   * Mermaid has a classDef, and a classDef dresses a node. There is no such
+   * thing as a class on a cell, because as far as Mermaid is concerned a table
+   * is a box with pipes in its label — so this is one of the few things that
+   * genuinely cannot be said in the real syntax, and it is said beside it.
+   *
+   * Written as `cells=1.0:b;2.1:m14`: the row, the column, and what that one
+   * cell wears. Letters for the marks and digits for the size, in that order,
+   * because a cell's whole appearance then fits in a token short enough to
+   * read at a glance in the file.
+   */
+  const CELL_MARKS = [
+    ["b", "font-weight", "700"],
+    ["i", "font-style", "italic"],
+    ["n", "font-family", "sans-serif"],
+    ["m", "font-family", "monospace"],
+    ["s", "font-family", "serif"]
+  ];
+  const CELL_SIZE = { least: 8, most: 48 };
+  const CELL_ONE_RE = /^(\d+)\.(\d+):([bimns]{0,5})(\d{0,2})$/;
+  const CELL_JOIN = ";";
+
+  const cellKey = (row, column) => `${row}.${column}`;
+
+  /* What the file says each cell is wearing.
+   *
+   * Anything that is not one of the shapes above is dropped rather than kept
+   * and passed on. The token becomes a style attribute on a <text>, and a file
+   * is something anyone can hand you.
+   */
+  function readCellStyles(said) {
+    const out = {};
+
+    for (const one of String(said || "").split(CELL_JOIN)) {
+      const found = CELL_ONE_RE.exec(one.trim());
+      if (!found) {
+        continue;
+      }
+
+      // A cell that says it wears nothing is a cell with no entry, not an
+      // entry that says nothing.
+      const [, row, column, marks, digits] = found;
+      if (marks === "" && digits === "") {
+        continue;
+      }
+
+      const size = Number(digits);
+      if (digits !== "" && (size < CELL_SIZE.least || size > CELL_SIZE.most)) {
+        continue;
+      }
+
+      out[cellKey(Number(row), Number(column))] = marks + digits;
+    }
+
+    return out;
+  }
+
+  /* Back to a token, in a fixed order, and only for cells the table still has.
+   *
+   * A row deleted takes its cells' type with it. Keeping the entry would mean
+   * that adding the row back later brings the old bold with it — which is a
+   * surprise, and worse, it means the file grows a line of dressing for parts
+   * of a table nobody can see.
+   */
+  function writeCellStyles(styles, grid) {
+    const rows = grid || [];
+    const columns = columnsOf(rows);
+
+    const kept = Object.entries(styles || {}).flatMap(([key, token]) => {
+      const found = /^(\d+)\.(\d+)$/.exec(key);
+      if (!found || !token) {
+        return [];
+      }
+
+      const row = Number(found[1]);
+      const column = Number(found[2]);
+      // The title spans the table, so it is the one cell of row zero.
+      const wide = row === 0 ? 1 : columns;
+      if (row >= rows.length || column >= wide) {
+        return [];
+      }
+
+      return [[row, column, String(token)]];
+    });
+
+    kept.sort((one, two) => (one[0] - two[0]) || (one[1] - two[1]));
+    return kept.map(([row, column, token]) =>
+      `${cellKey(row, column)}:${token}`).join(CELL_JOIN);
+  }
+
+  // A token spelled out as the declarations it stands for. The same property
+  // names a classDef uses, so a cell and the box around it are dressed by one
+  // vocabulary rather than two.
+  function cellDeclarations(token) {
+    const said = String(token || "");
+    const out = {};
+
+    for (const [letter, key, value] of CELL_MARKS) {
+      if (said.includes(letter)) {
+        out[key] = value;
+      }
+    }
+
+    const digits = said.replace(/\D/g, "");
+    if (digits !== "") {
+      out["font-size"] = `${Number(digits)}px`;
+    }
+
+    return out;
+  }
+
+  // The token a cell would wear given what is asked of it: the marks it keeps,
+  // plus the size. One place builds a token, so there is one spelling of one.
+  function cellToken(marks, size) {
+    const letters = CELL_MARKS
+      .filter(([letter]) => (marks || []).includes(letter))
+      .map(([letter]) => letter)
+      .join("");
+
+    const number = Number(size);
+    const said = Number.isFinite(number) && number >= CELL_SIZE.least
+      && number <= CELL_SIZE.most ? String(Math.round(number)) : "";
+
+    return letters + said;
   }
 
   /* A table's grid, of exactly this many rows and columns.
@@ -1975,6 +2110,13 @@
     joinCells,
     columnsOf,
     resizeGrid,
+    CELL_MARKS,
+    CELL_SIZE,
+    cellKey,
+    readCellStyles,
+    writeCellStyles,
+    cellDeclarations,
+    cellToken,
     tableMetrics,
     TABLE_PAD,
     TABLE_GAP,

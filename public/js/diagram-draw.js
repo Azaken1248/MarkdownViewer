@@ -163,10 +163,11 @@
 
   // One cell, written where it goes. Its own <text> rather than a tspan in a
   // shared one, because a <title> belongs to the element it describes.
-  function cellText(kind, x, y, anchor, cut) {
+  function cellText(kind, x, y, anchor, cut, paint) {
     return `<text class="dd-text ${kind}" x="${round(x)}" y="${round(y)}"`
-      + ` text-anchor="${anchor}" dominant-baseline="middle">`
-      + (cut.full ? `<title>${escapeText(cut.full)}</title>` : "")
+      + ` text-anchor="${anchor}" dominant-baseline="middle"`
+      + (paint ? ` style="${escapeText(paint)}"` : "")
+      + `>${cut.full ? `<title>${escapeText(cut.full)}</title>` : ""}`
       + `${escapeText(cut.text)}</text>`;
   }
 
@@ -181,8 +182,9 @@
    * have to infer from where the words happen to sit is a box with a list in
    * it, and the lines are the whole difference between the two.
    */
-  function tableMarkup(grid, w, h, spacing, char) {
+  function tableMarkup(grid, w, h, spacing, char, styles) {
     const title = (grid[0] || [])[0] || "";
+    const titleToken = (styles || {})[Model.cellKey(0, 0)] || "";
     const body = grid.slice(1);
     const columns = Model.columnsOf(grid);
     const wide = w / columns;
@@ -197,9 +199,13 @@
           return "";
         }
 
+        // The body starts at row one: row zero is the title, drawn on its own
+        // below, so a body row's number in the grid is one more than its number
+        // here.
+        const token = (styles || {})[Model.cellKey(line + 1, cell)] || "";
         return cellText("dd-row", (cell * wide) + spacing.pad,
           spacing.title + (line * tall) + (tall / 2), "start",
-          clip(words, room, char));
+          clip(words, room, cellChar(token, char)), cellPaint(token));
       }).join(""));
 
     /* The rules of the grid: down between the columns, across between the rows.
@@ -219,7 +225,8 @@
       + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
       + cellText("dd-title", w / 2, spacing.title / 2, "middle",
-        clip(title, w - (spacing.pad * 2), char))
+        clip(title, w - (spacing.pad * 2), cellChar(titleToken, char)),
+        cellPaint(titleToken))
       + cells.join("");
   }
 
@@ -320,7 +327,7 @@
 
     if (node.kind === "table") {
       return tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
-        charWidthOf(node, classes));
+        charWidthOf(node, classes), node.cells);
     }
 
     /* What is in the box: a picture, an icon, or its words. A picture beats an
@@ -415,6 +422,38 @@
     const said = wornBy(node, classes)["font-size"];
     const size = SIZE_RE.test(String(said || "").trim()) ? parseFloat(said) : TEXT_SIZE;
     return size * CHAR_RATIO;
+  }
+
+  /* What one cell of a table wears, checked exactly the way the box's own is.
+   *
+   * The four font entries and no others: a cell may be set in another type, and
+   * a cell may not repaint the table it is in. Same custom properties as the
+   * box sets, so a cell that says nothing about its weight inherits the one the
+   * box chose — which is what makes "bold this cell" a thing you can say on top
+   * of "this table is bold" rather than instead of it.
+   */
+  const CELL_PAINTED = PAINTED.filter(([key]) => key.startsWith("font-"));
+
+  function cellPaint(token) {
+    const said = Model.cellDeclarations(token);
+
+    let out = "";
+    for (const [key, property, allowed] of CELL_PAINTED) {
+      const value = said[key];
+      if (typeof value === "string" && allowed.test(value.trim())) {
+        out += `${property}:${value.trim()};`;
+      }
+    }
+
+    return out;
+  }
+
+  // How wide a character is in this cell: its own size if it set one, the box's
+  // otherwise. A cell set larger that kept the box's character width would be a
+  // cell whose words are cut too late, and so written over the wall.
+  function cellChar(token, char) {
+    const said = Model.cellDeclarations(token)["font-size"];
+    return SIZE_RE.test(String(said || "")) ? parseFloat(said) * CHAR_RATIO : char;
   }
 
   function paintOf(node, classes) {

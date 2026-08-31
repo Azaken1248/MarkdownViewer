@@ -2559,6 +2559,100 @@ console.log("=== a word too long for its cell stops at the wall ===");
     /<title>abcdef<\/title><\/text>/.test(none), true);
 }
 
+console.log("=== one cell of a table, set in its own type ===");
+{
+  const table = (cells, text = "T<br/>a | b<br/>c | d", w = 400) => DD.render({
+    direction: "TD",
+    nodes: [{ id: "A", shape: "rect", kind: "table", text, cells }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w, h: 120 } }
+  }, { natural: true });
+
+  const styleOf = (svg, words) => {
+    const found = new RegExp(`<text[^>]*?(?: style="([^"]*)")?>${words}</text>`)
+      .exec(svg);
+    return found ? (found[1] || "") : null;
+  };
+
+  /* The same custom properties the box's own font sets, one level further in.
+   * Which is what makes "bold this cell" something you can say on top of "this
+   * table is mono" rather than instead of it.
+   */
+  const dressed = table({ "1.0": "b", "2.1": "m11", "0.0": "s18" });
+  check("a cell told to be bold is written bold",
+    styleOf(dressed, "a"), "--dd-font-weight:700;");
+  check("...and one told a family and a size says both",
+    styleOf(dressed, "d"), "--dd-font-size:11px;--dd-font-family:monospace;");
+  check("...and the title is a cell like any other",
+    styleOf(dressed, "T"), "--dd-font-size:18px;--dd-font-family:serif;");
+  check("...while a cell that was told nothing says nothing",
+    styleOf(dressed, "b"), "");
+
+  // A cell set larger runs out of room sooner. A cell that kept the table's
+  // character width would be cut too late, and so written over the wall.
+  const big = table({ "1.0": "40" }, "T<br/>abcdefgh | b", 200);
+  check("a cell set larger is cut sooner",
+    /<title>abcdefgh<\/title>/.test(big), true);
+  check("...and the same words at the ordinary size are not",
+    /<title>abcdefgh<\/title>/.test(table({}, "T<br/>abcdefgh | b", 200)), false);
+
+  /* The token becomes a style attribute on a <text>, and a file is something
+   * anyone can hand you. Anything that is not one of the shapes the format has
+   * is dropped on the way in rather than kept and passed on.
+   */
+  const read = (said) => DM.readCellStyles(said);
+  check("a token the format has is read", read("1.0:b;2.1:m14"),
+    { "1.0": "b", "2.1": "m14" });
+  check("...a letter it does not have is not", read("1.0:x"), {});
+  check("...nor a size outside what a diagram is set in",
+    read("1.0:b99;2.0:b4"), {});
+  check("...nor anything smuggled in beside it",
+    read("1.0:b;red:x;2.0:</style>"), { "1.0": "b" });
+  check("...and a cell wearing nothing gets no entry", read("1.0:"), {});
+
+  /* Mermaid has a classDef and a classDef dresses a node. There is no such
+   * thing as a class on a cell, so this is one of the few things that cannot
+   * be said in the real syntax — and it is said beside it, and survives.
+   */
+  const written = DM.serializeFlowchart({
+    direction: "TD",
+    nodes: [{
+      id: "A", shape: "rect", kind: "table",
+      text: "Staff<br/>Ada | Lead", cells: { "1.1": "m14", "0.0": "b" }
+    }],
+    edges: [],
+    layout: { A: { x: 0, y: 0, w: 200, h: 80 } }
+  });
+  check("what a cell wears reaches the file beside the table",
+    /cells=0\.0:b;1\.1:m14/.test(written), true);
+  check("...in one order however it was given, so the file settles",
+    written, DM.serializeFlowchart(DM.parseFlowchart(written)));
+  check("...and comes back on the same cells",
+    DM.parseFlowchart(written).nodes[0].cells, { "0.0": "b", "1.1": "m14" });
+  check("...while a table nobody dressed says nothing about it",
+    /cells=/.test(DM.serializeFlowchart({
+      direction: "TD",
+      nodes: [{ id: "A", shape: "rect", kind: "table", text: "Staff<br/>Ada" }],
+      edges: [],
+      layout: { A: { x: 0, y: 0, w: 200, h: 80 } }
+    })), false);
+
+  /* A row taken off takes its cells' type with it. Keeping it would mean that
+   * adding the row back later brings an old bold with it out of nowhere.
+   */
+  const grid = DM.textCells("T<br/>a | b");
+  check("a cell the table still has is written",
+    DM.writeCellStyles({ "1.0": "b", "1.1": "i" }, grid), "1.0:b;1.1:i");
+  check("...and one on a row that has gone is not",
+    DM.writeCellStyles({ "1.0": "b", "4.0": "i" }, grid), "1.0:b");
+  check("...nor one in a column that has gone",
+    DM.writeCellStyles({ "1.0": "b", "1.5": "i" }, grid), "1.0:b");
+  // The title spans the table, so row zero has exactly one cell however many
+  // columns there are.
+  check("...nor one beside a title, which has no beside",
+    DM.writeCellStyles({ "0.0": "b", "0.1": "i" }, grid), "0.0:b");
+}
+
 console.log("=== a table is measured by its columns ===");
 {
   const size = (text) => DM.measureNode({ shape: "rect", kind: "table", text });

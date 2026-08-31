@@ -3207,6 +3207,16 @@
      *
      * The title spans the whole of it, the same way it is drawn.
      */
+    /* Which cell the type controls below the grid are aimed at: the one whose
+     * field has the caret.
+     *
+     * A strip of buttons over a grid of cells has to be about one of them, and
+     * the one you are typing into is the one you mean. With none entered the
+     * strip would have to guess, so it says so and switches itself off instead.
+     */
+    let cellFocus = null;
+    let showCellFont = () => {};
+
     const cellField = (item, row, column, label) => {
       const field = document.createElement("input");
       field.type = "text";
@@ -3236,6 +3246,11 @@
         grow(item);
         renameEverywhere(item.id, stepLabel(item));
         commit();
+      });
+
+      field.addEventListener("focus", () => {
+        cellFocus = { row, column };
+        showCellFont();
       });
 
       return field;
@@ -3314,6 +3329,19 @@
       const grid = DiagramModel.textCells(item.text || item.id);
       item.text = DiagramModel.joinCells(
         DiagramModel.resizeGrid(grid, rows, columns));
+
+      /* A row taken off takes its cells' type with it, here as well as in the
+       * file — or adding the row back later would bring an old bold with it
+       * out of nowhere. Written and read back rather than filtered by hand, so
+       * one place decides which cells a table has.
+       */
+      const kept = DiagramModel.readCellStyles(DiagramModel.writeCellStyles(
+        item.cells, DiagramModel.textCells(item.text)));
+      if (Object.keys(kept).length > 0) {
+        item.cells = kept;
+      } else {
+        delete item.cells;
+      }
 
       /* The box grows to hold what is in it, and never shrinks.
        *
@@ -4049,6 +4077,162 @@
       return holder;
     }
 
+    /* The type one cell of a table is set in.
+     *
+     * Everything else on this panel dresses a whole node, because a classDef
+     * dresses a whole node and that is the only thing Mermaid can be told. A
+     * table is the one place where that is not the grain of the thing: the
+     * header row wants to be bold and the id column wants to be mono, and
+     * neither is a statement about the table.
+     *
+     * So it is the same four choices as the box's own font row, aimed at one
+     * cell — and read as an override on top of the table's own rather than
+     * instead of it, which is what setting the same custom properties one
+     * level further in gets for free.
+     */
+    const CELL_FAMILIES = [
+      ["Default", ""],
+      ["Sans", "n"],
+      ["Serif", "s"],
+      ["Mono", "m"]
+    ];
+
+    const CELL_SIZES = [
+      ["Normal", ""],
+      ["Small", "11"],
+      ["Large", "16"],
+      ["Huge", "20"]
+    ];
+
+    const CELL_MARK_BUTTONS = [
+      ["Bold", "b", "ph-text-b"],
+      ["Italic", "i", "ph-text-italic"]
+    ];
+
+    const CELL_LETTERS = (token) => String(token || "").replace(/\d/g, "");
+    const CELL_DIGITS = (token) => String(token || "").replace(/\D/g, "");
+
+    function cellFontRow(item) {
+      const holder = document.createElement("div");
+      holder.className = "ve-diagram-font";
+
+      const where = document.createElement("p");
+      where.className = "ve-diagram-aimed";
+
+      const listed = (offered) => offered.map(([name]) => [name, name]);
+      const family = chooser("ve-diagram-kind", "Cell font", listed(CELL_FAMILIES),
+        CELL_FAMILIES[0][0]);
+      const size = chooser("ve-diagram-kind", "Cell text size", listed(CELL_SIZES),
+        CELL_SIZES[0][0]);
+
+      const menus = document.createElement("div");
+      menus.className = "ve-diagram-row ve-diagram-border";
+      menus.append(family, size);
+
+      const marks = document.createElement("div");
+      marks.className = "ve-diagram-marks";
+      marks.setAttribute("role", "group");
+      marks.setAttribute("aria-label", "Cell text style");
+
+      const keyNow = () => cellFocus
+        ? DiagramModel.cellKey(cellFocus.row, cellFocus.column) : "";
+      const tokenNow = () => (item.cells || {})[keyNow()] || "";
+
+      /* One way in, so a cell with nothing on it has no entry rather than an
+       * empty one, and a table with nothing on any cell has no `cells` at all.
+       * The file then says what was chosen and stays silent about the rest.
+       */
+      const change = (make) => {
+        if (!cellFocus) {
+          return;
+        }
+
+        const token = make(tokenNow());
+        const cells = { ...(item.cells || {}) };
+        if (token) {
+          cells[keyNow()] = token;
+        } else {
+          delete cells[keyNow()];
+        }
+
+        if (Object.keys(cells).length > 0) {
+          item.cells = cells;
+        } else {
+          delete item.cells;
+        }
+
+        write();
+        drawAtOnce();
+        show();
+      };
+
+      // A cell is set in one family, so choosing one takes the other two off.
+      family.addEventListener("change", () => change((token) => {
+        const chosen = (CELL_FAMILIES.find(([name]) => name === family.value) || [])[1] || "";
+        const kept = CELL_LETTERS(token).split("")
+          .filter((one) => !CELL_FAMILIES.some(([, letter]) => letter === one));
+
+        return DiagramModel.cellToken([...kept, chosen], CELL_DIGITS(token));
+      }));
+
+      size.addEventListener("change", () => change((token) => {
+        const chosen = (CELL_SIZES.find(([name]) => name === size.value) || [])[1] || "";
+        return DiagramModel.cellToken(CELL_LETTERS(token).split(""), chosen);
+      }));
+
+      const buttons = CELL_MARK_BUTTONS.map(([label, letter, icon]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ve-diagram-mark";
+        button.title = label;
+        button.setAttribute("aria-label", `${label} cell`);
+        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+
+        button.addEventListener("click", () => change((token) => {
+          const letters = CELL_LETTERS(token).split("");
+          const kept = letters.filter((one) => one !== letter);
+
+          return DiagramModel.cellToken(
+            letters.includes(letter) ? kept : [...kept, letter],
+            CELL_DIGITS(token));
+        }));
+
+        marks.append(button);
+        return [button, letter];
+      });
+
+      const show = () => {
+        const token = tokenNow();
+        const letters = CELL_LETTERS(token);
+        const aimed = Boolean(cellFocus);
+
+        where.textContent = aimed
+          ? (cellFocus.row === 0 ? "The title."
+            : `Row ${cellFocus.row}, column ${cellFocus.column + 1}.`)
+          : "Click into a cell above to set how it is written.";
+
+        family.disabled = !aimed;
+        size.disabled = !aimed;
+        family.value = (CELL_FAMILIES.find(([, letter]) =>
+          letter && letters.includes(letter)) || CELL_FAMILIES[0])[0];
+        size.value = (CELL_SIZES.find(([, digits]) =>
+          digits && digits === CELL_DIGITS(token)) || CELL_SIZES[0])[0];
+
+        for (const [button, letter] of buttons) {
+          const on = aimed && letters.includes(letter);
+          button.disabled = !aimed;
+          button.classList.toggle("is-on", on);
+          button.setAttribute("aria-pressed", on ? "true" : "false");
+        }
+      };
+
+      showCellFont = show;
+      show();
+
+      holder.append(menus, marks, where);
+      return holder;
+    }
+
     /* A darker version of a colour, for the stroke and the text.
      *
      * Mixed towards black rather than scaled, so a pale fill gives a stroke that
@@ -4070,6 +4254,10 @@
 
     function paintInspector(options = {}) {
       inspector.replaceChildren();
+      // The cell fields the type controls aimed at are about to be thrown away,
+      // so the aim goes with them rather than outliving them.
+      cellFocus = null;
+      showCellFont = () => {};
       const item = selectedNode();
 
       if (!item) {
@@ -4147,7 +4335,8 @@
       );
 
       if (table) {
-        inspector.append(tableSize(item), tableSpacing(item));
+        inspector.append(tableSize(item), tableSpacing(item),
+          captioned("Cell text", cellFontRow(item)));
       }
 
       inspector.append(

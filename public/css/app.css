@@ -4560,6 +4560,28 @@ body.page-editing #dockEdit {
   color: var(--fg-on-emphasis);
 }
 
+/* The cell controls with no cell to act on. Shown rather than hidden: a strip
+   that appears the moment you click a field is a strip you find by accident,
+   and one that is there but greyed says what it is waiting for. */
+.ve-diagram-mark:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ve-diagram-mark:disabled:hover {
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+
+/* Which cell the type above it is aimed at. Under the controls rather than
+   over them, because it answers a question the controls raise. */
+.ve-diagram-aimed {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
 /* Rows and columns are one answer to one question about a table, so they sit
    on one line and share it evenly. */
 .ve-diagram-grid-size {
