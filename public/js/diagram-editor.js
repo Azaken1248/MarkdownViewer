@@ -1451,6 +1451,30 @@
         }
       }
 
+      /* Two taps on a thing, noted before anything that would move it.
+       *
+       * The second press does not open anything yet — it is a tap only if the
+       * hand stays still until it lets go, and until then it may still be the
+       * beginning of a drag. So a box is picked up as usual and judged on the
+       * way up, and a corner and a line are left alone: pressing a line puts a
+       * corner in it, and opening its label should not also bend it.
+       */
+      tapping = markPress(event, point);
+
+      if (tapping.again) {
+        event.preventDefault?.();
+
+        if (tapping.what.kind === "node") {
+          if (!isSelected(tapping.what.id)) {
+            select(tapping.what.id);
+          }
+
+          beginGesture("move", tapping.what.id, point, event);
+        }
+
+        return;
+      }
+
       const handle = event.target.closest?.("[data-role]");
 
       if (handle && selectedId) {
@@ -1812,6 +1836,9 @@
     });
 
     canvas.addEventListener("pointerup", endGesture);
+    // After the gesture, so a corner is written where it was left before being
+    // asked whether it should be there at all.
+    canvas.addEventListener("pointerup", liftPress);
     canvas.addEventListener("pointercancel", (event) => {
       if (gesture) {
         gesture = null;
@@ -2281,8 +2308,11 @@
       style.top = `${(at.y * view.scale) + view.y}px`;
       style.width = `${at.w * view.scale}px`;
       style.height = `${at.h * view.scale}px`;
-      // Scaled with the diagram, so what is typed is the size it will be.
-      style.fontSize = `${13 * view.scale}px`;
+      /* Scaled with the diagram and set in the type the words are drawn in, so
+       * what is typed is the size it will be. A field that is always 13px is a
+       * word that changes size the moment you stop typing.
+       */
+      style.fontSize = `${(editing.size || DiagramModel.TEXT_SIZE) * view.scale}px`;
     }
 
     function startEditing(what) {
@@ -2414,6 +2444,9 @@
       select(id);
       startEditing({
         label: row === 0 ? "Table title" : `Row ${row}, column ${column + 1}`,
+        size: DiagramDraw.cellSize(
+          (item.cells || {})[DiagramModel.cellKey(row, column)] || "",
+          DiagramDraw.sizeOf(item, model.classes)),
         id,
         cell: { row, column },
         left: row > 0,
@@ -2458,6 +2491,7 @@
       select(id);
       startEditing({
         label: "Box text",
+        size: DiagramDraw.sizeOf(item, model.classes),
         box: () => boxOf(id),
         read: () => DiagramModel.textRows(item.text || "").join("\n"),
         write: (value) => {
@@ -2517,27 +2551,109 @@
       editNode(id);
     }
 
-    canvas.addEventListener("dblclick", (event) => {
-      // A corner put in by hand is taken out the same way a box is opened: two
-      // taps on the thing itself.
+    /* --- Two taps on the same thing -----------------------------------------
+     *
+     * Counted here rather than left to the browser's own `dblclick`, which
+     * never arrived on a box and so left the words editable only from the
+     * panel.
+     *
+     * The first press selects what was pressed, and selecting is
+     * `canvas.innerHTML = …` — so by the time the second press lands, the
+     * element the browser was counting clicks against has been thrown away and
+     * replaced by a new one drawing the same box. A click count only survives
+     * on one element, so it started again from one; and the canvas takes the
+     * pointer for the length of a drag besides, which moves the compatibility
+     * events off the shape as well.
+     *
+     * So the count is kept against what was pressed — this box, this corner,
+     * this arrow — which is a name that outlives any number of redraws. It is
+     * also what a finger does, so a double tap opens a box on a phone without
+     * a second mechanism for it.
+     */
+    const TAP_AGAIN = 400;
+    const TAP_NEAR = 6;
+    let lastTap = null;
+    let tapping = null;
+
+    // What a press is about, said in a way that does not name the element
+    // drawing it. The order is the order a press is read in: a corner sits on
+    // top of the line it bends, and a box on top of the paper.
+    function pressedOn(event, point) {
       const corner = event.target.closest?.(".dd-via");
       if (corner) {
-        dropCorner(Number(corner.getAttribute("data-edge")),
-          Number(corner.getAttribute("data-at")));
-        return;
+        return {
+          kind: "via",
+          edge: Number(corner.getAttribute("data-edge")),
+          at: Number(corner.getAttribute("data-at"))
+        };
       }
 
-      const group = event.target.closest?.(".dd-node");
-      if (group) {
-        openText(group.getAttribute("data-id"), pointIn(event.clientX, event.clientY));
-        return;
+      const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
+      if (id) {
+        return { kind: "node", id };
       }
 
       const line = event.target.closest?.(".dd-edge");
-      if (line) {
-        editEdge(Number(line.getAttribute("data-edge")));
+      return line ? { kind: "edge", edge: Number(line.getAttribute("data-edge")) } : null;
+    }
+
+    const samePress = (one, two) => Boolean(one) && Boolean(two)
+      && one.kind === two.kind && one.id === two.id
+      && one.edge === two.edge && one.at === two.at;
+
+    const nearly = (event, spot) => Math.abs(event.clientX - spot.x) <= TAP_NEAR
+      && Math.abs(event.clientY - spot.y) <= TAP_NEAR;
+
+    // What is being pressed, and whether it is the same thing the last tap was
+    // on — soon enough after it, and near enough to it, to be the second of a
+    // pair rather than one more press.
+    function markPress(event, point) {
+      const what = pressedOn(event, point);
+      const again = Boolean(what) && samePress(what, lastTap)
+        && Date.now() - lastTap.when <= TAP_AGAIN && nearly(event, lastTap);
+
+      return { what, point, x: event.clientX, y: event.clientY, again };
+    }
+
+    /* Letting go is what settles it. A press that went somewhere was a drag,
+     * and a drag is not a tap however quickly it followed the last one —
+     * clicking a box and then dragging it is two things a person does in a row,
+     * not a double click.
+     */
+    function liftPress(event) {
+      const held = tapping;
+      tapping = null;
+
+      if (!held?.what || !nearly(event, held)) {
+        // A drag also breaks the pair it might have started.
+        lastTap = null;
+        return;
       }
-    });
+
+      if (held.again) {
+        // Three taps are a pair and then a tap, not three pairs.
+        lastTap = null;
+        openTapped(held.what, held.point);
+        return;
+      }
+
+      lastTap = { ...held.what, when: Date.now(), x: held.x, y: held.y };
+    }
+
+    function openTapped(what, point) {
+      if (what.kind === "via") {
+        // A corner put in by hand is taken out the same way a box is opened.
+        dropCorner(what.edge, what.at);
+        return;
+      }
+
+      if (what.kind === "node") {
+        openText(what.id, point);
+        return;
+      }
+
+      editEdge(what.edge);
+    }
 
     /* --- Getting about ------------------------------------------------------
      *

@@ -322,7 +322,7 @@
       x >= at.x && x < at.x + at.w && y >= at.y && y < at.y + at.h) || null;
   }
 
-  function tableMarkup(grid, w, h, spacing, char, styles) {
+  function tableMarkup(grid, w, h, spacing, size, styles) {
     const boxes = cellBoxes(grid, w, h, spacing);
     const title = (grid[0] || [])[0] || "";
     const titleToken = (styles || {})[Model.cellKey(0, 0)] || "";
@@ -340,7 +340,7 @@
       const token = (styles || {})[Model.cellKey(at.row, at.column)] || "";
       // What a cell has to write in, once the padding either side is taken off.
       return cellText("dd-row", at.x + spacing.pad, at.y + (at.h / 2), "start",
-        clip(words, at.w - (spacing.pad * 2), cellChar(token, char)), cellPaint(token));
+        clip(words, at.w - (spacing.pad * 2), cellChar(token, size)), cellPaint(token));
     });
 
     /* The rules of the grid: down between the columns, across between the rows.
@@ -360,7 +360,7 @@
       + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
       + cellText("dd-title", boxes[0].w / 2, boxes[0].h / 2, "middle",
-        clip(title, w - (spacing.pad * 2), cellChar(titleToken, char)),
+        clip(title, w - (spacing.pad * 2), cellChar(titleToken, size)),
         cellPaint(titleToken))
       + cells.join("");
   }
@@ -480,7 +480,7 @@
 
     if (node.kind === "table") {
       return tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
-        charWidthOf(node, classes), node.cells);
+        sizeOf(node, classes), node.cells);
     }
 
     /* What is in the box: a picture, an icon, or its words. A picture beats an
@@ -582,9 +582,6 @@
     return SIZE_RE.test(String(said || "").trim()) ? parseFloat(said) : TEXT_SIZE;
   }
 
-  function charWidthOf(node, classes) {
-    return sizeOf(node, classes) * CHAR_RATIO;
-  }
 
   /* What one cell of a table wears, checked exactly the way the box's own is.
    *
@@ -610,12 +607,21 @@
     return out;
   }
 
-  // How wide a character is in this cell: its own size if it set one, the box's
-  // otherwise. A cell set larger that kept the box's character width would be a
-  // cell whose words are cut too late, and so written over the wall.
-  function cellChar(token, char) {
+  /* How big this cell's type is: its own size if it set one, the box's
+   * otherwise. Asked here rather than worked out again wherever it is wanted,
+   * because the field typed into a cell has to open at the size the cell is
+   * drawn at or the words change size the moment you stop typing.
+   */
+  function cellSize(token, size) {
     const said = Model.cellDeclarations(token)["font-size"];
-    return SIZE_RE.test(String(said || "")) ? parseFloat(said) * CHAR_RATIO : char;
+    return SIZE_RE.test(String(said || "")) ? parseFloat(said) : size;
+  }
+
+  // How wide a character is in this cell. A cell set larger that kept the box's
+  // character width would be a cell whose words are cut too late, and so
+  // written over the wall.
+  function cellChar(token, size) {
+    return cellSize(token, size) * CHAR_RATIO;
   }
 
   function paintOf(node, classes) {
@@ -1821,6 +1827,8 @@
     shapeMarkup,
     cellBoxes,
     cellAt,
+    sizeOf,
+    cellSize,
     exportRules,
     exportPalette,
     exportSvg,

@@ -2768,10 +2768,22 @@ async function run(server, cookie) {
       return { x: (x * view.scale) + view.x, y: (y * view.scale) + view.y, scale: view.scale };
     };
 
+    /* Two presses, the way a browser sends them — and re-asking for the box
+     * between them, because the first press selects it and selecting redraws
+     * the whole drawing. A test that dispatched one `dblclick` at an element it
+     * held onto would pass against an editor no hand could open.
+     */
     const openAt = (x, y) => {
       const spot = onScreen(x, y);
-      groupOf("A").dispatchEvent(new window.MouseEvent("dblclick",
-        { clientX: spot.x, clientY: spot.y, bubbles: true, cancelable: true }));
+      const press = () => {
+        groupOf("A").dispatchEvent(new window.MouseEvent("pointerdown",
+          { clientX: spot.x, clientY: spot.y, bubbles: true, cancelable: true }));
+        canvas.dispatchEvent(new window.MouseEvent("pointerup",
+          { clientX: spot.x, clientY: spot.y, bubbles: true, cancelable: true }));
+      };
+
+      press();
+      press();
     };
 
     const press = (key, options = {}) => field().dispatchEvent(
@@ -2878,6 +2890,60 @@ async function run(server, cookie) {
       field().value, "Step 2");
 
     page.window.close();
+
+    /* A cell may be set in its own type, and the field over it has to be set in
+     * that type rather than in the table's — otherwise the one cell anybody
+     * bothered to enlarge is the one cell that jumps when you stop typing.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "sized.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 200x120 kind=table cells=1.1:24",
+        '    A["Person<br/>name | string"]'
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const sized = await openPage({ url: `${origin}/diagram/file/sized.mmd`, cookie, origin });
+    const paper = sized.document.querySelector(".ve-diagram-canvas");
+    const table = () => paper.querySelector('.dd-node[data-id="A"]');
+    const typing = () => paper.querySelector(".ve-diagram-inline");
+    const view = () => Number(/scale\(([\d.]+)\)/
+      .exec(paper.querySelector(".dd-view").getAttribute("transform"))[1]);
+
+    // The diagram is drawn in its own coordinates and pressed in the window's.
+    const pressAt = (x, y) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(paper.querySelector(".dd-view").getAttribute("transform"));
+      const spot = {
+        clientX: (x * Number(found[3])) + Number(found[1]),
+        clientY: (y * Number(found[3])) + Number(found[2]),
+        bubbles: true,
+        cancelable: true
+      };
+
+      for (let count = 0; count < 2; count += 1) {
+        table().dispatchEvent(new sized.window.MouseEvent("pointerdown", spot));
+        paper.dispatchEvent(new sized.window.MouseEvent("pointerup", spot));
+      }
+    };
+
+    // Row one, column one: the cell the file set in 24px.
+    pressAt(250, 149);
+    check("a cell set in its own type is typed into in that type",
+      typing().style.fontSize, `${24 * view()}px`);
+    typing().dispatchEvent(new sized.window.KeyboardEvent("keydown",
+      { key: "Escape", bubbles: true, cancelable: true }));
+
+    await new Promise((r) => setTimeout(r, 450));
+
+    // Row one, column nought, which set nothing and so takes the table's.
+    pressAt(150, 149);
+    // 13px is the size a box is drawn in when it says nothing about its type.
+    check("...and one that set none takes the table's",
+      typing().style.fontSize, `${13 * view()}px`);
+
+    sized.window.close();
   }
 
   console.log("=== the keys are the builder's, not the paper's ===");
@@ -2948,6 +3014,11 @@ async function run(server, cookie) {
      * swallowed them would be a panel that cannot be worked from the keyboard
      * at all — so the control that uses the key keeps it.
      */
+    /* Long enough after the last press on this box to be a second click rather
+     * than the second half of a double one — which would open the box to be
+     * typed in, and that is the thing this is checking does not happen.
+     */
+    await new Promise((r) => setTimeout(r, 450));
     tap("A");
     press(rail.querySelector("button"), "Enter");
     check("Enter on a button belongs to the button",
@@ -3135,6 +3206,33 @@ async function run(server, cookie) {
     sizeOn(inspector).value = "11";
     sizeOn(inspector).dispatchEvent(new window.Event("change", { bubbles: true }));
     check("and it works the other way round too", sizeOn(bar()).value, "11");
+
+    /* The field laid over a box is set in the box's own type. One that is
+     * always 13px is a word that changes size the moment you stop typing —
+     * which is the one thing typing into the drawing is supposed to avoid.
+     */
+    sizeOn(inspector).value = "32";
+    sizeOn(inspector).dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 450));
+    const tapTwice = () => {
+      for (let count = 0; count < 2; count += 1) {
+        groupOf("A").dispatchEvent(
+          new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+        canvas.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      }
+    };
+
+    tapTwice();
+    const scale = Number(/scale\(([\d.]+)\)/
+      .exec(canvas.querySelector(".dd-view").getAttribute("transform"))[1]);
+    check("the field opens in the type the box is set in",
+      canvas.querySelector(".ve-diagram-inline").style.fontSize, `${32 * scale}px`);
+    canvas.querySelector(".ve-diagram-inline").dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+
+    sizeOn(inspector).value = "11";
+    sizeOn(inspector).dispatchEvent(new window.Event("change", { bubbles: true }));
 
     /* The bar is laid over the drawing rather than drawn into it, so a redraw
      * has to leave it where it is — and it has to follow the box it is about.
@@ -3575,6 +3673,18 @@ async function run(server, cookie) {
       canvas.dispatchEvent(new window.MouseEvent("pointerup", here));
     };
 
+    /* Two presses on the same thing, asked for again in between: the first one
+     * changes the diagram, and a change is a redraw that throws the element
+     * away. What is tapped twice is the corner, not the circle drawing it.
+     */
+    const tapTwice = (selector) => {
+      for (let count = 0; count < 2; count += 1) {
+        canvas.querySelector(selector).dispatchEvent(
+          new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+        canvas.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      }
+    };
+
     check("an arrow nobody has touched has no corners in it", corners(), 0);
     check("...and the box beside it shows none either", pins(), 0);
 
@@ -3648,15 +3758,32 @@ async function run(server, cookie) {
 
     // The second of the two, so that taking out "a corner" and taking out "the
     // one that was asked for" are two different answers.
-    canvas.querySelector('.dd-via[data-at="1"]')
-      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    /* Two corners of the same arrow are two things. Pressing one and then the
+     * other is not two presses on a corner, and neither of them goes.
+     */
+    const onCorner = (which) => {
+      const found = canvas.querySelector(`.dd-via[data-at="${which}"]`);
+      // Where the corner actually is: a press somewhere else is a corner
+      // dragged there, because letting go of a corner puts it where the hand is.
+      const here = at(Number(found.getAttribute("cx")), Number(found.getAttribute("cy")));
+      found.dispatchEvent(new window.MouseEvent("pointerdown", here));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", here));
+    };
+
+    onCorner(0);
+    onCorner(1);
+    check("one press on each of two corners takes neither of them out", corners(), 2);
+
+    // Long enough after that last press for the pair below to be its own pair.
+    await new Promise((r) => setTimeout(r, 450));
+
+    tapTwice('.dd-via[data-at="1"]');
     check("...and the one taken out is the one that was asked for",
       [corners(), canvas.querySelector(".dd-via").getAttribute("cy")], [1, "160"]);
 
     // Two taps on the corner itself takes it out, the same way two taps on a
     // box opens it.
-    canvas.querySelector(".dd-via")
-      .dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    tapTwice(".dd-via");
     check("two taps on a corner takes it out", corners(), 0);
 
     await saveAndWait(page);
@@ -3715,6 +3842,80 @@ async function run(server, cookie) {
     await saveAndWait(page);
     check("...and the file says nothing about it at all",
       /%% edge 0/.test(await written()), false);
+
+    /* Two corners can be put next to each other, and zoomed out far enough they
+     * are within a finger's width of each other on the screen. Then the only
+     * thing telling a press on one from a press on the other is which corner it
+     * was — and without that, pressing one and then its neighbour takes out a
+     * corner nobody asked to lose.
+     *
+     * On a paper of its own, because it leaves a diagram bent in two places and
+     * looked at from a long way off.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "close.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,260 80x40",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const far = await openPage({ url: `${origin}/diagram/file/close.mmd`, cookie, origin });
+    const paper = far.document.querySelector(".ve-diagram-canvas");
+    const bends = () => paper.querySelectorAll(".dd-via").length;
+    const spot = (x, y) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(paper.querySelector(".dd-view").getAttribute("transform"));
+      return {
+        clientX: (x * Number(found[3])) + Number(found[1]),
+        clientY: (y * Number(found[3])) + Number(found[2]),
+        bubbles: true
+      };
+    };
+
+    const bend = (x, y) => {
+      paper.querySelector(".dd-edge .dd-hit")
+        .dispatchEvent(new far.window.MouseEvent("pointerdown", spot(x, y)));
+      paper.dispatchEvent(new far.window.MouseEvent("pointerup", spot(x, y)));
+    };
+
+    // Selected, because only the arrows of the box being worked on can be bent.
+    paper.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new far.window.MouseEvent("pointerdown", spot(140, 120)));
+    paper.dispatchEvent(new far.window.MouseEvent("pointerup", spot(140, 120)));
+
+    const step = 10;
+    bend(140, 200);
+    bend(140, 200 + step);
+    check("two corners can be put next to each other", bends(), 2);
+
+    // Far enough out that one grid step is less than a tap is wide.
+    for (let count = 0; count < 8; count += 1) {
+      paper.dispatchEvent(new far.window.WheelEvent("wheel",
+        { deltaY: 1, ctrlKey: true, bubbles: true, cancelable: true }));
+    }
+
+    const shrunk = Number(/scale\(([\d.]+)\)/
+      .exec(paper.querySelector(".dd-view").getAttribute("transform"))[1]);
+    check("...and zoomed out they are a few pixels apart on the screen",
+      step * shrunk < 6, true);
+
+    await new Promise((r) => setTimeout(r, 450));
+
+    const onCornerHere = (which) => {
+      const found = paper.querySelector(`.dd-via[data-at="${which}"]`);
+      const here = spot(Number(found.getAttribute("cx")), Number(found.getAttribute("cy")));
+      found.dispatchEvent(new far.window.MouseEvent("pointerdown", here));
+      paper.dispatchEvent(new far.window.MouseEvent("pointerup", here));
+    };
+
+    onCornerHere(0);
+    onCornerHere(1);
+    check("...but one press on each is still one press on each", bends(), 2);
+
+    far.window.close();
   }
 
   console.log("=== a box carried into another is carried on top of it ===");
@@ -4079,13 +4280,50 @@ async function run(server, cookie) {
     const { window } = page;
     const canvas = page.document.querySelector(".ve-diagram-canvas");
     const field = () => canvas.querySelector(".ve-diagram-inline");
-    const twice = (target) => target.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    /* Asked for again between the presses: the first one selects the box, and
+     * selecting throws the whole drawing away and draws it again. Holding on to
+     * the element is how a test passes while no hand can open the box.
+     */
+    const twice = (selector) => {
+      for (let count = 0; count < 2; count += 1) {
+        canvas.querySelector(selector)
+          .dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+        canvas.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      }
+    };
     const key = (target, name, extra = {}) => target.dispatchEvent(
       new window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...extra }));
 
     check("nothing is being typed into to begin with", Boolean(field()), false);
 
-    twice(canvas.querySelector('.dd-node[data-id="A"]'));
+    /* Why two presses and not one `dblclick` event.
+     *
+     * The first press selects the box, and selecting redraws the whole diagram
+     * — `canvas.innerHTML = …` — so the element the browser was counting
+     * clicks against is thrown away before the second press lands, and its
+     * count starts again from one. A double click therefore never arrived, and
+     * the words could only be edited from the panel. Nothing about that is
+     * visible to a test that hands the editor a `dblclick` of its own.
+     */
+    const held = canvas.querySelector('.dd-node[data-id="A"]');
+    held.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    check("pressing a box replaces the very element that was pressed",
+      canvas.querySelector('.dd-node[data-id="A"]') === held, false);
+    check("...and it is no longer in the page at all", held.isConnected, false);
+
+    // The second press, on the box rather than on the element: the count is
+    // kept against what was pressed, which outlives any number of redraws.
+    canvas.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    check("two presses on a box open a place to type in it, all the same",
+      Boolean(field()), true);
+
+    key(field(), "Escape");
+    await new Promise((r) => setTimeout(r, 450));
+
+    twice('.dd-node[data-id="A"]');
     check("double-clicking a box opens a place to type in it", Boolean(field()), true);
     // The file says <br/> because that is what Mermaid reads. A person typing
     // into a box presses Enter.
@@ -4119,7 +4357,7 @@ async function run(server, cookie) {
     check("...and so does the panel beside it",
       page.document.querySelector(".ve-diagram-text").value, "Renamed");
 
-    twice(canvas.querySelector('.dd-node[data-id="A"]'));
+    twice('.dd-node[data-id="A"]');
     field().value = "Thrown away";
     key(field(), "Escape");
     check("escape throws away what was typed", Boolean(field()), false);
@@ -4128,7 +4366,7 @@ async function run(server, cookie) {
 
     // Shift-enter is a line break, the way it is in every box anyone has typed
     // a label into.
-    twice(canvas.querySelector('.dd-node[data-id="B"]'));
+    twice('.dd-node[data-id="B"]');
     field().value = "Two\nlines";
     key(field(), "Enter");
     await saveAndWait(page);
@@ -4137,8 +4375,14 @@ async function run(server, cookie) {
       written.includes("B[\"Two<br/>lines\"]"), true);
 
     // An arrow has no box to type in, so one is borrowed where its label is.
-    twice(canvas.querySelector(".dd-edge"));
+    twice(".dd-edge");
     check("double-clicking an arrow opens a place to type its label", field().value, "when");
+    /* Pressing a line bends it, so the press that opens its label puts one
+     * corner in it. The second press is about the label and nothing else — it
+     * must not put a second corner in on the way.
+     */
+    check("...without bending it a second time on the way",
+      canvas.querySelectorAll(".dd-via").length, 1);
     field().value = "if ready";
     key(field(), "Enter");
     await saveAndWait(page);
@@ -4150,6 +4394,85 @@ async function run(server, cookie) {
       { key: "z", ctrlKey: true, bubbles: true }));
     check("typing into the diagram can be undone",
       canvas.querySelector(".dd-edge").textContent.includes("when"), true);
+
+    /* --- what a second press is not ---------------------------------------- */
+
+    await new Promise((r) => setTimeout(r, 450));
+
+    /* Clicking a box and then dragging it is two things a person does in a row.
+     * Judging the pair on the way down would turn the beginning of that drag
+     * into an opened box, and the box would be typed into instead of moved.
+     */
+    const where = () => /translate\((-?[\d.]+),(-?[\d.]+)\)/
+      .exec(canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform"));
+
+    const start = where();
+    const spot = (dx, dy) => ({
+      clientX: Number(start[1]) + 10 + dx,
+      clientY: Number(start[2]) + 10 + dy,
+      bubbles: true,
+      cancelable: true
+    });
+
+    canvas.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", spot(0, 0)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", spot(0, 0)));
+    canvas.querySelector('.dd-node[data-id="A"]')
+      .dispatchEvent(new window.MouseEvent("pointerdown", spot(0, 0)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", spot(60, 0)));
+    await new Promise((r) => setTimeout(r, 60));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", spot(60, 0)));
+
+    check("a press that goes somewhere is a drag, not the second of two taps",
+      Boolean(field()), false);
+    check("...and the box went where it was dragged",
+      Number(where()[1]) - Number(start[1]), 60);
+
+    /* What else a pair is not. A pair is two presses on the same thing, close
+     * together and close by — anything else is two presses.
+     */
+    const now = () => /translate\((-?[\d.]+),(-?[\d.]+)\)/
+      .exec(canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform"));
+
+    const pressOn = (selector, dx = 0, dy = 0) => {
+      const at = now();
+      const spot = {
+        clientX: Number(at[1]) + 10 + dx,
+        clientY: Number(at[2]) + 10 + dy,
+        bubbles: true,
+        cancelable: true
+      };
+
+      canvas.querySelector(selector).dispatchEvent(new window.MouseEvent("pointerdown", spot));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", spot));
+    };
+
+    pressOn('.dd-node[data-id="A"]');
+    pressOn('.dd-node[data-id="B"]');
+    check("one press on each of two boxes is not a pair on either",
+      Boolean(field()), false);
+
+    // Far enough apart on the same box to be two places rather than one.
+    pressOn('.dd-node[data-id="A"]');
+    pressOn('.dd-node[data-id="A"]', 40);
+    check("...and two presses far apart on one box are not a pair either",
+      Boolean(field()), false);
+
+    await new Promise((r) => setTimeout(r, 450));
+
+    pressOn('.dd-node[data-id="A"]');
+    pressOn('.dd-node[data-id="A"]');
+    check("...while two on the same spot are", Boolean(field()), true);
+
+    /* Three presses are a pair and then a press. Counting the third against the
+     * first as well would throw away the field being typed into and open
+     * another one in its place, halfway through a word.
+     */
+    const opened = field();
+    pressOn('.dd-node[data-id="A"]');
+    check("...and a third press leaves the field that is being typed into alone",
+      field() === opened, true);
+    key(field(), "Escape");
   }
 
   console.log("=== every edit has a way back ===");
