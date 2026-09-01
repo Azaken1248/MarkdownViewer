@@ -492,11 +492,31 @@
       ? pictureMarkup(node, at, lead)
       : iconMarkup(node, at, lead) || labelMarkup(node, at, Model.textRows(words), lead);
 
-    /* A box drawn without its box: an icon or a picture standing on the paper
-     * on its own, which is what most of a technical diagram is. The shape is
-     * the frame; without one there is nothing to draw but what is inside.
-     */
-    return (node.frame === "none" ? "" : shapeMarkup(node.shape, at.w, at.h)) + inside;
+    return backing(node, at, classes) + inside;
+  }
+
+  /* What is drawn behind what a box holds.
+   *
+   * For most boxes that is the shape. For a frameless one it is nothing — an
+   * icon or a picture standing on the paper on its own, which is what most of a
+   * technical diagram is: the shape is the frame, and without one there is
+   * nothing to draw but what is inside.
+   *
+   * Words on the paper are the third case. They have no shape either, but a
+   * colour behind them has to be painted on something, so they get a plain
+   * rectangle the size of the words and no border — a highlight rather than a
+   * box. Which is the only honest way to offer a background on a thing whose
+   * whole point is not having one.
+   */
+  function backing(node, at, classes) {
+    if (node.kind === "text") {
+      return wornBy(node, classes).fill
+        ? `<rect class="dd-shape dd-back" x="0" y="0" width="${round(at.w)}"`
+          + ` height="${round(at.h)}" rx="${round(RADIUS)}"/>`
+        : "";
+    }
+
+    return node.frame === "none" ? "" : shapeMarkup(node.shape, at.w, at.h);
   }
 
   /* --- Colour ---------------------------------------------------------------

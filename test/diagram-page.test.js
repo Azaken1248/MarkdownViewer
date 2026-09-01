@@ -517,11 +517,36 @@ async function run(server, cookie) {
       ["Icon", "Picture"].filter((one) => rail.includes(one)),
       ["Icon", "Picture"]);
 
-    const icon = [...page.document.querySelectorAll(".ve-diagram-tool")]
-      .find((one) => one.textContent === "Icon");
-    icon.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
-    icon.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    /* A shape is put down in two taps: one on the rail to say what, and one on
+     * the paper to say where. Tapping the rail used to put the shape down
+     * wherever there happened to be room, which is an answer to a question
+     * nobody asked — every box then cost a tap and a drag.
+     */
+    const armTool = (label) => {
+      const tool = [...page.document.querySelectorAll(".ve-diagram-tool")]
+        .find((one) => one.textContent === label);
+      tool.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+      tool.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      return tool;
+    };
+
+    const tapPaper = (x, y) => canvas.dispatchEvent(new window.MouseEvent("pointerdown",
+      { bubbles: true, clientX: x, clientY: y }));
+
+    const before = canvas.querySelectorAll(".dd-node").length;
+    const armed = armTool("Icon");
+    check("tapping a shape on the rail puts nothing on the paper yet",
+      canvas.querySelectorAll(".dd-node").length, before);
+    check("...and the shape that is armed says so",
+      armed.getAttribute("aria-pressed"), "true");
+
+    tapPaper(240, 180);
     await new Promise((done) => setTimeout(done, 300));
+
+    check("...and the tap on the paper is what puts it down",
+      canvas.querySelectorAll(".dd-node").length, before + 1);
+    check("...after which nothing is armed any more",
+      armed.getAttribute("aria-pressed"), "false");
 
     const put = [...canvas.querySelectorAll(".dd-node")].pop();
     check("an icon put down is an icon and not a rectangle with one in it",
@@ -540,11 +565,13 @@ async function run(server, cookie) {
      * shape with the exact one said beside it, so what is dropped here has to
      * come back out of the file as what was dropped.
      */
+    let spot = 200;
     const drop = async (label) => {
-      const tool = [...page.document.querySelectorAll(".ve-diagram-tool")]
-        .find((one) => one.textContent === label);
-      tool.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
-      tool.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+      armTool(label);
+      // Somewhere new each time, so that what is being looked at is the shape
+      // just put down rather than the one it landed on top of.
+      spot += 60;
+      tapPaper(spot, spot);
       await new Promise((done) => setTimeout(done, 300));
       return [...canvas.querySelectorAll(".dd-node")].pop();
     };
@@ -567,9 +594,76 @@ async function run(server, cookie) {
     check("text put down is words and no shape",
       [text.textContent, Boolean(text.querySelector(".dd-shape"))], ["Text", false]);
 
+    /* Where the tap said, and not wherever there happened to be room.
+     *
+     * Which is the whole difference: the old rail put a shape under the lowest
+     * box, or nudged it sideways until it was clear of everything, and the
+     * shape then had to be dragged from there to wherever it was wanted. So
+     * two things are asked. Two taps far apart put two shapes far apart, in the
+     * order they were tapped — and two taps on the same spot put both shapes on
+     * the same spot, which a rail that nudges things clear of each other could
+     * never do.
+     */
+    const middle = (one) => {
+      const at = /translate\((-?[\d.]+)[ ,]+(-?[\d.]+)\)/
+        .exec(one.getAttribute("transform")) || [];
+      return [Number(at[1]), Number(at[2])];
+    };
+
+    // By the id that was not there a moment ago, rather than by whichever
+    // group is drawn last: what is on top is a question about stacking order,
+    // and the one just put down is not always the answer to it.
+    const ids = () => new Set([...canvas.querySelectorAll(".dd-node")]
+      .map((one) => one.getAttribute("data-id")));
+
+    const placeAt = async (label, x, y) => {
+      const had = ids();
+      armTool(label);
+      tapPaper(x, y);
+      await new Promise((done) => setTimeout(done, 300));
+
+      const made = [...ids()].find((one) => !had.has(one));
+      return made ? middle(canvas.querySelector(`.dd-node[data-id="${made}"]`)) : null;
+    };
+
+    const near = await placeAt("Box", 300, 300);
+    const far = await placeAt("Box", 620, 520);
+
+    check("a shape goes where the paper was tapped, not where there was room",
+      [far[0] > near[0], far[1] > near[1]], [true, true]);
+
+    const over = await placeAt("Box", 300, 300);
+    check("...and two tapped on one spot land on it, rather than being nudged"
+      + " clear of each other", over, near);
+
+    /* A mode wants a way out that is not "use it". Two of them: the button that
+     * turned it on, and the key that dismisses everything else here.
+     */
+    const box = armTool("Box");
+    check("tapping the armed shape again puts the tool down",
+      armTool("Box").getAttribute("aria-pressed"), "false");
+    check("...and so does Escape", (() => {
+      armTool("Box");
+      const held = box.getAttribute("aria-pressed");
+      page.document.querySelector(".ve-diagram-shell").dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return [held, box.getAttribute("aria-pressed")];
+    })(), ["true", "false"]);
+
+    const settled = canvas.querySelectorAll(".dd-node").length;
+    tapPaper(500, 400);
+    await new Promise((done) => setTimeout(done, 300));
+    check("...after which a tap on the paper is a tap and not a placement",
+      canvas.querySelectorAll(".dd-node").length, settled);
+
     await saveAndWait(page);
     const vocabulary = (await server.request("GET", "/api/docs/regions.mmd",
       undefined, { Cookie: cookie })).body.content;
+    /* Words on the paper are their own kind in the file, rather than a box with
+     * its frame turned off. Which is what lets the panel for one be a panel
+     * about words instead of a panel about a box with most of it greyed out.
+     */
+    check("text reaches the file as its own kind", /kind=text/.test(vocabulary), true);
     check("...and each reaches the file as the nearest real shape",
       ["A[", "((", "([", "[("].every((real) => vocabulary.includes(real)), true);
     check("...with the exact one said beside it",
@@ -625,7 +719,8 @@ async function run(server, cookie) {
     check("...with the way to remove it up there, since it is not a property of it",
       Boolean(inspector.querySelector(".ve-diagram-picked > .ve-diagram-drop")), true);
     check("...and every control below it named",
-      captions(), ["Label", "Shape", "Fill", "Border", "Font", "Picture", "Icon"]);
+      captions(),
+      ["Label", "Shape", "Fill", "Colours", "Border", "Font", "Picture", "Icon"]);
 
     // A label wrapping its control is also the label that control answers to,
     // so the caption is a way into the field rather than a word beside it. A
@@ -836,6 +931,9 @@ async function run(server, cookie) {
       .find((one) => one.dataset.kind === "table");
     shape.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
     shape.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true }));
+    // The rail says what; the paper says where.
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown",
+      { bubbles: true, clientX: 420, clientY: 320 }));
     await new Promise((done) => setTimeout(done, 300));
 
     check("a table dropped on the paper is a table", counts(), [3, 2]);
@@ -2204,6 +2302,190 @@ async function run(server, cookie) {
     const reopened = window.DiagramModel.parseFlowchart(blue);
     check("...which is read back as the same colour",
       reopened.classes[reopened.nodes[0].classes[0]].fill, "#d9e6fb");
+  }
+
+  console.log("=== words on the paper are their own thing ===");
+  {
+    /* A text element used to be an ordinary box with its frame turned off,
+     * which meant tapping one opened the panel for a box: a shape menu for a
+     * thing with no shape, a border for a thing with no edge, a picture and an
+     * icon for a thing that is neither. So it is a kind of its own now, and the
+     * panel for one asks only what words have an answer to.
+     *
+     * The one written with nothing but frame=none is how the old tool wrote
+     * them, and there are files out there full of them — a frameless box with
+     * no icon and no picture is words on the paper and nothing else, so it is
+     * read back as what it always was.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "words.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ T 300,100 90x32 kind=text frame=none",
+        "    %% @ O 500,100 90x32 frame=none",
+        "    %% @ P 700,100 80x80 frame=none image=/x.png",
+        "    A[One]",
+        "    T[Heading]",
+        "    O[Older]",
+        "    P[Photo]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/words.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const captions = () => [...inspector.querySelectorAll(".ve-diagram-field-name")]
+      .map((one) => one.textContent);
+    const legend = () =>
+      inspector.querySelector(".ve-diagram-picked .ve-diagram-legend").textContent;
+    const tap = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/
+        .exec(groupOf(id).getAttribute("transform"));
+      const x = Number(found[1]) + 10;
+      const y = Number(found[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+    const written = async () => (await server.request("GET", "/api/docs/words.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    tap("T");
+    check("a panel about words says words, not box", legend(), "Text");
+    check("...and asks only what words have an answer to",
+      captions(), ["Words", "Font", "Colours"]);
+    check("...so no shape menu, which is the question it has no answer to",
+      Boolean(inspector.querySelector(".ve-diagram-shape")), false);
+
+    check("the bar over it offers no shape either",
+      Boolean(page.document.querySelector(".ve-diagram-hud .ve-diagram-shape")), false);
+
+    check("words on the paper are drawn without a shape",
+      Boolean(groupOf("T").querySelector(".dd-shape")), false);
+
+    tap("O");
+    check("a frameless box from before there was a kind for one is words too",
+      legend(), "Text");
+
+    tap("P");
+    check("...while a picture standing on its own is still a box, because it"
+      + " is carrying the thing it shows", legend(), "Box");
+
+    tap("A");
+    check("an ordinary box still gets every question a box has an answer to",
+      captions(),
+      ["Label", "Shape", "Fill", "Colours", "Border", "Font", "Picture", "Icon"]);
+
+    /* The two colours everything has, said outright. The swatches say fill,
+     * stroke and text all at once, which is the right offer for "make this one
+     * red" and no way at all to say "these words are grey".
+     */
+    const wellFor = (name) => inspector
+      .querySelector(`.ve-diagram-inks input[data-ink="${name}"]`);
+    const clearFor = (name) => inspector
+      .querySelector(`.ve-diagram-inks [data-unink="${name}"]`);
+    const setInk = (name, value) => {
+      const well = wellFor(name);
+      well.value = value;
+      well.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+
+    check("a box is offered its two colours by name",
+      [...inspector.querySelectorAll(".ve-diagram-ink-name")].map((one) => one.textContent),
+      ["Words", "Behind"]);
+    check("...neither of which it has yet, so neither can be taken off",
+      [clearFor("color").disabled, clearFor("fill").disabled], [true, true]);
+
+    setInk("color", "#334455");
+    check("choosing a colour for the words colours the words",
+      groupOf("A").style.getPropertyValue("--dd-text"), "#334455");
+    check("...and leaves what is behind them alone",
+      groupOf("A").style.getPropertyValue("--dd-fill"), "");
+    check("...and can now be taken off on its own",
+      [clearFor("color").disabled, clearFor("fill").disabled], [false, true]);
+
+    setInk("fill", "#ffeedd");
+    check("and a colour behind them is the other half of the same question",
+      [groupOf("A").style.getPropertyValue("--dd-fill"),
+        groupOf("A").style.getPropertyValue("--dd-text")], ["#ffeedd", "#334455"]);
+
+    await saveAndWait(page);
+    const painted = await written();
+    check("both reach the file as one classDef, like every other colour here",
+      /classDef ddC\d+ color:#334455,fill:#ffeedd|classDef ddC\d+ fill:#ffeedd,color:#334455/
+        .test(painted), true);
+
+    clearFor("fill").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("taking one off takes only that one off",
+      [groupOf("A").style.getPropertyValue("--dd-fill"),
+        groupOf("A").style.getPropertyValue("--dd-text")], ["", "#334455"]);
+
+    /* A background on a thing whose whole point is not having one has to be
+     * painted on something. So words given a colour behind them get a plain
+     * rectangle the size of the words — a highlight, with no border, which is
+     * the only honest way to offer the control at all.
+     */
+    tap("T");
+    check("words with no colour behind them have nothing drawn behind them",
+      Boolean(groupOf("T").querySelector(".dd-shape")), false);
+
+    setInk("fill", "#ffee99");
+    check("...and words given one get a highlight to put it on",
+      Boolean(groupOf("T").querySelector(".dd-shape.dd-back")), true);
+    check("...which is a fill and not a border, or it would be the box the text"
+      + " exists in order not to be",
+      groupOf("T").style.getPropertyValue("--dd-fill"), "#ffee99");
+
+    clearFor("fill").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("...and taking the colour off takes the highlight with it",
+      Boolean(groupOf("T").querySelector(".dd-shape")), false);
+
+    /* And a way back, because the way in is a choice on a box's shape menu and
+     * words have no shape menu. Without it a box turned into words by accident
+     * is words for good.
+     */
+    const backToBox = [...inspector.querySelectorAll(".ve-diagram-add")]
+      .find((one) => one.textContent.includes("Put a box round it"));
+    check("words are offered a way back to being a box", Boolean(backToBox), true);
+
+    backToBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("...which gives them one", legend(), "Box");
+    // The redraw is the next frame's work, the way every other edit's is.
+    await new Promise((done) => setTimeout(done, 200));
+    check("...drawn round them again",
+      Boolean(groupOf("T").querySelector(".dd-shape")), true);
+
+    /* And the other way is the shape menu's "No frame", which has to reach the
+     * same answer the parser does — a box that changed kind by being saved
+     * would be a diagram damaged by saving it.
+     */
+    const shapeMenu = inspector.querySelector(".ve-diagram-shape");
+    shapeMenu.value = "none";
+    shapeMenu.dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("taking a box's frame off leaves words on the paper", legend(), "Text");
+    check("...and it is offered the way back straight away",
+      Boolean([...inspector.querySelectorAll(".ve-diagram-add")]
+        .find((one) => one.textContent.includes("Put a box round it"))), true);
+
+    await saveAndWait(page);
+    const kept = await written();
+    check("...and the file says the same, so it is not a kind it changes into"
+      + " by being saved",
+      window.DiagramModel.parseFlowchart(kept)
+        .nodes.find((one) => one.id === "T").kind, "text");
+    check("words on the paper say so in the file",
+      (kept.match(/kind=text/g) || []).length, 2);
+
+    // Read back through the parser rather than assumed: a kind this editor
+    // writes and the parser does not read is a diagram damaged by being saved.
+    const reopened = window.DiagramModel.parseFlowchart(kept);
+    check("...and are read back as words rather than as boxes",
+      reopened.nodes.filter((one) => one.kind === "text").map((one) => one.id),
+      ["T", "O"]);
   }
 
   console.log("=== a line is a style and two ends, chosen one at a time ===");

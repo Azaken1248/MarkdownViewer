@@ -233,7 +233,7 @@
      * boxes, or a note about one, is not itself a step — and drawing a box
      * round it says it is.
      */
-    { shape: "rect", kind: "box", label: "Text", frame: "none", text: "Text",
+    { shape: "rect", kind: "text", label: "Text", frame: "none", text: "Text",
       size: { w: 90, h: 32 },
       glyph: '<path d="M2,3 H16 M9,3 V11 M6,11 H12"/>' },
     /* The shapes Mermaid has no brackets for. Each is written as the nearest
@@ -1360,6 +1360,7 @@
       // takes the whole canvas.
       if (handTool) {
         useArrowTool(false);
+        usePlaceTool(null);
       }
 
       showGrab();
@@ -1395,11 +1396,63 @@
         // ways of saying the same thing go away.
         armedFrom = null;
         handTool = false;
+        usePlaceTool(null);
         showGrab();
         paintInspector();
       }
 
       showArrowTool();
+    }
+
+    /* The place tool.
+     *
+     * Tapping a shape on the rail used to drop it wherever there happened to be
+     * room — under the lowest box, or nudged sideways until it was clear of
+     * everything. Which is an answer to "where does this go" that nobody asked
+     * for: the shape then had to be dragged from wherever it landed to wherever
+     * it was wanted, so every box cost a tap and a drag.
+     *
+     * So a tap on the rail no longer puts anything down. It says what the next
+     * tap on the paper is for, and the tap on the paper says where. Dragging a
+     * shape straight onto the paper still works and is still the quickest way
+     * to place one — this is the same gesture for a hand that would rather not
+     * drag, and the only one that works when the rail and the paper are not on
+     * screen together.
+     *
+     * One shape at a time, and it is put down after one placement: a rail that
+     * stays armed is an editor that quietly adds a box every time you click
+     * anywhere, which is a worse surprise than tapping the shape again.
+     */
+    let placing = null;
+    const placeButtons = new Map();
+
+    const showPlacing = () => {
+      canvas.classList.toggle("is-placing", Boolean(placing));
+
+      for (const [choice, button] of placeButtons) {
+        const on = placing === choice;
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+        button.classList.toggle("is-on", on);
+      }
+    };
+
+    function usePlaceTool(choice) {
+      const was = placing;
+      placing = choice || null;
+
+      if (placing) {
+        // Two modes at once is one mode too many, here as everywhere else.
+        armedFrom = null;
+        handTool = false;
+        arrowTool = false;
+        showGrab();
+        showArrowTool();
+        say(`Tap the paper to put a ${placing.label.toLowerCase()} there.`);
+      } else if (was) {
+        say("");
+      }
+
+      showPlacing();
     }
 
     canvas.addEventListener("pointerdown", (event) => {
@@ -1431,6 +1484,24 @@
       }
 
       const point = pointIn(event.clientX, event.clientY);
+
+      /* Armed with a shape, a press on the paper is where that shape goes.
+       *
+       * Asked before anything that selects or moves, because the whole reason
+       * to arm the tool is to say where the next thing goes — a press that
+       * first picked up whatever was already under it would drop the new one
+       * on top of the old one and start dragging both.
+       */
+      if (placing) {
+        event.preventDefault?.();
+        // Putting something else down settles the words being typed, the same
+        // as pressing anywhere else on the paper does.
+        stopEditing(true);
+        const choice = placing;
+        usePlaceTool(null);
+        placeChoice(choice, point);
+        return;
+      }
 
       /* Armed, a drag from a box is an arrow out of it and nothing else.
        *
@@ -2931,6 +3002,12 @@
 
         // A mode is a mode, and a mode wants a way out that does not involve
         // finding the button that turned it on.
+        if (placing) {
+          event.stopPropagation();
+          usePlaceTool(null);
+          return;
+        }
+
         if (arrowTool) {
           event.stopPropagation();
           useArrowTool(false);
@@ -3021,7 +3098,12 @@
         return;
       }
 
-      const kind = options.kind === "table" ? "table" : "box";
+      // What the thing is, as the rail offered it, and a box for anything the
+      // rail did not name — one list, so a new kind is one entry rather than
+      // another branch here.
+      const kind = DiagramModel.NODE_KINDS.includes(options.kind)
+        ? options.kind
+        : "box";
       const id = DiagramModel.nextNodeId(model);
       const item = {
         id,
@@ -3186,6 +3268,23 @@
       size: choice.size || (choice.icon ? { w: 80, h: 80 } : undefined)
     });
 
+    /* Putting one down, wherever "there" turns out to be.
+     *
+     * A picture has nothing to put down until a file has been chosen, so the
+     * place it was asked for is carried through the file dialogue and the box
+     * lands there when the picture arrives. Everything else lands at once.
+     */
+    function placeChoice(choice, point) {
+      const at = point ? { x: point.x, y: point.y } : {};
+
+      if (choice.picture) {
+        askForPicture({ frame: "none", ...at });
+        return;
+      }
+
+      addBox({ ...fromPalette(choice), ...at });
+    }
+
     const palette = document.createElement("div");
     palette.className = "ve-diagram-palette";
 
@@ -3197,7 +3296,10 @@
       button.dataset.kind = choice.kind;
       button.innerHTML = `${shapeGlyph(choice.glyph)}<span></span>`;
       button.querySelector("span").textContent = choice.label;
-      button.title = `Add a ${choice.label.toLowerCase()} — drag it onto the diagram`;
+      button.title = `Add a ${choice.label.toLowerCase()}`
+        + " — drag it onto the diagram, or tap and then tap where it goes";
+      button.setAttribute("aria-pressed", "false");
+      placeButtons.set(choice, button);
 
       let ghost = null;
       let dragging = false;
@@ -3214,15 +3316,12 @@
           // Nothing was captured.
         }
 
-        // The picture tool has nothing to put down until there is a picture, so
-        // it asks for one and drops the box where the file lands instead.
-        if (choice.picture) {
-          askForPicture({ frame: "none" });
-          return;
-        }
-
+        /* A tap says what, and the next tap on the paper says where. Tapping
+         * the one that is already armed puts it down again, so the button is
+         * its own way out of the mode it turned on.
+         */
         if (!dragging) {
-          addBox(fromPalette(choice));
+          usePlaceTool(placing === choice ? null : choice);
           return;
         }
 
@@ -3235,8 +3334,7 @@
           return;
         }
 
-        const point = pointIn(event.clientX, event.clientY);
-        addBox({ ...fromPalette(choice), x: point.x, y: point.y });
+        placeChoice(choice, pointIn(event.clientX, event.clientY));
       };
 
       button.addEventListener("pointerdown", (event) => {
@@ -3525,7 +3623,19 @@
         if (shape.value === NO_FRAME) {
           item.frame = NO_FRAME;
           delete item.kind;
+
+          /* Turning the frame off a box that is not carrying a picture or an
+           * icon leaves words on the paper, which is a kind. The parser says
+           * the same of the same box when the file is opened again, and it
+           * says it by asking the same question — so the box does not change
+           * kind by being saved, which is the seam this closes.
+           */
+          if (DiagramModel.wordsOnly(item)) {
+            item.kind = "text";
+          }
+
           commit();
+          paintInspector();
           paintLists();
           return;
         }
@@ -4241,6 +4351,75 @@
       return row;
     }
 
+    /* The two colours everything on the paper has: the words, and what is
+     * behind them.
+     *
+     * The swatches say all three of fill, stroke and text at once, which is the
+     * right offer for "make this one red" and the wrong one for "these words
+     * are grey on white". So this is the other half of the same question, asked
+     * outright: a well for each, and a way to put each one back on its own — a
+     * diagram that has to match somebody's brand can then say so, rather than
+     * choosing whichever preset is nearest.
+     *
+     * Both are ordinary classDef declarations, like everything else on this
+     * panel, so words set grey here are grey on GitHub too.
+     */
+    const DIAGRAM_INKS = [
+      ["Words", "color", "#1b2430"],
+      ["Behind", "fill", "#e8eaed"]
+    ];
+
+    const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+    function inkRow(ids) {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-row ve-diagram-inks";
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", "Its own colours");
+
+      const declarations = ids.length === 1 ? styleOf(nodeById(ids[0])) : {};
+
+      for (const [label, key, fallback] of DIAGRAM_INKS) {
+        const held = String(declarations[key] || "");
+
+        const well = document.createElement("div");
+        well.className = "ve-diagram-ink";
+
+        const caption = document.createElement("span");
+        caption.className = "ve-diagram-ink-name";
+        caption.textContent = label;
+
+        const input = document.createElement("input");
+        input.type = "color";
+        input.className = "ve-diagram-swatch ve-diagram-swatch-custom";
+        input.dataset.ink = key;
+        input.value = HEX_RE.test(held) ? held.toLowerCase() : fallback;
+        named(input, `${label} colour`);
+        input.addEventListener("change", () => restyle(ids, { [key]: input.value }));
+
+        /* Off, rather than back to the colour the well was showing. The theme's
+         * own colour is not a hex this panel knows — it changes with the theme,
+         * which is the whole point of not declaring one — so the way back is to
+         * say nothing, and a well that can only be set is a well that traps the
+         * first colour anybody tries in it.
+         */
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "ve-diagram-unink";
+        clear.dataset.unink = key;
+        clear.innerHTML = '<i class="ph ph-x" aria-hidden="true"></i>';
+        clear.title = `Default ${label.toLowerCase()} colour`;
+        named(clear, `Default ${label.toLowerCase()} colour`);
+        clear.disabled = held === "";
+        clear.addEventListener("click", () => restyle(ids, { [key]: null }));
+
+        well.append(caption, input, clear);
+        row.append(well);
+      }
+
+      return row;
+    }
+
     /* The border: a dash and a weight, two selects side by side.
      *
      * Selects rather than swatches because neither is a thing you recognise at
@@ -4347,9 +4526,26 @@
         picker.addEventListener("change", () => {
           const file = picker.files?.[0];
           picker.value = "";
-          void putPicture(file, picker.dataset.id
-            ? { id: picker.dataset.id }
-            : { frame: picker.dataset.frame });
+
+          if (picker.dataset.id) {
+            void putPicture(file, { id: picker.dataset.id });
+            return;
+          }
+
+          /* Where it was asked for, carried across the file dialogue. A place
+           * chosen before the dialogue opened is still the place it was chosen,
+           * however long somebody spends looking for the file — and a picture
+           * that lands somewhere else is a picture that has to be dragged.
+           */
+          const spot = picker.dataset.at
+            ? picker.dataset.at.split(",").map(Number)
+            : [];
+
+          void putPicture(file, {
+            frame: picker.dataset.frame,
+            x: spot.length === 2 && spot.every(Number.isFinite) ? spot[0] : undefined,
+            y: spot.length === 2 && spot.every(Number.isFinite) ? spot[1] : undefined
+          });
         });
 
         node.append(picker);
@@ -4357,6 +4553,9 @@
 
       picker.dataset.id = where?.id || "";
       picker.dataset.frame = where?.frame || "";
+      picker.dataset.at = Number.isFinite(where?.x) && Number.isFinite(where?.y)
+        ? `${where.x},${where.y}`
+        : "";
       picker.click();
     }
 
@@ -4850,8 +5049,10 @@
       const item = ids.length === 1 ? nodeById(ids[0]) : null;
 
       // A shape menu over four boxes would have to say what four shapes are, so
-      // it is offered for one box and the rest of the bar for any number.
-      if (item) {
+      // it is offered for one box and the rest of the bar for any number. Words
+      // on the paper have no shape to offer, and a menu of nine of them over a
+      // thing whose whole point is not being any of them is a menu that lies.
+      if (item && item.kind !== "text") {
         bar.append(shapeSelect(item));
       }
 
@@ -4954,6 +5155,7 @@
           inspector.append(
             heading(`${selection.length} boxes`),
             captioned("Fill", colourRow([...selection])),
+            captioned("Colours", inkRow([...selection])),
             captioned("Border", borderRow([...selection])),
             captioned("Font", fontRow([...selection]))
           );
@@ -4977,6 +5179,15 @@
        * same caption — it is only that one of them has a shape.
        */
       const table = item.kind === "table";
+      /* And words on the paper are only the words. A text element is not a box
+       * with its box turned off any more — it is its own thing — so the panel
+       * for one is not the panel for a box with the shape menu greyed out. It
+       * is the questions that have an answer for words: what they say, what
+       * type they are set in, and their two colours. A shape, a border, a
+       * picture and an icon are all questions about a box, and asking them of
+       * something that has not got one is what made this panel confusing.
+       */
+      const words = item.kind === "text";
       const cells = table ? cellGrid(item) : null;
       const name = table
         ? cells.querySelector(".ve-diagram-cell-title")
@@ -5007,6 +5218,32 @@
 
       actions.append(step, connect);
 
+      /* The way back out of being words.
+       *
+       * Turning a box's frame off is a choice on its shape menu, and words have
+       * no shape menu — so without this the choice only goes one way, and a box
+       * turned into words by accident is words for good. It is one button
+       * rather than a menu because there is only one thing on the other side of
+       * it: whatever shape it had before, drawn again.
+       */
+      if (words) {
+        const framed = document.createElement("button");
+        framed.type = "button";
+        framed.className = "ve-diagram-add";
+        framed.innerHTML = '<i class="ph ph-square" aria-hidden="true"></i>'
+          + "<span>Put a box round it</span>";
+        framed.addEventListener("click", () => {
+          delete item.kind;
+          delete item.frame;
+          grow(item);
+          commit();
+          paintInspector();
+          paintLists();
+        });
+
+        actions.append(framed);
+      }
+
       const out = model.edges.filter((edge) => edge.from === item.id);
 
       /* One thing per line, each with its name over it. Three controls crammed
@@ -5014,8 +5251,8 @@
        * panel look assembled rather than designed.
        */
       inspector.append(
-        heading(table ? "Table" : "Box", drop),
-        captioned(table ? "Cells" : "Label", table ? cells : name)
+        heading(words ? "Text" : table ? "Table" : "Box", drop),
+        captioned(table ? "Cells" : words ? "Words" : "Label", table ? cells : name)
       );
 
       if (table) {
@@ -5023,20 +5260,27 @@
           captioned("Cell text", cellFontRow(item)));
       }
 
-      inspector.append(
-        captioned("Shape", shapeSelect(item)),
-        captioned("Fill", colourRow([item.id])),
-        captioned("Border", borderRow([item.id])),
-        captioned("Font", fontRow([item.id]))
-      );
+      if (words) {
+        inspector.append(
+          captioned("Font", fontRow([item.id])),
+          captioned("Colours", inkRow([item.id])),
+          actions
+        );
+      } else {
+        inspector.append(
+          captioned("Shape", shapeSelect(item)),
+          captioned("Fill", colourRow([item.id])),
+          captioned("Colours", inkRow([item.id])),
+          captioned("Border", borderRow([item.id])),
+          captioned("Font", fontRow([item.id]))
+        );
 
-      if (canUpload) {
-        inspector.append(captioned("Picture", pictureRow(item)));
+        if (canUpload) {
+          inspector.append(captioned("Picture", pictureRow(item)));
+        }
+
+        inspector.append(captioned("Icon", iconRow(item)), actions);
       }
-
-      inspector.append(captioned("Icon", iconRow(item)));
-
-      inspector.append(actions);
 
       if (out.length > 0) {
         const legend = document.createElement("div");
@@ -5131,6 +5375,20 @@
 
       const drop = dropButton(`Remove ${stepLabel(item)}`);
       drop.addEventListener("click", () => removeStep(item.id));
+
+      /* Words on the paper keep the column the shape menu is in, but say what
+       * they are in it rather than offering nine shapes none of which they
+       * are. The column stays because the list is a grid, and a row that
+       * skipped it would put its own remove button under everyone else's
+       * shape.
+       */
+      if (item.kind === "text") {
+        const said = document.createElement("span");
+        said.className = "ve-diagram-row-kind";
+        said.textContent = "Text";
+        row.append(text, said, drop);
+        return row;
+      }
 
       row.append(text, shapeSelect(item), drop);
       return row;

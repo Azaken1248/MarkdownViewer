@@ -341,6 +341,16 @@
   // Mermaid nodes in the file; the kind only says how this app draws one.
   const NODE_KINDS = ["box", "table", "container", "text"];
 
+  /* Words on the paper: a frameless box that is not carrying anything to show.
+   *
+   * One place answers it, because two would have to agree — the parser reading
+   * a file written before there was a kind for words, and the editor turning a
+   * box's frame off. If they disagreed, a box would change kind by being saved,
+   * which is the one thing a file format must never do to a diagram.
+   */
+  const wordsOnly = (node) =>
+    node.frame === "none" && !node.icon && !node.image;
+
   /* The layout comments, which is where everything Mermaid cannot say lives.
    *
    *     %% layout v1
@@ -1113,6 +1123,19 @@
          */
         if (at.attributes.frame === "none") {
           node.frame = "none";
+        }
+
+        /* Words on the paper, from before there was a kind for them.
+         *
+         * The Text tool used to put down an ordinary box with its frame turned
+         * off, and nothing else ever did: an icon and a picture turn their
+         * frames off too, but each of those carries the thing it is showing and
+         * this carries neither. So a frameless box with nothing in it but words
+         * is words on the paper, and saying so here is what stops one opening a
+         * panel of questions about a shape it has not got.
+         */
+        if (!node.kind && wordsOnly(node)) {
+          node.kind = "text";
         }
 
         /* A shape Mermaid has no brackets for. The brackets on the line said
@@ -2179,6 +2202,7 @@
     lineStyleOf,
     linkFor,
     NODE_KINDS,
+    wordsOnly,
     MAX_NODES,
     MAX_EDGES,
     GRID,

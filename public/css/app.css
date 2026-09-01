@@ -2184,6 +2184,13 @@ button.crumb:focus-visible {
   stroke-dasharray: var(--dd-dash, none);
 }
 
+/* The colour behind words on the paper. A highlight, so it is the fill and
+   nothing else: a border round a text element would make it the box that the
+   text element exists in order not to be. */
+.dd .dd-back {
+  stroke: none;
+}
+
 .dd .dd-rule {
   stroke: var(--border-strong);
   stroke-width: 1px;
@@ -3784,6 +3791,21 @@ body.page-editing #dockEdit {
   color: var(--fg);
 }
 
+/* The one that is armed. A mode has to look like one from the button that
+   turned it on as well as from the canvas it acts on, or the crosshair is the
+   only clue about which of thirteen shapes is coming. */
+.ve-diagram-tool.is-on,
+.ve-diagram-tool.is-on:hover {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+.ve-diagram-tool.is-on .ve-diagram-glyph,
+.ve-diagram-tool.is-on:hover .ve-diagram-glyph {
+  color: var(--fg-on-emphasis);
+}
+
 /* The picture of the shape, which is the half of the button that says what it
    does. Never squeezed: a flex child with a drawing in it will give up its
    width to the words beside it before it gives up anything else. */
@@ -3962,6 +3984,65 @@ body.page-editing #dockEdit {
   padding: 2px;
 }
 
+/* The two colours said outright: the words, and what is behind them. A well
+   each, with its own way back to the theme's colour beside it — the swatches
+   above set all three of fill, stroke and text at once, and there is no way to
+   say only one of them by choosing a preset. */
+.ve-diagram-inks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+
+.ve-diagram-ink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ve-diagram-ink-name {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* Off rather than back to something. Disabled when there is nothing to take
+   off, so the button says whether this element has a colour of its own. */
+.ve-diagram-unink {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-unink:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.ve-diagram-unink:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* What a text element is, in the list of everything. It stands where the shape
+   menu stands on every other row, so the columns still line up. */
+.ve-diagram-row-kind {
+  align-self: center;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
 /* The hand, switched on. The only thing in the bar that stays pressed, so it
    is the only one that says so. */
 .ve-diagram-icon.is-on {
@@ -3988,6 +4069,14 @@ body.page-editing #dockEdit {
 }
 
 .ve-diagram-canvas.is-joining .dd-node {
+  cursor: crosshair;
+}
+
+/* Armed with a shape, and waiting to be told where it goes. The same crosshair
+   as the arrow tool, because it is the same promise: the next press on the
+   paper is a place rather than a thing. */
+.ve-diagram-canvas.is-placing,
+.ve-diagram-canvas.is-placing .dd-node {
   cursor: crosshair;
 }
 
@@ -4424,7 +4513,8 @@ body.page-editing #dockEdit {
   letter-spacing: 0.06em;
 }
 
-.ve-diagram-field > .ve-diagram-colours {
+.ve-diagram-field > .ve-diagram-colours,
+.ve-diagram-field > .ve-diagram-inks {
   padding: 0;
 }
 
