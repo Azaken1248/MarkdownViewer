@@ -2454,8 +2454,14 @@ async function run(server, cookie) {
 
     backToBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("...which gives them one", legend(), "Box");
-    // The redraw is the next frame's work, the way every other edit's is.
-    await new Promise((done) => setTimeout(done, 200));
+
+    /* The redraw is deferred, the way every other edit's is — so this waits
+     * for it rather than sleeping for as long as it ought to take. A fixed
+     * sleep here was two hundred milliseconds against a delay of two hundred
+     * and fifty, which passed on this machine and failed on a cold runner.
+     */
+    await waitFor(window, () => groupOf("T").querySelector(".dd-shape"),
+      "the box was never drawn round the words again");
     check("...drawn round them again",
       Boolean(groupOf("T").querySelector(".dd-shape")), true);
 
