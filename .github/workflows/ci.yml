@@ -36,7 +36,32 @@ jobs:
       # The DOM suite spawns its own server against a temp state directory, so
       # there is nothing to start here and nothing to clean up.
       - name: Test
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/test.log
+
+      # A failing run used to say "Process completed with exit code 1" and
+      # nothing else to anyone without permission to download the log, which
+      # is a failure you cannot work on. The checks that failed go in the job
+      # summary, which is public with the run.
+      - name: Say which checks failed
+        if: failure()
+        run: |
+          {
+            echo '### Failing checks'
+            echo
+            echo '```'
+            grep -E '^\s+FAIL|FAILED|was cut off' /tmp/test.log | head -60 || true
+            echo '```'
+            echo
+            echo '<details><summary>The last 120 lines</summary>'
+            echo
+            echo '```'
+            tail -120 /tmp/test.log
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check the server boots and reports healthy
         run: |
