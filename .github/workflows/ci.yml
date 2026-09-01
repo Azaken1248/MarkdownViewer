@@ -42,16 +42,26 @@ jobs:
 
       # A failing run used to say "Process completed with exit code 1" and
       # nothing else to anyone without permission to download the log, which
-      # is a failure you cannot work on. The checks that failed go in the job
-      # summary, which is public with the run.
+      # is a failure you cannot work on.
+      #
+      # The job summary is not readable through the API, and the log needs
+      # permission on the repository — but an annotation is public with the
+      # run. So each failing check becomes one, and the summary keeps the
+      # surrounding output for anyone reading the run in a browser.
       - name: Say which checks failed
         if: failure()
         run: |
+          grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log \
+            | head -40 \
+            | while IFS= read -r line; do
+                printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
+              done
           {
             echo '### Failing checks'
             echo
             echo '```'
-            grep -E '^\s+FAIL|FAILED|was cut off' /tmp/test.log | head -60 || true
+            grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log \
+              | head -60 || true
             echo '```'
             echo
             echo '<details><summary>The last 120 lines</summary>'
