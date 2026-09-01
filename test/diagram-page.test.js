@@ -2034,6 +2034,14 @@ async function run(server, cookie) {
       labels().includes("Delete 2 boxes"), true);
     check("...and drops what only makes sense for one", labels().includes("Rename box"), false);
 
+    /* A rule divides two groups. One at either end, or two together, is what is
+     * left behind when the items that do not apply to a handful are dropped —
+     * and it reads as a group with nothing in it.
+     */
+    check("...and leaves no rule standing on its own",
+      [...menu().children].some((one, at, all) => one.tagName === "HR"
+        && (at === 0 || at === all.length - 1 || all[at - 1].tagName === "HR")), false);
+
     clickItem("Delete 2 boxes");
     check("...and does it to all of them", boxes().length, 0);
     canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
@@ -2527,6 +2535,11 @@ async function run(server, cookie) {
       "the picture was never added to the diagram");
 
     check("a picture dropped on the paper becomes a box on the paper", boxes(), 2);
+    // A box put down is opened for its name, but a picture is not named by
+    // being dropped, and a caret blinking over a photograph asks a question
+    // nobody had.
+    check("...without a caret blinking over it",
+      canvas.querySelector(".ve-diagram-inline"), null);
     check("...holding the picture, at the address the store gave it",
       /^\/api\/assets\/[0-9a-f]{64}\.png$/.test(pictures()[0]), true);
     check("...and the paper stops saying it will take one",
@@ -2719,6 +2732,150 @@ async function run(server, cookie) {
     pick("Font", "Default");
     check("...and Default is a choice rather than the absence of one",
       [setOf("--dd-font-family"), setOf("--dd-font-size")], ["", "16px"]);
+
+    page.window.close();
+  }
+
+  console.log("=== the words are typed where they are drawn ===");
+  {
+    /* A table opened as one field of pipes is a table you edit by counting
+     * walls. Its cells are drawn in known places, so a double-click lands in
+     * one of them and the field goes exactly where that cell's words are.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "typing.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 200x120 kind=table",
+        '    A["Person<br/>name | string<br/>age | int"]'
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/typing.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const field = () => canvas.querySelector(".ve-diagram-inline");
+    const rows = () => [...groupOf("A").querySelectorAll(".dd-row")]
+      .map((one) => one.textContent);
+
+    // The diagram is drawn in its own coordinates and clicked in the window's,
+    // so a point in the table has to be put through the view to be aimed at.
+    const onScreen = (x, y) => {
+      const said = /translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      const view = { x: Number(said[1]), y: Number(said[2]), scale: Number(said[3]) };
+      return { x: (x * view.scale) + view.x, y: (y * view.scale) + view.y, scale: view.scale };
+    };
+
+    const openAt = (x, y) => {
+      const spot = onScreen(x, y);
+      groupOf("A").dispatchEvent(new window.MouseEvent("dblclick",
+        { clientX: spot.x, clientY: spot.y, bubbles: true, cancelable: true }));
+    };
+
+    const press = (key, options = {}) => field().dispatchEvent(
+      new window.KeyboardEvent("keydown",
+        { key, bubbles: true, cancelable: true, ...options }));
+
+    const typed = (words) => {
+      field().value = words;
+    };
+
+    // Where the field is, rounded, so it can be compared with where the cell is.
+    const over = () => ({
+      x: Math.round(Number(field().style.left.replace("px", ""))),
+      y: Math.round(Number(field().style.top.replace("px", ""))),
+      w: Math.round(Number(field().style.width.replace("px", "")))
+    });
+
+    check("a table starts with its words in its cells",
+      rows(), ["name", "string", "age", "int"]);
+    check("...and nothing being typed into", field(), null);
+
+    /* The table is 200 across and 120 down at 100,100, with a title band of 26
+     * over two rows of two. So the second cell of the first row is the 100 to
+     * 200 half, 26 to 73 down — and its middle is what is aimed at here.
+     */
+    openAt(250, 149);
+    check("double-clicking a cell opens that cell", Boolean(field()), true);
+    check("...saying what that cell says", field().value, "string");
+    check("...set against its left wall, the way a cell is drawn",
+      field().classList.contains("ve-diagram-inline-left"), true);
+    check("...and standing exactly over it", over(),
+      { x: Math.round(onScreen(200, 126).x), y: Math.round(onScreen(200, 126).y),
+        w: Math.round(100 * onScreen(0, 0).scale) });
+
+    typed("text");
+    press("Enter");
+    check("what is typed goes into that cell and no other",
+      rows(), ["name", "text", "age", "int"]);
+    check("...and the field is put away", field(), null);
+
+    /* Tab walks the grid, the way it does in every table anybody has typed
+     * into. Without it a table is filled in by double-clicking once per cell.
+     */
+    openAt(150, 149);
+    check("Tab starts where you opened", field().value, "name");
+    press("Tab");
+    check("...and steps along to the next cell",
+      [field().value, over().x], ["text", Math.round(onScreen(200, 126).x)]);
+    press("Tab");
+    check("...and round the end of the row into the one below",
+      [field().value, over().y], ["age", Math.round(onScreen(100, 173).y)]);
+    press("Tab", { shiftKey: true });
+    check("...and back the other way", field().value, "text");
+
+    press("Tab");
+    press("Tab");
+    press("Tab");
+    check("...and off the last cell it closes rather than wrapping", field(), null);
+
+    /* Asked for without a point — from a key — it opens the first thing anybody
+     * would want to type, which for a table is its title.
+     */
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "Enter", bubbles: true, cancelable: true }));
+    check("a key opens the title, being the first thing anybody would type",
+      field().value, "Person");
+    press("Escape");
+
+    // The title spans the whole table, the way it is drawn.
+    openAt(200, 113);
+    check("the title band opens the title", field().value, "Person");
+    check("...spanning the whole table", over().w, Math.round(200 * onScreen(0, 0).scale));
+    // A title is drawn in the middle of its band and a cell against its left
+    // wall, and a field that disagrees is a word that jumps when you stop.
+    check("...and set in the middle, the way a title is drawn",
+      field().classList.contains("ve-diagram-inline-left"), false);
+
+    /* A pipe is the wall between two cells and a line break is the wall between
+     * two rows, so neither can be inside one.
+     */
+    typed("A | person\nhere");
+    press("Enter");
+    check("neither wall can be typed into a cell",
+      groupOf("A").querySelector(".dd-title").textContent, "A person here");
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/typing.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("and what was typed on the paper is what the file says",
+      /A\["A person here<br\/>name \| text<br\/>age \| int"\]/.test(written), true);
+
+    /* A box just put down is a box about to be named, and the place to name it
+     * is the box rather than a field in a panel on the other side of the screen.
+     */
+    canvas.dispatchEvent(new window.MouseEvent("contextmenu",
+      { clientX: 40, clientY: 40, bubbles: true, cancelable: true }));
+    [...canvas.querySelectorAll(".ve-diagram-menu .context-item")]
+      .find((one) => one.querySelector("span").textContent.trim() === "Add box here")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    check("a box just put down is open for its name, on the paper",
+      Boolean(field()), true);
+    check("...with the name it was given ready to be typed over",
+      field().value, "Step 2");
 
     page.window.close();
   }
@@ -3019,6 +3176,52 @@ async function run(server, cookie) {
       [/--dd-fill:/.test(groupOf("A").getAttribute("style") || ""),
         /--dd-fill:/.test(groupOf("B").getAttribute("style") || "")],
       [true, true]);
+
+    /* Not everybody wants a bar standing over what they are drawing, so it is
+     * put away the way the other regions are: by asking, and it stays away.
+     */
+    const menuOn = (target, x, y) => target.dispatchEvent(new window.MouseEvent(
+      "contextmenu", { clientX: x, clientY: y, bubbles: true, cancelable: true }));
+    const item = (text) => [...canvas.querySelectorAll(".ve-diagram-menu .context-item")]
+      .find((one) => one.querySelector("span").textContent.trim() === text);
+
+    menuOn(groupOf("A"), 200, 200);
+    check("the list of what can be done to a box offers to put the bar away",
+      Boolean(item("Hide the bar over the box")), true);
+    item("Hide the bar over the box").dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true }));
+    check("...and asking puts it away", bar(), null);
+
+    tap("A");
+    check("...and it stays away when the next box is held", bar(), null);
+
+    // Asked back from the paper, which is where you are when there is no bar to
+    // right-click.
+    menuOn(canvas, 20, 20);
+    check("the paper offers it back", Boolean(item("Show the bar over the box")), true);
+    item("Show the bar over the box").dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true }));
+    check("...and asking brings it back", Boolean(bar()), true);
+
+    // Kept where the width of the panels is kept: it is the same question about
+    // the same builder, and answering it twice a session is answering it twice.
+    menuOn(groupOf("A"), 200, 200);
+    item("Hide the bar over the box").dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true }));
+    check("...and the answer is remembered",
+      JSON.parse(window.localStorage.getItem("azadocs:diagram:panels")).barShut, true);
+
+    menuOn(groupOf("A"), 200, 200);
+    item("Show the bar over the box").dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true }));
+
+    tap("A");
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown",
+      { clientX: 5, clientY: 5, bubbles: true }));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup",
+      { clientX: 5, clientY: 5, bubbles: true }));
+    tap("B", { shiftKey: true });
+    tap("A", { shiftKey: true });
 
     bar().querySelector(".ve-diagram-drop")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));

@@ -1844,7 +1844,14 @@
     function openMenu(clientX, clientY, items) {
       closeMenu();
 
-      const shown = items.filter(Boolean);
+      /* A rule between two groups, never two of them together and never one at
+       * either end. An item that does not apply here is dropped, and the rule
+       * that was beside it would otherwise be left standing on its own.
+       */
+      const kept = items.filter(Boolean);
+      const shown = kept.filter((item, at) => item !== "-"
+        || (at > 0 && kept[at - 1] !== "-" && kept.slice(at + 1).some((one) => one !== "-")));
+
       if (shown.length === 0) {
         return;
       }
@@ -1950,6 +1957,24 @@
       drawAtOnce();
     }
 
+    /* The bar over the box, put away and brought back.
+     *
+     * The same item in two menus, written once: it is hidden from the box it is
+     * standing over, and it is asked back from the paper, which is where you
+     * are when there is no bar to right-click.
+     */
+    const barItem = () => (viewport
+      ? {
+        label: panels.barShut ? "Show the bar over the box" : "Hide the bar over the box",
+        icon: panels.barShut ? "ph-eye" : "ph-eye-slash",
+        run: () => {
+          panels.barShut = !panels.barShut;
+          rememberPanels();
+          paintHud();
+        }
+      }
+      : null);
+
     function menuFor(target, point) {
       const many = selection.length > 1;
       const holding = selection.length > 0;
@@ -1993,8 +2018,12 @@
         const them = many ? `${selection.length} boxes` : "box";
 
         return [
-          many ? null : { label: "Rename box", icon: "ph-text-t", keys: "F2",
-            run: () => editNode(target.id) },
+          many ? null : {
+            label: nodeById(target.id)?.kind === "table" ? "Type in this cell" : "Rename box",
+            icon: "ph-text-t",
+            keys: "F2",
+            run: () => openText(target.id, point)
+          },
           many ? null : { label: "Draw arrow from here", icon: "ph-arrow-up-right", run: () => {
             armedFrom = target.id;
             say("Tap another box to join it.");
@@ -2005,6 +2034,8 @@
           { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: copySelection },
           { label: `Copy ${them} as Mermaid`, icon: "ph-code",
             run: () => copyOutside(selectionSource()) },
+          "-",
+          barItem(),
           "-",
           { label: "Bring to front", icon: "ph-stack-simple",
             run: () => restack(selection, true) },
@@ -2043,6 +2074,7 @@
         viewport
           ? { label: "Fit diagram to the window", icon: "ph-corners-out", run: () => fitView() }
           : null,
+        barItem(),
         "-",
         { label: "Copy diagram as Mermaid", icon: "ph-code",
           run: () => copyOutside(sourceNow()) }
@@ -2257,7 +2289,11 @@
       stopEditing(true);
 
       const field = document.createElement("textarea");
-      field.className = "ve-diagram-inline";
+      /* A cell is drawn against its left wall and a label in the middle of its
+       * box. A field that does not agree is a word that jumps the moment you
+       * stop typing.
+       */
+      field.className = `ve-diagram-inline${what.left ? " ve-diagram-inline-left" : ""}`;
       field.value = what.read();
       field.setAttribute("aria-label", what.label);
       field.spellcheck = false;
@@ -2286,6 +2322,23 @@
           event.preventDefault();
           stopEditing(true);
           canvas.focus();
+          return;
+        }
+
+        /* Tab walks the grid, the way it does in every table anybody has ever
+         * typed into. Without it a table is filled in by double-clicking it
+         * once per cell, which is the panel's job done worse.
+         */
+        if (what.cell && event.key === "Tab") {
+          event.preventDefault();
+          stopEditing(true);
+
+          const next = cellAlong(what.id, what.cell, event.shiftKey ? -1 : 1);
+          if (next) {
+            editCell(what.id, next.row, next.column);
+          } else {
+            canvas.focus();
+          }
         }
       });
 
@@ -2313,9 +2366,92 @@
       drawAtOnce();
     }
 
+    // The cells of a table in the order Tab walks them, which is the order the
+    // drawing lays them out in — the same run, asked for once.
+    function cellRun(item, at) {
+      return DiagramDraw.cellBoxes(DiagramModel.textCells(item.text || ""),
+        at.w, at.h, DiagramModel.tableMetrics(item));
+    }
+
+    function cellAlong(id, from, step) {
+      const item = nodeById(id);
+      const at = item && boxOf(id);
+      if (!at) {
+        return null;
+      }
+
+      const cells = cellRun(item, at);
+      const now = cells.findIndex((one) =>
+        one.row === from.row && one.column === from.column);
+
+      return now < 0 ? null : cells[now + step] || null;
+    }
+
+    /* One cell of a table, typed into where it is drawn.
+     *
+     * A table opened as a single field of pipes is a table you edit by counting
+     * walls: which of these words is in the second column is a question you
+     * answer by looking very carefully. The drawing already knows where every
+     * cell is, so the field goes exactly where the words are — the same
+     * arithmetic, asked of the same place.
+     */
+    function editCell(id, row, column) {
+      const item = nodeById(id);
+      if (item?.kind !== "table") {
+        return;
+      }
+
+      const where = () => {
+        const at = boxOf(id);
+        const found = at && cellRun(item, at)
+          .find((one) => one.row === row && one.column === column);
+
+        return found
+          ? { x: at.x + found.x, y: at.y + found.y, w: found.w, h: found.h }
+          : null;
+      };
+
+      select(id);
+      startEditing({
+        label: row === 0 ? "Table title" : `Row ${row}, column ${column + 1}`,
+        id,
+        cell: { row, column },
+        left: row > 0,
+        box: where,
+        read: () => (DiagramModel.textCells(item.text || "")[row] || [])[column] || "",
+        write: (value) => {
+          const grid = DiagramModel.textCells(item.text || "");
+          while (grid.length <= row) {
+            grid.push([]);
+          }
+
+          /* A pipe is the wall between two cells and a line break is the wall
+           * between two rows, so neither can be inside one. A wall taken out
+           * leaves a gap where it stood, so the spaces are closed up rather
+           * than left standing in a row.
+           *
+           * The panel's own fields do this a character at a time, as they are
+           * typed into, and only have the pipe to worry about. This is asked
+           * once, when the typing is finished, so it can tidy afterwards
+           * without the caret being anywhere near it.
+           */
+          grid[row][column] = value.replace(/[|\n]+/g, " ").replace(/\s+/g, " ").trim();
+          item.text = DiagramModel.joinCells(grid);
+          grow(item);
+        }
+      });
+    }
+
     function editNode(id) {
       const item = nodeById(id);
       if (!item) {
+        return;
+      }
+
+      // A table's words belong to its cells, so they are typed into one of
+      // those rather than into one field of everything with pipes in it.
+      if (item.kind === "table") {
+        editCell(id, 0, 0);
         return;
       }
 
@@ -2360,6 +2496,27 @@
       });
     }
 
+    /* The words under the pointer, whatever they belong to: a box's label, or
+     * the one cell of a table that was actually double-clicked. Asked without a
+     * point — from a key, or from a box that has only just been made — it opens
+     * the first thing anybody would want to type, which for a table is its
+     * title.
+     */
+    function openText(id, point) {
+      const item = nodeById(id);
+      const at = boxOf(id);
+
+      if (item?.kind === "table" && at && point) {
+        const found = DiagramDraw.cellAt(DiagramModel.textCells(item.text || ""),
+          at.w, at.h, DiagramModel.tableMetrics(item), point.x - at.x, point.y - at.y);
+
+        editCell(id, found ? found.row : 0, found ? found.column : 0);
+        return;
+      }
+
+      editNode(id);
+    }
+
     canvas.addEventListener("dblclick", (event) => {
       // A corner put in by hand is taken out the same way a box is opened: two
       // taps on the thing itself.
@@ -2372,7 +2529,7 @@
 
       const group = event.target.closest?.(".dd-node");
       if (group) {
-        editNode(group.getAttribute("data-id"));
+        openText(group.getAttribute("data-id"), pointIn(event.clientX, event.clientY));
         return;
       }
 
@@ -2691,7 +2848,7 @@
       if (event.key === "Enter" || event.key === "F2") {
         answered(event);
         if (selection.length === 1) {
-          editNode(selection[0]);
+          openText(selection[0]);
         }
         return;
       }
@@ -2800,7 +2957,20 @@
 
       write();
       paintLists();
-      select(id, { focusName: true });
+
+      /* A box just put down is a box about to be named, and the place to name
+       * it is the box itself. The caret used to go to a field in a panel on the
+       * other side of the screen, which is a long way to look for the word you
+       * were already typing.
+       */
+      if (viewport && !options.image && !options.icon) {
+        select(id);
+        openText(id);
+      } else {
+        // A picture is not named by being dropped, and a caret blinking over a
+        // photograph is a question nobody asked.
+        select(id, { focusName: true });
+      }
     }
 
     // Where a new box goes: where it was dropped, or clear of the one it was
@@ -4585,10 +4755,12 @@
       hud?.remove();
       hud = null;
 
-      // Only where there is a window to float it over. In a document the diagram
-      // is drawn at its own size inside the page, and a bar laid over that would
-      // be laid over the words around it too.
-      if (!viewport || selection.length === 0) {
+      /* Only where there is a window to float it over — in a document the
+       * diagram is drawn at its own size inside the page, and a bar laid over
+       * that would be laid over the words around it too — and only if it has
+       * not been put away.
+       */
+      if (!viewport || panels.barShut || selection.length === 0) {
         return;
       }
 
@@ -5104,7 +5276,10 @@
       rail: PANELS.rail.standard,
       side: PANELS.side.standard,
       railShut: false,
-      sideShut: false
+      sideShut: false,
+      // The bar over the box is a fourth region, and it is put away the same
+      // way the other three are: by asking, and it stays away.
+      barShut: false
     };
 
     const inBounds = (which, value) => Math.min(PANELS[which].most,
@@ -5135,6 +5310,7 @@
         panels.side = inBounds("side", kept.side ?? panels.side);
         panels.railShut = Boolean(kept.railShut);
         panels.sideShut = Boolean(kept.sideShut);
+        panels.barShut = Boolean(kept.barShut);
       }
     } catch {
       // Nothing kept, or nothing readable. The standard widths, then.

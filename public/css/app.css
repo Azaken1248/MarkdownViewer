@@ -3854,6 +3854,13 @@ body.page-editing #dockEdit {
   outline: none;
 }
 
+/* A cell of a table is drawn against its left wall, so the field over it is
+   written that way too — a word that jumps the moment you stop typing is a
+   field that was never really over the thing it was editing. */
+.ve-diagram-inline-left {
+  text-align: left;
+}
+
 /* The bar over the box.
    Everything a box wears could be changed from the panel at the side and
    nowhere else, which is a long way to go when the box is what you are looking

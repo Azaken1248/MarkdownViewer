@@ -2472,6 +2472,56 @@ console.log("=== the type a diagram is set in is real Mermaid ===");
       "var(--dd-font-style, normal)"]);
 }
 
+console.log("=== a table's cells are in one place, read twice ===");
+{
+  /* The drawing puts its words in these places, and the editor puts a field
+   * over a cell in the same ones. Two copies of that arithmetic is a table
+   * where you type into one place and the words come out in another.
+   */
+  const grid = [["Person"], ["name", "string"], ["age", "int"]];
+  const node = { id: "A", shape: "rect", kind: "table", text: DM.joinCells(grid) };
+  const spacing = DM.tableMetrics(node);
+  const cells = DM.textCells(node.text);
+  const boxes = DD.cellBoxes(cells, 200, 120, spacing);
+
+  check("a table is its title, and then a cell per column per row",
+    boxes.map((at) => `${at.row}.${at.column}`),
+    ["0.0", "1.0", "1.1", "2.0", "2.1"]);
+  // A heading rather than one more row: it spans the width and keeps its own
+  // band whatever the rows under it are doing.
+  check("...the title spanning the whole of it",
+    [boxes[0].w, boxes[0].h], [200, spacing.title]);
+
+  const drawn = DD.render({
+    direction: "TD",
+    nodes: [node],
+    edges: [],
+    classes: {},
+    layout: { A: { x: 0, y: 0, w: 200, h: 120 } }
+  }, { natural: true });
+
+  const parsed = new JSDOM(`<!doctype html><body>${drawn}</body>`).window.document;
+  const written = (what) => [...parsed.querySelectorAll(what)]
+    .map((one) => [Number(one.getAttribute("x")), Number(one.getAttribute("y"))]);
+
+  check("...and every word is drawn where the run says its cell is",
+    written(".dd-row"),
+    boxes.slice(1).map((at) => [at.x + spacing.pad, at.y + (at.h / 2)]));
+  check("...the title in the middle of the band the run gives it",
+    written(".dd-title"), [[boxes[0].w / 2, boxes[0].h / 2]]);
+
+  // And which cell a point is in, asked of the same run: a table dragged taller
+  // than its rows has somewhere in it that is no cell at all.
+  const found = (x, y) => {
+    const at = DD.cellAt(cells, 200, 120, spacing, x, y);
+    return at && `${at.row}.${at.column}`;
+  };
+
+  check("a point in the table finds the cell it landed in",
+    [found(150, 49), found(10, 10), found(10, 500), found(150, 96)],
+    ["1.1", "0.0", null, "2.1"]);
+}
+
 console.log("=== type big enough to need the room ===");
 {
   /* A size control that only changes the letters is a size control that works

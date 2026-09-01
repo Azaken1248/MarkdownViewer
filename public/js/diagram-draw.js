@@ -283,31 +283,65 @@
    * have to infer from where the words happen to sit is a box with a list in
    * it, and the lines are the whole difference between the two.
    */
+  /* Where each cell of a table is, in the box's own coordinates.
+   *
+   * Written down once and read twice: the drawing puts its words in these
+   * places, and the editor puts a field over a cell in the same ones. Two
+   * copies of this arithmetic is a table where you type into one place and the
+   * words come out in another.
+   *
+   * The title is the first of them and spans the whole width, the way it is
+   * drawn. The body starts at row one, so a body row's number in the grid is
+   * one more than its number in the run.
+   */
+  function cellBoxes(grid, w, h, spacing) {
+    const body = grid.slice(1);
+    const columns = Model.columnsOf(grid);
+    const wide = w / columns;
+    const tall = body.length > 0 ? (h - spacing.title) / body.length : 0;
+
+    return [
+      { row: 0, column: 0, x: 0, y: 0, w, h: spacing.title },
+      ...body.flatMap((ignored, line) =>
+        Array.from({ length: columns }, (also, cell) => ({
+          row: line + 1,
+          column: cell,
+          x: cell * wide,
+          y: spacing.title + (line * tall),
+          w: wide,
+          h: tall
+        })))
+    ];
+  }
+
+  // Which cell of a table a point is in, in the box's own coordinates. Nothing
+  // at all for a point past the last row, which is a table dragged taller than
+  // its rows.
+  function cellAt(grid, w, h, spacing, x, y) {
+    return cellBoxes(grid, w, h, spacing).find((at) =>
+      x >= at.x && x < at.x + at.w && y >= at.y && y < at.y + at.h) || null;
+  }
+
   function tableMarkup(grid, w, h, spacing, char, styles) {
+    const boxes = cellBoxes(grid, w, h, spacing);
     const title = (grid[0] || [])[0] || "";
     const titleToken = (styles || {})[Model.cellKey(0, 0)] || "";
     const body = grid.slice(1);
     const columns = Model.columnsOf(grid);
     const wide = w / columns;
     const tall = body.length > 0 ? (h - spacing.title) / body.length : 0;
-    // What a cell has to write in, once the padding either side is taken off.
-    const room = wide - (spacing.pad * 2);
 
-    const cells = body.flatMap((row, line) =>
-      Array.from({ length: columns }, (ignored, cell) => {
-        const words = row[cell] || "";
-        if (words === "") {
-          return "";
-        }
+    const cells = boxes.slice(1).map((at) => {
+      const words = (grid[at.row] || [])[at.column] || "";
+      if (words === "") {
+        return "";
+      }
 
-        // The body starts at row one: row zero is the title, drawn on its own
-        // below, so a body row's number in the grid is one more than its number
-        // here.
-        const token = (styles || {})[Model.cellKey(line + 1, cell)] || "";
-        return cellText("dd-row", (cell * wide) + spacing.pad,
-          spacing.title + (line * tall) + (tall / 2), "start",
-          clip(words, room, cellChar(token, char)), cellPaint(token));
-      }).join(""));
+      const token = (styles || {})[Model.cellKey(at.row, at.column)] || "";
+      // What a cell has to write in, once the padding either side is taken off.
+      return cellText("dd-row", at.x + spacing.pad, at.y + (at.h / 2), "start",
+        clip(words, at.w - (spacing.pad * 2), cellChar(token, char)), cellPaint(token));
+    });
 
     /* The rules of the grid: down between the columns, across between the rows.
      * Never round the outside — the box's own border is already there, and the
@@ -325,7 +359,7 @@
     return `${rect(w, h, RADIUS)}`
       + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
-      + cellText("dd-title", w / 2, spacing.title / 2, "middle",
+      + cellText("dd-title", boxes[0].w / 2, boxes[0].h / 2, "middle",
         clip(title, w - (spacing.pad * 2), cellChar(titleToken, char)),
         cellPaint(titleToken))
       + cells.join("");
@@ -1785,6 +1819,8 @@
     pathData,
     midpoint,
     shapeMarkup,
+    cellBoxes,
+    cellAt,
     exportRules,
     exportPalette,
     exportSvg,
