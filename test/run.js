@@ -39,13 +39,32 @@ for (const [name, file, description] of selected) {
   console.log(`${name}  —  ${description}`);
   console.log("=".repeat(72));
 
+  const began = Date.now();
   const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
     stdio: "inherit",
-    // The DOM suite spawns a server; give it room on a cold CI runner.
-    timeout: 120000
+    /* The DOM suite spawns a server; give it room on a cold CI runner.
+     *
+     * Generously, because a suite killed by this clock reports as a failing
+     * suite and there is nothing in the output to say which it was — an hour
+     * was spent looking for a broken check that was only a slow machine. The
+     * two longest suites take about a minute here, so this is a runner five
+     * times slower than this one before anything is cut off.
+     */
+    timeout: 300000
   });
 
   if (result.status !== 0) {
+    /* A suite killed by the clock above looks exactly like a suite whose
+     * checks failed — no status, no output of its own, and a runner that says
+     * only which one it was. So it says which it was.
+     */
+    if (result.status === null) {
+      console.log(`\n${name} was cut off after `
+        + `${((Date.now() - began) / 1000).toFixed(1)}s — `
+        + `${result.signal || result.error?.code || "no exit status"}. `
+        + "This is the runner's own clock, not a failing check.");
+    }
+
     failed.push(name);
   }
 }
