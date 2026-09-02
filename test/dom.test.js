@@ -1617,9 +1617,12 @@ async function run(server) {
 
   console.log("=== a diagram is built on a page of its own ===");
   {
-    /* Two diagrams, and the difference between them is the whole safety story:
-     * the first is steps and arrows and nothing else, the second has a subgraph
-     * in it, which the canvas cannot draw and must therefore not offer to.
+    /* Three diagrams, and the difference between them is the whole safety
+     * story: the canvas offers to build what it can read all of, and says
+     * nothing about the rest. Steps and arrows it reads; a subgraph it reads
+     * now that a group is drawn; a sequence diagram it does not read at all,
+     * and an editor that opened one would be an editor that saved a flowchart
+     * over it.
      *
      * The canvas used to open inside the block as well, in a strip a few
      * hundred pixels tall with the document either side of it. Everything it
@@ -1628,7 +1631,7 @@ async function run(server) {
      * and this is the document editor's half of that: what it offers, and what
      * it hands across.
      */
-    const source = "# Flow\n\n```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```\n\n```mermaid\nflowchart TD\n  subgraph outer\n  C --> D\n  end\n```\n\nAfter.\n";
+    const source = "# Flow\n\n```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```\n\n```mermaid\nflowchart TD\n  subgraph outer\n  C --> D\n  end\n```\n\n```mermaid\nsequenceDiagram\n  A->>B: hello\n```\n\nAfter.\n";
 
     await window.eval(`window.__t.requestJson("/api/docs", {
       method: "POST",
@@ -1645,13 +1648,15 @@ async function run(server) {
     await new Promise((r) => setTimeout(r, 300));
 
     const embeds = [...doc.querySelectorAll("#docContent .ve-embed")];
-    check("both diagrams are blocks that keep their source", embeds.length, 2);
+    check("every diagram is a block that keeps its source", embeds.length, 3);
     check("the one the canvas understands offers to build it",
       Boolean(embeds[0].querySelector(".ve-embed-build")), true);
-    check("...and the one with a subgraph in it does not",
-      Boolean(embeds[1].querySelector(".ve-embed-build")), false);
+    check("...and so does the one with a group in it",
+      Boolean(embeds[1].querySelector(".ve-embed-build")), true);
+    check("...while one that is not a flowchart at all does not",
+      Boolean(embeds[2].querySelector(".ve-embed-build")), false);
     check("...which still leaves it editable as markdown",
-      embeds[1].querySelector(".ve-embed-edit").textContent.trim(), "Edit code (mermaid)");
+      embeds[2].querySelector(".ve-embed-edit").textContent.trim(), "Edit code (mermaid)");
     check("a buildable diagram calls its source button by the shorter name",
       embeds[0].querySelector(".ve-embed-source-open").textContent.trim(), "Markdown");
 

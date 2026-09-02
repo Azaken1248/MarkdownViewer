@@ -2274,6 +2274,35 @@ button.crumb:focus-visible {
   stroke-width: 3px;
 }
 
+/* A group's frame takes no pointer events at all.
+
+   Which is what lets a press inside a group land on the paper, so a rubber band
+   can be pulled across the boxes in one and a box in one is still just a box to
+   press. A group is taken hold of by its name, and that is worked out from
+   where the press was rather than from what the browser says it hit — the same
+   way every other target on this canvas is. */
+.dd .dd-group {
+  pointer-events: none;
+}
+
+/* A group's frame. Behind everything it holds, so it is drawn faintly and
+   filled barely at all: it says what belongs together, and what belongs
+   together is the part worth looking at. Dashed, so it never reads as a box
+   somebody drew — a box has a solid edge here, and a group is not a box. */
+.dd .dd-group-box {
+  fill: var(--dd-fill, var(--raised));
+  fill-opacity: 0.35;
+  stroke: var(--dd-stroke, var(--border-strong));
+  stroke-width: 1.2px;
+  stroke-dasharray: 5 4;
+}
+
+.dd .dd-group-name {
+  fill: var(--dd-text, var(--fg-muted));
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .dd .dd-label-back {
   fill: var(--surface);
   stroke: none;

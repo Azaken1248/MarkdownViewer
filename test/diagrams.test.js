@@ -454,14 +454,41 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
       Boolean(root.querySelector(".mermaid-block svg.dd")), true);
     check("...still without the engine", drawn.length, beforeDrawn);
 
-    // Layout comments on a diagram this cannot model — a subgraph — are still
-    // comments, and Mermaid ignores comments. So it goes to Mermaid, which is
-    // the only reading that leaves a diagram on the screen.
-    const beyond = "flowchart TD\n    %% layout v1\n    %% @ A 40,40 160x56\n    subgraph outer\n    A --> B\n    end";
+    // A group is drawn here now, so a laid-out diagram with a subgraph in it is
+    // ours to draw rather than the engine's — and the frame it gets is worked
+    // out from the boxes in it rather than read out of the file.
+    const grouped = "flowchart TD\n    %% layout v1\n    %% @ A 10,10 160x56\n    %% @ B 10,150 160x56"
+      + "\n    subgraph outer [\"Outer\"]\n    A[One]\n    B[Two]\n    end\n    A --> B";
+    seed(root, `<pre><code class="language-mermaid">${grouped}</code></pre>`);
+    const beforeGroup = drawn.length;
+    await win.MarkdownCore.renderMermaidBlocks(root);
+    check("a laid-out diagram with a group in it is drawn here",
+      Boolean(root.querySelector(".mermaid-block svg.dd .dd-group")), true);
+    check("...with the group's name on it",
+      root.querySelector(".mermaid-block .dd-group-name")?.textContent, "Outer");
+    check("...and without the engine", drawn.slice(beforeGroup), []);
+
+    /* A frame reaches further than the boxes it holds, so the paper has to be
+     * measured with it on. These boxes sit ten pixels from the origin, which
+     * puts the frame past it — and paper measured by the boxes alone would cut
+     * the frame off at exactly its own padding.
+     */
+    const paper = root.querySelector(".mermaid-block svg.dd")
+      .getAttribute("viewBox").split(" ").map(Number);
+    const framed = root.querySelector(".mermaid-block .dd-group-box");
+    check("...on paper measured with the frame on it, not just the boxes",
+      [paper[0] <= Number(framed.getAttribute("x")),
+        paper[1] <= Number(framed.getAttribute("y"))], [true, true]);
+
+    // Layout comments on a diagram this cannot read — one whose subgraph is
+    // never closed — are still comments, and Mermaid ignores comments. So it
+    // goes to Mermaid, which is the only reading that leaves a diagram on the
+    // screen rather than an error where one was.
+    const beyond = "flowchart TD\n    %% layout v1\n    %% @ A 40,40 160x56\n    subgraph outer\n    A --> B";
     seed(root, `<pre><code class="language-mermaid">${beyond}</code></pre>`);
     const beforeHandover = drawn.length;
     await win.MarkdownCore.renderMermaidBlocks(root);
-    check("a laid-out diagram we cannot draw is handed to the engine",
+    check("a laid-out diagram we cannot read is handed to the engine",
       drawn.slice(beforeHandover), [beyond]);
 
     console.log(failures === 0 ? "\nALL DIAGRAM CHECKS PASSED" : `\n${failures} DIAGRAM CHECK(S) FAILED`);

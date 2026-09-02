@@ -4949,6 +4949,229 @@ async function run(server, cookie) {
     check("...and the box that wears it", saved.includes("class A blue"), true);
   }
 
+  console.log("=== a name round a handful of boxes ===");
+  {
+    /* A group is a name over some boxes and nothing else.
+     *
+     * It has no rectangle of its own anywhere — not in the file, not in the
+     * model — so the frame drawn round it is worked out from the boxes every
+     * time. That is what these checks are really about: a frame that follows
+     * what it holds, and padding that is the same after nine edits as after
+     * one, because there is nothing for a second helping of it to be added to.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "band.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    %% @ C 100,300 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/band.mmd`, cookie, origin });
+    const { window } = page;
+    const canvas = page.document.querySelector(".ve-diagram-canvas");
+    const inspector = page.document.querySelector(".ve-diagram-inspector");
+    const at = (x, y, extra = {}) => ({ clientX: x, clientY: y, bubbles: true, ...extra });
+    const box = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const placed = (id) => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box(id).getAttribute("transform"));
+      return [Number(found[1]), Number(found[2])];
+    };
+
+    const view = () => {
+      const found = /translate\((-?[\d.]+),(-?[\d.]+)\) scale\(([\d.]+)\)/
+        .exec(canvas.querySelector(".dd-view").getAttribute("transform"));
+      return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) };
+    };
+    const onScreen = (x, y) => [(x * view().scale) + view().x, (y * view().scale) + view().y];
+
+    const tap = (id, extra = {}) => {
+      const [x, y] = onScreen(...placed(id));
+      box(id).dispatchEvent(new window.MouseEvent("pointerdown", at(x + 10, y + 10, extra)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x + 10, y + 10, extra)));
+    };
+
+    const press = (key, options = {}) => canvas.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key, bubbles: true, cancelable: true, ...options }));
+
+    const frame = () => canvas.querySelector(".dd-group-box");
+    const frameBox = () => {
+      const rect = frame();
+      return rect && [Number(rect.getAttribute("x")), Number(rect.getAttribute("y")),
+        Number(rect.getAttribute("width")), Number(rect.getAttribute("height"))];
+    };
+    const ringed = () => canvas.querySelectorAll(".dd-ring").length;
+    const nameOn = () => canvas.querySelector(".dd-group-name")?.textContent;
+
+    check("nothing is grouped to begin with", canvas.querySelectorAll(".dd-group").length, 0);
+
+    tap("A");
+    press("g", { ctrlKey: true });
+    check("one box on its own is not a handful to put a name round",
+      canvas.querySelectorAll(".dd-group").length, 0);
+
+    tap("B", { shiftKey: true });
+    press("g", { ctrlKey: true });
+    check("two boxes held become a group", canvas.querySelectorAll(".dd-group").length, 1);
+    check("...with a name on it", nameOn(), "Group 1");
+    check("...drawn round both of them and no further",
+      frameBox(), [100 - 18, 100 - 18 - 22, 280 + 36, 40 + 36 + 22]);
+    check("...behind the boxes, because a frame is background",
+      [...canvas.querySelectorAll(".dd-groups, .dd-nodes")]
+        .map((one) => one.getAttribute("class"))[0], "dd-groups");
+    check("...and the box that was left out is still outside it",
+      frameBox()[1] + frameBox()[3] < 300, true);
+
+    check("the panel calls it a group rather than counting the boxes",
+      inspector.querySelector(".ve-diagram-legend")?.textContent, "Group");
+
+    /* --- what is written down ---------------------------------------------- */
+
+    const savedNow = async () => {
+      await saveAndWait(page);
+      return (await server.request("GET", "/api/docs/band.mmd", undefined, { Cookie: cookie })).body.content;
+    };
+
+    const written = await savedNow();
+    check("a group is written as a subgraph, which is real Mermaid",
+      written.includes("subgraph group1 [Group 1]"), true);
+    check("...with the boxes in it declared inside it",
+      /subgraph group1[^]*A\[One\][^]*B\[Two\][^]*end/.test(written), true);
+    check("...and the one that is not, before it and outside it",
+      /C\[Three\][^]*subgraph group1/.test(written), true);
+    check("...and no rectangle for it anywhere, because there is not one",
+      /%% @ group1/.test(written), false);
+
+    /* And read back, it opens on the canvas rather than as source. This used to
+     * be the one thing the editor refused: a diagram with a group in it stayed
+     * a page of Mermaid you could only type at.
+     */
+    const reopened = await openPage({ url: `${origin}/diagram/file/band.mmd`, cookie, origin });
+    check("a diagram with a group in it opens as a canvas",
+      reopened.document.querySelectorAll(".dd-node").length, 3);
+    check("...with the group drawn round the boxes it holds",
+      reopened.document.querySelectorAll(".dd-group").length, 1);
+
+    /* --- taking hold of it -------------------------------------------------- */
+
+    tap("C");
+    check("something else can be held", ringed(), 1);
+
+    const nameSpot = () => {
+      const rect = frame();
+      return onScreen(Number(rect.getAttribute("x")) + 30, Number(rect.getAttribute("y")) + 8);
+    };
+
+    const pressName = (extra = {}) => {
+      const [x, y] = nameSpot();
+      canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(x, y, extra)));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x, y, extra)));
+    };
+
+    pressName();
+    check("pressing the group's name takes hold of everything in it", ringed(), 2);
+    check("...which is the group, not three boxes that happen to be selected",
+      inspector.querySelector(".ve-diagram-legend")?.textContent, "Group");
+
+    // Inside the frame but not on the name is the paper, so a rubber band can
+    // still be pulled across a group's contents.
+    const inside = onScreen(250, 120);
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(inside[0], inside[1])));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(inside[0], inside[1])));
+    check("a press inside the frame is a press on the paper", ringed(), 0);
+
+    /* --- moving it ---------------------------------------------------------- */
+
+    const wasFrame = frameBox();
+    const [nx, ny] = nameSpot();
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(nx, ny)));
+    canvas.dispatchEvent(new window.MouseEvent("pointermove", at(nx + 40, ny + 60)));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(nx + 40, ny + 60)));
+
+    check("dragging the name carries the boxes", placed("A"), [140, 160]);
+    check("...both of them", placed("B"), [340, 160]);
+    check("...and not the one outside", placed("C"), [100, 300]);
+    check("...with the frame following, the same size it was",
+      [frameBox()[0] - wasFrame[0], frameBox()[1] - wasFrame[1],
+        frameBox()[2] - wasFrame[2], frameBox()[3] - wasFrame[3]], [40, 60, 0, 0]);
+
+    /* --- the name ------------------------------------------------------------ */
+
+    pressName();
+    const field = inspector.querySelector(".ve-diagram-group-name");
+    check("the panel has the group's name in it to change", field?.value, "Group 1");
+    field.value = "Back end";
+    field.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("...and typing in it renames the group on the paper", nameOn(), "Back end");
+
+    const renamed = await savedNow();
+    check("...and in the file, with the id it has always had",
+      renamed.includes("subgraph group1 [Back end]"), true);
+
+    /* --- nesting -------------------------------------------------------------- */
+
+    press("Escape");
+    tap("A");
+    tap("B", { shiftKey: true });
+    press("g", { ctrlKey: true });
+    check("grouping part of a group nests rather than escaping it",
+      canvas.querySelectorAll(".dd-group").length, 2);
+
+    const nestedFile = await savedNow();
+    check("...which the file says by putting one inside the other",
+      /subgraph group1[^]*subgraph group2[^]*end[^]*end/.test(nestedFile), true);
+
+    const frames = () => [...canvas.querySelectorAll(".dd-group-box")]
+      .map((rect) => Number(rect.getAttribute("width")));
+    check("...and the outer frame goes round the inner one, not round its boxes",
+      Math.max(...frames()) - Math.min(...frames()), 36);
+
+    // The outer group holds no box directly — only the group inside it — and
+    // its name still takes hold of everything under it.
+    pressName();
+    check("...whose name still holds everything under it, however deep", ringed(), 2);
+
+    /* --- taking the name off again --------------------------------------------- */
+
+    press("g", { ctrlKey: true, shiftKey: true });
+    check("ungrouping takes the name off what is held", canvas.querySelectorAll(".dd-group").length, 1);
+    // The inner one, because both hold exactly these two boxes and the one you
+    // meant is the closer of the two. Taking the outer instead would leave the
+    // group that was just made and lose the one it was made inside.
+    check("...the inner one, leaving the group it was made inside", nameOn(), "Back end");
+    check("...and leaves the boxes exactly where they were", placed("A"), [140, 160]);
+
+    press("g", { ctrlKey: true, shiftKey: true });
+    check("...and again takes off the one above it", canvas.querySelectorAll(".dd-group").length, 0);
+
+    const flat = await savedNow();
+    check("...leaving a file with no subgraph in it at all", /subgraph/.test(flat), false);
+    check("...and every box still in it", [/A\[One\]/, /B\[Two\]/, /C\[Three\]/]
+      .every((one) => one.test(flat)), true);
+
+    /* --- a group with nothing left in it ----------------------------------------- */
+
+    press("Escape");
+    tap("A");
+    tap("B", { shiftKey: true });
+    press("g", { ctrlKey: true });
+    check("a group again", canvas.querySelectorAll(".dd-group").length, 1);
+
+    pressName();
+    press("Delete");
+    check("taking the last box out of a group takes the group with it",
+      canvas.querySelectorAll(".dd-group").length, 0);
+
+    const emptied = await savedNow();
+    check("...and the file has no empty subgraph left in it", /subgraph/.test(emptied), false);
+    check("...only the box that was never in one", /C\[Three\]/.test(emptied), true);
+  }
+
   console.log("=== the way in and the way back ===");
   {
     const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");

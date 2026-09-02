@@ -107,14 +107,14 @@
 
   /* The diagram this editor is able to open, or null.
    *
-   * The parser reads more than the canvas can draw — a group, for one — and an
-   * editor that quietly hides part of a diagram is an editor that writes back a
-   * diagram nobody recognises. Those stay as source until the canvas can draw
-   * them, which is the one honest answer while it cannot.
+   * Everything the parser reads is now drawn, so what the parser accepts is
+   * exactly what opens. A diagram it will not read stays as source, because an
+   * editor that quietly drops the part it did not understand is an editor that
+   * writes back a diagram nobody recognises.
    */
   function canOpen(source) {
     const model = DiagramModel.parseFlowchart(String(source ?? ""));
-    return model.ok && DiagramDraw.canDraw(model) ? model : null;
+    return model.ok ? model : null;
   }
 
   function diagramShapeLabel(name) {
@@ -1599,6 +1599,27 @@
       const adding = Boolean(event.shiftKey);
 
       if (!id) {
+        /* A group is taken hold of by its name.
+         *
+         * The frame itself is background — a press anywhere inside one lands on
+         * the paper — so a rubber band can still be pulled across the boxes in
+         * a group, and a box in a group is still just a box to press. Taking
+         * hold of the name takes hold of everything inside, which is what makes
+         * dragging a group move its contents: there is nothing else to move.
+         */
+        const onName = groupNameAt(point);
+
+        if (onName) {
+          const members = groupMembers(onName);
+          choose(adding ? [...new Set([...selection, ...members])] : members);
+
+          if (members.length > 0) {
+            beginGesture("move", members[0], point, event);
+          }
+
+          return;
+        }
+
         /* Empty paper. With a finger it is how you go somewhere else, because a
          * finger has no space bar and no middle button to pan with. With a
          * pointer it is how you draw a rubber band round several boxes, which
@@ -2076,6 +2097,7 @@
     function menuFor(target, point) {
       const many = selection.length > 1;
       const holding = selection.length > 0;
+      const held = groupHeld();
 
       if (target.kind === "edge") {
         const edge = model.edges[target.index];
@@ -2132,6 +2154,19 @@
           { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: copySelection },
           { label: `Copy ${them} as Mermaid`, icon: "ph-code",
             run: () => copyOutside(selectionSource()) },
+          "-",
+          held
+            ? { label: "Rename group", icon: "ph-textbox",
+              run: () => paintInspector({ focusName: true }) }
+            : null,
+          held
+            ? { label: `Ungroup ${them}`, icon: "ph-selection-slash",
+              keys: "Ctrl+Shift+G", run: ungroupSelection }
+            : null,
+          many && !held
+            ? { label: `Group ${them}`, icon: "ph-selection-plus",
+              keys: "Ctrl+G", run: groupSelection }
+            : null,
           "-",
           barItem(),
           "-",
@@ -2192,6 +2227,11 @@
         return { kind: "edge", index: Number(line.getAttribute("data-edge")) };
       }
 
+      const onName = groupNameAt(point);
+      if (onName) {
+        return { kind: "group", id: onName };
+      }
+
       return { kind: "paper" };
     }
 
@@ -2205,7 +2245,19 @@
         select(target.id);
       }
 
-      openMenu(event.clientX, event.clientY, menuFor(target, point));
+      // And right-clicking a group's name is about the group, so it is held
+      // first — the menu is then the menu for what is held.
+      let about = target;
+
+      if (target.kind === "group") {
+        const members = groupMembers(target.id);
+        choose(members);
+        // The menu for a group's name is the menu for what is in it, which is
+        // where grouping and ungrouping already live.
+        about = members.length > 0 ? { kind: "node", id: members[0] } : { kind: "paper" };
+      }
+
+      openMenu(event.clientX, event.clientY, menuFor(about, point));
     }
 
     canvas.addEventListener("contextmenu", (event) => {
@@ -2970,6 +3022,22 @@
           return;
         }
 
+        /* Grouping and ungrouping, on the keys every canvas uses for them.
+         * Ungrouping is asked for first because Ctrl+Shift+G is also Ctrl+G,
+         * and the shift is the whole difference between the two.
+         */
+        if (key === "g" && event.shiftKey) {
+          answered(event);
+          ungroupSelection();
+          return;
+        }
+
+        if (key === "g" && selection.length > 1) {
+          answered(event);
+          groupSelection();
+          return;
+        }
+
         if (key === "z" && !event.shiftKey) {
           answered(event);
           undo();
@@ -3237,9 +3305,215 @@
         delete model.layout[id];
       }
 
+      // Before the file is written, not after: a group emptied by a delete is
+      // gone from the drawing at once, and a file that still had it would put
+      // it back on the next read.
+      tidyGroups();
       write();
       paintLists();
       select(null);
+    }
+
+    /* --- Groups -------------------------------------------------------------
+     *
+     * A group is a name over a handful of boxes, and nothing else. It has no
+     * rectangle of its own — the drawing works one out from what is inside it,
+     * every time — so grouping is writing a parent on each member and
+     * ungrouping is taking it off again. There is no geometry here to keep in
+     * step with the boxes, which is why dragging a grouped box needs no code
+     * in this section at all: the frame follows because it is made of them.
+     */
+
+    const groupsNow = () => (Array.isArray(model.groups) ? model.groups : []);
+
+    // Everything in a group, and everything in the groups inside it, however
+    // deep. A box belongs to one group directly and to every group above it.
+    function groupMembers(id) {
+      const inside = new Set([id]);
+
+      for (let again = true; again;) {
+        again = false;
+
+        for (const group of groupsNow()) {
+          if (!inside.has(group.id) && inside.has(group.parent)) {
+            inside.add(group.id);
+            again = true;
+          }
+        }
+      }
+
+      return model.nodes.filter((node) => inside.has(node.parent)).map((node) => node.id);
+    }
+
+    /* The group that is selected, worked out rather than remembered.
+     *
+     * A group is selected exactly when what is held is everything in it and
+     * nothing else. Keeping a separate "the group you clicked" would be a
+     * second fact about the selection that could disagree with the first, and
+     * the two would have to be put back in step after every edit.
+     *
+     * Innermost wins: a group whose only member is another group holds exactly
+     * the same boxes, and the one you meant is the closer of the two.
+     */
+    function groupHeld() {
+      if (selection.length === 0) {
+        return null;
+      }
+
+      const chosen = [...selection].sort().join("\u0000");
+      const depths = DiagramDraw.groupDepths(groupsNow());
+      const matches = groupsNow().filter((group) => {
+        const members = groupMembers(group.id);
+        return members.length === selection.length
+          && members.sort().join("\u0000") === chosen;
+      });
+
+      return matches.sort((one, two) =>
+        (depths.get(two.id) || 0) - (depths.get(one.id) || 0))[0] || null;
+    }
+
+    // Where every group's name is written, which is the only part of a frame
+    // that can be taken hold of. The frame itself is background: a press inside
+    // one lands on the paper, so a rubber band can still be pulled across a
+    // group.
+    const framesNow = () => DiagramDraw.groupBoxes(model, model.layout);
+
+    function groupNameAt(point) {
+      const frames = framesNow();
+
+      /* No order to decide here. A group inside a group starts a full padding
+       * below the outer name, so two names can never be over the same point,
+       * and the first frame whose band holds it is the only one that does.
+       */
+      for (const group of groupsNow()) {
+        const at = frames[group.id];
+
+        if (!at) {
+          continue;
+        }
+
+        if (point.x >= at.x && point.x <= at.x + at.w
+          && point.y >= at.y && point.y <= at.y + DiagramDraw.GROUP_HEAD) {
+          return group.id;
+        }
+      }
+
+      return null;
+    }
+
+    // A group with nothing in it encloses nothing and is drawn as nothing, so
+    // it is not a group any more. One that holds another group is still holding
+    // something, whatever became of its boxes.
+    function tidyGroups() {
+      if (groupsNow().length === 0) {
+        return;
+      }
+
+      for (let again = true; again;) {
+        again = false;
+
+        const empty = groupsNow().find((group) =>
+          !model.nodes.some((node) => node.parent === group.id)
+          && !groupsNow().some((other) => other.parent === group.id));
+
+        if (empty) {
+          liftOut(empty);
+          again = true;
+        }
+      }
+
+      if (model.groups.length === 0) {
+        delete model.groups;
+      }
+    }
+
+    /* Taking one group out of the tree, with whatever it held handed up.
+     *
+     * A box at the top level carries no parent at all — that is what the parser
+     * writes and what the file says — so the field goes rather than being set
+     * to nothing. A group at the top level carries a parent of null, for the
+     * same reason.
+     */
+    function liftOut(group) {
+      for (const node of model.nodes) {
+        if (node.parent === group.id) {
+          if (group.parent) {
+            node.parent = group.parent;
+          } else {
+            delete node.parent;
+          }
+        }
+      }
+
+      for (const other of groupsNow()) {
+        if (other.parent === group.id) {
+          other.parent = group.parent || null;
+        }
+      }
+
+      model.groups = groupsNow().filter((other) => other !== group);
+    }
+
+    function nextGroupNumber() {
+      const taken = new Set([...groupsNow().map((group) => group.id),
+        ...model.nodes.map((node) => node.id)]);
+
+      let n = 1;
+      while (taken.has(`group${n}`)) {
+        n += 1;
+      }
+
+      return n;
+    }
+
+    /* Putting a name round what is held.
+     *
+     * A handful taken out of one group stays inside it, so grouping part of a
+     * group nests rather than escaping it. A handful gathered from two places
+     * has no group in common, so the new one goes to the top.
+     */
+    function groupSelection() {
+      if (selection.length === 0) {
+        return;
+      }
+
+      const members = model.nodes.filter((node) => selection.includes(node.id));
+      const above = new Set(members.map((node) => node.parent || null));
+      const parent = above.size === 1 ? [...above][0] : null;
+      const n = nextGroupNumber();
+      const id = `group${n}`;
+
+      model.groups = [...groupsNow(), { id, label: `Group ${n}`, parent }];
+
+      for (const node of members) {
+        node.parent = id;
+      }
+
+      tidyGroups();
+      write();
+      paintLists();
+      // The same boxes are still held; what changed is that they are now a
+      // group, which is what the panel has to say next.
+      choose(selection);
+    }
+
+    function ungroupSelection() {
+      const group = groupHeld();
+      if (!group) {
+        return;
+      }
+
+      liftOut(group);
+      tidyGroups();
+      write();
+      paintLists();
+      choose(selection);
+    }
+
+    function renameGroup(group, name) {
+      group.label = name;
+      write();
+      drawAtOnce();
     }
 
     /* --- The palette --------------------------------------------------------
@@ -3979,6 +4253,25 @@
      * property of it. A panel that opens with a heading is a panel you can tell
      * at a glance is about something.
      */
+    /* What a group is called, typed where everything else about a selection is
+     * typed. A group has one thing to say about itself and this is it — the
+     * rest of the panel is about the boxes, which are what a group is made of.
+     */
+    const groupNameField = (group) => {
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "ve-diagram-text ve-diagram-group-name";
+      field.value = DiagramDraw.groupName(group);
+      field.placeholder = group.id;
+      named(field, "Group name");
+
+      field.addEventListener("input", () => {
+        renameGroup(group, field.value);
+      });
+
+      return field;
+    };
+
     const heading = (words, extra) => {
       const row = document.createElement("div");
       row.className = "ve-diagram-picked";
@@ -5151,14 +5444,30 @@
          * four of them, and this is that thing.
          */
         if (selection.length > 1) {
-          say(`${selection.length} boxes held. Colour them, or drag them about.`);
+          const held = groupHeld();
+          const groupField = held ? groupNameField(held) : null;
+
+          say(held
+            ? `${DiagramDraw.groupName(held)} held. Drag its name to move it about.`
+            : `${selection.length} boxes held. Colour them, or drag them about.`);
+          inspector.append(heading(held ? "Group" : `${selection.length} boxes`));
+
+          if (groupField) {
+            inspector.append(captioned("Name", groupField));
+          }
+
           inspector.append(
-            heading(`${selection.length} boxes`),
             captioned("Fill", colourRow([...selection])),
             captioned("Colours", inkRow([...selection])),
             captioned("Border", borderRow([...selection])),
             captioned("Font", fontRow([...selection]))
           );
+
+          if (options.focusName && groupField) {
+            groupField.focus();
+            groupField.select();
+          }
+
           return;
         }
 
@@ -5291,6 +5600,15 @@
         rows.className = "ve-diagram-rows";
         rows.append(...out.map(arrowRow));
         inspector.append(legend, rows);
+      }
+
+      /* A group of one is not something this editor makes — grouping needs two
+       * boxes to be a group of — but it is something a file can say, and a name
+       * you cannot change is a name you cannot correct.
+       */
+      const alone = groupHeld();
+      if (alone) {
+        inspector.append(captioned("Group name", groupNameField(alone)));
       }
 
       if (options.focusName) {

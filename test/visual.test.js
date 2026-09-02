@@ -685,6 +685,82 @@ console.log("=== a diagram says more than boxes and arrows ===");
   check("...written into the file so it stays that way",
     DM.serializeFlowchart(titled).includes("subgraph group1 [\"Query phase (60 fps)\"]"), true);
 
+  /* A group's frame is worked out from what is in it, every time it is drawn.
+   *
+   * Which is the answer to padding that creeps: there is no rectangle stored
+   * anywhere for a second helping of padding to be added to. Drawing the same
+   * model twice gives the same frame, and drawing it after a box has moved
+   * gives a frame that has moved with it and is no bigger than it was.
+   */
+  const nested = DM.parseFlowchart([
+    "flowchart TD",
+    "  %% layout v1",
+    "  %% @ A 100,100 100x40",
+    "  %% @ B 100,200 100x40",
+    "  %% @ C 400,100 100x40",
+    "  subgraph outer [\"Outer\"]",
+    "    A[One]",
+    "    subgraph inner [\"In\"]",
+    "      B[Two]",
+    "    end",
+    "  end",
+    "  C[Three]"
+  ].join("\n"));
+
+  const framesOf = (model) => DD.groupBoxes(model, DM.ensureLayout(model));
+  const frames = framesOf(nested);
+
+  check("a group's frame goes round what is in it",
+    [frames.inner.x, frames.inner.y, frames.inner.w, frames.inner.h],
+    [100 - DD.GROUP_PAD, 200 - DD.GROUP_PAD - DD.GROUP_HEAD,
+      100 + (DD.GROUP_PAD * 2), 40 + (DD.GROUP_PAD * 2) + DD.GROUP_HEAD]);
+  check("...and a group holding a group goes round the inner frame, not its boxes",
+    [frames.outer.x, frames.outer.y], [frames.inner.x - DD.GROUP_PAD,
+      100 - DD.GROUP_PAD - DD.GROUP_HEAD]);
+  check("...reaching to the bottom of what is inside it",
+    frames.outer.y + frames.outer.h, frames.inner.y + frames.inner.h + DD.GROUP_PAD);
+  check("...and leaving out the box that is in neither", frames.outer.x + frames.outer.w < 400, true);
+  check("a box in no group has no frame of its own", Object.keys(frames).sort(), ["inner", "outer"]);
+
+  // Drawn twice, the same. This is the check that would catch a frame kept in
+  // the model and topped up with padding on every pass.
+  check("...and the same frame however many times it is worked out",
+    JSON.stringify(framesOf(nested)), JSON.stringify(frames));
+
+  const moved = DM.parseFlowchart(DM.serializeFlowchart(nested));
+  moved.layout.B.y = 300;
+  const after = framesOf(moved);
+  check("a box moved inside a group takes the frame with it",
+    after.inner.h - frames.inner.h, 0);
+  check("...and the group above it grows to hold it",
+    after.outer.h - frames.outer.h, 100);
+
+  // A name wider than the boxes under it widens the frame rather than hanging
+  // out of the side of it.
+  const longName = DM.parseFlowchart([
+    "flowchart TD",
+    "  %% layout v1",
+    "  %% @ A 100,100 40x40",
+    "  subgraph wordy [\"A name considerably wider than the box beneath it\"]",
+    "    A[x]",
+    "  end"
+  ].join("\n"));
+  check("a frame is at least as wide as the name on it",
+    framesOf(longName).wordy.w > 40 + (DD.GROUP_PAD * 2), true);
+
+  // A group nothing is in encloses nothing, so there is nothing to draw.
+  const emptied = DM.parseFlowchart(DM.serializeFlowchart(nested));
+  emptied.nodes = emptied.nodes.filter((node) => node.id !== "B");
+  delete emptied.layout.B;
+  check("a group with nothing in it gets no frame",
+    Object.keys(framesOf(emptied)).sort(), ["outer"]);
+
+  // A group that is its own ancestor cannot be drawn sensibly, but a page that
+  // opened one must not hang working that out.
+  const eating = { nodes: [], groups: [{ id: "a", parent: "b" }, { id: "b", parent: "a" }] };
+  check("a group inside itself is measured without hanging",
+    Object.keys(DD.groupBoxes(eating, {})), []);
+
   // --- colours --------------------------------------------------------------
   const coloured = DM.parseFlowchart([
     "flowchart TD",
