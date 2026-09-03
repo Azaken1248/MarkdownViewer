@@ -636,7 +636,7 @@
         const at = boxOf(item.id);
 
         if (at && point.x >= at.x && point.x <= at.x + at.w
-          && point.y >= at.y && point.y <= at.y + at.h) {
+          && point.y >= at.y && point.y <= at.y + at.h && !lockedAway(item.id)) {
           return item.id;
         }
       }
@@ -1512,7 +1512,7 @@
        * drawing the second arrow bent the first.
        */
       if (arrowTool) {
-        const from = event.target.closest?.(".dd-node")?.getAttribute("data-id")
+        const from = pickable(event.target.closest?.(".dd-node")?.getAttribute("data-id"))
           || boxAt(point);
 
         if (from) {
@@ -1604,7 +1604,8 @@
         }
       }
 
-      const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
+      const id = pickable(event.target.closest?.(".dd-node")?.getAttribute("data-id"))
+        || boxAt(point);
 
       const adding = Boolean(event.shiftKey);
 
@@ -1787,7 +1788,7 @@
         // away holding whatever those two pixels happened to touch. The same
         // slop every other gesture here uses, for the same reason.
         if (band.w > DIAGRAM_DRAG_SLOP || band.h > DIAGRAM_DRAG_SLOP) {
-          const caught = boxesIn(band);
+          const caught = boxesIn(band).filter((id) => !lockedAway(id));
           choose(held.adding ? [...new Set([...held.was, ...caught])] : caught);
         }
 
@@ -2240,7 +2241,7 @@
     // What is under a point, asked the same way for both ways of asking.
     function targetAt(event, point) {
       const group = event.target.closest?.(".dd-node");
-      const id = group?.getAttribute("data-id") || boxAt(point);
+      const id = pickable(group?.getAttribute("data-id")) || boxAt(point);
       if (id) {
         return { kind: "node", id };
       }
@@ -2735,7 +2736,8 @@
         };
       }
 
-      const id = event.target.closest?.(".dd-node")?.getAttribute("data-id") || boxAt(point);
+      const id = pickable(event.target.closest?.(".dd-node")?.getAttribute("data-id"))
+        || boxAt(point);
       if (id) {
         return { kind: "node", id };
       }
@@ -3179,7 +3181,7 @@
       answered(event);
       for (const id of selection) {
         const at = boxOf(id);
-        if (!at) {
+        if (!at || lockedAway(id)) {
           continue;
         }
 
@@ -3333,7 +3335,9 @@
     // nine steps writes the file nine times and redraws it nine times, and an
     // arrow between two of them would be removed twice.
     function removeSteps(ids) {
-      const going = new Set(ids);
+      // A locked group is locked against this too, which is most of the reason
+      // anybody locks one.
+      const going = new Set(ids.filter((id) => !lockedAway(id)));
       model.nodes = model.nodes.filter((item) => !going.has(item.id));
       // An arrow to a step that is no longer there would declare it again by
       // naming it, and the step would come back as an empty box.
@@ -3413,6 +3417,24 @@
       const from = depth < 0 ? chain.length : depth;
       return from > 0 ? { kind: "group", id: chain[from - 1] } : { kind: "node", id };
     }
+
+    /* Locked, which is a group's word for "not from the paper".
+     *
+     * A locked group locks what is in it, because what is in it is the group.
+     * Locked is not hidden and it is not gone: the paper is simply what is
+     * under a locked box, so a band still pulls across one, whatever is behind
+     * it is still reachable, and the tree can still hold it — which is where
+     * the lock comes off again.
+     */
+    function lockedAway(id) {
+      const node = nodeById(id);
+      return Boolean(node) && groupsAbove(node.parent).some((one) => groupById(one)?.lock);
+    }
+
+    // What a press on the paper is allowed to come away with. Asked of what the
+    // document says was hit; what the model says is under the point is asked
+    // the same question in boxAt.
+    const pickable = (id) => (id && !lockedAway(id) ? id : null);
 
     // What a press takes hold of, as a list of boxes to select.
     const reachedBy = (id) => {
@@ -5773,14 +5795,27 @@
 
     /* --- Everything at once, for when tapping is not enough ---------------- */
 
+    /* The tree goes down the left, beside the shapes, because it is about what
+     * the diagram is made of. What one thing is like goes down the right, where
+     * everything else about a selection already is.
+     */
+    const tree = document.createElement("div");
+    tree.className = "ve-diagram-tree";
+
+    const treeLegend = document.createElement("div");
+    treeLegend.className = "ve-diagram-legend";
+    treeLegend.textContent = "On the paper";
+
+    const treeBody = document.createElement("div");
+    treeBody.className = "ve-diagram-branches";
+
+    tree.append(treeLegend, treeBody);
+
     const all = document.createElement("details");
     all.className = "ve-diagram-all";
 
     const allSummary = document.createElement("summary");
-    allSummary.textContent = "Everything on the paper";
-
-    const nodeRows = document.createElement("div");
-    nodeRows.className = "ve-diagram-rows";
+    allSummary.textContent = "All arrows";
 
     const edgeRows = document.createElement("div");
     edgeRows.className = "ve-diagram-rows";
@@ -5796,57 +5831,21 @@
       }
     };
 
-    function nodeRow(item, depth = 0) {
-      const row = document.createElement("div");
-      row.className = "ve-diagram-row";
-      row.dataset.nodeId = item.id;
-      row.style.setProperty("--dd-depth", String(depth));
-
-      const text = labelField(item);
-
-      // Reaching a step from the list is the other half of reaching it from the
-      // diagram, and it has to leave the same thing selected either way.
-      text.addEventListener("focus", () => {
-        if (selectedId !== item.id) {
-          // The tree names the box itself, so it holds the box itself — which
-          // means standing inside whatever group it is in, or a press on the
-          // paper afterwards would jump straight back out to the group.
-          inside = parentOnPaper(item);
-          select(item.id);
-        }
-      });
-
-      const drop = dropButton(`Remove ${stepLabel(item)}`);
-      drop.addEventListener("click", () => removeStep(item.id));
-
-      /* Words on the paper keep the column the shape menu is in, but say what
-       * they are in it rather than offering nine shapes none of which they
-       * are. The column stays because the list is a grid, and a row that
-       * skipped it would put its own remove button under everyone else's
-       * shape.
-       */
-      if (item.kind === "text") {
-        const said = document.createElement("span");
-        said.className = "ve-diagram-row-kind";
-        said.textContent = "Text";
-        row.append(text, said, drop);
-        return row;
-      }
-
-      row.append(text, shapeSelect(item), drop);
-      return row;
-    }
-
     /* --- The tree ------------------------------------------------------------
      *
      * Everything on the paper, in the shape it is actually in.
      *
-     * A flat list cannot show a group at all, and a group is now a thing you
-     * take hold of, name, and put other things inside. So the list is the
-     * tree: what is at the top level, then each group with its contents under
-     * it and indented, exactly the order the file is written in. Which means
-     * there is one answer to "what is in what" and both the file and this read
-     * it the same way.
+     * A flat list cannot show a group at all, so the list is the tree: what is
+     * at the top level, then each group with its contents under it, in the
+     * order the file is written in. One answer to what is in what, read the
+     * same way by the file and by this.
+     *
+     * A row is a picture and a name and nothing else. It used to be a field, a
+     * menu and a button per row, which turned a list of nine boxes into
+     * twenty-seven controls to look past — and every one of them is already in
+     * the panel on the other side, aimed at whatever the tree is pointing at.
+     * So this says what is there and what is held, and the panel says what it
+     * is like.
      */
     const shutGroups = new Set();
 
@@ -5858,14 +5857,111 @@
       return known ? item.parent : null;
     };
 
-    function groupRow(group, depth) {
+    // The picture on a row is the one on the button that puts that thing down,
+    // so the rail and the tree cannot draw the same box two different ways.
+    function glyphFor(item) {
+      const wanted = (choice) => {
+        if (item.image) {
+          return Boolean(choice.picture);
+        }
+
+        if (item.icon) {
+          return Boolean(choice.icon);
+        }
+
+        return !choice.icon && !choice.picture
+          && choice.kind === (item.kind || "box") && choice.shape === item.shape;
+      };
+
+      return (DIAGRAM_PALETTE.find(wanted) || DIAGRAM_PALETTE[0]).glyph;
+    }
+
+    const leafName = (words) => {
+      const name = document.createElement("span");
+      name.className = "ve-diagram-leaf-name";
+      name.textContent = words;
+      return name;
+    };
+
+    function leafRow(item, depth) {
       const row = document.createElement("div");
-      row.className = "ve-diagram-row ve-diagram-row-group";
-      row.dataset.groupId = group.id;
+      row.className = "ve-diagram-leaf";
+      row.dataset.nodeId = item.id;
       row.style.setProperty("--dd-depth", String(depth));
 
+      const glyph = document.createElement("span");
+      glyph.className = "ve-diagram-leaf-glyph";
+      glyph.innerHTML = shapeGlyph(glyphFor(item));
+
+      row.append(glyph, leafName(stepLabel(item)));
+
+      /* The tree names the box itself, so it holds the box itself — no descent
+       * needed, because the row already said which one it meant. Standing
+       * inside whatever group it is in, or the next press on the paper would
+       * jump straight back out to the group.
+       */
+      row.addEventListener("click", () => {
+        inside = parentOnPaper(item);
+        select(item.id);
+      });
+
+      // And the second press does here what it does on the paper.
+      row.addEventListener("dblclick", () => openText(item.id));
+      return row;
+    }
+
+    /* Typing a group's name where the name is written.
+     *
+     * The field is only there while it is being typed into. A row that is a
+     * field all the time is a row you cannot read at a glance, which is the
+     * whole thing this list is for.
+     */
+    function renameHere(group, name) {
+      const was = DiagramDraw.groupName(group);
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "ve-diagram-leaf-field";
+      field.value = was;
+      named(field, "Group name");
+
+      let done = false;
+      const finish = (keep) => {
+        if (done) {
+          return;
+        }
+
+        done = true;
+        renameGroup(group, keep ? field.value : was);
+        paintLists();
+      };
+
+      field.addEventListener("blur", () => finish(true));
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finish(true);
+        }
+
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          finish(false);
+        }
+      });
+
+      name.replaceWith(field);
+      field.focus();
+      field.select();
+    }
+
+    function branchRow(group, depth) {
       const name = DiagramDraw.groupName(group) || group.id;
       const folded = shutGroups.has(group.id);
+
+      const row = document.createElement("div");
+      row.className = "ve-diagram-leaf ve-diagram-branch";
+      row.dataset.groupId = group.id;
+      row.style.setProperty("--dd-depth", String(depth));
+      row.classList.toggle("is-locked", Boolean(group.lock));
 
       const twist = document.createElement("button");
       twist.type = "button";
@@ -5884,18 +5980,34 @@
         paintLists();
       });
 
-      const field = groupNameField(group);
-      field.addEventListener("focus", () => holdGroup(group.id));
+      const lock = document.createElement("button");
+      lock.type = "button";
+      lock.className = "ve-diagram-lock";
+      lock.setAttribute("aria-pressed", String(Boolean(group.lock)));
+      named(lock, group.lock ? `Unlock ${name}` : `Lock ${name}`);
+      lock.innerHTML = `<i class="ph ${group.lock ? "ph-lock-simple" : "ph-lock-simple-open"}"`
+        + ` aria-hidden="true"></i>`;
+      lock.addEventListener("click", () => {
+        if (group.lock) {
+          delete group.lock;
+        } else {
+          group.lock = true;
+        }
 
-      // Removing a group is not removing what is in it. The boxes stay and the
-      // name comes off, which is the only reading that is not a trap.
-      const drop = dropButton(`Ungroup ${name}`);
-      drop.addEventListener("click", () => {
-        holdGroup(group.id);
-        ungroupSelection();
+        write();
+        paintLists();
       });
 
-      row.append(twist, field, drop);
+      const words = leafName(name);
+      words.addEventListener("dblclick", () => renameHere(group, words));
+
+      row.append(twist, words, lock);
+      row.addEventListener("click", (event) => {
+        if (!event.target.closest("button, input")) {
+          holdGroup(group.id);
+        }
+      });
+
       return row;
     }
 
@@ -5921,7 +6033,7 @@
             placed.add(item.id);
 
             if (show) {
-              rows.push(nodeRow(item, depth));
+              rows.push(leafRow(item, depth));
             }
           }
         }
@@ -5937,7 +6049,7 @@
           walked.add(group.id);
 
           if (show) {
-            rows.push(groupRow(group, depth));
+            rows.push(branchRow(group, depth));
           }
 
           walk(group.id, depth + 1, show && !shutGroups.has(group.id));
@@ -5950,7 +6062,7 @@
       // in the list — at the top, where it can be got at and put right.
       for (const item of model.nodes) {
         if (!placed.has(item.id)) {
-          rows.push(nodeRow(item, 0));
+          rows.push(leafRow(item, 0));
         }
       }
 
@@ -5959,7 +6071,7 @@
 
     /* Which rows are held, without rebuilding any of them.
      *
-     * The tree carries the fields somebody may be typing into, and a list
+     * A row being renamed carries the field it is being renamed in, and a list
      * rebuilt on every selection is a list that takes the caret with it.
      */
     function markTree() {
@@ -5969,7 +6081,7 @@
 
       const held = groupHeld();
 
-      for (const row of nodeRows.querySelectorAll(".ve-diagram-row")) {
+      for (const row of treeBody.querySelectorAll(".ve-diagram-leaf")) {
         row.classList.toggle("is-picked", row.dataset.groupId
           ? row.dataset.groupId === held?.id
           : isSelected(row.dataset.nodeId));
@@ -5977,7 +6089,7 @@
     }
 
     function paintLists() {
-      nodeRows.replaceChildren(...treeRows());
+      treeBody.replaceChildren(...treeRows());
       edgeRows.replaceChildren(...model.edges.map(arrowRow));
       addArrow.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
       listed = true;
@@ -5996,13 +6108,6 @@
       join(model.nodes[0].id, model.nodes[1].id);
     });
 
-    const stepsLegend = document.createElement("div");
-    stepsLegend.className = "ve-diagram-legend";
-    stepsLegend.textContent = "Steps and groups";
-
-    const arrowsLegend = document.createElement("div");
-    arrowsLegend.className = "ve-diagram-legend";
-    arrowsLegend.textContent = "Arrows";
 
     // The inspector and the list are two views of the same arrows, and only the
     // one being looked at is worth keeping in step on every keystroke. Opening
@@ -6011,14 +6116,9 @@
       if (all.open) {
         paintLists();
       }
-
-      // Whether the tree is open is about this screen and these hands, so it
-      // is kept where the panel widths are kept rather than in the diagram.
-      panels.listShut = !all.open;
-      rememberPanels();
     });
 
-    all.append(allSummary, stepsLegend, nodeRows, arrowsLegend, edgeRows, addArrow);
+    all.append(allSummary, edgeRows, addArrow);
 
     /* --- Putting it together ------------------------------------------------
      *
@@ -6210,7 +6310,7 @@
 
     const rail = document.createElement("aside");
     rail.className = "ve-diagram-rail";
-    rail.append(palette);
+    rail.append(palette, tree);
 
     const side = document.createElement("aside");
     side.className = "ve-diagram-side";
@@ -6231,7 +6331,7 @@
      */
     const PANEL_STORE = "azadocs:diagram:panels";
     const PANELS = {
-      rail: { least: 56, most: 260, standard: 132 },
+      rail: { least: 56, most: 320, standard: 196 },
       side: { least: 200, most: 520, standard: 300 }
     };
 
@@ -6242,10 +6342,7 @@
       sideShut: false,
       // The bar over the box is a fourth region, and it is put away the same
       // way the other three are: by asking, and it stays away.
-      barShut: false,
-      // The tree is worth seeing without being asked for — it is where a group
-      // that has been folded away is found again — so it starts open.
-      listShut: false
+      barShut: false
     };
 
     const inBounds = (which, value) => Math.min(PANELS[which].most,
@@ -6259,7 +6356,6 @@
       // A rail too narrow for the words is a rail of pictures, which is what
       // the phone already does with it — one rule, reached two ways.
       body.classList.toggle("is-rail-tight", panels.rail < 108);
-      all.open = !panels.listShut;
     }
 
     function rememberPanels() {
@@ -6278,7 +6374,6 @@
         panels.railShut = Boolean(kept.railShut);
         panels.sideShut = Boolean(kept.sideShut);
         panels.barShut = Boolean(kept.barShut);
-        panels.listShut = Boolean(kept.listShut);
       }
     } catch {
       // Nothing kept, or nothing readable. The standard widths, then.

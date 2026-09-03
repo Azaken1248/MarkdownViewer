@@ -3580,13 +3580,156 @@ body.page-editing #dockEdit {
    deciding how wide the window has to be. As wide as it was left: the width is
    a custom property the editor writes, because how much room somebody wants
    for the shapes is about their screen rather than about the drawing. */
+/* The rail is two things stacked: the shapes you can put down, and the tree of
+   what is down already. The shapes take the room they need and the tree takes
+   the rest, so a long diagram scrolls inside the tree rather than pushing the
+   shapes off the top of the rail. */
 .ve-diagram-rail {
-  flex: 0 0 var(--dd-rail, 132px);
+  display: flex;
+  flex: 0 0 var(--dd-rail, 196px);
+  flex-direction: column;
   min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--border-muted);
   background: var(--surface);
+}
+
+.ve-diagram-rail > .ve-diagram-palette {
+  flex: 0 0 auto;
+  overflow-y: auto;
   scrollbar-width: thin;
+}
+
+/* --- The tree of what is on the paper ------------------------------------
+
+   A row is a picture and a name. Everything you can change about a thing is in
+   the panel on the other side, aimed at whatever this is pointing at — so this
+   says what is there and what is held, and stays quiet. */
+.ve-diagram-tree {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px 12px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.ve-diagram-tree > .ve-diagram-legend {
+  padding: 0 4px;
+}
+
+.ve-diagram-branches {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* Indented by how deep in the groups it is, as a padding rather than a margin,
+   so the tint of a held row still reaches the edge of the rail — which is what
+   makes a column of held rows read as one selection and not as a staircase. */
+.ve-diagram-leaf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 2px;
+  padding-left: calc(4px + (var(--dd-depth, 0) * 13px));
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.ve-diagram-leaf:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* What is held on the paper is held here. One selection shown in two places,
+   because a tree that does not say what is selected is a tree you have to
+   check against the drawing every time you look at it. */
+.ve-diagram-leaf.is-picked {
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--fg);
+}
+
+/* Locked reads as out of reach rather than as missing: it is still on the
+   paper and still in the list, it is simply not what a press picks up. */
+.ve-diagram-leaf.is-locked > .ve-diagram-leaf-name {
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-leaf-glyph {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-leaf-name {
+  overflow: hidden;
+  flex: 1 1 auto;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ve-diagram-branch > .ve-diagram-leaf-name {
+  font-weight: 600;
+}
+
+/* The field is only there while a name is being typed. A row that is a field
+   all the time is a row you cannot read at a glance. */
+.ve-diagram-leaf-field {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+/* The triangle that folds a group away, and the lock. Both sized to the row
+   rather than to a button, so a tree of them reads as one column each. */
+.ve-diagram-twist,
+.ve-diagram-lock {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-twist:hover,
+.ve-diagram-lock:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* A lock nobody has turned on is out of the way until it is wanted — which is
+   what keeps a column of rows a column of names. One that is on stays on show,
+   because that is a fact about the group rather than a control. */
+.ve-diagram-lock {
+  opacity: 0;
+}
+
+.ve-diagram-leaf:hover > .ve-diagram-lock,
+.ve-diagram-leaf:focus-within > .ve-diagram-lock,
+.ve-diagram-lock[aria-pressed="true"] {
+  opacity: 1;
 }
 
 /* Shut, a region is gone and its bar is all that is left of it — which is what
@@ -4915,53 +5058,10 @@ body.page-editing #dockEdit {
   gap: 6px;
 }
 
-/* A row is a thing on the paper, indented by how deep in the groups it is.
-   The indent is a padding rather than a margin so the tint of a held row still
-   reaches the left edge of the panel, which is what makes a column of held
-   rows read as one selection rather than as a ragged staircase. */
 .ve-diagram-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: calc(var(--dd-depth, 0) * 14px);
-  border-radius: var(--radius-sm);
-}
-
-/* What is held on the paper is held here. One selection, shown in two places,
-   because a tree that does not say what is selected is a tree you have to
-   check against the drawing every time you look at it. */
-.ve-diagram-row.is-picked {
-  background: var(--accent-subtle);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-/* A group is a name and what is under it. Bolder than a box, because it is the
-   line you look for when you are looking for where something lives. */
-.ve-diagram-row-group > .ve-diagram-group-name {
-  font-weight: 600;
-}
-
-/* The triangle that folds a group away. Sized like the row rather than like a
-   button, so a tree of them reads as one column of triangles. */
-.ve-diagram-twist {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--fg-subtle);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.ve-diagram-twist:hover {
-  background: var(--raised-hover);
-  color: var(--fg);
 }
 
 /* An arrow is five controls: what it comes from, what it goes to, a way to

@@ -685,6 +685,36 @@ console.log("=== a diagram says more than boxes and arrows ===");
   check("...written into the file so it stays that way",
     DM.serializeFlowchart(titled).includes("subgraph group1 [\"Query phase (60 fps)\"]"), true);
 
+  /* Whether a group is locked is about editing it rather than about drawing it,
+   * so it rides in a comment beside the subgraph and every other renderer is
+   * right to ignore it. There is no position and no size to write down — the
+   * frame is worked out from what is in it — so this is the whole of what a
+   * group has to say for itself.
+   */
+  const locked = DM.parseFlowchart([
+    "flowchart TD",
+    "  %% layout v1",
+    "  %% group shut lock=1",
+    "  subgraph shut [\"Shut\"]",
+    "    A[One]",
+    "  end",
+    "  B[Two]"
+  ].join("\n"));
+
+  check("a group can be locked", locked.ok && locked.groups[0].lock, true);
+  check("...and the one that is not says nothing about it",
+    "lock" in DM.parseFlowchart("flowchart TD\n  subgraph open\n    A[One]\n  end").groups[0],
+    false);
+  check("...written back beside the subgraph rather than inside it",
+    DM.serializeFlowchart(locked).includes("%% group shut lock=1"), true);
+  check("...leaving the subgraph itself ordinary Mermaid",
+    DM.serializeFlowchart(locked).includes("subgraph shut [Shut]"), true);
+
+  const unlocked = DM.parseFlowchart(DM.serializeFlowchart(locked));
+  delete unlocked.groups[0].lock;
+  check("...and a group nobody locked writes no line at all",
+    DM.serializeFlowchart(unlocked).includes("%% group"), false);
+
   /* A group's frame is worked out from what is in it, every time it is drawn.
    *
    * Which is the answer to padding that creeps: there is no rectangle stored
@@ -3184,6 +3214,9 @@ console.log("=== the previews are actually on the screen ===");
         <div class="ve-diagram-body" id="body">
           <aside class="ve-diagram-rail" id="rail">
             <div class="ve-diagram-palette" id="palette"></div>
+            <div class="ve-diagram-tree" id="tree">
+              <div class="ve-diagram-branches" id="branches"></div>
+            </div>
           </aside>
           <div class="ve-diagram-stage" id="stage">
             <div class="ve-diagram-canvas" id="paper"></div>
@@ -3215,12 +3248,21 @@ console.log("=== the previews are actually on the screen ===");
    */
   check("a side is as wide as it was left rather than as wide as it was built",
     [region("rail").flex, region("side").flex],
-    ["0 0 var(--dd-rail, 132px)", "0 0 var(--dd-side, 300px)"]);
+    ["0 0 var(--dd-rail, 196px)", "0 0 var(--dd-side, 300px)"]);
   check("...and can be narrower than what is in it, so the bar can reach",
     [region("rail").minWidth, region("side").minWidth], ["0", "0"]);
 
   check("nothing scrolls the page the editor is on", region("host").overflow, "hidden");
-  check("...the rail scrolls itself", region("rail").overflowY, "auto");
+  /* The rail is two things stacked — the shapes to put down and the tree of
+   * what is down — so it is the two of them that scroll rather than the rail.
+   * A rail that scrolled as one would push the shapes off the top of it as
+   * soon as the diagram had more boxes than the window is tall.
+   */
+  check("...the rail holds two scrollers rather than being one",
+    [region("rail").overflow, region("palette").overflowY, region("branches").overflowY],
+    ["hidden", "auto", "auto"]);
+  check("...with the tree taking whatever the shapes leave",
+    [region("tree").flex, region("tree").minHeight], ["1 1 auto", "0"]);
   check("...and so does the panel", region("side").overflowY, "auto");
 
   // The zoom is about the view rather than about the diagram, so it belongs to

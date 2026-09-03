@@ -366,6 +366,14 @@
   const LAYOUT_LINE_RE = /^%%\s*@\s*([A-Za-z_][A-Za-z0-9_-]*)\s+(-?\d+),(-?\d+)\s+(\d+)x(\d+)\s*(.*)$/;
   const EDGE_LINE_RE = /^%%\s*edge\s+(\d+)\s*(.*)$/i;
   const LAYER_LINE_RE = /^%%\s*layer\s+(\d+)\s+"((?:[^"\\]|\\.)*)"\s*(.*)$/i;
+  /* What is true of a group and cannot be said in a subgraph.
+   *
+   * Not much, and deliberately: a group's frame is worked out from what is in
+   * it, so there is no position and no size to write down. Only whether it is
+   * locked, which is about editing it rather than about drawing it, and which
+   * every other renderer is right to ignore.
+   */
+  const GROUP_LINE_RE = /^%%\s*group\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(.*)$/i;
   const ATTR_RE = /([A-Za-z][\w-]*)=("(?:[^"\\]|\\.)*"|[^\s]+)/g;
   const POINT_RE = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/;
 
@@ -457,6 +465,7 @@
    */
   const NODE_ATTRS = ["kind", "icon", "image", "layer", "z", "pad", "gap", "frame",
     "cells", "shape"];
+  const GROUP_ATTRS = ["lock"];
   const EDGE_ATTRS = ["sides", "via", "ends", "route", "class"];
 
   function readPoints(value) {
@@ -747,6 +756,7 @@
     // mean different things to everything downstream.
     let placed = null;
     const edgeLines = new Map();
+    const groupLines = new Map();
     // The subgraphs currently open. Anything declared while this is not empty
     // belongs to whatever is on top of it, which is exactly Mermaid's own rule.
     const open = [];
@@ -791,6 +801,12 @@
         const edgeLine = line.match(EDGE_LINE_RE);
         if (edgeLine) {
           edgeLines.set(Number(edgeLine[1]), readAttributes(edgeLine[2]));
+          continue;
+        }
+
+        const groupLine = line.match(GROUP_LINE_RE);
+        if (groupLine) {
+          groupLines.set(groupLine[1], readAttributes(groupLine[2]));
           continue;
         }
 
@@ -1010,7 +1026,7 @@
     }
 
     nameAnonymousGroups(model);
-    attachLayout(model, placed, edgeLines);
+    attachLayout(model, placed, edgeLines, groupLines);
     orderClasses(model);
     return orderNodes(model);
   }
@@ -1086,7 +1102,7 @@
    * dropping it is the only reading that keeps what comes back out the same as
    * what went in.
    */
-  function attachLayout(model, placed, edgeLines) {
+  function attachLayout(model, placed, edgeLines, groupLines) {
     if (placed) {
       const layout = {};
       const known = new Map(model.nodes.map((node) => [node.id, node]));
@@ -1164,6 +1180,22 @@
       }
 
       model.layout = layout;
+    }
+
+    for (const [id, attributes] of groupLines) {
+      const group = (model.groups || []).find((one) => one.id === id);
+      if (!group) {
+        continue;
+      }
+
+      if (attributes.lock === "1") {
+        group.lock = true;
+      }
+
+      const rest = restAttributes(attributes, GROUP_ATTRS);
+      if (Object.keys(rest).length > 0) {
+        group.extra = rest;
+      }
     }
 
     for (const [index, attributes] of edgeLines) {
@@ -1321,7 +1353,11 @@
 
     /* --- What Mermaid cannot say ---------------------------------------- */
 
-    if (layout || layers.length > 0 || edges.some(hasEdgeExtras)) {
+    const hasGroupExtras = (group) => Boolean(group.lock)
+      || Object.keys(group.extra || {}).length > 0;
+
+    if (layout || layers.length > 0 || edges.some(hasEdgeExtras)
+      || groups.some(hasGroupExtras)) {
       lines.push(`    %% ${LAYOUT_MARK}`);
     }
 
@@ -1376,6 +1412,17 @@
       });
 
       lines.push(`    %% edge ${index} ${attributes}`);
+    }
+
+    for (const group of groups) {
+      if (!hasGroupExtras(group)) {
+        continue;
+      }
+
+      lines.push(`    %% group ${group.id} ${writeAttributes({
+        lock: group.lock ? "1" : "",
+        ...(group.extra || {})
+      })}`);
     }
 
     for (const layer of layers) {

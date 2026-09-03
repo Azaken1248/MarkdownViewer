@@ -1395,7 +1395,7 @@ async function run(server, cookie) {
     const wide = (which) => body.style.getPropertyValue(`--dd-${which}`);
 
     check("the two sides start at the width they were given",
-      [wide("rail"), wide("side")], ["132px", "300px"]);
+      [wide("rail"), wide("side")], ["196px", "300px"]);
     check("...with a bar between each of them and the paper",
       [...body.children].map((one) => one.className.split(" ")[0]),
       ["ve-diagram-rail", "ve-diagram-grip", "ve-diagram-stage",
@@ -1415,8 +1415,8 @@ async function run(server, cookie) {
         { clientX: to, bubbles: true }));
     };
 
-    drag("rail", 132, 192);
-    check("dragging the rail's bar to the right widens the rail", wide("rail"), "192px");
+    drag("rail", 196, 256);
+    check("dragging the rail's bar to the right widens the rail", wide("rail"), "256px");
 
     // The rail's edge is on its right and the panel's on its left, so the same
     // drag widens one and narrows the other.
@@ -1424,9 +1424,9 @@ async function run(server, cookie) {
     check("...and dragging the panel's bar the same way narrows the panel",
       wide("side"), "240px");
 
-    drag("rail", 192, 9000);
-    check("neither can be dragged wider than it is allowed", wide("rail"), "260px");
-    drag("rail", 260, -9000);
+    drag("rail", 256, 9000);
+    check("neither can be dragged wider than it is allowed", wide("rail"), "320px");
+    drag("rail", 320, -9000);
     check("...nor narrower", wide("rail"), "56px");
     check("...and a rail too narrow for the words shows the pictures alone",
       body.classList.contains("is-rail-tight"), true);
@@ -1469,17 +1469,17 @@ async function run(server, cookie) {
     // panel that will not open.
     const fresh = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin });
     check("a browser holding nothing opens at the widths it was built with",
-      [wideOf(fresh, "rail"), wideOf(fresh, "side")], ["132px", "300px"]);
+      [wideOf(fresh, "rail"), wideOf(fresh, "side")], ["196px", "300px"]);
 
     const bad = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin,
       panels: "{not json" });
     check("...and so does one holding something it cannot read",
-      [wideOf(bad, "rail"), wideOf(bad, "side")], ["132px", "300px"]);
+      [wideOf(bad, "rail"), wideOf(bad, "side")], ["196px", "300px"]);
 
     const daft = await openPage({ url: `${origin}/diagram/file/sides.mmd`, cookie, origin,
       panels: JSON.stringify({ rail: 99999, side: -4 }) });
     check("...and one holding a width no panel may be is held to what it may",
-      [wideOf(daft, "rail"), wideOf(daft, "side")], ["260px", "200px"]);
+      [wideOf(daft, "rail"), wideOf(daft, "side")], ["320px", "200px"]);
 
     daft.window.close();
     bad.window.close();
@@ -5152,17 +5152,26 @@ async function run(server, cookie) {
      * at the top level, then each group with its contents under it. Which is
      * the order the file is written in, read the same way in both places.
      */
-    const rows = () => page.document.querySelector(".ve-diagram-all .ve-diagram-rows");
-    const shape = () => [...rows().querySelectorAll(".ve-diagram-row")]
+    const rows = () => page.document.querySelector(".ve-diagram-rail .ve-diagram-branches");
+    const shape = () => [...rows().querySelectorAll(".ve-diagram-leaf")]
       .map((row) => [row.dataset.groupId || row.dataset.nodeId,
         Number(row.style.getPropertyValue("--dd-depth"))]);
     const clickOn = (element) =>
       element.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
-    check("the tree is there without being asked for",
-      page.document.querySelector(".ve-diagram-all").open, true);
+    // Down the left, beside the shapes, because it is about what the diagram is
+    // made of — and always there, rather than behind a fold-out.
+    check("the tree is down the side without being asked for", Boolean(rows()), true);
     check("...with the group as a row of its own and its boxes indented under it",
       shape(), [["C", 0], ["group1", 0], ["A", 1], ["B", 1]]);
+
+    /* A row is a picture and a name and nothing else. It used to carry a field,
+     * a menu and a button each, which turned a list of three boxes into nine
+     * controls to look past — and every one of them is in the panel on the
+     * other side already, aimed at whatever this is pointing at.
+     */
+    check("...and a row is a picture and a name, not a form",
+      [...rows().querySelectorAll("input, select, textarea")].length, 0);
 
     await apart();
     tap("A");
@@ -5170,7 +5179,7 @@ async function run(server, cookie) {
       [...rows().querySelectorAll(".is-picked")]
         .map((row) => row.dataset.groupId || row.dataset.nodeId), ["group1", "A", "B"]);
 
-    const twist = () => rows().querySelector(".ve-diagram-row-group .ve-diagram-twist");
+    const twist = () => rows().querySelector(".ve-diagram-branch .ve-diagram-twist");
     clickOn(twist());
     check("folding a group away takes what is in it with it", shape(), [["C", 0], ["group1", 0]]);
     clickOn(twist());
@@ -5179,8 +5188,7 @@ async function run(server, cookie) {
 
     // The tree names the box itself, so it holds the box itself — no descent
     // needed, because the row said which one it meant.
-    rows().querySelector('.ve-diagram-row[data-node-id="A"] .ve-diagram-text')
-      .dispatchEvent(new window.Event("focus", { bubbles: true }));
+    clickOn(rows().querySelector('.ve-diagram-leaf[data-node-id="A"]'));
     check("holding a box from the tree holds the box, not the group round it", ringed(), 1);
 
     press("Escape");
@@ -5266,26 +5274,65 @@ async function run(server, cookie) {
     tap("B", { shiftKey: true });
     press("g", { ctrlKey: true });
 
-    const groupField = rows().querySelector(".ve-diagram-row-group .ve-diagram-group-name");
-    groupField.value = "Whole thing";
-    groupField.dispatchEvent(new window.Event("input", { bubbles: true }));
-    check("a group is renamed in the tree as well as in the panel", nameOn(), "Whole thing");
+    // A name is typed where the name is written, and only while it is being
+    // typed: the row goes back to being a row afterwards.
+    const branchName = () => rows().querySelector(".ve-diagram-branch .ve-diagram-leaf-name");
+    branchName().dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
 
-    // Removing a group is not removing what is in it. The boxes stay and the
-    // name comes off, which is the only reading of that button that is not a
-    // trap.
-    clickOn(rows().querySelector(".ve-diagram-row-group .ve-diagram-drop"));
-    check("...and taken apart from there, without taking its boxes with it",
-      [canvas.querySelectorAll(".dd-group").length, canvas.querySelectorAll(".dd-node").length],
-      [0, 3]);
+    const typing = rows().querySelector(".ve-diagram-leaf-field");
+    check("a group's name is typed in the tree, in a field that was not there before",
+      typing.value, "Group 1");
 
-    /* --- a group with nothing left in it ----------------------------------------- */
+    typing.value = "Whole thing";
+    typing.dispatchEvent(new window.KeyboardEvent("keydown",
+      { key: "Enter", bubbles: true, cancelable: true }));
+    check("...and it is the group's name on the paper afterwards", nameOn(), "Whole thing");
+    check("...with the row back to being a row",
+      [Boolean(rows().querySelector(".ve-diagram-leaf-field")), branchName().textContent],
+      [false, "Whole thing"]);
+
+    /* --- locking -------------------------------------------------------------- */
+
+    /* A locked group is not what a press on the paper picks up. Locked is not
+     * hidden and it is not gone: the paper is simply what is under it, and the
+     * tree can still hold it, which is where the lock comes off again.
+     */
+    const lockButton = () => rows().querySelector(".ve-diagram-branch .ve-diagram-lock");
+    check("a group is unlocked until it is locked",
+      lockButton().getAttribute("aria-pressed"), "false");
+
+    clickOn(lockButton());
+    check("...and says so once it is", lockButton().getAttribute("aria-pressed"), "true");
 
     press("Escape");
     await apart();
     tap("A");
-    tap("B", { shiftKey: true });
-    press("g", { ctrlKey: true });
+    check("a press on a locked group's box picks up nothing at all", ringed(), 0);
+
+    const locked = await savedNow();
+    check("...which the file says beside the group rather than inside it",
+      locked.includes("%% group group1 lock=1"), true);
+    check("...leaving the subgraph itself ordinary Mermaid",
+      /subgraph group1 \[Whole thing\]/.test(locked), true);
+
+    // Still there to be found, and still the way to let it go again.
+    clickOn(rows().querySelector('.ve-diagram-leaf[data-node-id="A"]'));
+    check("the tree can still hold what the paper will not", ringed(), 1);
+    press("Delete");
+    check("...but a locked box is not deleted by holding it",
+      canvas.querySelectorAll(".dd-node").length, 3);
+
+    clickOn(lockButton());
+    check("...and the lock comes off from the same button",
+      lockButton().getAttribute("aria-pressed"), "false");
+
+    press("Escape");
+    await apart();
+    tap("A");
+    check("...leaving the group there to be picked up again", ringed(), 2);
+
+    /* --- a group with nothing left in it ----------------------------------------- */
+
     check("a group again", canvas.querySelectorAll(".dd-group").length, 1);
 
     pressName();
