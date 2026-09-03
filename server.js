@@ -9,14 +9,7 @@ const { buildSchema, NoSchemaIntrospectionCustomRule } = require("graphql");
 
 const {
   AuthStore,
-  parseCookies,
-  sessionCookieOptions,
-  publicUser,
-  permissionsFor,
-  roleCan,
   ROLES,
-  SESSION_COOKIE,
-  SESSION_TTL_MS,
   SEED_ADMIN_USERNAME,
   SEED_ADMIN_PASSWORD
 } = require("./lib/auth");
@@ -49,6 +42,7 @@ const { requestLogger } = require("./lib/http/logging");
 const { templateReader, fillTemplate } = require("./lib/http/html");
 const { isAbsoluteHttpUrl, toAbsoluteUrl, createBaseUrlResolver } = require("./lib/http/urls");
 const { HttpError, createErrorPages } = require("./lib/http/errors");
+const { createGuards } = require("./lib/guards");
 
 const app = express();
 const PORT = process.env.PORT || 4321;
@@ -151,6 +145,47 @@ if (LOG_REQUESTS) {
 // while still bounding how much a single request can buffer.
 const JSON_BODY_LIMIT = MAX_DOC_BYTES * 2 + 64 * 1024;
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+// ---------------------------------------------------------------------------
+// Authentication and access control
+//
+// Accounts, not a shared token. Sessions are server-side and carried in an
+// httpOnly SameSite=Strict cookie; see lib/auth.js for why each of those was
+// chosen. Roles are viewer / editor / admin.
+//
+// Reads require a session by default. PUBLIC_READS=true restores the old
+// behaviour where anyone could read every document. Individual documents can be
+// published regardless, via a share link (lib/shares.js).
+// ---------------------------------------------------------------------------
+
+const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "true";
+
+const authStore = new AuthStore({ dataDir: DATA_DIR });
+const shareStore = new ShareStore({ dataDir: DATA_DIR });
+const linkStore = new LinkStore({ dataDir: DATA_DIR });
+
+// Cookies must be Secure in production or the session travels in clear text on
+// the first plain-HTTP request. Derived from the public base URL rather than
+// from the request, which an attacker controls.
+const COOKIES_SECURE = String(process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL)
+  .startsWith("https://");
+
+const {
+  attachSession,
+  requireAuth,
+  requireRead,
+  requirePermission,
+  requireCsrf,
+  sessionPayload,
+  issueSessionCookie,
+  clearSessionCookie
+} = createGuards({
+  authStore,
+  publicReads: PUBLIC_READS,
+  trustProxy: TRUST_PROXY,
+  cookiesSecure: COOKIES_SECURE,
+  getBaseUrl: getBaseUrlFromRequest
+});
 
 // Every request learns who it is from before any route runs; the guards decide
 // what that means. CSRF is checked globally so a new route cannot forget it.
@@ -286,209 +321,14 @@ async function sendAsset(res, name) {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Authentication and access control
-//
-// Accounts, not a shared token. Sessions are server-side and carried in an
-// httpOnly SameSite=Strict cookie; see lib/auth.js for why each of those was
-// chosen. Roles are viewer / editor / admin.
-//
-// Reads require a session by default. PUBLIC_READS=true restores the old
-// behaviour where anyone could read every document. Individual documents can be
-// published regardless, via a share link (lib/shares.js).
-// ---------------------------------------------------------------------------
 
-const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "true";
-
-const authStore = new AuthStore({ dataDir: DATA_DIR });
-const shareStore = new ShareStore({ dataDir: DATA_DIR });
-const linkStore = new LinkStore({ dataDir: DATA_DIR });
-
-// Cookies must be Secure in production or the session travels in clear text on
-// the first plain-HTTP request. Derived from the public base URL rather than
-// from the request, which an attacker controls.
-const COOKIES_SECURE = String(process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL)
-  .startsWith("https://");
-
-function currentSession(req) {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[SESSION_COOKIE];
-  if (!token) {
-    return null;
-  }
-
-  const session = authStore.getSession(token);
-  if (!session) {
-    return null;
-  }
-
-  const user = authStore.findById(session.userId);
-  if (!user || user.disabled) {
-    return null;
-  }
-
-  return { token, session, user };
-}
-
-// Populates req.auth for every request. Does not reject anything — that is the
-// job of the guards below, so a route's requirements are visible at the route.
-function attachSession(req, res, next) {
-  const found = currentSession(req);
-  req.auth = found
-    ? { user: found.user, session: found.session, token: found.token }
-    : null;
-  next();
-}
-
-function requireAuth(req, res, next) {
-  if (req.auth) {
-    next();
-    return;
-  }
-
-  res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
-}
-
-// A forced password change has to actually block things, or it is a suggestion.
-// Everything except signing out, reading the session, and setting the new
-// password is refused until it is done.
-function passwordChangePending(req) {
-  return Boolean(req.auth?.user?.mustChangePassword);
-}
-
-function refusePendingPasswordChange(res) {
-  res.status(403).json({
-    error: "Set a new password before continuing.",
-    code: "password_change_required"
-  });
-}
-
-function requireRead(req, res, next) {
-  if (passwordChangePending(req)) {
-    refusePendingPasswordChange(res);
-    return;
-  }
-
-  if (PUBLIC_READS || req.auth) {
-    next();
-    return;
-  }
-
-  res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
-}
-
-function requirePermission(permission) {
-  return function permissionGuard(req, res, next) {
-    if (!req.auth) {
-      res.status(401).json({ error: "Sign in to continue.", code: "auth_required" });
-      return;
-    }
-
-    if (passwordChangePending(req)) {
-      refusePendingPasswordChange(res);
-      return;
-    }
-
-    if (!roleCan(req.auth.user.role, permission)) {
-      // 403, not 401: the request was authenticated and is still not allowed,
-      // and re-authenticating will not change that.
-      res.status(403).json({
-        error: "Your account does not have permission to do that.",
-        code: "forbidden",
-        required: permission
-      });
-      return;
-    }
-
-    next();
-  };
-}
-
-// CSRF. SameSite=Strict already stops the browser sending the session cookie
-// from another site, so this is the second lock: a token the page has to read
-// out of its own session and echo back, which cross-origin script cannot do.
-// The Origin check catches anything that gets past both.
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-function requireCsrf(req, res, next) {
-  if (SAFE_METHODS.has(req.method)) {
-    next();
-    return;
-  }
-
-  if (!req.auth) {
-    // Unauthenticated writes are rejected by the auth guards; there is no
-    // session-riding to protect against yet.
-    next();
-    return;
-  }
-
-  const origin = req.get("origin");
-  if (origin) {
-    const expected = getBaseUrlFromRequest(req);
-    let sameOrigin = false;
-    try {
-      sameOrigin = new URL(origin).origin === new URL(expected).origin;
-    } catch {
-      sameOrigin = false;
-    }
-
-    // Behind a proxy the public origin and the request origin can legitimately
-    // differ, so a mismatch only fails when the token also fails, below.
-    if (!sameOrigin && !TRUST_PROXY) {
-      res.status(403).json({ error: "Cross-origin request refused.", code: "csrf" });
-      return;
-    }
-  }
-
-  const provided = String(req.get("x-csrf-token") || "");
-  const expected = String(req.auth.session.csrfToken || "");
-  const providedBuf = Buffer.from(provided);
-  const expectedBuf = Buffer.from(expected);
-
-  if (providedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(providedBuf, expectedBuf)) {
-    res.status(403).json({ error: "Session token missing or stale. Reload and try again.", code: "csrf" });
-    return;
-  }
-
-  next();
-}
-
-function sessionPayload(req) {
-  if (!req.auth) {
-    return {
-      authenticated: false,
-      publicReads: PUBLIC_READS,
-      user: null,
-      permissions: [],
-      csrfToken: null
-    };
-  }
-
-  return {
-    authenticated: true,
-    publicReads: PUBLIC_READS,
-    user: publicUser(req.auth.user),
-    permissions: permissionsFor(req.auth.user.role),
-    csrfToken: req.auth.session.csrfToken
-  };
-}
 
 
 // ---------------------------------------------------------------------------
 // Auth routes
 // ---------------------------------------------------------------------------
 
-function issueSessionCookie(res, token) {
-  res.cookie(SESSION_COOKIE, token, sessionCookieOptions({
-    secure: COOKIES_SECURE,
-    maxAgeMs: SESSION_TTL_MS
-  }));
-}
 
-function clearSessionCookie(res) {
-  res.clearCookie(SESSION_COOKIE, sessionCookieOptions({ secure: COOKIES_SECURE }));
-}
 
 app.get("/api/session", (req, res) => {
   res.json(sessionPayload(req));
