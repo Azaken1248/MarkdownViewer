@@ -16,7 +16,8 @@ const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require
 
 const ROOT = path.join(__dirname, "..", "public");
 const pageHtml = fs.readFileSync(path.join(ROOT, "diagram.html"), "utf8");
-const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+// The shell routes, which is where the reserved prefixes live.
+const pagesSource = fs.readFileSync(path.join(__dirname, "..", "lib", "routes", "pages.js"), "utf8");
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -179,7 +180,7 @@ async function run(server, cookie) {
     // has to be kept out of the shell route or opening the editor would serve
     // the app instead.
     check("the editor's address is not read as a document",
-      /SHELL_RESERVED_PREFIXES = \[[^\]]*"\/diagram"/.test(serverSource), true);
+      /SHELL_RESERVED_PREFIXES = \[[^\]]*"\/diagram"/.test(pagesSource), true);
 
     for (const [what, url] of [
       ["a fence inside a document", "/diagram/doc/Notes/deploy.md"],
