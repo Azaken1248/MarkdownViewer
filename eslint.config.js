@@ -134,8 +134,17 @@ module.exports = [
     ]
   },
   {
-    // Server and tooling.
-    files: ["server.js", "eslint.config.js", "test/**/*.js"],
+    // Server and tooling. `lib/**` is where the server's own modules live, so it
+    // is listed explicitly: a flat config lints a file only if some block claims
+    // it, and for a while these did not appear in any block at all — an
+    // undefined identifier in lib/ was a runtime error nothing would have caught.
+    files: [
+      "server.js",
+      "eslint.config.js",
+      "lib/**/*.js",
+      "tools/**/*.js",
+      "test/**/*.js"
+    ],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "commonjs",
