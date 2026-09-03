@@ -4915,10 +4915,53 @@ body.page-editing #dockEdit {
   gap: 6px;
 }
 
+/* A row is a thing on the paper, indented by how deep in the groups it is.
+   The indent is a padding rather than a margin so the tint of a held row still
+   reaches the left edge of the panel, which is what makes a column of held
+   rows read as one selection rather than as a ragged staircase. */
 .ve-diagram-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding-left: calc(var(--dd-depth, 0) * 14px);
+  border-radius: var(--radius-sm);
+}
+
+/* What is held on the paper is held here. One selection, shown in two places,
+   because a tree that does not say what is selected is a tree you have to
+   check against the drawing every time you look at it. */
+.ve-diagram-row.is-picked {
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* A group is a name and what is under it. Bolder than a box, because it is the
+   line you look for when you are looking for where something lives. */
+.ve-diagram-row-group > .ve-diagram-group-name {
+  font-weight: 600;
+}
+
+/* The triangle that folds a group away. Sized like the row rather than like a
+   button, so a tree of them reads as one column of triangles. */
+.ve-diagram-twist {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-twist:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
 }
 
 /* An arrow is five controls: what it comes from, what it goes to, a way to

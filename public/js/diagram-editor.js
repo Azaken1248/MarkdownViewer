@@ -1536,7 +1536,17 @@
         event.preventDefault?.();
 
         if (tapping.what.kind === "node") {
-          if (!isSelected(tapping.what.id)) {
+          /* Inside, one level. A box you are already down to is a box whose
+           * words the second press opens, which is what it has always done —
+           * so the descent runs out exactly where the typing begins.
+           */
+          const reach = reachFor(tapping.what.id);
+
+          if (reach && reach.kind === "group") {
+            inside = reach.id;
+            choose(reachedBy(tapping.what.id));
+            tapping.drilled = true;
+          } else if (!isSelected(tapping.what.id)) {
             select(tapping.what.id);
           }
 
@@ -1611,6 +1621,9 @@
 
         if (onName) {
           const members = groupMembers(onName);
+          // Held from outside, so pressing it again goes into it, the same as
+          // pressing one of the boxes it holds.
+          inside = groupById(onName)?.parent || null;
           choose(adding ? [...new Set([...selection, ...members])] : members);
 
           if (members.length > 0) {
@@ -1626,6 +1639,10 @@
          * is what dragging empty space means everywhere else.
          */
         if (!adding) {
+          // Out of whatever group we were in, too: pressing the paper is how
+          // you say "none of this", and standing inside a group you can no
+          // longer see anything selected in is not none of it.
+          inside = null;
           select(null);
         }
 
@@ -1648,11 +1665,17 @@
         return;
       }
 
+      /* A box in a group is the group, until we have gone inside it.
+       *
+       * Which is what makes a group one thing rather than a heap of boxes that
+       * happen to move together — the frame's name is a way in, not the only
+       * way in.
+       */
       // A box already in a selection of several is not a new selection — it is
       // the handle you drag the whole lot by. Narrowing to it on the way down
       // would make a multiple selection impossible to move.
       if (!isSelected(id)) {
-        select(id);
+        choose(reachedBy(id));
       }
 
       beginGesture("move", id, point, event);
@@ -2239,10 +2262,11 @@
       const point = pointIn(event.clientX, event.clientY);
       const target = targetAt(event, point);
 
-      // Right-clicking a box that is not in the selection is about that box.
-      // Right-clicking one that is, is about the whole handful.
+      // Right-clicking a box that is not in the selection is about that box —
+      // or about the group it is in, the same as pressing it. Right-clicking
+      // one that is already held is about the whole handful.
       if (target.kind === "node" && !isSelected(target.id)) {
-        select(target.id);
+        choose(reachedBy(target.id));
       }
 
       // And right-clicking a group's name is about the group, so it is held
@@ -2756,7 +2780,13 @@
       if (held.again) {
         // Three taps are a pair and then a tap, not three pairs.
         lastTap = null;
-        openTapped(held.what, held.point);
+
+        // A press that went one level into a group has already done what the
+        // pair was for.
+        if (!held.drilled) {
+          openTapped(held.what, held.point);
+        }
+
         return;
       }
 
@@ -3088,6 +3118,13 @@
           return;
         }
 
+        // Up one level first, to the group we went into. Only when we are back
+        // at the top of the diagram does Escape mean "nothing".
+        if (stepOutside()) {
+          event.stopPropagation();
+          return;
+        }
+
         if (selection.length > 0) {
           event.stopPropagation();
           select(null);
@@ -3325,6 +3362,75 @@
      */
 
     const groupsNow = () => (Array.isArray(model.groups) ? model.groups : []);
+    const groupById = (id) => groupsNow().find((group) => group.id === id) || null;
+
+    /* Which group we have gone inside, or null for the top of the diagram.
+     *
+     * A group is one thing to press, so pressing a box in one takes hold of the
+     * group. That would leave no way to reach the box, which is why every
+     * editor shaped like this has a way in: pressing again goes one level down,
+     * and Escape comes back up. This is where we are in that descent, and it is
+     * the only state here that is about looking rather than about the diagram —
+     * it is never written to the file and never survives the group it names.
+     */
+    let inside = null;
+
+    // Whether the tree has been built yet. Selecting something before it has is
+    // a mark with nothing to put it on.
+    let listed = false;
+
+    // Every group above a thing, nearest first.
+    function groupsAbove(parent) {
+      const chain = [];
+      const seen = new Set();
+
+      for (let at = groupById(parent); at && !seen.has(at.id); at = groupById(at.parent)) {
+        seen.add(at.id);
+        chain.push(at.id);
+      }
+
+      return chain;
+    }
+
+    /* What one press on a box takes hold of.
+     *
+     * The outermost group it is in that we have not gone inside — so at the top
+     * of the diagram a box in a group is the whole group, and having gone into
+     * that group it is whatever is directly in it, which may be another group.
+     * A box in no group we are outside of is itself.
+     */
+    function reachFor(id) {
+      const node = nodeById(id);
+      if (!node) {
+        return null;
+      }
+
+      const chain = groupsAbove(node.parent);
+      const depth = inside ? chain.indexOf(inside) : chain.length;
+
+      // Somewhere else entirely: the press has left the group we were in, so
+      // it is read from the top again.
+      const from = depth < 0 ? chain.length : depth;
+      return from > 0 ? { kind: "group", id: chain[from - 1] } : { kind: "node", id };
+    }
+
+    // What a press takes hold of, as a list of boxes to select.
+    const reachedBy = (id) => {
+      const reach = reachFor(id);
+      return reach && reach.kind === "group" ? groupMembers(reach.id) : [id];
+    };
+
+    // Coming back out, to the group we were in the middle of.
+    function stepOutside() {
+      const was = inside;
+      if (!was) {
+        return false;
+      }
+
+      inside = groupById(was)?.parent || null;
+      choose(groupMembers(was));
+      return true;
+    }
 
     // Everything in a group, and everything in the groups inside it, however
     // deep. A box belongs to one group directly and to every group above it.
@@ -3424,6 +3530,12 @@
 
       if (model.groups.length === 0) {
         delete model.groups;
+      }
+
+      // Standing inside a group that is no longer there would leave every press
+      // being read from a place in the diagram that does not exist.
+      if (inside && !groupById(inside)) {
+        inside = null;
       }
     }
 
@@ -3812,6 +3924,7 @@
       selectedId = selection.length === 1 ? selection[0] : null;
       armedFrom = null;
       paintInspector(options);
+      markTree();
       // The ring and its handles are part of the drawing, so selecting something
       // is a redraw — of a picture that is a few kilobytes of string.
       drawAtOnce();
@@ -3822,9 +3935,16 @@
     }
 
     // Shift, on every canvas anyone has used: add what was not there, take away
-    // what was.
+    // what was. What it adds is what a plain press would have taken — the group
+    // a box is in, until we have gone inside that group — so shift does not
+    // quietly reach past a group that an ordinary press cannot.
     function toggleInSelection(id) {
-      choose(isSelected(id) ? selection.filter((one) => one !== id) : [...selection, id]);
+      const reach = reachedBy(id);
+      const already = reach.every(isSelected);
+
+      choose(already
+        ? selection.filter((one) => !reach.includes(one))
+        : [...new Set([...selection, ...reach])]);
     }
 
     /* --- What you can do to what is selected ------------------------------- */
@@ -5657,7 +5777,7 @@
     all.className = "ve-diagram-all";
 
     const allSummary = document.createElement("summary");
-    allSummary.textContent = "All steps and arrows";
+    allSummary.textContent = "Everything on the paper";
 
     const nodeRows = document.createElement("div");
     nodeRows.className = "ve-diagram-rows";
@@ -5676,10 +5796,11 @@
       }
     };
 
-    function nodeRow(item) {
+    function nodeRow(item, depth = 0) {
       const row = document.createElement("div");
       row.className = "ve-diagram-row";
       row.dataset.nodeId = item.id;
+      row.style.setProperty("--dd-depth", String(depth));
 
       const text = labelField(item);
 
@@ -5687,6 +5808,10 @@
       // diagram, and it has to leave the same thing selected either way.
       text.addEventListener("focus", () => {
         if (selectedId !== item.id) {
+          // The tree names the box itself, so it holds the box itself — which
+          // means standing inside whatever group it is in, or a press on the
+          // paper afterwards would jump straight back out to the group.
+          inside = parentOnPaper(item);
           select(item.id);
         }
       });
@@ -5712,10 +5837,151 @@
       return row;
     }
 
+    /* --- The tree ------------------------------------------------------------
+     *
+     * Everything on the paper, in the shape it is actually in.
+     *
+     * A flat list cannot show a group at all, and a group is now a thing you
+     * take hold of, name, and put other things inside. So the list is the
+     * tree: what is at the top level, then each group with its contents under
+     * it and indented, exactly the order the file is written in. Which means
+     * there is one answer to "what is in what" and both the file and this read
+     * it the same way.
+     */
+    const shutGroups = new Set();
+
+    // The same rule the file is written by: a thing whose group is not there is
+    // at the top level rather than nowhere. Losing which group a box was in is
+    // a small loss; losing the box is not.
+    const parentOnPaper = (item) => {
+      const known = groupsNow().some((group) => group.id === item.parent);
+      return known ? item.parent : null;
+    };
+
+    function groupRow(group, depth) {
+      const row = document.createElement("div");
+      row.className = "ve-diagram-row ve-diagram-row-group";
+      row.dataset.groupId = group.id;
+      row.style.setProperty("--dd-depth", String(depth));
+
+      const name = DiagramDraw.groupName(group) || group.id;
+      const folded = shutGroups.has(group.id);
+
+      const twist = document.createElement("button");
+      twist.type = "button";
+      twist.className = "ve-diagram-twist";
+      twist.setAttribute("aria-expanded", String(!folded));
+      named(twist, `${folded ? "Show" : "Hide"} what is in ${name}`);
+      twist.innerHTML = `<i class="ph ${folded ? "ph-caret-right" : "ph-caret-down"}"`
+        + ` aria-hidden="true"></i>`;
+      twist.addEventListener("click", () => {
+        if (folded) {
+          shutGroups.delete(group.id);
+        } else {
+          shutGroups.add(group.id);
+        }
+
+        paintLists();
+      });
+
+      const field = groupNameField(group);
+      field.addEventListener("focus", () => holdGroup(group.id));
+
+      // Removing a group is not removing what is in it. The boxes stay and the
+      // name comes off, which is the only reading that is not a trap.
+      const drop = dropButton(`Ungroup ${name}`);
+      drop.addEventListener("click", () => {
+        holdGroup(group.id);
+        ungroupSelection();
+      });
+
+      row.append(twist, field, drop);
+      return row;
+    }
+
+    // Taking hold of a group from the tree leaves us outside it, the same as
+    // pressing its name on the paper does.
+    function holdGroup(id) {
+      inside = groupById(id)?.parent || null;
+      choose(groupMembers(id));
+    }
+
+    function treeRows() {
+      const rows = [];
+      const placed = new Set();
+      const walked = new Set();
+
+      /* A folded group is still walked, so that what is in it counts as reached
+       * — it is out of sight, not lost. Only what the walk never gets to at all
+       * is left over.
+       */
+      const walk = (parent, depth, show) => {
+        for (const item of model.nodes) {
+          if (parentOnPaper(item) === parent) {
+            placed.add(item.id);
+
+            if (show) {
+              rows.push(nodeRow(item, depth));
+            }
+          }
+        }
+
+        for (const group of groupsNow()) {
+          // A group that is its own ancestor has no place in the tree. It is
+          // still in the file, and the walk simply stops rather than running
+          // round the ring forever.
+          if (parentOnPaper(group) !== parent || walked.has(group.id)) {
+            continue;
+          }
+
+          walked.add(group.id);
+
+          if (show) {
+            rows.push(groupRow(group, depth));
+          }
+
+          walk(group.id, depth + 1, show && !shutGroups.has(group.id));
+        }
+      };
+
+      walk(null, 0, true);
+
+      // Anything the walk could not reach is still on the paper, so it is still
+      // in the list — at the top, where it can be got at and put right.
+      for (const item of model.nodes) {
+        if (!placed.has(item.id)) {
+          rows.push(nodeRow(item, 0));
+        }
+      }
+
+      return rows;
+    }
+
+    /* Which rows are held, without rebuilding any of them.
+     *
+     * The tree carries the fields somebody may be typing into, and a list
+     * rebuilt on every selection is a list that takes the caret with it.
+     */
+    function markTree() {
+      if (!listed) {
+        return;
+      }
+
+      const held = groupHeld();
+
+      for (const row of nodeRows.querySelectorAll(".ve-diagram-row")) {
+        row.classList.toggle("is-picked", row.dataset.groupId
+          ? row.dataset.groupId === held?.id
+          : isSelected(row.dataset.nodeId));
+      }
+    }
+
     function paintLists() {
-      nodeRows.replaceChildren(...model.nodes.map(nodeRow));
+      nodeRows.replaceChildren(...treeRows());
       edgeRows.replaceChildren(...model.edges.map(arrowRow));
       addArrow.disabled = model.nodes.length < 2 || model.edges.length >= DiagramModel.MAX_EDGES;
+      listed = true;
+      markTree();
     }
 
     const addArrow = document.createElement("button");
@@ -5732,7 +5998,7 @@
 
     const stepsLegend = document.createElement("div");
     stepsLegend.className = "ve-diagram-legend";
-    stepsLegend.textContent = "Steps";
+    stepsLegend.textContent = "Steps and groups";
 
     const arrowsLegend = document.createElement("div");
     arrowsLegend.className = "ve-diagram-legend";
@@ -5745,6 +6011,11 @@
       if (all.open) {
         paintLists();
       }
+
+      // Whether the tree is open is about this screen and these hands, so it
+      // is kept where the panel widths are kept rather than in the diagram.
+      panels.listShut = !all.open;
+      rememberPanels();
     });
 
     all.append(allSummary, stepsLegend, nodeRows, arrowsLegend, edgeRows, addArrow);
@@ -5971,7 +6242,10 @@
       sideShut: false,
       // The bar over the box is a fourth region, and it is put away the same
       // way the other three are: by asking, and it stays away.
-      barShut: false
+      barShut: false,
+      // The tree is worth seeing without being asked for — it is where a group
+      // that has been folded away is found again — so it starts open.
+      listShut: false
     };
 
     const inBounds = (which, value) => Math.min(PANELS[which].most,
@@ -5985,6 +6259,7 @@
       // A rail too narrow for the words is a rail of pictures, which is what
       // the phone already does with it — one rule, reached two ways.
       body.classList.toggle("is-rail-tight", panels.rail < 108);
+      all.open = !panels.listShut;
     }
 
     function rememberPanels() {
@@ -6003,6 +6278,7 @@
         panels.railShut = Boolean(kept.railShut);
         panels.sideShut = Boolean(kept.sideShut);
         panels.barShut = Boolean(kept.barShut);
+        panels.listShut = Boolean(kept.listShut);
       }
     } catch {
       // Nothing kept, or nothing readable. The standard widths, then.

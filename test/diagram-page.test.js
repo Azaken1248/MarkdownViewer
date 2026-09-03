@@ -4999,6 +4999,11 @@ async function run(server, cookie) {
     const press = (key, options = {}) => canvas.dispatchEvent(new window.KeyboardEvent("keydown",
       { key, bubbles: true, cancelable: true, ...options }));
 
+    // Long enough that the next press is a press rather than the second of a
+    // pair, which is a different thing entirely now that a pair goes inside.
+    const apart = () => new Promise((r) => setTimeout(r, 450));
+    const legend = () => inspector.querySelector(".ve-diagram-legend")?.textContent;
+
     const frame = () => canvas.querySelector(".dd-group-box");
     const frameBox = () => {
       const rect = frame();
@@ -5027,8 +5032,7 @@ async function run(server, cookie) {
     check("...and the box that was left out is still outside it",
       frameBox()[1] + frameBox()[3] < 300, true);
 
-    check("the panel calls it a group rather than counting the boxes",
-      inspector.querySelector(".ve-diagram-legend")?.textContent, "Group");
+    check("the panel calls it a group rather than counting the boxes", legend(), "Group");
 
     /* --- what is written down ---------------------------------------------- */
 
@@ -5076,7 +5080,7 @@ async function run(server, cookie) {
     pressName();
     check("pressing the group's name takes hold of everything in it", ringed(), 2);
     check("...which is the group, not three boxes that happen to be selected",
-      inspector.querySelector(".ve-diagram-legend")?.textContent, "Group");
+      legend(), "Group");
 
     // Inside the frame but not on the name is the paper, so a rubber band can
     // still be pulled across a group's contents.
@@ -5084,6 +5088,104 @@ async function run(server, cookie) {
     canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(inside[0], inside[1])));
     canvas.dispatchEvent(new window.MouseEvent("pointerup", at(inside[0], inside[1])));
     check("a press inside the frame is a press on the paper", ringed(), 0);
+
+    /* --- a group is one thing to press -------------------------------------- */
+
+    /* Pressing a box in a group takes the group. Which is what makes a group a
+     * thing rather than a heap of boxes that happen to move together — its name
+     * is a way to take hold of it, not the only way.
+     *
+     * That would leave no way to reach the box, so pressing again goes one
+     * level in and Escape comes back out: the descent every editor shaped like
+     * this has, and it runs out exactly where typing into a box begins.
+     */
+    await apart();
+    tap("A");
+    check("pressing a box in a group takes hold of the group", ringed(), 2);
+    check("...and the panel says so", legend(), "Group");
+
+    await apart();
+    tap("A");
+    tap("A");
+    check("pressing it again goes inside, down to the box itself", ringed(), 1);
+    check("...which is the box on its own, not the group round it",
+      Boolean(inspector.querySelector(".ve-diagram-group-name")), false);
+    // Going in is what the second press did. Opening the words as well would
+    // put a field over a box that was only being reached for.
+    check("...and it did not also open the box for typing",
+      Boolean(page.document.querySelector(".ve-diagram-inline")), false);
+
+    press("Escape");
+    check("Escape comes back out to the group it went into", ringed(), 2);
+    check("...as the group, not as two boxes", legend(), "Group");
+
+    press("Escape");
+    check("...and again lets go of it altogether", ringed(), 0);
+
+    /* Pressing the paper is the other way back to the top. Standing inside a
+     * group with nothing in it selected is standing somewhere you cannot see,
+     * and the next press on a box would quietly reach past a group it looks
+     * like it should have taken.
+     */
+    await apart();
+    tap("A");
+    tap("A");
+    const away = onScreen(700, 520);
+    canvas.dispatchEvent(new window.MouseEvent("pointerdown", at(away[0], away[1])));
+    canvas.dispatchEvent(new window.MouseEvent("pointerup", at(away[0], away[1])));
+    await apart();
+    tap("A");
+    check("a press on the paper comes back out to the top of the diagram", ringed(), 2);
+
+    // Shift reaches exactly as far as a press does, so it cannot quietly take
+    // half a group.
+    await apart();
+    tap("C");
+    tap("A", { shiftKey: true });
+    check("shift on a box in a group adds the whole group", ringed(), 3);
+
+    press("Escape");
+
+    /* --- the tree ------------------------------------------------------------ */
+
+    /* A flat list cannot show a group at all, so the list is the tree: what is
+     * at the top level, then each group with its contents under it. Which is
+     * the order the file is written in, read the same way in both places.
+     */
+    const rows = () => page.document.querySelector(".ve-diagram-all .ve-diagram-rows");
+    const shape = () => [...rows().querySelectorAll(".ve-diagram-row")]
+      .map((row) => [row.dataset.groupId || row.dataset.nodeId,
+        Number(row.style.getPropertyValue("--dd-depth"))]);
+    const clickOn = (element) =>
+      element.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    check("the tree is there without being asked for",
+      page.document.querySelector(".ve-diagram-all").open, true);
+    check("...with the group as a row of its own and its boxes indented under it",
+      shape(), [["C", 0], ["group1", 0], ["A", 1], ["B", 1]]);
+
+    await apart();
+    tap("A");
+    check("...and the group's row marked, along with what it holds",
+      [...rows().querySelectorAll(".is-picked")]
+        .map((row) => row.dataset.groupId || row.dataset.nodeId), ["group1", "A", "B"]);
+
+    const twist = () => rows().querySelector(".ve-diagram-row-group .ve-diagram-twist");
+    clickOn(twist());
+    check("folding a group away takes what is in it with it", shape(), [["C", 0], ["group1", 0]]);
+    clickOn(twist());
+    check("...and unfolding brings it back",
+      shape(), [["C", 0], ["group1", 0], ["A", 1], ["B", 1]]);
+
+    // The tree names the box itself, so it holds the box itself — no descent
+    // needed, because the row said which one it meant.
+    rows().querySelector('.ve-diagram-row[data-node-id="A"] .ve-diagram-text')
+      .dispatchEvent(new window.Event("focus", { bubbles: true }));
+    check("holding a box from the tree holds the box, not the group round it", ringed(), 1);
+
+    press("Escape");
+    check("...and Escape from there still comes out to the group", ringed(), 2);
+    press("Escape");
 
     /* --- moving it ---------------------------------------------------------- */
 
@@ -5115,9 +5217,11 @@ async function run(server, cookie) {
 
     /* --- nesting -------------------------------------------------------------- */
 
-    press("Escape");
+    await apart();
+    tap("A");
     tap("A");
     tap("B", { shiftKey: true });
+    check("inside a group, the boxes in it are picked up one at a time", ringed(), 2);
     press("g", { ctrlKey: true });
     check("grouping part of a group nests rather than escaping it",
       canvas.querySelectorAll(".dd-group").length, 2);
@@ -5154,9 +5258,31 @@ async function run(server, cookie) {
     check("...and every box still in it", [/A\[One\]/, /B\[Two\]/, /C\[Three\]/]
       .every((one) => one.test(flat)), true);
 
+    /* --- the tree's own buttons ---------------------------------------------- */
+
+    press("Escape");
+    await apart();
+    tap("A");
+    tap("B", { shiftKey: true });
+    press("g", { ctrlKey: true });
+
+    const groupField = rows().querySelector(".ve-diagram-row-group .ve-diagram-group-name");
+    groupField.value = "Whole thing";
+    groupField.dispatchEvent(new window.Event("input", { bubbles: true }));
+    check("a group is renamed in the tree as well as in the panel", nameOn(), "Whole thing");
+
+    // Removing a group is not removing what is in it. The boxes stay and the
+    // name comes off, which is the only reading of that button that is not a
+    // trap.
+    clickOn(rows().querySelector(".ve-diagram-row-group .ve-diagram-drop"));
+    check("...and taken apart from there, without taking its boxes with it",
+      [canvas.querySelectorAll(".dd-group").length, canvas.querySelectorAll(".dd-node").length],
+      [0, 3]);
+
     /* --- a group with nothing left in it ----------------------------------------- */
 
     press("Escape");
+    await apart();
     tap("A");
     tap("B", { shiftKey: true });
     press("g", { ctrlKey: true });
