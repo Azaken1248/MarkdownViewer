@@ -59,6 +59,8 @@ const {
   folderDirFor,
   createOrganizerFile
 } = require("./lib/docs/organizer");
+const { createSearch } = require("./lib/docs/search");
+const { createDocumentCache } = require("./lib/docs/content");
 
 const app = express();
 const PORT = process.env.PORT || 4321;
@@ -93,6 +95,23 @@ const SEARCH_RESULT_LIMIT = 200;
 const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+const {
+  readCachedTextFile,
+  readSearchIndexEntry,
+  readSnippetSource,
+  invalidateCachedContent
+} = createDocumentCache({
+  contentMaxBytes: CONTENT_CACHE_MAX_BYTES,
+  indexMaxBytes: SEARCH_INDEX_MAX_BYTES,
+  snippetMaxBytes: SNIPPET_CACHE_MAX_BYTES
+});
+
+const { searchDocuments: searchIn } = createSearch({
+  readSearchIndexEntry,
+  readSnippetSource,
+  resultLimit: SEARCH_RESULT_LIMIT
+});
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
 const ERROR_TEMPLATE_PATH = path.join(PUBLIC_DIR, "error.html");
@@ -997,280 +1016,6 @@ async function migrateFlatLibraryToDirectories() {
   return { moved, folders: folderDirs.size, skipped };
 }
 
-function normalizeSearchText(value) {
-  return String(value || "").toLowerCase();
-}
-
-function tokenizeSearchQuery(query) {
-  return normalizeSearchText(query)
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean);
-}
-
-// `raw` is the whitespace-collapsed document and `normalizedContent` its
-// lowercased form; both come from the snippet cache so this no longer rescans
-// the source text on every request.
-function buildSearchSnippet(raw, normalizedContent, query, tokens) {
-  if (!raw) {
-    return "No preview available.";
-  }
-
-  const searchTerms = [...new Set([normalizeSearchText(query).trim(), ...(tokens || [])]
-    .map((token) => normalizeSearchText(token).trim())
-    .filter(Boolean))];
-
-  let matchIndex = -1;
-  let matchToken = "";
-
-  for (const token of searchTerms) {
-    const index = normalizedContent.indexOf(token);
-    if (index >= 0 && (matchIndex === -1 || index < matchIndex)) {
-      matchIndex = index;
-      matchToken = token;
-    }
-  }
-
-  if (matchIndex === -1) {
-    return raw.length > 140 ? `${raw.slice(0, 140)}...` : raw;
-  }
-
-  const focusLength = Math.max(matchToken.length, 18);
-  const start = Math.max(0, matchIndex - 56);
-  const end = Math.min(raw.length, matchIndex + focusLength + 72);
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < raw.length ? "..." : "";
-  return `${prefix}${raw.slice(start, end)}${suffix}`;
-}
-
-// `normalizedContent` arrives already lowercased from the search index; this
-// used to lowercase the entire document on every request.
-function scoreSearchDoc(doc, normalizedQuery, tokens, normalizedContent) {
-  const title = normalizeSearchText(doc.title);
-  const file = normalizeSearchText(doc.originalFile || doc.file);
-  const folderName = normalizeSearchText(doc.folderName || "");
-
-  let score = 0;
-  let matched = false;
-
-  if (title.startsWith(normalizedQuery)) {
-    score += 1200;
-    matched = true;
-  }
-
-  if (file.startsWith(normalizedQuery)) {
-    score += 1000;
-    matched = true;
-  }
-
-  if (folderName.startsWith(normalizedQuery)) {
-    score += 880;
-    matched = true;
-  }
-
-  if (title.includes(normalizedQuery)) {
-    score += 850;
-    matched = true;
-  }
-
-  if (file.includes(normalizedQuery)) {
-    score += 760;
-    matched = true;
-  }
-
-  if (folderName.includes(normalizedQuery)) {
-    score += 620;
-    matched = true;
-  }
-
-  const contentIndex = normalizedContent.indexOf(normalizedQuery);
-  if (contentIndex >= 0) {
-    score += 520 + Math.max(0, 140 - (contentIndex / 11));
-    matched = true;
-  }
-
-  let tokenHits = 0;
-  for (const token of tokens) {
-    if (!token) {
-      continue;
-    }
-
-    if (title.includes(token)) {
-      tokenHits += 4;
-    }
-
-    if (file.includes(token)) {
-      tokenHits += 4;
-    }
-
-    if (folderName.includes(token)) {
-      tokenHits += 3;
-    }
-
-    if (normalizedContent.includes(token)) {
-      tokenHits += 2;
-      matched = true;
-    }
-  }
-
-  if (tokenHits > 0) {
-    score += tokenHits * 35;
-  }
-
-  return matched ? score : null;
-}
-
-// A plain Map grew to the size of the entire corpus and never gave any of it
-// back. This is a byte-budgeted LRU: Map preserves insertion order, so the
-// oldest key is always the first one iteration yields, and re-reading a key
-// moves it to the back.
-function createLruCache(maxBytes) {
-  const entries = new Map();
-  let usedBytes = 0;
-
-  function evictUntilUnder(limit) {
-    for (const key of entries.keys()) {
-      if (usedBytes <= limit) {
-        return;
-      }
-
-      usedBytes -= entries.get(key).bytes;
-      entries.delete(key);
-    }
-  }
-
-  return {
-    get(key) {
-      const entry = entries.get(key);
-      if (!entry) {
-        return null;
-      }
-
-      entries.delete(key);
-      entries.set(key, entry);
-      return entry;
-    },
-    set(key, value, bytes) {
-      const existing = entries.get(key);
-      if (existing) {
-        usedBytes -= existing.bytes;
-        entries.delete(key);
-      }
-
-      // A single file larger than the whole budget is simply not cached,
-      // rather than evicting everything else to make room for it.
-      if (bytes > maxBytes) {
-        evictUntilUnder(maxBytes);
-        return;
-      }
-
-      entries.set(key, { ...value, bytes });
-      usedBytes += bytes;
-      evictUntilUnder(maxBytes);
-    },
-    delete(key) {
-      const entry = entries.get(key);
-      if (!entry) {
-        return;
-      }
-
-      usedBytes -= entry.bytes;
-      entries.delete(key);
-    },
-    stats() {
-      return { count: entries.size, usedBytes, maxBytes };
-    }
-  };
-}
-
-const docContentCache = createLruCache(CONTENT_CACHE_MAX_BYTES);
-// Search reads the lowercased form of every document on every keystroke.
-// Keeping that derived form next to the raw text turns the per-request cost
-// from "lowercase the whole corpus" into "walk strings already in memory".
-const docSearchIndex = createLruCache(SEARCH_INDEX_MAX_BYTES);
-const docSnippetCache = createLruCache(SNIPPET_CACHE_MAX_BYTES);
-
-function invalidateCachedContent(fullPath) {
-  docContentCache.delete(fullPath);
-  docSearchIndex.delete(fullPath);
-  docSnippetCache.delete(fullPath);
-}
-
-async function readCachedTextFile(fullPath) {
-  const stat = await fsp.stat(fullPath);
-  const cached = docContentCache.get(fullPath);
-
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return {
-      content: cached.content,
-      stat,
-      cached: true
-    };
-  }
-
-  const content = await fsp.readFile(fullPath, "utf8");
-  docContentCache.set(fullPath, {
-    content,
-    mtimeMs: stat.mtimeMs,
-    size: stat.size
-  }, Buffer.byteLength(content, "utf8"));
-
-  return {
-    content,
-    stat,
-    cached: false
-  };
-}
-
-// Only the lowercased full text is indexed, because scoring needs it for every
-// document on every request. The whitespace-collapsed form a snippet is cut from
-// is derived on demand instead: snippets are built for at most a page of results,
-// so caching that too would roughly triple the index for no gain.
-async function readSearchIndexEntry(fullPath) {
-  const { content, stat } = await readCachedTextFile(fullPath);
-  const cached = docSearchIndex.get(fullPath);
-
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return { ...cached, content, stat };
-  }
-
-  const normalizedContent = normalizeSearchText(content);
-  const entry = {
-    normalizedContent,
-    mtimeMs: stat.mtimeMs,
-    size: stat.size
-  };
-
-  docSearchIndex.set(fullPath, entry, Buffer.byteLength(normalizedContent, "utf8"));
-
-  return { ...entry, content, stat };
-}
-
-// Snippet inputs are needed only for results that survive the limit, so they get
-// their own much smaller budget rather than riding along in the main index.
-async function readSnippetSource(fullPath, content, stat) {
-  const cached = docSnippetCache.get(fullPath);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return cached;
-  }
-
-  const collapsed = String(content || "").replace(/\s+/g, " ").trim();
-  const entry = {
-    collapsed,
-    normalizedCollapsed: normalizeSearchText(collapsed),
-    mtimeMs: stat.mtimeMs,
-    size: stat.size
-  };
-
-  docSnippetCache.set(
-    fullPath,
-    entry,
-    Buffer.byteLength(collapsed, "utf8") + Buffer.byteLength(entry.normalizedCollapsed, "utf8")
-  );
-
-  return entry;
-}
-
 async function fileExists(filePath) {
   try {
     await fsp.access(filePath, fs.constants.F_OK);
@@ -1458,17 +1203,10 @@ async function getDocs(organizerState = null) {
   return docs;
 }
 
+/* Which documents a search covers. Scoring them is lib/docs/search.js; picking
+ * the corpus is here, because it is the storage layout that decides it.
+ */
 async function searchDocuments(query, scope = "docs") {
-  const normalizedQuery = normalizeSearchText(query).trim();
-  if (!normalizedQuery) {
-    return {
-      matches: [],
-      searchTerms: []
-    };
-  }
-
-  const tokens = tokenizeSearchQuery(normalizedQuery);
-  const searchTerms = [...new Set([normalizedQuery, ...tokens].filter(Boolean))];
   const organizer = await readOrganizerState();
   // Each scope reads a different directory, so resolve it once and reuse it below.
   const scopeDir = scope === "recycle-bin"
@@ -1480,60 +1218,7 @@ async function searchDocuments(query, scope = "docs") {
     ? await getDocs(organizer)
     : await getRecycleDocs(organizer, scopeDir);
 
-  const matches = await Promise.all(docs.map(async (doc) => {
-    const fullPath = path.join(scopeDir, doc.file);
-    const indexEntry = await readSearchIndexEntry(fullPath);
-    const score = scoreSearchDoc(doc, normalizedQuery, tokens, indexEntry.normalizedContent);
-    if (score === null) {
-      return null;
-    }
-
-    return { ...doc, score, indexEntry };
-  }));
-
-  // Drop non-matching docs before sorting; the comparator dereferences .score.
-  const scoredMatches = matches.filter(Boolean);
-
-  scoredMatches.sort((left, right) => {
-    if (right.score !== left.score) {
-      return right.score - left.score;
-    }
-
-    const rightTime = Date.parse(right.updatedAt || right.deletedAt || "") || 0;
-    const leftTime = Date.parse(left.updatedAt || left.deletedAt || "") || 0;
-    if (rightTime !== leftTime) {
-      return rightTime - leftTime;
-    }
-
-    return left.file.localeCompare(right.file);
-  });
-
-  // Snippets are cut only for the results that survive the limit, instead of for
-  // every document that happened to match.
-  const limited = await Promise.all(
-    scoredMatches.slice(0, SEARCH_RESULT_LIMIT).map(async ({ indexEntry, ...match }) => {
-      const snippetSource = await readSnippetSource(
-        path.join(scopeDir, match.file),
-        indexEntry.content,
-        indexEntry.stat
-      );
-
-      return {
-        ...match,
-        snippet: buildSearchSnippet(
-          snippetSource.collapsed,
-          snippetSource.normalizedCollapsed,
-          normalizedQuery,
-          searchTerms
-        )
-      };
-    })
-  );
-
-  return {
-    matches: limited,
-    searchTerms
-  };
+  return searchIn({ query, docs, scopeDir });
 }
 
 function buildEmbedMeta(req, requestedUrl) {
