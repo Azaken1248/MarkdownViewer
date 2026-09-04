@@ -60,6 +60,7 @@ const BROWSER_GLOBALS = {
   ThemeSwitch: "readonly",
         DiagramIcons: "readonly",
   // The modules app.js is assembled from, in /js/app, each loaded before it.
+  AppText: "readonly",
   AppDom: "readonly",
   AppState: "readonly",
   AppSelection: "readonly",
