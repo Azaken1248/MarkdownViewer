@@ -62,6 +62,7 @@ const BROWSER_GLOBALS = {
   // The modules app.js is assembled from, in /js/app, each loaded before it.
   AppDom: "readonly",
   AppState: "readonly",
+  AppSelection: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
