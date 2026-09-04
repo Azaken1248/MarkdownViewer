@@ -422,8 +422,12 @@ async function run(server) {
         canDropOnFolder, closeContextMenu, beginInlineRename, notify, setStatus,
         revealFolderInTree, folderPathIds, openDocument,
         renderSuperSearchPanel, applyThemePreference, themePreference,
-        activeThemeName, enterModalLayer, exitModalLayer, showTooltip,
-        hideTooltip, syncFilterChip, SUPERSEARCH_LIMIT,
+        activeThemeName, enterModalLayer, exitModalLayer, syncFilterChip,
+        SUPERSEARCH_LIMIT,
+        // Reached through the namespace, because the module is the only
+        // place these are named now — app.js itself only binds them.
+        showTooltip: AppTooltips.showTooltip,
+        hideTooltip: AppTooltips.hideTooltip,
         applySession, refreshSession, can, openLoginModal, closeLoginModal,
         openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
         updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
