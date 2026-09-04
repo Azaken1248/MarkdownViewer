@@ -58,7 +58,7 @@ const BROWSER_GLOBALS = {
   // The theme cycle, set up by theme-boot.js in <head> on every page that has
   // one — including the diagram page, which loads none of the rest of this.
   ThemeSwitch: "readonly",
-        DiagramIcons: "readonly",
+  DiagramIcons: "readonly",
   // The modules app.js is assembled from, in /js/app, each loaded before it.
   // app.js itself, which is the last of them and exports what it is.
   App: "readonly",

@@ -24,6 +24,19 @@ const {
 } = AppText;
 const { elements } = AppDom;
 const { state } = AppState;
+const { requestJson, can, onSessionSignal } = AppApi;
+const {
+  getCurrentDocsCollection, getDocByFile, getFolderRecord, getFolderLabel,
+  getFolderOrder, getDocCacheVersion, folderPathIds, buildFolderTree
+} = AppLibrary;
+const {
+  SUPERSEARCH_LIMIT, SUPERSEARCH_PAGE_SIZE, highlightMatches,
+  buildSuperSearchMatches, buildJumpSearchTerms
+} = AppSearch;
+const {
+  documentPath, viewFromLocation, showLinksInUrl, fileFromLocation,
+  showDocumentInUrl
+} = AppLocation;
 const {
   pruneSelection, resolveTargetFiles, setSelection, clearSelection,
   updateSelectionMeta, updateSelectionUI, handleRowSelection
@@ -34,19 +47,17 @@ const { setNavOpen, syncBodyLock, setMeta, syncFilterChip } = AppShell;
 const {
   notify, setStatus, requestConfirmation, resolveConfirmDialog, askAboutUnsavedWork
 } = AppNotify;
-const { requestJson, can, onSessionSignal } = AppApi;
-const { renderLinks, refreshLinks, submitLink, openLinkModal, closeLinkModal, showLinksLoading, linksNeedingIcons, backfillLinkIcons } = AppLinks;
-const { imagesFromTransfer, imageName, uploadPlaceholder, uploadImage, imageMarkdown } = AppPastedImages;
-const { refreshShares, openShareModal, closeShareModal, createShareLink, revokeShareLink, updateShareButton } = AppShare;
 const {
-  getCurrentDocsCollection, getDocByFile, getFolderRecord, getFolderLabel,
-  getFolderOrder, getDocCacheVersion, folderPathIds, buildFolderTree
-} = AppLibrary;
-const { documentPath, viewFromLocation, showLinksInUrl, fileFromLocation, showDocumentInUrl } = AppLocation;
+  renderLinks, refreshLinks, submitLink, openLinkModal, closeLinkModal,
+  showLinksLoading, linksNeedingIcons, backfillLinkIcons
+} = AppLinks;
 const {
-  SUPERSEARCH_LIMIT, SUPERSEARCH_PAGE_SIZE, highlightMatches,
-  buildSuperSearchMatches, buildJumpSearchTerms
-} = AppSearch;
+  refreshShares, openShareModal, closeShareModal, createShareLink,
+  revokeShareLink, updateShareButton
+} = AppShare;
+const {
+  imagesFromTransfer, imageName, uploadPlaceholder, uploadImage, imageMarkdown
+} = AppPastedImages;
 
 const MOBILE_BREAKPOINT = 920;
 // How many document rows each folder group renders before offering "show more".
