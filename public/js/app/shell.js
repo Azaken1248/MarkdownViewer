@@ -1,4 +1,5 @@
-// Whether the sidebar is open, and whether the page behind it scrolls.
+// The sidebar's own furniture: whether it is open, whether the page behind it
+// scrolls, and the line under the search box that says what the query found.
 //
 // The lock is computed from everything that can be over the page rather than
 // set and unset by each of them, because two overlapping things that each
@@ -21,8 +22,26 @@
     document.body.classList.toggle("lock-scroll", shouldLock);
   }
 
+  function setMeta(message) {
+    elements.searchMeta.textContent = message;
+    syncFilterChip();
+  }
+
+  // The results panel and the file tree are two views of one query. This chip is
+  // what ties them together in the tree, and the way out of the filter without
+  // hunting for the search box.
+  function syncFilterChip() {
+    if (!elements.clearFilterBtn) {
+      return;
+    }
+
+    elements.clearFilterBtn.hidden = String(elements.searchInput.value || "").trim().length === 0;
+  }
+
   global.AppShell = {
     setNavOpen,
-    syncBodyLock
+    syncBodyLock,
+    setMeta,
+    syncFilterChip
   };
 })(typeof window === "undefined" ? globalThis : window);
