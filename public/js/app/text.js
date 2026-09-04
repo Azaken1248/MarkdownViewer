@@ -87,6 +87,10 @@
     return "ph-file-text";
   }
 
+  // What this app will open, and therefore what it is worth uploading. The
+  // server checks too; this is convenience, not the security boundary.
+  const UPLOADABLE_EXTENSIONS = [".md", ".markdown", ".mmd", ".mermaid", ".ipynb"];
+
   function ensureDocFilename(fileName) {
     const value = String(fileName || "").trim();
     if (!value) {
@@ -140,6 +144,7 @@
   }
 
   global.AppText = {
+    UPLOADABLE_EXTENSIONS,
     filenameToTitle,
     normalize,
     escapeHtml,
