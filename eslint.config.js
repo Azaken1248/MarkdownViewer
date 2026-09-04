@@ -65,6 +65,9 @@ const BROWSER_GLOBALS = {
   AppState: "readonly",
   AppSelection: "readonly",
   AppTooltips: "readonly",
+  AppModal: "readonly",
+  AppShell: "readonly",
+  AppNotify: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
