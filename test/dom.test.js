@@ -417,7 +417,7 @@ async function run(server) {
     window.eval(appEntrySource + `
       ;window.__t = {
         state,
-        get visibleFileOrder() { return visibleFileOrder; },
+        get visibleFileOrder() { return state.visibleFileOrder; },
         setSelection, clearSelection, cutFiles, pasteIntoFolder,
         canDropOnFolder, closeContextMenu, beginInlineRename, notify, setStatus,
         revealFolderInTree, folderPathIds, openDocument,

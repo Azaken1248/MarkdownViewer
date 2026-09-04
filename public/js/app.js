@@ -1,5 +1,8 @@
-// The elements the page is made of, and the object it is drawn from. Named
-// locally so that every use below reads the way it always has.
+// The modules this file is assembled from.
+//
+// Named locally, in the order the page loads them, so that every use below
+// reads the way it always has — the module a function lives in is a fact
+// about the source tree, not something the call sites should have to spell.
 const { elements } = AppDom;
 const { state } = AppState;
 
@@ -3443,10 +3446,8 @@ function updateActiveRowHighlight() {
 
 // --- Selection ------------------------------------------------------------
 // Explorer semantics: plain click replaces the selection, Ctrl toggles one row,
-// Shift extends from the anchor. `visibleFileOrder` is rebuilt on every render
-// so a Shift-range always matches what is actually on screen.
-
-let visibleFileOrder = [];
+// Shift extends from the anchor, across state.visibleFileOrder — rebuilt on
+// every render so a Shift-range always matches what is actually on screen.
 
 function pruneSelection() {
   const known = new Set([
@@ -3509,12 +3510,12 @@ function clearSelection() {
 
 function handleRowSelection(file, event) {
   if (event.shiftKey && state.selectionAnchor) {
-    const from = visibleFileOrder.indexOf(state.selectionAnchor);
-    const to = visibleFileOrder.indexOf(file);
+    const from = state.visibleFileOrder.indexOf(state.selectionAnchor);
+    const to = state.visibleFileOrder.indexOf(file);
 
     if (from >= 0 && to >= 0) {
       const [lo, hi] = from <= to ? [from, to] : [to, from];
-      const range = visibleFileOrder.slice(lo, hi + 1);
+      const range = state.visibleFileOrder.slice(lo, hi + 1);
       // Ctrl+Shift adds the range to what is already selected, as Explorer does.
       setSelection(event.ctrlKey || event.metaKey ? [...state.selection, ...range] : range);
       return;
@@ -5303,7 +5304,7 @@ function renderTreeNode(node, container) {
 
   for (const doc of visibleDocs) {
     childList.appendChild(buildDocRow(doc, node.depth + 1));
-    visibleFileOrder.push(doc.file);
+    state.visibleFileOrder.push(doc.file);
   }
 
   if (node.docs.length === 0 && node.children.length === 0) {
@@ -5340,7 +5341,7 @@ function renderDocList() {
   const sidebarScrollTop = elements.sidebar?.scrollTop || 0;
 
   elements.docList.innerHTML = "";
-  visibleFileOrder = [];
+  state.visibleFileOrder = [];
 
   const nodes = buildFolderTree(state.filteredDocs);
 
@@ -5399,7 +5400,7 @@ function handleTreeKeydown(event) {
 
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
     event.preventDefault();
-    setSelection(visibleFileOrder);
+    setSelection(state.visibleFileOrder);
     return;
   }
 
@@ -8834,7 +8835,7 @@ elements.docList.addEventListener("contextmenu", (event) => {
   items.push({
     label: "Select all",
     icon: "ph-check-square",
-    action: () => setSelection(visibleFileOrder)
+    action: () => setSelection(state.visibleFileOrder)
   });
 
   openContextMenu(event.clientX, event.clientY, items);

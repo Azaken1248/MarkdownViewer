@@ -112,7 +112,10 @@
     collapsedFolderIds: new Set(),
     groupRevealCounts: new Map(),
 
-    // Explorer-style selection and clipboard.
+    // Explorer-style selection and clipboard. visibleFileOrder is what a
+    // Shift-range extends across, rebuilt by every render so it always means
+    // the rows actually on screen.
+    visibleFileOrder: [],
     selection: new Set(),
     selectionAnchor: null,
     clipboard: { files: [], mode: null },
