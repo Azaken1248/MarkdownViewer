@@ -34,6 +34,7 @@ const { setNavOpen, syncBodyLock } = AppShell;
 const {
   notify, setStatus, requestConfirmation, resolveConfirmDialog, askAboutUnsavedWork
 } = AppNotify;
+const { requestJson, can, onSessionSignal } = AppApi;
 
 const MOBILE_BREAKPOINT = 920;
 const SUPERSEARCH_LIMIT = 8;
@@ -1450,19 +1451,6 @@ function updateActiveDocUI(fileName) {
 }
 
 
-/* --------------------------------------------------------------------------
-   Session
-
-   Accounts replace the shared editor token. The session lives in an httpOnly
-   cookie the script cannot read, so there is nothing here to store or leak —
-   credentials: "same-origin" is what attaches it.
-
-   The CSRF token is the one piece the page does hold, because the whole point
-   of a double-submit token is that script has to echo it back and cross-origin
-   script cannot.
-   -------------------------------------------------------------------------- */
-
-const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 
 /* --- The address bar ------------------------------------------------------
@@ -1549,60 +1537,21 @@ function showDocumentInUrl(file, { replace = false } = {}) {
   window.history[replace ? "replaceState" : "pushState"]({ file: file || null }, "", next);
 }
 
-async function requestJson(url, options = {}) {
-  const requestOptions = { ...options, credentials: "same-origin" };
-  const method = String(options.method || "GET").toUpperCase();
-  const headers = { ...(options.headers || {}) };
 
-  // express.json() only parses a body that says it is JSON, and silently leaves
-  // req.body empty otherwise — so a caller that forgot this header got a
-  // confusing "that field is missing" from the server rather than an error.
-  // Every caller used to set it by hand, and every new one was one omission
-  // away from the same bug. A string body from here is always JSON.
-  if (typeof options.body === "string" && !Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
-    headers["Content-Type"] = "application/json";
-  }
 
-  if (UNSAFE_METHODS.has(method) && state.csrfToken) {
-    headers["X-CSRF-Token"] = state.csrfToken;
-  }
-
-  if (Object.keys(headers).length > 0) {
-    requestOptions.headers = headers;
-  }
-
-  const response = await fetch(url, requestOptions);
-  let payload = null;
-
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-
-  if (response.status === 401) {
-    // The session expired, was revoked, or never existed.
+/* The answers to the two signals api.js raises, given by the parts that own
+ * what has to change: the session state here, the forced password dialog
+ * further down.
+ */
+onSessionSignal({
+  ended() {
     applySession({ authenticated: false, user: null, permissions: [], csrfToken: null });
-    throw new Error(payload?.error || "Your session has ended. Sign in again.");
-  }
-
-  if (response.status === 403 && payload?.code === "password_change_required") {
-    // eslint-disable-next-line require-atomic-updates
+  },
+  passwordChangeRequired() {
     state.mustChangePassword = true;
     openPasswordModal({ forced: true });
-    throw new Error(payload.error);
   }
-
-  if (!response.ok) {
-    throw new Error(payload?.error || `Request failed (${response.status})`);
-  }
-
-  return payload;
-}
-
-function can(permission) {
-  return state.permissions.includes(permission);
-}
+});
 
 // One place decides what the session means for the UI, so a role change or a
 // sign-out cannot leave half the controls in the wrong state.

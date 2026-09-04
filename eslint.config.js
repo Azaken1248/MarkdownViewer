@@ -62,6 +62,7 @@ const BROWSER_GLOBALS = {
   // The modules app.js is assembled from, in /js/app, each loaded before it.
   // app.js itself, which is the last of them and exports what it is.
   App: "readonly",
+  AppApi: "readonly",
   AppText: "readonly",
   AppDom: "readonly",
   AppState: "readonly",
