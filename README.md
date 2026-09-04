@@ -103,7 +103,23 @@ proxy hop rather than the client's scheme.
 │   ├── share.html            # The standalone share page
 │   ├── error.html            # 404 and friends, for browsers
 │   ├── js/
-│   │   ├── app.js            # The client
+│   │   ├── app.js            # Wires the modules below together and boots
+│   │   ├── app/              # What the client is made of
+│   │   │   ├── text.js       # Title, icon, size, sort order — from a name alone
+│   │   │   ├── dom.js        # Every element the interface reaches for
+│   │   │   ├── state.js      # The one object the interface is drawn from
+│   │   │   ├── api.js        # Every request, and what a 401 or 403 means
+│   │   │   ├── library.js    # Which document, which folder, what shape the tree is
+│   │   │   ├── search.js     # Scoring the corpus against a typed query
+│   │   │   ├── location.js   # The address bar
+│   │   │   ├── selection.js  # Click, Ctrl-click, Shift-range
+│   │   │   ├── tooltips.js   # One body-level tooltip, adopted from title=
+│   │   │   ├── modal.js      # Focus containment, as a stack of layers
+│   │   │   ├── shell.js      # Sidebar open, body lock, the search meta line
+│   │   │   ├── notify.js     # Toasts, and the confirmation dialog
+│   │   │   ├── links.js      # Saved links
+│   │   │   ├── share.js      # Share links
+│   │   │   └── pasted-images.js  # A screenshot becomes an image link
 │   │   ├── markdown-core.js  # Render engine shared by both pages
 │   │   ├── visual-editor.js  # Block splitting + markdown serialization
 │   │   ├── diagram-model.js  # Mermaid flowcharts as steps, arrows and positions
@@ -116,12 +132,31 @@ proxy hop rather than the client's scheme.
 │   ├── img/                  # PNGs for link previews (see npm run images)
 │   └── docs/                 # Your documents, in folders (gitignored)
 ├── lib/
+│   ├── docs/                 # The library as it exists on disk
+│   │   ├── paths.js          # Sanitizing and resolving a document path
+│   │   ├── store.js          # Files, folders on disk, recycle, uniqueness
+│   │   ├── organizer.js      # The folder tree and the file that records it
+│   │   ├── search.js         # Scoring documents server-side
+│   │   └── content.js        # The read caches
+│   ├── http/                 # The shapes a response can take
+│   │   ├── headers.js        # CSP and the rest of the security headers
+│   │   ├── logging.js        # The request log
+│   │   ├── errors.js         # HttpError, the error page, the handler
+│   │   ├── html.js           # Escaping and the template cache
+│   │   ├── urls.js           # Absolute URLs and the base-URL resolver
+│   │   └── embed.js          # og:/twitter: meta for a document
+│   ├── routes/               # The addresses, one router per area
+│   │   └── auth.js users.js docs.js folders.js recycle.js shares.js
+│   │       links.js assets.js upload.js meta.js pages.js
+│   ├── guards.js             # Who may: sessions, CSRF, permissions
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
 │   ├── excerpt.js            # Title and summary for link previews
 │   ├── link-preview.js       # Fetches a URL safely and reads its og: tags
 │   ├── links.js              # Saved links
+│   ├── lru.js                # The byte-budgeted cache the read caches use
 │   ├── passwords.js          # scrypt hashing and the password policy
-│   └── shares.js             # Per-document share links
+│   ├── shares.js             # Per-document share links
+│   └── site.js               # The name and icons this site calls itself by
 ├── data/                     # All gitignored
 │   ├── document-organizer.json   # The folder tree (ids, names, nesting, order)
 │   ├── users.json            # Accounts and password hashes
@@ -135,10 +170,11 @@ proxy hop rather than the client's scheme.
 ├── test/
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
-│   └── *.test.js             # The eleven suites
+│   ├── app-source.js         # Reads the client's script order out of index.html
+│   └── *.test.js             # The twelve suites
 ├── tools/
 │   └── make-embed-images.js  # Draws public/img/*.png. No dependencies.
-├── server.js                 # Express app, ~2,400 lines
+├── server.js                 # Configuration, middleware order, mounts, boot
 ├── eslint.config.js
 ├── package.json
 ├── package-lock.json         # Tracked — `npm ci` needs it
@@ -154,6 +190,42 @@ recreates them on boot.
 > version-controls it. Losing it no longer loses which documents are in which
 > folder — the directories say that — but it does lose the folders' ids,
 > ordering and any empty ones. Back it up if you care about those.
+
+### How the client is put together
+
+`app.js` is the last script the page loads and the only one that wires anything:
+it names what the modules in `public/js/app/` export, registers the listeners,
+and boots. Everything it still contains is on its way out to a module of its
+own.
+
+A module is a plain script that closes over its own names and puts one object on
+the page:
+
+```js
+(function (global) {
+  const { state } = global.AppState;
+
+  function setSelection(files) { /* ... */ }
+
+  global.AppSelection = { setSelection };
+})(typeof window === "undefined" ? globalThis : window);
+```
+
+Two rules keep that honest. A module takes what it needs from the namespaces at
+the top, never from whatever happens to be in scope by the time it runs — which
+is why `index.html` is the one place that says what loads in what order, and why
+the tests read that order out of the page rather than keeping a list of their
+own. And a module reaches downward only: `notify.js` is handed the modal layers,
+the modal layers know nothing about toasts.
+
+**Not ES modules**, though `import`/`export` would state the order better than a
+script tag can. jsdom does not execute `<script type="module">`, and nine of the
+twelve suites drive the real client in jsdom — so `type="module"` would mean
+either a bundler in the test path or nine suites that quietly stop testing
+anything. The namespaces are what the four diagram modules already used, and
+they cost nothing at runtime.
+
+---
 
 ---
 
@@ -1213,11 +1285,14 @@ network: the suite is deterministic on a runner with no egress.
 | `code` | Copy buttons, both clipboard paths, and the live-highlighting policy |
 | `visual` | The block round trip, over fixtures and over every real document |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server |
+| `diagram-page` | The diagram editor page, its address, and the document handoff |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`
 seeded with a known corpus, so it exercises the write paths for real and can
 never touch actual documents. The others parse the stylesheet and the client
-source directly — several of them assert things a human cannot check by looking,
+source directly — `test/app-source.js` reads the script order out of
+`index.html`, so "the client source" means every module the page loads and not
+one filename — several of them assert things a human cannot check by looking,
 like WCAG contrast ratios and rendered diagram box sizes.
 
 Run one at a time with `npm test theme`, or a file directly with
