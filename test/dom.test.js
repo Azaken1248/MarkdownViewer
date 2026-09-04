@@ -414,40 +414,24 @@ async function run(server) {
 
   console.log("=== app.js evaluates against the real DOM ===");
   try {
-    window.eval(appEntrySource + `
-      ;window.__t = {
-        state,
-        get visibleFileOrder() { return state.visibleFileOrder; },
-        setSelection, clearSelection, cutFiles, pasteIntoFolder,
-        canDropOnFolder, closeContextMenu, beginInlineRename, notify, setStatus,
-        revealFolderInTree, folderPathIds, openDocument,
-        renderSuperSearchPanel, applyThemePreference, themePreference,
-        activeThemeName, enterModalLayer, exitModalLayer, syncFilterChip,
-        SUPERSEARCH_LIMIT,
-        // Reached through the namespace, because the module is the only
-        // place these are named now — app.js itself only binds them.
+    window.eval(appEntrySource);
+
+    // The app's own surface, plus the modules it is assembled from. Reaching
+    // for a name that no longer exists now fails here, loudly, instead of
+    // quietly testing nothing.
+    window.eval(`
+      ;window.__t = Object.assign({}, App, {
+        setSelection: AppSelection.setSelection,
+        clearSelection: AppSelection.clearSelection,
+        notify: AppNotify.notify,
+        setStatus: AppNotify.setStatus,
+        requestConfirmation: AppNotify.requestConfirmation,
+        resolveConfirmDialog: AppNotify.resolveConfirmDialog,
+        enterModalLayer: AppModal.enterModalLayer,
+        exitModalLayer: AppModal.exitModalLayer,
         showTooltip: AppTooltips.showTooltip,
-        hideTooltip: AppTooltips.hideTooltip,
-        applySession, refreshSession, can, openLoginModal, closeLoginModal,
-        openPasswordModal, closePasswordModal, openShareModal, closeShareModal,
-        updateShareButton, applyInitialFolderCollapse, persistCollapsedFolders,
-        buildDocContextItems, buildFolderContextItems, canDropOnFolder,
-        deleteFiles, switchViewMode, resolveConfirmDialog, requestConfirmation,
-        requestEditorClose, isEditorDirty, requestJson, refreshDocs,
-        uploadFolder, isUploadableFile, startNewDocument, closeContextMenu, closeEditor,
-        renderLinks, syncModeUI, openLinkModal, closeLinkModal, refreshLinks, submitLink,
-        syncEditorTabs, selectEditorTab, openEditor, openEditorForCurrentDoc, saveEditorDocument,
-        startPageEdit, savePageEdit, cancelPageEdit, collectPageMarkdown, insertPageBlock,
-        undoPageEdit, redoPageEdit, commitPageHistory, pageHistory,
-        insertIntoTextarea, replaceInTextarea, toggleMarkdownWrap, applySourceShortcut,
-        documentPath, fileFromLocation, showDocumentInUrl,
-        goToPlace, viewFromLocation, showLinksInUrl, applySearch, linksNeedingIcons,
-        backfillLinkIcons,
-        restoreDocumentView, stashSearchQuery, setPlaceBusy, hydrateSearchContent,
-        showEmptyState, showLoadingState, updateActiveDocUI,
-        openSourceFromPageEdit, isPageEditDirty, pageEditActive, applyVisualCommand,
-        stashDocument, takeStashedDocument, diagramStashKey
-      };
+        hideTooltip: AppTooltips.hideTooltip
+      });
     `);
     check("no exception on load", true, true);
   } catch (error) {
@@ -584,8 +568,8 @@ async function run(server) {
     check("shift+click selects a range", range.length >= 2, true);
     check("range includes both ends", range.includes(D("delta.md")) && range.includes(D("epsilon.md")), true);
 
-    window.eval("window.__t.setSelection(window.__t.visibleFileOrder)");
-    check("select-all covers every visible file", window.eval("window.__t.state.selection.size") === window.eval("window.__t.visibleFileOrder.length"), true);
+    window.eval("window.__t.setSelection(window.__t.state.visibleFileOrder)");
+    check("select-all covers every visible file", window.eval("window.__t.state.selection.size") === window.eval("window.__t.state.visibleFileOrder.length"), true);
     check("selected rows are marked", doc.querySelectorAll(".tree-row-doc.is-selected").length > 0, true);
     check("the count is surfaced", doc.getElementById("selectionMeta").hidden, false);
 

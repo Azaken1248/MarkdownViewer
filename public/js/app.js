@@ -1,3 +1,17 @@
+/* The app.
+ *
+ * Everything below is inside this function, so none of it is a property of the
+ * page. What the file offers is the one object at the bottom, named the way
+ * every other module on the page names itself.
+ *
+ * The body is not indented into the wrapper. Indenting it would rewrite nine
+ * thousand lines to say nothing, and would change the contents of every
+ * multi-line template literal in the file — the strings this app draws itself
+ * out of. The wrapper is one line at each end, and it stays that way while the
+ * sections inside it move out one at a time.
+ */
+(function (global) {
+
 // The modules this file is assembled from.
 //
 // Named locally, in the order the page loads them, so that every use below
@@ -9436,5 +9450,45 @@ document.addEventListener("click", (event) => {
   setSuperSearchOpen(false);
 });
 
+
+/* What this file is, from outside.
+ *
+ * Nothing on the page reads it — app.js is the last script, and it calls its
+ * own boot. This is the surface the tests drive, which is to say the operations
+ * the interface performs, named in the source rather than fished out of scope
+ * by a test that appends itself to the file.
+ *
+ * It shrinks as the sections below become modules of their own.
+ */
+global.App = {
+  state, can, requestJson, applySession, refreshSession,
+  openLoginModal, closeLoginModal, openPasswordModal, closePasswordModal,
+  openShareModal, closeShareModal, updateShareButton,
+  cutFiles, pasteIntoFolder, canDropOnFolder, deleteFiles,
+  closeContextMenu, buildDocContextItems, buildFolderContextItems,
+  beginInlineRename, revealFolderInTree, folderPathIds,
+  applyInitialFolderCollapse, persistCollapsedFolders,
+  openDocument, refreshDocs, switchViewMode, updateActiveDocUI,
+  restoreDocumentView, showEmptyState, showLoadingState, setPlaceBusy,
+  renderSuperSearchPanel, syncFilterChip, applySearch, stashSearchQuery,
+  hydrateSearchContent, SUPERSEARCH_LIMIT,
+  applyThemePreference, themePreference, activeThemeName,
+  requestEditorClose, isEditorDirty, closeEditor, openEditor,
+  openEditorForCurrentDoc, saveEditorDocument, syncEditorTabs, selectEditorTab,
+  startNewDocument, uploadFolder, isUploadableFile,
+  startPageEdit, savePageEdit, cancelPageEdit, isPageEditDirty, pageEditActive,
+  collectPageMarkdown, insertPageBlock, applyVisualCommand,
+  undoPageEdit, redoPageEdit, commitPageHistory, pageHistory,
+  openSourceFromPageEdit, insertIntoTextarea, replaceInTextarea,
+  toggleMarkdownWrap, applySourceShortcut,
+  renderLinks, refreshLinks, submitLink, openLinkModal, closeLinkModal,
+  linksNeedingIcons, backfillLinkIcons, syncModeUI,
+  documentPath, fileFromLocation, showDocumentInUrl, showLinksInUrl,
+  viewFromLocation, goToPlace,
+  stashDocument, takeStashedDocument, diagramStashKey
+};
+
 bindTooltips();
 initialize();
+
+})(typeof window === "undefined" ? globalThis : window);
