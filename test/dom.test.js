@@ -432,6 +432,21 @@ async function run(server) {
       );
     `);
     check("no exception on load", true, true);
+
+    /* Every upward call a module makes is answered.
+     *
+     * A module below app.js that has to call back up writes App.something(),
+     * which is only a name until app.js puts it on its surface. Nothing checks
+     * that at load: the call fails when a person clicks the thing, which is
+     * how "App.openContextMenu is not a function" reached a green lint.
+     *
+     * Calls only: the prose in these files names App.x too.
+     */
+    const upward = [...new Set(appModules
+      .flatMap((file) => [...fs.readFileSync(file, "utf8").matchAll(/\bApp\.([a-zA-Z_$][\w$]*)\s*\(/g)])
+      .map(([, name]) => name))].sort();
+    const unanswered = upward.filter((name) => window.eval(`typeof App.${name}`) === "undefined");
+    check(`the ${upward.length} calls back up to app.js are all answered`, unanswered, []);
   } catch (error) {
     check(`no exception on load (${error.message})`, false, true);
     console.log(error.stack.split("\n").slice(0, 6).join("\n"));
