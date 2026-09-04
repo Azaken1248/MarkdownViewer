@@ -10,6 +10,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
@@ -23,7 +24,7 @@ function check(label, actual, expected) {
 
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
-const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+const app = appSource(ROOT);
 const core = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
 
 /* --- the engine, in a browser that is not one -------------------------------

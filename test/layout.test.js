@@ -2,6 +2,7 @@
 // owner per region, nothing that reintroduces the side gutters.
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
@@ -238,7 +239,7 @@ console.log("=== a narrow editor becomes two tabs ===");
   // The CSS decides whether the tab bar is visible; the client decides whether
   // a pane is hidden. If those disagree you get a tab bar that controls
   // nothing, or no visible pane at all.
-  const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+  const js = appSource(PUBLIC_DIR);
   const jsQuery = (js.match(/EDITOR_TABS_QUERY = "([^"]+)"/) || [])[1];
   check("the client uses the same breakpoint as the stylesheet",
     jsQuery, "(max-width: 1160px)");

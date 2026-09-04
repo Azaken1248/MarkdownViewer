@@ -2,12 +2,13 @@
 // stylesheet and measures WCAG ratios for the pairs that carry meaning.
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
 const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
 const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+const js = appSource(PUBLIC_DIR);
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -448,7 +449,7 @@ console.log("=== one file, one version of it ===");
   // of the responsive rules that page needs.
   const versions = new Map();
   for (const [page, markup] of [["index.html", html], ["share.html", shareHtml], ["error.html", errorHtml], ["diagram.html", diagramHtml]]) {
-    for (const [, file, version] of markup.matchAll(/\/((?:css|js)\/[a-z-]+\.(?:css|js))\?v=(\d+)/g)) {
+    for (const [, file, version] of markup.matchAll(/\/((?:css|js)\/(?:[a-z-]+\/)?[a-z-]+\.(?:css|js))\?v=(\d+)/g)) {
       if (!versions.has(file)) versions.set(file, new Map());
       versions.get(file).set(page, version);
     }

@@ -11,6 +11,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { appSource: readAppSource } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
@@ -5348,7 +5349,7 @@ async function run(server, cookie) {
 
   console.log("=== the way in and the way back ===");
   {
-    const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+    const appSource = readAppSource(ROOT);
 
     check("a diagram in a document has a way out to the page",
       /ve-embed-build/.test(appSource), true);

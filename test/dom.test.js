@@ -6,11 +6,15 @@
 // cut, paste, rename, folder create — be exercised for real.
 const fs = require("fs");
 const path = require("path");
+const { appScriptPaths, appSource } = require("./app-source.js");
 const http = require("http");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
 const ROOT = path.join(__dirname, "..", "public");
+
+// The whole client, for the checks that read it as text rather than run it.
+const clientSource = appSource(ROOT);
 
 let failures = 0;
 const consoleErrors = [];
@@ -374,7 +378,12 @@ async function run(server) {
     absorbCookies({ headers: changed.headers });
   }
 
-  const appSource = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+  // The modules app.js is assembled from, in the order the page loads them,
+  // and then app.js itself — which is evaluated below with the test handle
+  // appended, so it has to stay separate from the rest.
+  const appScripts = appScriptPaths(ROOT);
+  const appModules = appScripts.slice(0, -1);
+  const appEntrySource = fs.readFileSync(appScripts[appScripts.length - 1], "utf8");
   const coreSource = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
   // markdown-core defines the render engine app.js delegates to; it has to be
   // in scope before app.js runs, exactly as the two <script> tags arrange.
@@ -401,9 +410,11 @@ async function run(server) {
   // button is pressed.
   window.eval(fs.readFileSync(path.join(ROOT, "js", "notebook-runtime.js"), "utf8"));
 
+  for (const file of appModules) window.eval(fs.readFileSync(file, "utf8"));
+
   console.log("=== app.js evaluates against the real DOM ===");
   try {
-    window.eval(appSource + `
+    window.eval(appEntrySource + `
       ;window.__t = {
         state,
         get visibleFileOrder() { return visibleFileOrder; },
@@ -1071,7 +1082,7 @@ async function run(server) {
 
     // Switching documents mid-run used to write the result into a node that
     // had already been thrown away.
-    const app = withoutComments(fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8"));
+    const app = withoutComments(clientSource);
     check("a result is dropped if the document changed",
       /state\.activeFile !== startedFor/.test(app), true);
     check("...or if its output node is gone", /!target\.isConnected/.test(app), true);
@@ -1916,7 +1927,7 @@ async function run(server) {
     // scrolling: jsdom runs no layout, so emptying the container does not reset
     // scrollTop here the way a browser does, and a behavioural check would pass
     // whether or not the app carried the position across.
-    const restoreState = appSource.slice(appSource.indexOf("function applyPageHistoryState"));
+    const restoreState = clientSource.slice(clientSource.indexOf("function applyPageHistoryState"));
     const body = restoreState.slice(0, restoreState.indexOf("\n}\n"));
     check("the scroll position is read before the document is re-rendered",
       body.indexOf("viewer.scrollTop") < body.indexOf("renderPageEditor(entry.markdown)"), true);
@@ -2089,7 +2100,7 @@ async function run(server) {
     // source rather than raced for, for the same reason the scroll check above
     // is: a passing race proves nothing about the run where it loses.
     const queues = (name, chain) => {
-      const from = appSource.slice(appSource.indexOf(`function ${name}(options) {`));
+      const from = clientSource.slice(clientSource.indexOf(`function ${name}(options) {`));
       return from.slice(0, from.indexOf("\n}\n")).includes(`${chain} = ${chain}.then(run, run)`);
     };
     check("saves on the page are queued behind each other, not raced",
@@ -3011,7 +3022,7 @@ async function run(server) {
     // Only around a real round trip: a move already in memory finishes in the
     // same frame, and a spinner inside one frame is a flicker, not an answer.
     check("a move that is already in memory never raises one",
-      /if \(state\.linksLoaded\) \{[\s\S]{0,80}?renderLinks\(\);[\s\S]{0,40}?return true;/.test(appSource), true);
+      /if \(state\.linksLoaded\) \{[\s\S]{0,80}?renderLinks\(\);[\s\S]{0,40}?return true;/.test(clientSource), true);
 
     // The free path back is only free from the links. The recycle bin and the
     // archive put deleted entries in the tree and in the filtered list, so
@@ -3041,7 +3052,7 @@ async function run(server) {
     // to make it run again at a different address inside a page that has
     // already booted.
     check("...and the boot looks at it before loading the library",
-      /viewFromLocation\(\) === "links"[\s\S]{0,240}?await refreshLinks\(\)/.test(appSource), true);
+      /viewFromLocation\(\) === "links"[\s\S]{0,240}?await refreshLinks\(\)/.test(clientSource), true);
 
     // Leave nothing behind for the sections after this one.
     search.value = "";

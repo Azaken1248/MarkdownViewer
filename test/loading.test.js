@@ -12,13 +12,14 @@
 // year.
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const index = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const share = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 const core = fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8");
 const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
-const app = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+const app = appSource(PUBLIC_DIR);
 
 let failures = 0;
 function check(label, actual, expected) {

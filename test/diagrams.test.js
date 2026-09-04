@@ -3,6 +3,7 @@
 // zero. Also checks the diagram palette is actually distinguishable.
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
@@ -12,7 +13,7 @@ const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
 const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8");
 // The repaint-on-theme-change lives with whichever page owns the DOM it
 // repaints, so those checks read the pages rather than the engine.
-const appJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+const appJs = appSource(PUBLIC_DIR);
 const shareJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "share.js"), "utf8");
 // And the two pages themselves, because which scripts a page loads decides
 // which diagrams it can draw.

@@ -3,10 +3,11 @@
 // boundaries (WCAG 1.4.11), and 24px for pointer targets (2.5.8).
 const fs = require("fs");
 const path = require("path");
+const { appSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
-const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"), "utf8");
+const js = appSource(PUBLIC_DIR);
 const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const boot = fs.readFileSync(path.join(PUBLIC_DIR, "js", "theme-boot.js"), "utf8");
 const diagramHtml = fs.readFileSync(path.join(PUBLIC_DIR, "diagram.html"), "utf8");
