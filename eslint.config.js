@@ -59,6 +59,9 @@ const BROWSER_GLOBALS = {
   // one — including the diagram page, which loads none of the rest of this.
   ThemeSwitch: "readonly",
         DiagramIcons: "readonly",
+  // The modules app.js is assembled from, in /js/app, each loaded before it.
+  AppDom: "readonly",
+  AppState: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.

@@ -90,7 +90,12 @@
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
   <script src="/js/notebook-runtime.js?v=64" defer></script>
-  <script src="/js/app.js?v=86" defer></script>
+  <!-- app.js is assembled from the modules in /js/app, each loaded before it.
+       They are plain scripts in dependency order: a module only ever uses what
+       an earlier one put on the page. -->
+  <script src="/js/app/dom.js?v=1" defer></script>
+  <script src="/js/app/state.js?v=1" defer></script>
+  <script src="/js/app.js?v=87" defer></script>
 </head>
 
 <body>
