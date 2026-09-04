@@ -63,6 +63,7 @@ const BROWSER_GLOBALS = {
   // app.js itself, which is the last of them and exports what it is.
   App: "readonly",
   AppApi: "readonly",
+  AppLibrary: "readonly",
   AppText: "readonly",
   AppDom: "readonly",
   AppState: "readonly",
