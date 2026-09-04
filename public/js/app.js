@@ -18,18 +18,18 @@
 // reads the way it always has — the module a function lives in is a fact
 // about the source tree, not something the call sites should have to spell.
 const {
-  UPLOADABLE_EXTENSIONS, filenameToTitle, normalize, isNotebookFile,
-  docUrl, docName, compareNames, inferIcon, ensureDocFilename, isDiagramFile,
+  UPLOADABLE_EXTENSIONS, normalize, isNotebookFile,
+  docUrl, docName, compareNames, ensureDocFilename, isDiagramFile,
   toMermaidMarkdown
 } = AppText;
 const { elements } = AppDom;
 const { state } = AppState;
 const { requestJson, can } = AppApi;
 const {
-  getCurrentDocsCollection, getDocByFile, getFolderOrder
+  getDocByFile
 } = AppLibrary;
 const {
-  SUPERSEARCH_LIMIT, buildSuperSearchMatches, buildJumpSearchTerms
+  SUPERSEARCH_LIMIT, buildJumpSearchTerms
 } = AppSearch;
 const {
   documentPath, viewFromLocation, showLinksInUrl, fileFromLocation,
@@ -59,7 +59,7 @@ const { bindThemeToggle } = AppTheme;
 const { bindNotebookExecution } = AppNotebook;
 const { replaceRangeInTextarea, insertIntoTextarea, replaceInTextarea } = AppTextarea;
 const { persistCollapsedFolders } = AppFolderCollapse;
-const { updateJumpNavigationUI, resetJumpNavigation, jumpToSearchMatch, moveToAdjacentJumpMatch } = AppJump;
+const { updateJumpNavigationUI, resetJumpNavigation, moveToAdjacentJumpMatch } = AppJump;
 const { setSuperSearchOpen, syncSearchInputState, renderSuperSearchPanel } = AppSearchPanel;
 const { revealFolderInTree, updateActiveDocUI } = AppViewerHeader;
 const {
@@ -69,30 +69,23 @@ const {
 const { openUsersModal, closeUsersModal, submitNewUser } = AppUsers;
 const { openFolderModal, closeFolderModal } = AppFolderModal;
 const {
-  waitForNextFrame, renderMarkdown, highlightCodeBlocks, renderDocumentContent,
+  renderMarkdown, highlightCodeBlocks, renderDocumentContent,
   renderMermaidBlocks, destroyPanZoomInstances, bindWheelZoomModifier
 } = AppRender;
-const { fetchDocs, fetchDeletedDocs, loadDocContent, loadDeletedDocContent, syncModeUI, hydrateSearchContent, hydrateDeletedSearchContent, showEmptyState, showLoadingState, showNoDocumentOpen } = AppDocs;
-const { taskCheckboxes, bindTaskCheckboxes, toggleTaskCheckbox } = AppTaskLists;
+const { fetchDocs, loadDocContent, loadDeletedDocContent, syncModeUI, hydrateSearchContent, showEmptyState, showLoadingState, showNoDocumentOpen } = AppDocs;
+const { taskCheckboxes, toggleTaskCheckbox } = AppTaskLists;
 const { attachImagesToSource, attachImagesToPage } = AppPageImages;
 const { cutFiles, pasteIntoFolder } = AppClipboard;
 const { deleteFiles } = AppDeletion;
 const { closeContextMenu, openContextMenu, buildDocContextItems, buildFolderContextItems } = AppContextMenu;
 const { canDropOnFolder, renderDocList, handleTreeKeydown } = AppTree;
+const { applySearch } = AppSearching;
+const { openDocument, openRecycleBinDocument, refreshDeletedDocs } = AppOpening;
+const { deleteCurrentDocument, restoreCurrentDeletedDocument, hardDeleteCurrentDeletedDocument } = AppDocActions;
+const { moveDocumentToFolder, handleFolderModalAction } = AppFolderOps;
 
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
-
-// Opening a document only changes which row is highlighted. Rebuilding all ~93
-// rows and their listeners for that was both wasteful and visible: emptying the
-// list collapsed the page height and threw the scroll position back to the top.
-function updateActiveRowHighlight() {
-  for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
-    const isActive = row.dataset.file === state.activeFile;
-    row.classList.toggle("is-active", isActive);
-    row.setAttribute("aria-current", isActive ? "true" : "false");
-  }
-}
 
 // One entry point for "make a new document", so the toolbar button and the two
 // context menus cannot drift apart. folderId preselects the picker.
@@ -106,511 +99,7 @@ function startNewDocument(folderId = null) {
 }
 
 
-async function applySearch(query) {
-  const rawQuery = String(query || "");
 
-  // In the links pane the search box filters links, and everything below here
-  // is about documents — the tree, the results panel, the jump navigation.
-  // None of it has anything to say about a list of URLs.
-  if (state.viewMode === "links") {
-    state.linkFilter = rawQuery;
-    setSuperSearchOpen(false);
-    renderLinks();
-    return;
-  }
-
-  const q = normalize(rawQuery).trim();
-  const currentDocs = getCurrentDocsCollection();
-
-  if (q !== normalize(state.jumpQuery)) {
-    resetJumpNavigation();
-  }
-
-  if (!q) {
-    state.searchRequestId += 1;
-    state.groupRevealCounts.clear();
-    state.filteredDocs = [...currentDocs];
-    setMeta(state.viewMode === "archive"
-      ? `${state.filteredDocs.length} archived document(s)`
-      : state.viewMode === "recycle"
-        ? `${state.filteredDocs.length} deleted document(s)`
-        : `${state.filteredDocs.length} document(s)`);
-    renderSuperSearchPanel(rawQuery, [], []);
-    renderDocList();
-    return;
-  }
-
-  const requestId = ++state.searchRequestId;
-  const searchScope = state.viewMode === "archive"
-    ? "archive"
-    : state.viewMode === "recycle"
-      ? "recycle-bin"
-      : "docs";
-  const contextLabel = searchScope === "archive"
-    ? "archive"
-    : searchScope === "recycle-bin"
-      ? "recycle bin"
-      : "documents";
-  setMeta(`Searching ${contextLabel}...`);
-
-  try {
-    const payload = await requestJson(`/api/docs/search?scope=${encodeURIComponent(searchScope)}&q=${encodeURIComponent(rawQuery)}`, { cache: "no-store" });
-    if (requestId !== state.searchRequestId) {
-      return;
-    }
-
-    const matches = (payload.matches || []).map((match) => ({
-      file: match.file,
-      originalFile: match.originalFile || "",
-      title: match.title || filenameToTitle(match.originalFile || match.file),
-      size: Number(match.size || 0),
-      updatedAt: match.updatedAt || match.deletedAt || "",
-      deletedAt: match.deletedAt || match.updatedAt || "",
-      folderId: match.folderId || null,
-      folderName: match.folderName || null,
-      folderOrder: Number.isFinite(Number(match.folderOrder)) ? Number(match.folderOrder) : getFolderOrder(match.folderId),
-      icon: inferIcon(match.originalFile || match.file),
-      snippet: match.snippet || "No preview available."
-    }));
-
-    const searchTerms = buildJumpSearchTerms(rawQuery, payload.searchTerms || []);
-    state.groupRevealCounts.clear();
-    state.filteredDocs = matches;
-    renderSuperSearchPanel(rawQuery, matches, searchTerms);
-    setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
-    renderDocList();
-  } catch (error) {
-    if (requestId !== state.searchRequestId) {
-      return;
-    }
-
-    console.error(error);
-    const fallback = buildSuperSearchMatches(rawQuery, currentDocs);
-    const matches = fallback.matches.map((match) => ({
-      file: match.file,
-      originalFile: match.originalFile || "",
-      title: match.title || filenameToTitle(match.originalFile || match.file),
-      size: Number(match.size || 0),
-      updatedAt: match.updatedAt || match.deletedAt || "",
-      deletedAt: match.deletedAt || match.updatedAt || "",
-      folderId: match.folderId || null,
-      folderName: match.folderName || null,
-      folderOrder: Number.isFinite(Number(match.folderOrder)) ? Number(match.folderOrder) : getFolderOrder(match.folderId),
-      icon: inferIcon(match.originalFile || match.file),
-      snippet: match.snippet || "No preview available."
-    }));
-
-    state.groupRevealCounts.clear();
-    state.filteredDocs = matches;
-    renderSuperSearchPanel(rawQuery, matches, fallback.searchTerms);
-    setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
-    renderDocList();
-    setStatus("Search fell back to local metadata results.", "neutral");
-  }
-}
-
-async function openDocument(file, pushHash, options = {}) {
-  // Opening something else while the page is being edited would replace the
-  // edits with another document and say nothing about it.
-  if (pageEditActive() && file !== state.pageEdit.file) {
-    const left = await cancelPageEdit({ restore: false });
-    if (!left) {
-      return;
-    }
-  }
-
-  const requestId = ++state.openDocumentRequestId;
-
-  try {
-    const doc = state.docs.find((candidate) => candidate.file === file);
-    if (!doc) {
-      return;
-    }
-
-    const jumpQuery = String(options.jumpQuery || "");
-    const jumpTerms = Array.isArray(options.jumpTerms) ? options.jumpTerms : [];
-    const jumpIndex = Number.isFinite(Number(options.jumpIndex)) ? Number(options.jumpIndex) : 0;
-    const scrollBehavior = String(options.scrollBehavior || "auto");
-    const hasJumpQuery = jumpQuery.trim().length > 0;
-    const forceReload = Boolean(options.forceReload);
-
-    if (file === state.activeFile && elements.docContent.classList.contains("visible") && !forceReload) {
-      let jumpResult = {
-        found: false,
-        index: -1,
-        total: 0
-      };
-
-      if (hasJumpQuery) {
-        jumpResult = jumpToSearchMatch(jumpQuery, jumpTerms, jumpIndex, {
-          sourceFile: file,
-          scrollBehavior
-        });
-      } else {
-        resetJumpNavigation();
-      }
-
-      if (requestId !== state.openDocumentRequestId) {
-        return;
-      }
-
-      document.title = `${doc.title} | AzaDocs`;
-      // Push when someone asked for this document, replace when the app
-      // simply landed on it, so the address always names what is on screen
-      // without inventing history entries nobody navigated to.
-      showDocumentInUrl(file, { replace: !pushHash });
-
-      if (hasJumpQuery) {
-        if (jumpResult.found) {
-          setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
-        } else {
-          setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
-        }
-        return;
-      }
-
-      setStatus(`Viewing ${docName(doc.file)}`, "neutral");
-      return;
-    }
-
-    const rawContent = await loadDocContent(file, { forceReload });
-    if (requestId !== state.openDocumentRequestId) {
-      return;
-    }
-
-    const safeHtml = renderDocumentContent(file, rawContent, doc.title || file);
-
-    elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
-
-    destroyPanZoomInstances(elements.docContent);
-    elements.docContent.innerHTML = safeHtml;
-    elements.docContent.classList.add("visible");
-    elements.emptyState.style.display = "none";
-    bindTaskCheckboxes(file, rawContent);
-
-    // Claim the document the moment its content is on screen. Waiting until after
-    // Mermaid finishes left a multi-second window on diagram-heavy files where the
-    // Edit and Delete buttons still pointed at the previously open document.
-    state.activeFile = file;
-    // Selection-only change: repaint the highlight, don't rebuild the list.
-    updateActiveRowHighlight();
-    updateActiveDocUI(file);
-    document.title = `${doc.title} | AzaDocs`;
-    showDocumentInUrl(file, { replace: !pushHash });
-
-    await waitForNextFrame();
-
-    if (requestId !== state.openDocumentRequestId) {
-      return;
-    }
-
-    let jumpResult = {
-      found: false,
-      index: -1,
-      total: 0
-    };
-
-    if (hasJumpQuery) {
-      jumpResult = jumpToSearchMatch(jumpQuery, jumpTerms, jumpIndex, {
-        sourceFile: file,
-        scrollBehavior
-      });
-    } else {
-      resetJumpNavigation();
-    }
-
-    await renderMermaidBlocks(elements.docContent);
-    if (requestId !== state.openDocumentRequestId) {
-      return;
-    }
-
-    if (hasJumpQuery) {
-      if (jumpResult.found) {
-        setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
-      } else {
-        setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
-      }
-      return;
-    }
-
-    setStatus(`Viewing ${docName(doc.file)}`, "neutral");
-  } catch (error) {
-    if (requestId !== state.openDocumentRequestId) {
-      return;
-    }
-
-    showEmptyState(isNotebookFile(file) ? "Could not load this notebook" : "Could not load this markdown", error.message, "ph-warning");
-    setStatus(error.message, "error");
-  }
-}
-
-async function openRecycleBinDocument(file, options = {}) {
-  try {
-    const doc = state.deletedDocs.find((candidate) => candidate.file === file);
-    if (!doc) {
-      return;
-    }
-
-    const rawContent = await loadDeletedDocContent(file, { forceReload: Boolean(options.forceReload) });
-    const originalFile = doc.originalFile || doc.file;
-    const safeHtml = renderDocumentContent(originalFile, rawContent, doc.title || originalFile);
-
-    elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(originalFile));
-
-    destroyPanZoomInstances(elements.docContent);
-    elements.docContent.innerHTML = safeHtml;
-    elements.docContent.classList.add("visible");
-    elements.emptyState.style.display = "none";
-
-    // Same reason as openDocument: claim it before the async Mermaid pass.
-    // Assigning after the earlier await is deliberate, not a race.
-    // eslint-disable-next-line require-atomic-updates
-    state.activeFile = file;
-    // Selection-only change: repaint the highlight, don't rebuild the list.
-    updateActiveRowHighlight();
-    updateActiveDocUI(file);
-
-    await waitForNextFrame();
-    await renderMermaidBlocks(elements.docContent);
-
-    document.title = state.viewMode === "archive"
-      ? `${doc.title} | Archive | AzaDocs`
-      : `${doc.title} | Recycle Bin | AzaDocs`;
-    setStatus(state.viewMode === "archive"
-      ? `Viewing archived doc ${doc.originalFile || doc.file}`
-      : `Viewing deleted doc ${doc.originalFile || doc.file}`, "neutral");
-  } catch (error) {
-    showEmptyState("Could not load deleted document", error.message, "ph-warning");
-    setStatus(error.message, "error");
-  }
-}
-
-async function refreshDeletedDocs({ openFile = null, preserveSearch = true } = {}) {
-  const inArchive = state.viewMode === "archive";
-  setMeta(inArchive ? "Loading archive..." : "Loading recycle bin...");
-
-  await fetchDeletedDocs();
-  void hydrateDeletedSearchContent();
-
-  const query = preserveSearch ? elements.searchInput.value : "";
-  if (!preserveSearch) {
-    elements.searchInput.value = "";
-  }
-
-  await applySearch(query);
-
-  if (state.deletedDocs.length === 0) {
-    state.activeFile = null;
-    updateActiveDocUI(null);
-    if (inArchive) {
-      showEmptyState("Archive is empty", "Archived markdowns will appear here.", "ph-archive-box");
-      setStatus("Archive is empty.", "neutral");
-    } else {
-      showEmptyState("Recycle bin is empty", "Soft-deleted markdowns will appear here.", "ph-trash");
-      setStatus("Recycle bin is empty.", "neutral");
-    }
-    return;
-  }
-
-  const target = state.deletedDocs.find((doc) => doc.file === openFile)?.file
-    || state.deletedDocs.find((doc) => doc.file === state.activeFile)?.file
-    || null;
-
-  if (!target) {
-    state.activeFile = null;
-    showDocumentInUrl(null, { replace: true });
-    updateActiveDocUI(null);
-    // No toast here: the empty state on screen already says this, and a toast
-    // that fires on every refresh is what teaches people to ignore toasts.
-    showEmptyState("No file selected", "Choose a deleted file from the explorer to read it.", "ph-trash");
-    return;
-  }
-
-  await openRecycleBinDocument(target, { forceReload: true });
-}
-
-async function deleteCurrentDocument(mode) {
-  if (!state.activeFile || state.isRecycleBinMode) {
-    setStatus("Select an active markdown to delete.", "error");
-    return;
-  }
-
-  const targetFile = state.activeFile;
-  const shouldProceed = await requestConfirmation({
-    title: mode === "hard" ? "Archive this markdown?" : "Move markdown to recycle bin?",
-    message: mode === "hard"
-      ? `${targetFile} will be moved straight to the archive, skipping the recycle bin. It can still be restored from there.`
-      : `${targetFile} will be moved into the recycle bin and can be restored later.`,
-    confirmLabel: mode === "hard" ? "Archive" : "Move To Bin",
-    tone: mode === "hard" ? "danger" : "primary"
-  });
-
-  if (!shouldProceed) {
-    setStatus("Delete cancelled.", "neutral");
-    return;
-  }
-
-  try {
-    const payload = await requestJson(`/api/docs/${docUrl(targetFile)}/delete`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ mode })
-    });
-
-    state.contentCache.delete(targetFile);
-    await refreshDocs({ preserveSearch: true });
-    setStatus(payload.message || `${payload.originalFile} deleted.`, "success");
-  } catch (error) {
-    if (normalize(error.message).includes("request failed (404)")) {
-      setStatus("Delete endpoint returned 404. Restart the server so the recycle-bin API routes are loaded.", "error");
-      return;
-    }
-
-    setStatus(error.message, "error");
-  }
-}
-
-async function restoreCurrentDeletedDocument() {
-  if (!state.isRecycleBinMode || !state.activeFile) {
-    setStatus("Select a recycle bin markdown to restore.", "error");
-    return;
-  }
-
-  try {
-    const payload = await requestJson(`/api/recycle-bin/${encodeURIComponent(state.activeFile)}/restore`, {
-      method: "POST"
-    });
-
-    state.contentCache.delete(state.activeFile);
-    state.isRecycleBinMode = false;
-    syncModeUI();
-    resetJumpNavigation();
-    await refreshDocs({ openFile: payload.file, preserveSearch: false });
-    setStatus(`Restored ${payload.file} from recycle bin.`, "success");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-}
-
-async function hardDeleteCurrentDeletedDocument() {
-  if (!state.isRecycleBinMode || !state.activeFile) {
-    setStatus("Select a recycle bin markdown to archive.", "error");
-    return;
-  }
-
-  const entryFile = state.activeFile;
-  const shouldProceed = await requestConfirmation({
-    title: "Archive this markdown?",
-    message: "The file stays on disk. It moves out of the recycle bin and into the archive, where it can still be restored or erased for good.",
-    confirmLabel: "Archive",
-    tone: "danger"
-  });
-
-  if (!shouldProceed) {
-    setStatus("Archive cancelled.", "neutral");
-    return;
-  }
-
-  try {
-    await requestJson(`/api/recycle-bin/${docUrl(entryFile)}/hard-delete`, {
-      method: "POST"
-    });
-
-    state.contentCache.delete(entryFile);
-    await refreshDeletedDocs({ preserveSearch: true });
-    setStatus("Document moved to the archive.", "success");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-}
-
-async function createFolderOnServer(folderName, parentId = null) {
-  return requestJson("/api/folders", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ name: folderName, parentId: parentId || null })
-  });
-}
-
-async function renameFolderOnServer(folderId, folderName) {
-  return requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ name: folderName })
-  });
-}
-
-async function moveDocumentToFolder(file, folderId) {
-  const payload = await requestJson(`/api/docs/${docUrl(file)}/folder`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ folderId: folderId || null })
-  });
-
-  state.contentCache.delete(file);
-  // A move is a move on disk, so the document that comes back has the
-  // destination's path. Asking for the old one would find nothing there —
-  // and only the document actually being read should follow the move.
-  const stillOpen = state.activeFile === file ? payload.file : state.activeFile;
-  await refreshDocs({ openFile: stillOpen, preserveSearch: true });
-  setStatus(`Moved ${payload.file} to ${payload.folderName || state.rootFolderLabel || "Ungrouped"}.`, "success");
-  return payload;
-}
-
-async function handleFolderModalAction() {
-  const folderName = String(elements.folderNameInput.value || "").trim();
-  if (!folderName) {
-    setStatus("Folder name is required.", "error");
-    elements.folderNameInput.focus();
-    return;
-  }
-
-  try {
-    if (state.folderModalMode === "rename") {
-      if (!state.folderModalTargetFolderId) {
-        setStatus("Select a folder to rename.", "error");
-        return;
-      }
-
-      await renameFolderOnServer(state.folderModalTargetFolderId, folderName);
-      closeFolderModal();
-      await refreshDocs({ preserveSearch: true });
-      setStatus(`Renamed folder to ${folderName}.`, "success");
-      return;
-    }
-
-    const created = await createFolderOnServer(folderName, state.folderModalParentId);
-
-    if (state.folderModalMode === "upload") {
-      const pending = state.pendingUploadFile;
-      closeFolderModal();
-      await uploadMarkdown(pending, created.folder.id);
-      return;
-    }
-
-    if (state.folderModalMode === "move" && state.folderModalTargetFile) {
-      await moveDocumentToFolder(state.folderModalTargetFile, created.folder.id);
-      closeFolderModal();
-      return;
-    }
-
-    closeFolderModal();
-    await refreshDocs({ preserveSearch: true });
-    notify(created.folder.parentId
-      ? `Created "${created.folder.name}" in ${created.folder.path.replace(/ \/ [^/]+$/, "")}.`
-      : `Created folder "${created.folder.name}".`, "success");
-  } catch (error) {
-    notify(error.message, "error");
-  }
-}
 
 // Every render bumps the generation. An async pass that finds the generation has
 // moved on abandons its work instead of writing stale HTML over a newer render.

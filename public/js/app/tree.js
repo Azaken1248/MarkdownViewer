@@ -605,7 +605,20 @@
     }
   }
 
+  // Opening a document only changes which row is highlighted. Rebuilding all
+  // ~93 rows and their listeners for that was both wasteful and visible:
+  // emptying the list collapsed the page height and threw the scroll position
+  // back to the top.
+  function updateActiveRowHighlight() {
+    for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+      const isActive = row.dataset.file === state.activeFile;
+      row.classList.toggle("is-active", isActive);
+      row.setAttribute("aria-current", isActive ? "true" : "false");
+    }
+  }
+
   global.AppTree = {
+    updateActiveRowHighlight,
     getVisibleTreeButtons,
     moveTreeFocus,
     handleTreeKeydown,
