@@ -64,6 +64,7 @@ const BROWSER_GLOBALS = {
   App: "readonly",
   AppApi: "readonly",
   AppLibrary: "readonly",
+  AppSearch: "readonly",
   AppText: "readonly",
   AppDom: "readonly",
   AppState: "readonly",
