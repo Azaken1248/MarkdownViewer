@@ -58,6 +58,10 @@ const {
 const {
   imagesFromTransfer, imageName, uploadPlaceholder, uploadImage, imageMarkdown
 } = AppPastedImages;
+const { bindThemeToggle } = AppTheme;
+const { bindNotebookExecution } = AppNotebook;
+const { replaceRangeInTextarea, insertIntoTextarea, replaceInTextarea } = AppTextarea;
+const { findFolderRow, beginInlineRename, beginInlineFolderRename } = AppInlineRename;
 
 const MOBILE_BREAKPOINT = 920;
 // How many document rows each folder group renders before offering "show more".
@@ -820,101 +824,6 @@ function renderSuperSearchPanel(query, matches, searchTerms) {
 }
 
 
-/* --------------------------------------------------------------------------
-   Theme
-
-   Every colour in the stylesheet is a custom property, so switching themes is
-   a single attribute on <html>. Two things do not follow automatically and are
-   handled here: the browser-chrome theme-color meta, and Mermaid, which bakes
-   hex into the SVG it emits and has to redraw.
-
-   theme-boot.js has already applied the stored preference before first paint;
-   this only takes over once the user touches the toggle.
-   -------------------------------------------------------------------------- */
-
-/* The cycle, the icons and the writing-down all live in theme-boot.js, which
- * runs on every page that has a theme — including the diagram page, which does
- * not load this file. What is here is what only this page has to do about it:
- * say so out loud, and redraw the Mermaid on the screen.
- */
-const THEME_META = ThemeSwitch.META;
-
-const themePreference = () => ThemeSwitch.preference();
-const activeThemeName = () => ThemeSwitch.active();
-
-function syncThemeToggleUI() {
-  ThemeSwitch.dress(elements.themeToggleBtn);
-}
-
-async function applyThemePreference(preference, { announce = false } = {}) {
-  const resolvedBefore = activeThemeName();
-  const next = ThemeSwitch.CYCLE.includes(preference) ? preference : "dark";
-  const resolved = ThemeSwitch.apply(next);
-
-  syncThemeToggleUI();
-
-  if (announce) {
-    notify(THEME_META[next].label + " enabled.", "info");
-  }
-
-  if (resolved !== resolvedBefore) {
-    await repaintDiagramsForTheme();
-  }
-}
-
-// Mermaid renders to a static SVG with the palette inlined, so the only way to
-// recolour a diagram is to draw it again from its source.
-async function repaintDiagramsForTheme() {
-  const roots = [elements.docContent, elements.editorPreview].filter(Boolean);
-  const blocks = roots.flatMap((root) => [...root.querySelectorAll(".mermaid-block")]);
-  if (blocks.length === 0) {
-    // Nothing on screen to redraw, but the next render must not reuse the old
-    // palette.
-    MarkdownCore.resetMermaidForThemeChange();
-    return;
-  }
-
-  // Their SVGs are about to be replaced; leaving the instances bound would leak
-  // handlers onto detached nodes.
-  destroyPanZoomInstances();
-
-  for (const block of blocks) {
-    const source = block.dataset.mermaidSource;
-    if (!source) {
-      continue;
-    }
-
-    block.removeAttribute("data-processed");
-    // Sizing is derived from the rendered viewBox and has to be measured again.
-    block.style.aspectRatio = "";
-    block.style.maxWidth = "";
-    block.textContent = source;
-    block.classList.add("mermaid");
-  }
-
-  MarkdownCore.resetMermaidForThemeChange();
-
-  for (const root of roots) {
-    await renderMermaidBlocks(root);
-  }
-}
-
-function bindThemeToggle() {
-  syncThemeToggleUI();
-
-  elements.themeToggleBtn?.addEventListener("click", () => {
-    void applyThemePreference(THEME_META[themePreference()].next, { announce: true });
-  });
-
-  // Only meaningful while the preference is "auto", but the listener is cheap
-  // and the guard keeps an explicit choice from being overridden.
-  window.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => {
-    if (themePreference() === "auto") {
-      void applyThemePreference("auto");
-    }
-  });
-}
-
 // --- Breadcrumbs ----------------------------------------------------------
 // With folders nesting arbitrarily, "which folder am I in" stops being obvious
 // from the tree alone once a branch is scrolled or collapsed. The trail answers
@@ -1645,158 +1554,6 @@ async function deleteUser(user) {
   }
 }
 
-
-/* --------------------------------------------------------------------------
-   Running notebook cells
-
-   The Python lives in a worker (see notebook-runtime.js). This is the glue
-   between a Run button and the output area under the cell.
-
-   Nothing runs on its own. Opening a notebook renders it and stops; a cell
-   executes because someone pressed Run on it, which is the only reason a
-   document in a library should ever execute anything.
-   -------------------------------------------------------------------------- */
-
-function notebookOutputFor(cellNumber) {
-  return elements.docContent.querySelector(`.notebook-live-output[data-cell="${cellNumber}"]`);
-}
-
-function renderRunOutput(target, result) {
-  target.innerHTML = "";
-  target.hidden = false;
-
-  const append = (className, text) => {
-    if (!text || !String(text).trim()) {
-      return;
-    }
-
-    const block = document.createElement("pre");
-    block.className = className;
-    block.textContent = String(text);
-    target.appendChild(block);
-  };
-
-  append("notebook-run-stream", (result.stdout || []).join("\n"));
-  append("notebook-run-stream is-stderr", (result.stderr || []).join("\n"));
-
-  if (result.ok) {
-    append("notebook-run-value", result.result);
-  } else {
-    append("notebook-run-error", result.error);
-  }
-
-  if (!target.childElementCount) {
-    const empty = document.createElement("p");
-    empty.className = "notebook-run-empty";
-    empty.textContent = result.ok ? "Ran with no output." : "Failed with no output.";
-    target.appendChild(empty);
-  }
-}
-
-function setKernelStatus(label, { busy = false } = {}) {
-  if (!elements.kernelStatus) {
-    return;
-  }
-
-  elements.kernelStatus.hidden = !label;
-  elements.kernelStatus.textContent = label || "";
-  elements.kernelStatus.classList.toggle("is-busy", busy);
-  if (elements.kernelBar) {
-    elements.kernelBar.hidden = !NotebookRuntime.started;
-  }
-}
-
-async function runNotebookCell(button) {
-  const cellNumber = Number(button.dataset.cell);
-  const code = MarkdownCore.notebookSourceFor(cellNumber);
-  const target = notebookOutputFor(cellNumber);
-
-  if (!code || !target) {
-    return;
-  }
-
-  // Which document this run belongs to. Switching away mid-run replaces the
-  // whole article, and writing into the detached node would put one notebook's
-  // output under another's cell.
-  const startedFor = state.activeFile;
-
-  button.disabled = true;
-  button.classList.add("is-running");
-  target.hidden = false;
-  target.innerHTML = '<p class="notebook-run-empty">Working…</p>';
-
-  try {
-    // The notebook's filename keys the kernel namespace, so cells in one
-    // document share variables and two notebooks do not collide.
-    const result = await NotebookRuntime.runCell(startedFor || "notebook", code, {
-      onSlow: () => {
-        if (target.isConnected) {
-          target.innerHTML = "";
-          const note = document.createElement("p");
-          note.className = "notebook-run-empty";
-          note.textContent = "Still running. Use Restart Python if it is stuck.";
-          target.appendChild(note);
-        }
-      }
-    });
-
-    // The reader has moved on; their current notebook must not gain output
-    // from the one they left.
-    if (state.activeFile !== startedFor || !target.isConnected) {
-      return;
-    }
-
-    renderRunOutput(target, result);
-
-    if (!result.ok) {
-      notify(`Cell ${cellNumber} failed.`, "error");
-    }
-  } catch (error) {
-    if (target.isConnected) {
-      renderRunOutput(target, { ok: false, error: error.message });
-    }
-  } finally {
-    // Re-enabling the button that started this run; nothing else holds it.
-    // eslint-disable-next-line require-atomic-updates
-    button.disabled = false;
-    button.classList.remove("is-running");
-    setKernelStatus(NotebookRuntime.isBusy() ? "Running…" : "Python ready", { busy: NotebookRuntime.isBusy() });
-  }
-}
-
-function bindNotebookExecution() {
-  // If the runtime script failed to load, the app still has to work — running
-  // Python is an extra, not a dependency. Cells simply keep their rendered
-  // output and lose the Run button.
-  if (typeof NotebookRuntime === "undefined") {
-    MarkdownCore.configure({ executableNotebooks: false });
-    return;
-  }
-
-  // Delegated, because the notebook markup is replaced wholesale every time a
-  // document opens.
-  elements.docContent.addEventListener("click", (event) => {
-    const button = event.target.closest(".notebook-run");
-    if (button) {
-      void runNotebookCell(button);
-    }
-  });
-
-  NotebookRuntime.onStatus((status) => {
-    setKernelStatus(status.label, { busy: status.stage !== "ready" && status.stage !== "idle" });
-  });
-
-  elements.restartKernelBtn?.addEventListener("click", () => {
-    NotebookRuntime.restart();
-    for (const output of elements.docContent.querySelectorAll(".notebook-live-output")) {
-      output.hidden = true;
-      output.innerHTML = "";
-    }
-    notify("Python kernel stopped. The next Run starts a fresh one.", "neutral");
-    setKernelStatus("");
-  });
-}
-
 async function fetchDocs() {
   const payload = await requestJson("/api/docs", { cache: "no-store" });
 
@@ -2222,61 +1979,6 @@ async function toggleTaskCheckbox(box) {
   }
 }
 
-// --- Into the source editor ------------------------------------------------
-
-/* Put text into a textarea in a way the browser's own undo can see.
- *
- * Assigning to .value clears a textarea's undo history outright in every
- * engine, so the old version of this meant that pasting a picture — or using
- * any of the formatting shortcuts — silently threw away everything typed before
- * it. Ctrl+Z afterwards did nothing at all. execCommand("insertText") is
- * deprecated and is still the only way to make an edit the undo stack knows
- * about; where it is refused, the assignment is the fallback and the loss of
- * history is the lesser problem than not inserting the text.
- */
-function replaceRangeInTextarea(area, start, end, text) {
-  area.focus();
-  area.setSelectionRange(start, end);
-
-  try {
-    if (document.execCommand("insertText", false, text)) {
-      return;
-    }
-  } catch {
-    // Refused; fall through to the assignment below.
-  }
-
-  area.value = `${area.value.slice(0, start)}${text}${area.value.slice(end)}`;
-  area.selectionStart = start + text.length;
-  area.selectionEnd = area.selectionStart;
-}
-
-function insertIntoTextarea(area, text) {
-  const at = area.selectionStart ?? area.value.length;
-  const end = area.selectionEnd ?? at;
-  replaceRangeInTextarea(area, at, end, text);
-}
-
-// Found by text rather than by the offset it went in at, because the upload is
-// away for a while and nothing stops the author typing above it in the meantime.
-function replaceInTextarea(area, find, text) {
-  const at = area.value.indexOf(find);
-  if (at === -1) {
-    return false;
-  }
-
-  const caret = area.selectionStart ?? 0;
-  replaceRangeInTextarea(area, at, at + find.length, text);
-
-  // Keep the cursor where the typing was, allowing for the length change. The
-  // insertion above left it after the replacement, which is the right place
-  // only for someone whose cursor was already there.
-  const shift = text.length - find.length;
-  const next = caret > at ? Math.max(at, caret + shift) : caret;
-  area.selectionStart = next;
-  area.selectionEnd = next;
-  return true;
-}
 
 async function attachImagesToSource(files) {
   for (const file of files) {
@@ -2806,135 +2508,6 @@ async function deleteFiles(files, mode) {
   if (failed.length) {
     notify(failed[0], "error");
   }
-}
-
-// --- Inline rename --------------------------------------------------------
-// F2 edits the label in place rather than opening the editor, which is what
-// makes renaming feel like a filesystem instead of a document workflow.
-
-function beginInlineEdit(labelNode, currentValue, commit) {
-  if (!labelNode || labelNode.querySelector("input")) {
-    return;
-  }
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "tree-rename-input";
-  input.name = "rename";
-  input.value = currentValue;
-  input.setAttribute("aria-label", "New name");
-
-  labelNode.textContent = "";
-  labelNode.appendChild(input);
-  input.focus();
-
-  // Preselect the stem so the extension is not in the way of typing.
-  const dot = currentValue.lastIndexOf(".");
-  input.setSelectionRange(0, dot > 0 ? dot : currentValue.length);
-
-  let settled = false;
-
-  const finish = async (accept) => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-
-    const next = input.value.trim();
-    if (!accept || !next || next === currentValue) {
-      renderDocList();
-      return;
-    }
-
-    await commit(next);
-  };
-
-  input.addEventListener("keydown", (event) => {
-    event.stopPropagation();
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void finish(true);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      void finish(false);
-    }
-  });
-
-  input.addEventListener("blur", () => void finish(true));
-  input.addEventListener("click", (event) => event.stopPropagation());
-}
-
-// Filenames here legitimately contain spaces, quotes and brackets, so match on
-// the dataset directly rather than building an attribute selector out of them.
-function findDocRow(file) {
-  for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
-    if (row.dataset.file === file) {
-      return row;
-    }
-  }
-  return null;
-}
-
-function findFolderRow(folderId) {
-  for (const row of elements.docList.querySelectorAll(".tree-row-folder")) {
-    if (row.dataset.folderId === folderId) {
-      return row;
-    }
-  }
-  return null;
-}
-
-function beginInlineRename(file) {
-  const row = findDocRow(file);
-  const label = row?.querySelector(".tree-label");
-  if (!label) {
-    return;
-  }
-
-  // Seeded with the name, not the path: renaming is renaming, and typing a
-  // path here would be a move the endpoint refuses.
-  beginInlineEdit(label, docName(file), async (nextName) => {
-    try {
-      // fileName, not name: the endpoint reads fileName, and sending the wrong
-      // key meant sanitizeNewFilename got undefined and answered "Invalid
-      // document file name" for every rename typed into the tree.
-      const payload = await requestJson(`/api/docs/${docUrl(file)}/rename`, {
-        method: "POST",
-        body: JSON.stringify({ fileName: nextName })
-      });
-      state.contentCache.delete(file);
-      const openedFile = state.activeFile === file ? payload.file : state.activeFile;
-      await refreshDocs({ openFile: openedFile, preserveSearch: true });
-      notify(`Renamed to ${docName(payload.file)}.`, "success");
-    } catch (error) {
-      notify(error.message, "error");
-      renderDocList();
-    }
-  });
-}
-
-function beginInlineFolderRename(folderId) {
-  const row = findFolderRow(folderId);
-  const label = row?.querySelector(".tree-label");
-  const folder = getFolderRecord(folderId);
-  if (!label || !folder) {
-    return;
-  }
-
-  beginInlineEdit(label, folder.name, async (nextName) => {
-    try {
-      await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nextName })
-      });
-      await refreshDocs({ preserveSearch: true });
-      notify(`Renamed folder to ${nextName}.`, "success");
-    } catch (error) {
-      notify(error.message, "error");
-      renderDocList();
-    }
-  });
 }
 
 
@@ -8012,13 +7585,12 @@ global.App = {
   openShareModal, closeShareModal, updateShareButton,
   cutFiles, pasteIntoFolder, canDropOnFolder, deleteFiles,
   closeContextMenu, buildDocContextItems, buildFolderContextItems,
-  beginInlineRename, revealFolderInTree, folderPathIds,
+  revealFolderInTree,
   applyInitialFolderCollapse, persistCollapsedFolders,
-  openDocument, refreshDocs, switchViewMode, updateActiveDocUI,
+  openDocument, refreshDocs, renderDocList, switchViewMode, updateActiveDocUI,
   restoreDocumentView, showEmptyState, showLoadingState, setPlaceBusy,
   renderSuperSearchPanel, syncFilterChip, applySearch, stashSearchQuery,
   hydrateSearchContent, SUPERSEARCH_LIMIT,
-  applyThemePreference, themePreference, activeThemeName,
   requestEditorClose, isEditorDirty, closeEditor, openEditor,
   openEditorForCurrentDoc, saveEditorDocument, syncEditorTabs, selectEditorTab,
   startNewDocument, uploadFolder, isUploadableFile,
