@@ -433,21 +433,23 @@ async function run(server) {
     `);
     check("no exception on load", true, true);
 
-    /* Every upward call a module makes is answered.
+    /* Every call a module makes into another one is answered.
      *
-     * A module below app.js that has to call back up writes App.something(),
-     * which is only a name until app.js puts it on its surface. Nothing checks
-     * that at load: the call fails when a person clicks the thing, which is
-     * how "App.openContextMenu is not a function" reached a green lint.
+     * A module that has to reach something loaded after it names the module at
+     * the call site — App.something() for app.js itself, AppPageEdit.x() for a
+     * module. Until that name is on the other side's surface it is only a name,
+     * and nothing checks it at load: the call fails when a person clicks the
+     * thing, which is how "App.openContextMenu is not a function" reached a
+     * green lint.
      *
      * Comments are stripped first: the prose in these files names App.x too.
      */
     const withoutComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
-    const upward = [...new Set(appModules
-      .flatMap((file) => [...withoutComments(fs.readFileSync(file, "utf8")).matchAll(/\bApp\.([a-zA-Z_$][\w$]*)\s*\(/g)])
-      .map(([, name]) => name))].sort();
-    const unanswered = upward.filter((name) => window.eval(`typeof App.${name}`) === "undefined");
-    check(`the ${upward.length} calls back up to app.js are all answered`, unanswered, []);
+    const reaches = [...new Set(appModules
+      .flatMap((file) => [...withoutComments(fs.readFileSync(file, "utf8")).matchAll(/\b(App[A-Za-z]*)\.([a-zA-Z_$][\w$]*)\s*\(/g)])
+      .map(([, namespace, name]) => `${namespace}.${name}`))].sort();
+    const unanswered = reaches.filter((call) => window.eval(`typeof ${call}`) === "undefined");
+    check(`the ${reaches.length} calls into another module are all answered`, unanswered, []);
   } catch (error) {
     check(`no exception on load (${error.message})`, false, true);
     console.log(error.stack.split("\n").slice(0, 6).join("\n"));
