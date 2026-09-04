@@ -95,6 +95,7 @@ const BROWSER_GLOBALS = {
   AppClipboard: "readonly",
   AppDeletion: "readonly",
   AppContextMenu: "readonly",
+  AppTree: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
