@@ -440,10 +440,11 @@ async function run(server) {
      * that at load: the call fails when a person clicks the thing, which is
      * how "App.openContextMenu is not a function" reached a green lint.
      *
-     * Calls only: the prose in these files names App.x too.
+     * Comments are stripped first: the prose in these files names App.x too.
      */
+    const withoutComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
     const upward = [...new Set(appModules
-      .flatMap((file) => [...fs.readFileSync(file, "utf8").matchAll(/\bApp\.([a-zA-Z_$][\w$]*)\s*\(/g)])
+      .flatMap((file) => [...withoutComments(fs.readFileSync(file, "utf8")).matchAll(/\bApp\.([a-zA-Z_$][\w$]*)\s*\(/g)])
       .map(([, name]) => name))].sort();
     const unanswered = upward.filter((name) => window.eval(`typeof App.${name}`) === "undefined");
     check(`the ${upward.length} calls back up to app.js are all answered`, unanswered, []);

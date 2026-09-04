@@ -26,7 +26,7 @@ const { elements } = AppDom;
 const { state } = AppState;
 const { requestJson, can } = AppApi;
 const {
-  getCurrentDocsCollection, getDocByFile, getFolderRecord, getFolderLabel,
+  getCurrentDocsCollection, getDocByFile, getFolderRecord,
   getFolderOrder, folderPathIds, buildFolderTree
 } = AppLibrary;
 const {
@@ -56,9 +56,7 @@ const {
   openShareModal, closeShareModal, createShareLink,
   revokeShareLink, updateShareButton
 } = AppShare;
-const {
-  imagesFromTransfer, imageName, uploadPlaceholder, uploadImage, imageMarkdown
-} = AppPastedImages;
+const { imagesFromTransfer } = AppPastedImages;
 const { bindThemeToggle } = AppTheme;
 const { bindNotebookExecution } = AppNotebook;
 const { replaceRangeInTextarea, insertIntoTextarea, replaceInTextarea } = AppTextarea;
@@ -73,127 +71,21 @@ const {
 } = AppSession;
 const { openUsersModal, closeUsersModal, submitNewUser } = AppUsers;
 const { openFolderModal, closeFolderModal } = AppFolderModal;
-const { waitForNextFrame, renderMarkdown, highlightCodeBlocks, renderDocumentContent } = AppRender;
+const {
+  waitForNextFrame, renderMarkdown, highlightCodeBlocks, renderDocumentContent,
+  renderMermaidBlocks, destroyPanZoomInstances, bindWheelZoomModifier
+} = AppRender;
 const { fetchDocs, fetchDeletedDocs, loadDocContent, loadDeletedDocContent, syncModeUI, hydrateSearchContent, hydrateDeletedSearchContent, showEmptyState, showLoadingState, showNoDocumentOpen } = AppDocs;
 const { taskCheckboxes, bindTaskCheckboxes, toggleTaskCheckbox } = AppTaskLists;
+const { attachImagesToSource, attachImagesToPage } = AppPageImages;
+const { cutFiles, pasteIntoFolder, moveFilesToFolder, moveFolderToParent } = AppClipboard;
+const { deleteFolderById, deleteFiles } = AppDeletion;
+const { closeContextMenu, openContextMenu, buildDocContextItems, buildFolderContextItems } = AppContextMenu;
 
 // How many document rows each folder group renders before offering "show more".
 const DOC_LIST_PAGE_SIZE = 50;
 const MATCH_SWIPE_THRESHOLD = 56;
 const MATCH_SWIPE_VERTICAL_LIMIT = 42;
-
-
-
-async function attachImagesToSource(files) {
-  for (const file of files) {
-    const placeholder = uploadPlaceholder(file);
-    insertIntoTextarea(elements.editorInput, placeholder);
-    scheduleEditorPreview();
-
-    try {
-      const url = await uploadImage(file);
-      replaceInTextarea(elements.editorInput, placeholder, imageMarkdown(file, url));
-      setStatus(`Attached ${imageName(file)}.`, "success");
-    } catch (error) {
-      // Leaving "Uploading..." in the text would be a lie that saves to the file.
-      replaceInTextarea(elements.editorInput, placeholder, "");
-      setStatus(error.message, "error");
-    }
-
-    scheduleEditorPreview();
-  }
-}
-
-// --- Into the document being edited on the page ----------------------------
-
-// An image in a rich block goes in as a real img element, so the picture is
-// where it will be rather than a line of markup standing in for it. The
-// serializer already writes an img back out as ![alt](src).
-function insertNodeAtCaret(node) {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) {
-    return false;
-  }
-
-  const range = selection.getRangeAt(0);
-  range.deleteContents();
-  range.insertNode(node);
-  range.setStartAfter(node);
-  range.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(range);
-  return true;
-}
-
-// Inserting a node is a change to the block, but the browser only fires input
-// for changes a person made. Saying so explicitly is what marks the block dirty
-// and updates the bar, through exactly the path typing already uses.
-function announceEdit(host) {
-  host?.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-async function attachImagesToPage(files) {
-  // The document without the picture is worth a step of its own, since undoing
-  // a paste is one of the more likely things anyone wants back.
-  commitPageHistory();
-
-  for (const file of files) {
-    const image = document.createElement("img");
-    // A local preview means the picture is on the page before the upload
-    // finishes, which is the whole feel of pasting one. Guarded because losing
-    // the preview should cost the preview, not the paste.
-    const preview = window.URL?.createObjectURL ? URL.createObjectURL(file) : "";
-    if (preview) {
-      image.src = preview;
-    }
-    image.alt = imageName(file).replace(/\.[^.]+$/, "");
-    image.dataset.uploading = "true";
-
-    const release = () => {
-      if (preview) {
-        URL.revokeObjectURL(preview);
-      }
-    };
-
-    if (!insertNodeAtCaret(image)) {
-      release();
-      return;
-    }
-
-    // Held now, because a failed upload takes the image back out of the
-    // document and there would be nothing left to ask.
-    const host = image.closest('[contenteditable="true"]');
-    announceEdit(host);
-
-    try {
-      const url = await uploadImage(file);
-      image.src = url;
-      delete image.dataset.uploading;
-      announceEdit(host);
-      setStatus(`Attached ${imageName(file)}.`, "success");
-    } catch (error) {
-      // The picture never made it, so it must not be left sitting in the
-      // document looking as though it did.
-      image.remove();
-      announceEdit(host);
-      setStatus(error.message, "error");
-    } finally {
-      release();
-    }
-  }
-}
-
-function renderMermaidBlocks(root) {
-  return MarkdownCore.renderMermaidBlocks(root);
-}
-
-function destroyPanZoomInstances(root = null) {
-  return MarkdownCore.destroyPanZoomInstances(root);
-}
-
-function bindWheelZoomModifier() {
-  return MarkdownCore.bindWheelZoomModifier();
-}
 
 // Opening a document only changes which row is highlighted. Rebuilding all ~93
 // rows and their listeners for that was both wasteful and visible: emptying the
@@ -203,105 +95,6 @@ function updateActiveRowHighlight() {
     const isActive = row.dataset.file === state.activeFile;
     row.classList.toggle("is-active", isActive);
     row.setAttribute("aria-current", isActive ? "true" : "false");
-  }
-}
-
-
-// --- Clipboard ------------------------------------------------------------
-
-function cutFiles(files) {
-  const list = files.filter(Boolean);
-  if (!list.length) {
-    return;
-  }
-
-  state.clipboard = { files: list, mode: "cut" };
-  updateSelectionUI();
-  notify(list.length === 1
-    ? `Cut ${list[0]}. Paste onto a folder to move it.`
-    : `Cut ${list.length} files. Paste onto a folder to move them.`, "info");
-}
-
-async function pasteIntoFolder(folderId) {
-  const files = state.clipboard.files.filter(Boolean);
-  if (!files.length) {
-    notify("Nothing to paste.", "warning");
-    return;
-  }
-
-  const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
-  const results = await moveFilesToFolder(files, folderId, { silent: true });
-
-  // Clearing after the move is the point; a cut must survive a failed paste.
-  // eslint-disable-next-line require-atomic-updates
-  state.clipboard = { files: [], mode: null };
-
-  if (results.moved > 0) {
-    notify(results.moved === 1
-      ? `Moved 1 file to ${targetLabel}.`
-      : `Moved ${results.moved} files to ${targetLabel}.`, "success");
-  }
-
-  if (results.failed.length) {
-    notify(`${results.failed.length} could not be moved: ${results.failed[0]}`, "error");
-  }
-}
-
-// One refresh for the whole batch rather than one per file, which is what made
-// a multi-file move feel like the UI was fighting itself.
-async function moveFilesToFolder(files, folderId, { silent = false } = {}) {
-  const failed = [];
-  let moved = 0;
-
-  for (const file of files) {
-    const doc = getDocByFile(file);
-    if (doc && (doc.folderId || null) === (folderId || null)) {
-      continue;
-    }
-
-    try {
-      await requestJson(`/api/docs/${docUrl(file)}/folder`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderId: folderId || null })
-      });
-      state.contentCache.delete(file);
-      moved += 1;
-    } catch (error) {
-      failed.push(error.message);
-    }
-  }
-
-  if (moved > 0) {
-    await refreshDocs({ preserveSearch: true });
-  }
-
-  if (!silent) {
-    const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
-    if (moved === 1) {
-      notify(`Moved 1 file to ${targetLabel}.`, "success");
-    } else if (moved > 1) {
-      notify(`Moved ${moved} files to ${targetLabel}.`, "success");
-    }
-    if (failed.length) {
-      notify(failed[0], "error");
-    }
-  }
-
-  return { moved, failed };
-}
-
-async function moveFolderToParent(folderId, parentId) {
-  try {
-    await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId: parentId || null })
-    });
-    await refreshDocs({ preserveSearch: true });
-    notify(`Moved "${getFolderLabel(folderId)}" into ${parentId ? getFolderLabel(parentId) : "the top level"}.`, "success");
-  } catch (error) {
-    notify(error.message, "error");
   }
 }
 
@@ -315,299 +108,6 @@ function startNewDocument(folderId = null) {
     folderId
   });
 }
-
-// --- Context menu ---------------------------------------------------------
-
-function closeContextMenu() {
-  if (!elements.contextMenu || elements.contextMenu.hidden) {
-    return;
-  }
-  elements.contextMenu.hidden = true;
-  elements.contextMenu.innerHTML = "";
-}
-
-function openContextMenu(x, y, items) {
-  if (!elements.contextMenu) {
-    return;
-  }
-
-  elements.contextMenu.innerHTML = "";
-
-  for (const item of items) {
-    if (item.separator) {
-      const hr = document.createElement("hr");
-      hr.className = "context-sep";
-      elements.contextMenu.appendChild(hr);
-      continue;
-    }
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = item.danger ? "context-item danger" : "context-item";
-    button.disabled = Boolean(item.disabled);
-    button.innerHTML = `<i class="ph ${item.icon}" aria-hidden="true"></i><span></span>`;
-    button.querySelector("span").textContent = item.label;
-
-    if (item.shortcut) {
-      const hint = document.createElement("kbd");
-      hint.textContent = item.shortcut;
-      button.appendChild(hint);
-    }
-
-    button.addEventListener("click", () => {
-      closeContextMenu();
-      item.action();
-    });
-
-    elements.contextMenu.appendChild(button);
-  }
-
-  elements.contextMenu.hidden = false;
-
-  // Flip the menu back on screen if it would overflow the viewport.
-  const rect = elements.contextMenu.getBoundingClientRect();
-  const left = Math.min(x, window.innerWidth - rect.width - 8);
-  const top = Math.min(y, window.innerHeight - rect.height - 8);
-  elements.contextMenu.style.left = `${Math.max(8, left)}px`;
-  elements.contextMenu.style.top = `${Math.max(8, top)}px`;
-
-  elements.contextMenu.querySelector(".context-item:not(:disabled)")?.focus();
-}
-
-function buildDocContextItems(doc) {
-  const targets = resolveTargetFiles(doc.file);
-  const many = targets.length > 1;
-  const inArchive = state.viewMode === "archive";
-
-  // Without write access the menu is what a reader can actually do: open it,
-  // and share it if the role allows. Offering Cut/Rename/Delete that only fail
-  // at the server is worse than not offering them.
-  if (!can("doc:write")) {
-    const items = state.isRecycleBinMode
-      ? [{ label: "Open", icon: "ph-file-text", action: () => void openRecycleBinDocument(doc.file) }]
-      : [{ label: "Open", icon: "ph-file-text", action: () => void openDocument(doc.file, true) }];
-
-    if (!state.isRecycleBinMode && can("share:manage")) {
-      items.push({ separator: true });
-      items.push({
-        label: state.shares.has(doc.file) ? "Manage share link" : "Share...",
-        icon: "ph-link-simple",
-        action: () => openShareModal(doc.file)
-      });
-    }
-
-    return items;
-  }
-
-  if (state.isRecycleBinMode) {
-    return [
-      {
-        label: "Open", icon: "ph-file-text", action: () => void openRecycleBinDocument(doc.file)
-      },
-      { separator: true },
-      {
-        label: "Restore",
-        icon: "ph-arrow-counter-clockwise",
-        action: () => void (inArchive ? restoreArchivedDocumentByFile(doc.file) : restoreDeletedDocumentByFile(doc.file))
-      },
-      {
-        label: inArchive ? "Delete forever" : "Archive",
-        icon: inArchive ? "ph-trash" : "ph-archive-box",
-        danger: true,
-        action: () => void (inArchive ? permanentlyDeleteArchivedDocument(doc.file) : hardDeleteDeletedDocumentByFile(doc.file))
-      }
-    ];
-  }
-
-  return [
-    { label: "Open", icon: "ph-file-text", disabled: many, action: () => void openDocument(doc.file, true) },
-    { label: "Edit", icon: "ph-pencil-simple", disabled: many, action: () => void openEditorForDocument(doc.file) },
-    { separator: true },
-    {
-      label: many ? `Cut ${targets.length} files` : "Cut",
-      icon: "ph-scissors",
-      shortcut: "Ctrl+X",
-      action: () => cutFiles(targets)
-    },
-    {
-      label: "Move to folder...",
-      icon: "ph-folder",
-      disabled: many,
-      action: () => openFolderModal({ mode: "move", file: doc.file, folderId: doc.folderId || null })
-    },
-    {
-      label: "Rename",
-      icon: "ph-cursor-text",
-      shortcut: "F2",
-      disabled: many,
-      action: () => beginInlineRename(doc.file)
-    },
-    { separator: true },
-    {
-      label: many ? `Delete ${targets.length} files` : "Delete",
-      icon: "ph-trash",
-      shortcut: "Del",
-      danger: true,
-      action: () => void deleteFiles(targets, "soft")
-    },
-    {
-      label: many ? `Archive ${targets.length} files` : "Archive",
-      icon: "ph-archive-box",
-      shortcut: "Shift+Del",
-      danger: true,
-      action: () => void deleteFiles(targets, "hard")
-    },
-    ...(can("share:manage") ? [
-      { separator: true },
-      {
-        label: state.shares.has(doc.file) ? "Manage share link" : "Share...",
-        icon: "ph-link-simple",
-        disabled: many,
-        action: () => openShareModal(doc.file)
-      }
-    ] : [])
-  ];
-}
-
-function buildFolderContextItems(folder) {
-  const canPaste = state.clipboard.files.length > 0;
-
-  // Every entry below is a write. There is no read-only folder action, so a
-  // viewer gets no folder menu rather than a menu of refusals.
-  if (!can("doc:write")) {
-    return [];
-  }
-
-  return [
-    {
-      label: "New file",
-      icon: "ph-file-plus",
-      action: () => startNewDocument(folder.id)
-    },
-    {
-      label: "New subfolder",
-      icon: "ph-folder-plus",
-      action: () => openFolderModal({ mode: "create", parentId: folder.id })
-    },
-    {
-      label: canPaste ? `Paste ${state.clipboard.files.length} file(s)` : "Paste",
-      icon: "ph-clipboard-text",
-      shortcut: "Ctrl+V",
-      disabled: !canPaste,
-      action: () => void pasteIntoFolder(folder.id)
-    },
-    { separator: true },
-    {
-      label: "Rename",
-      icon: "ph-cursor-text",
-      shortcut: "F2",
-      action: () => beginInlineFolderRename(folder.id)
-    },
-    {
-      label: "Move to top level",
-      icon: "ph-arrow-line-up",
-      disabled: !folder.parentId,
-      action: () => void moveFolderToParent(folder.id, null)
-    },
-    { separator: true },
-    {
-      label: "Delete folder",
-      icon: "ph-trash",
-      danger: true,
-      action: () => void deleteFolderById(folder.id)
-    }
-  ];
-}
-
-async function deleteFolderById(folderId) {
-  const folder = getFolderRecord(folderId);
-  if (!folder) {
-    return;
-  }
-
-  const descendants = state.folders.filter((entry) => folderPathIds(entry.id).includes(folderId) && entry.id !== folderId);
-  const affected = state.docs.filter((doc) => doc.folderId === folderId
-    || descendants.some((entry) => entry.id === doc.folderId)).length;
-
-  const shouldProceed = await requestConfirmation({
-    title: `Delete "${folder.name}"?`,
-    message: descendants.length
-      ? `This also deletes ${descendants.length} subfolder(s). ${affected} document(s) move back to Ungrouped. No file on disk is touched.`
-      : `${affected} document(s) move back to Ungrouped. No file on disk is touched.`,
-    confirmLabel: "Delete folder",
-    tone: "danger"
-  });
-
-  if (!shouldProceed) {
-    return;
-  }
-
-  try {
-    const payload = await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, { method: "DELETE" });
-    await refreshDocs({ preserveSearch: true });
-    notify(payload.removedFolders > 1
-      ? `Deleted "${folder.name}" and ${payload.removedFolders - 1} subfolder(s).`
-      : `Deleted folder "${folder.name}".`, "success");
-  } catch (error) {
-    notify(error.message, "error");
-  }
-}
-
-// --- Bulk delete ----------------------------------------------------------
-
-async function deleteFiles(files, mode) {
-  const list = files.filter(Boolean);
-  if (!list.length) {
-    return;
-  }
-
-  if (list.length === 1) {
-    await deleteDocumentByFile(list[0], mode);
-    return;
-  }
-
-  const shouldProceed = await requestConfirmation({
-    title: mode === "hard" ? `Archive ${list.length} files?` : `Delete ${list.length} files?`,
-    message: mode === "hard"
-      ? "They move to the archive, where they can still be restored."
-      : "They move to the recycle bin, where they can still be restored.",
-    confirmLabel: mode === "hard" ? "Archive" : "Delete",
-    tone: "danger"
-  });
-
-  if (!shouldProceed) {
-    notify("Nothing was deleted.", "info");
-    return;
-  }
-
-  const failed = [];
-  let done = 0;
-
-  for (const file of list) {
-    try {
-      await requestJson(`/api/docs/${docUrl(file)}/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode })
-      });
-      state.contentCache.delete(file);
-      done += 1;
-    } catch (error) {
-      failed.push(error.message);
-    }
-  }
-
-  clearSelection();
-  await refreshDocs({ preserveSearch: true });
-
-  if (done) {
-    notify(`${done} file(s) ${mode === "hard" ? "archived" : "moved to the recycle bin"}.`, "success");
-  }
-  if (failed.length) {
-    notify(failed[0], "error");
-  }
-}
-
 
 // --- Rendering ------------------------------------------------------------
 
@@ -5692,6 +5192,10 @@ global.App = {
   requestEditorClose, isEditorDirty, closeEditor, openEditor,
   openEditorForCurrentDoc, saveEditorDocument, syncEditorTabs, selectEditorTab,
   startNewDocument, uploadFolder, uploadMarkdown, isUploadableFile,
+  deleteDocumentByFile, openEditorForDocument,
+  restoreDeletedDocumentByFile, restoreArchivedDocumentByFile,
+  hardDeleteDeletedDocumentByFile, permanentlyDeleteArchivedDocument,
+  scheduleEditorPreview,
   moveDocumentToFolder,
   startPageEdit, savePageEdit, cancelPageEdit, isPageEditDirty, pageEditActive,
   collectPageMarkdown, insertPageBlock, applyVisualCommand,

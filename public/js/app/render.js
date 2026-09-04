@@ -29,10 +29,25 @@
     return MarkdownCore.renderDocumentContent(fileName, rawContent, title);
   }
 
+  function renderMermaidBlocks(root) {
+    return MarkdownCore.renderMermaidBlocks(root);
+  }
+
+  function destroyPanZoomInstances(root = null) {
+    return MarkdownCore.destroyPanZoomInstances(root);
+  }
+
+  function bindWheelZoomModifier() {
+    return MarkdownCore.bindWheelZoomModifier();
+  }
+
   global.AppRender = {
     waitForNextFrame,
     renderMarkdown,
     highlightCodeBlocks,
-    renderDocumentContent
+    renderDocumentContent,
+    renderMermaidBlocks,
+    destroyPanZoomInstances,
+    bindWheelZoomModifier
   };
 })(typeof window === "undefined" ? globalThis : window);
