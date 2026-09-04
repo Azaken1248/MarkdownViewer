@@ -1,3 +1,21 @@
+/* AzaDocs.
+ *
+ * This file is the assembly, and nothing else. It reads in one pass:
+ *
+ *   1. configuration — where state lives, what the limits are, which origin
+ *      this is served from. The only place in the app that reads the
+ *      environment.
+ *   2. what the app is built out of — each module handed that configuration.
+ *   3. middleware order, which is the one thing that has to be right here
+ *      because it cannot be seen from any of the modules.
+ *   4. the routes, mounted in the order a reader would want them.
+ *   5. boot, including the migration that must finish before anything serves.
+ *
+ * Anything that decides something rather than wiring something belongs in
+ * lib/: lib/docs for the library on disk, lib/http for the shapes a response
+ * can take, lib/routes for the addresses, lib/guards.js for who may.
+ */
+
 const express = require("express");
 const path = require("path");
 
@@ -65,10 +83,6 @@ const DELETED_MARKDOWN_DIR = path.join(STATE_DIR, "deleted_markdowns");
 const ASSETS_DIR = path.join(STATE_DIR, "assets");
 const DATA_DIR = path.join(STATE_DIR, "data");
 const ORGANIZER_FILE_PATH = path.join(DATA_DIR, "document-organizer.json");
-const {
-  readOrganizerState,
-  mutateOrganizerState
-} = createOrganizerFile({ filePath: ORGANIZER_FILE_PATH });
 const DELETED_SOFT_DIR = path.join(DELETED_MARKDOWN_DIR, "soft");
 const DELETED_HARD_DIR = path.join(DELETED_MARKDOWN_DIR, "hard");
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
@@ -80,49 +94,11 @@ const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 
-const {
-  readCachedTextFile,
-  readSearchIndexEntry,
-  readSnippetSource,
-  invalidateCachedContent
-} = createDocumentCache({
-  contentMaxBytes: CONTENT_CACHE_MAX_BYTES,
-  indexMaxBytes: SEARCH_INDEX_MAX_BYTES,
-  snippetMaxBytes: SNIPPET_CACHE_MAX_BYTES
-});
-
-const {
-  ensureStorageDirs,
-  migrateFlatLibraryToDirectories,
-  fileExists,
-  ensureUniqueFilenameInDir,
-  ensureUniqueFilename,
-  moveFile,
-  moveDocToRecycle,
-  getRecycleDocs,
-  walkDocs,
-  getDocs,
-  restoreFromBin,
-  resolveNewDocumentPath
-} = createDocumentStore({
-  markdownDir: MARKDOWN_DIR,
-  softDeletedDir: DELETED_SOFT_DIR,
-  hardDeletedDir: DELETED_HARD_DIR,
-  dataDir: DATA_DIR,
-  readOrganizerState,
-  mutateOrganizerState,
-  invalidateCachedContent
-});
-
-const { searchDocuments: searchIn } = createSearch({
-  readSearchIndexEntry,
-  readSnippetSource,
-  resultLimit: SEARCH_RESULT_LIMIT
-});
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
 const ERROR_TEMPLATE_PATH = path.join(PUBLIC_DIR, "error.html");
 const DIAGRAM_TEMPLATE_PATH = path.join(PUBLIC_DIR, "diagram.html");
+
 // Where this actually lives. Canonical, og:*, and oEmbed URLs are built from
 // this rather than from the request, so a spoofed Host header cannot redirect
 // a link preview somewhere else. PUBLIC_BASE_URL overrides it — set it to
@@ -211,63 +187,61 @@ const {
 app.use(attachSession);
 app.use(requireCsrf);
 
-const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH);
-
-// A folder upload is capped by count as well as by per-file size: 200 files at
-// 2MB each is already 400MB of request body in the worst case.
-
-
-
-
-
 // ---------------------------------------------------------------------------
-// Auth routes
+// What the app is built out of
+//
+// Each of these is a module handed the configuration above: the folder file,
+// the three caches, the library on disk, the scoring, the error pages, the
+// embed metadata. None of them reads the environment — everything they need
+// was decided at the top of this file — and none of them knows what a route is.
 // ---------------------------------------------------------------------------
 
+const {
+  readOrganizerState,
+  mutateOrganizerState
+} = createOrganizerFile({ filePath: ORGANIZER_FILE_PATH });
 
-
-app.use(createAuthRoutes({
-  authStore,
-  requireAuth,
-  sessionPayload,
-  issueSessionCookie,
-  clearSessionCookie
-}));
-
-// ---------------------------------------------------------------------------
-// Share links
-// ---------------------------------------------------------------------------
-
-app.use(createSharesRoutes({
-  markdownDir: MARKDOWN_DIR,
-  shareStore,
-  requirePermission,
-  getBaseUrl: getBaseUrlFromRequest,
-  fileExists,
+const {
   readCachedTextFile,
-  paramDocPath,
-  toDocTitle
-}));
+  readSearchIndexEntry,
+  readSnippetSource,
+  invalidateCachedContent
+} = createDocumentCache({
+  contentMaxBytes: CONTENT_CACHE_MAX_BYTES,
+  indexMaxBytes: SEARCH_INDEX_MAX_BYTES,
+  snippetMaxBytes: SNIPPET_CACHE_MAX_BYTES
+});
 
-// ---------------------------------------------------------------------------
-// Saved links
-//
-// Reading the list is a read; adding, editing and removing are writes, so they
-// sit behind doc:write like everything else that changes the library.
-//
-// Adding and refreshing also make the server fetch a URL someone else chose,
-// which is the one outbound request this app makes. lib/link-preview.js decides
-// what may be fetched; the limit below decides how often, so an account cannot
-// use this as a general-purpose proxy or a scanner.
-// ---------------------------------------------------------------------------
+const {
+  ensureStorageDirs,
+  migrateFlatLibraryToDirectories,
+  fileExists,
+  ensureUniqueFilenameInDir,
+  ensureUniqueFilename,
+  moveFile,
+  moveDocToRecycle,
+  getRecycleDocs,
+  walkDocs,
+  getDocs,
+  restoreFromBin,
+  resolveNewDocumentPath
+} = createDocumentStore({
+  markdownDir: MARKDOWN_DIR,
+  softDeletedDir: DELETED_SOFT_DIR,
+  hardDeletedDir: DELETED_HARD_DIR,
+  dataDir: DATA_DIR,
+  readOrganizerState,
+  mutateOrganizerState,
+  invalidateCachedContent
+});
 
-app.use(createLinksRoutes({ linkStore, requireRead, requirePermission }));
+const { searchDocuments: searchIn } = createSearch({
+  readSearchIndexEntry,
+  readSnippetSource,
+  resultLimit: SEARCH_RESULT_LIMIT
+});
 
-// ---------------------------------------------------------------------------
-// User administration
-// ---------------------------------------------------------------------------
-
-app.use(createUserRoutes({ authStore, roles: ROLES, requirePermission }));
+const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH);
 
 /* Which documents a search covers. Scoring them is lib/docs/search.js; picking
  * the corpus is here, because it is the storage layout that decides it.
@@ -294,10 +268,10 @@ const {
 } = createEmbed({ getBaseUrl: getBaseUrlFromRequest });
 
 /* What an error looks like is decided in lib/http/errors.js. Everything it
-   cannot know on its own — where the template is, what the site is called,
-   which origin to build links against, which of the two upload limits a 413
-   is about — is handed over once, here.
-   --------------------------------------------------------------------------- */
+ * cannot know on its own — where the template is, what the site is called,
+ * which origin to build links against, which of the two upload limits a 413
+ * is about — is handed over once, here.
+ */
 
 const { sendError, notFound, errorHandler } = createErrorPages({
   templatePath: ERROR_TEMPLATE_PATH,
@@ -310,6 +284,38 @@ const { sendError, notFound, errorHandler } = createErrorPages({
 });
 
 const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH);
+
+// ---------------------------------------------------------------------------
+// The routes
+//
+// Order matters twice, and only twice: the pages come last because they answer
+// anything left over, and the two error middlewares come after everything.
+// Between the routers the addresses do not overlap, so their order is the order
+// a reader would want them in.
+// ---------------------------------------------------------------------------
+
+app.use(createAuthRoutes({
+  authStore,
+  requireAuth,
+  sessionPayload,
+  issueSessionCookie,
+  clearSessionCookie
+}));
+
+app.use(createSharesRoutes({
+  markdownDir: MARKDOWN_DIR,
+  shareStore,
+  requirePermission,
+  getBaseUrl: getBaseUrlFromRequest,
+  fileExists,
+  readCachedTextFile,
+  paramDocPath,
+  toDocTitle
+}));
+
+app.use(createLinksRoutes({ linkStore, requireRead, requirePermission }));
+
+app.use(createUserRoutes({ authStore, roles: ROLES, requirePermission }));
 
 app.use(createMetaRoutes({
   buildEmbedMeta,
@@ -369,8 +375,6 @@ app.use(createRecycleRoutes({
   paramDocPath,
   paramEntryPath
 }));
-
-
 
 app.use(createAssetRoutes({
   assetsDir: ASSETS_DIR,
