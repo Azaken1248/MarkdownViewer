@@ -416,22 +416,20 @@ async function run(server) {
   try {
     window.eval(appEntrySource);
 
-    // The app's own surface, plus the modules it is assembled from. Reaching
-    // for a name that no longer exists now fails here, loudly, instead of
-    // quietly testing nothing.
     window.eval(`
-      ;window.__t = Object.assign({}, App, {
-        setSelection: AppSelection.setSelection,
-        clearSelection: AppSelection.clearSelection,
-        notify: AppNotify.notify,
-        setStatus: AppNotify.setStatus,
-        requestConfirmation: AppNotify.requestConfirmation,
-        resolveConfirmDialog: AppNotify.resolveConfirmDialog,
-        enterModalLayer: AppModal.enterModalLayer,
-        exitModalLayer: AppModal.exitModalLayer,
-        showTooltip: AppTooltips.showTooltip,
-        hideTooltip: AppTooltips.hideTooltip
-      });
+      /* The handle the checks below drive the app through.
+       *
+       * Assembled from every namespace the page defines rather than from a
+       * list kept here, so that moving a function from app.js into a module
+       * of its own — which is a fact about the source tree — cannot quietly
+       * empty a check. App goes on last: a name it still owns is the one the
+       * app is really using.
+       */
+      ;window.__t = Object.assign(
+        {},
+        ...Object.keys(window).filter((key) => /^App[A-Z]/.test(key)).map((key) => window[key]),
+        App
+      );
     `);
     check("no exception on load", true, true);
   } catch (error) {
