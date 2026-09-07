@@ -14,6 +14,7 @@ const path = require("path");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
+const { modelScriptPaths, drawScriptPaths } = require("./app-source.js");
 
 // The module is a plain script that hangs itself off the global, the same way
 // the browser loads it.
@@ -23,13 +24,17 @@ const VE = globalThis.VisualEditor;
 
 // The flowchart builder's model, loaded the same way and tested here for the
 // same reason: it is the other half of "edit this without retyping it".
-require(path.join(ROOT, "js", "diagram-model.js"));
+for (const file of modelScriptPaths(ROOT)) {
+  require(file);
+}
 const DM = globalThis.DiagramModel;
 
 // And the drawing, which is what makes writing the layout down worth doing: a
 // diagram that says where its boxes are is one this app can draw itself.
 require(path.join(ROOT, "js", "diagram-icons.js"));
-require(path.join(ROOT, "js", "diagram-draw.js"));
+for (const file of drawScriptPaths(ROOT)) {
+  require(file);
+}
 const DD = globalThis.DiagramDraw;
 
 let failures = 0;

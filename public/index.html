@@ -73,15 +73,38 @@
        integrity hashes live in LAZY_LIBRARIES there.
 
        marked and DOMPurify stay: nothing renders without them. -->
+  <script src="/js/md/lazy.js?v=1" defer></script>
+  <script src="/js/md/text.js?v=1" defer></script>
+  <script src="/js/md/math.js?v=1" defer></script>
+  <script src="/js/md/notebook.js?v=1" defer></script>
+  <script src="/js/md/diagram-theme.js?v=1" defer></script>
+  <script src="/js/md/code.js?v=1" defer></script>
+  <script src="/js/md/mermaid.js?v=1" defer></script>
+  <script src="/js/md/panzoom.js?v=1" defer></script>
   <script src="/js/markdown-core.js?v=79" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
   <script src="/js/visual-editor.js?v=65" defer></script>
   <!-- Mermaid flowcharts as steps and arrows, for building one without typing
        its syntax. A few kilobytes and no dependency on Mermaid itself, which is
        still only downloaded when a document has a diagram in it. -->
+  <script src="/js/dm/shapes.js?v=1" defer></script>
+  <script src="/js/dm/grammar.js?v=1" defer></script>
+  <script src="/js/dm/cells.js?v=1" defer></script>
+  <script src="/js/dm/declarations.js?v=1" defer></script>
+  <script src="/js/dm/parse.js?v=1" defer></script>
+  <script src="/js/dm/serialize.js?v=1" defer></script>
+  <script src="/js/dm/layout.js?v=1" defer></script>
   <script src="/js/diagram-model.js?v=95" defer></script>
   <!-- Draws a flowchart that carries its own layout, without the 3.5MB engine. -->
   <script src="/js/diagram-icons.js?v=1" defer></script>
+  <script src="/js/dd/base.js?v=1" defer></script>
+  <script src="/js/dd/paint.js?v=1" defer></script>
+  <script src="/js/dd/shapes.js?v=1" defer></script>
+  <script src="/js/dd/ends.js?v=1" defer></script>
+  <script src="/js/dd/route.js?v=1" defer></script>
+  <script src="/js/dd/edges.js?v=1" defer></script>
+  <script src="/js/dd/marks.js?v=1" defer></script>
+  <script src="/js/dd/groups.js?v=1" defer></script>
   <script src="/js/diagram-draw.js?v=104" defer></script>
   <!-- The canvas the diagram is edited on. The same one the standalone editor
        page mounts, so a fence in a document and a .mmd file on its own are the

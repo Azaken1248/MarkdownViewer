@@ -10,7 +10,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { appSource } = require("./app-source.js");
+const { appSource, coreSource, coreScriptPaths } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
@@ -25,7 +25,7 @@ function check(label, actual, expected) {
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
 const app = appSource(ROOT);
-const core = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
+const core = coreSource(ROOT);
 
 /* --- the engine, in a browser that is not one -------------------------------
 
@@ -64,7 +64,9 @@ window.hljs = {
   }
 };
 
-window.eval(fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8"));
+for (const file of coreScriptPaths(ROOT)) {
+  window.eval(fs.readFileSync(file, "utf8"));
+}
 const Core = window.MarkdownCore;
 
 // Counted from before the first pass, so the delegation check below can say

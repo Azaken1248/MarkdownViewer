@@ -34,4 +34,56 @@ function appSource(publicDir = DEFAULT_PUBLIC_DIR) {
     .join("\n");
 }
 
-module.exports = { clientScriptPaths, appScriptPaths, appSource };
+// The render engine: the modules under js/md, then markdown-core.js, in page
+// order. Same reasoning as above — the page says which files it is made of, so
+// a test that evaluates "the engine" gets whatever the page would have loaded.
+function coreScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  const jsDir = path.join(publicDir, "js");
+  return clientScriptPaths(publicDir).filter((file) => {
+    const rel = path.relative(jsDir, file);
+    return rel === "markdown-core.js" || rel.startsWith(`md${path.sep}`);
+  });
+}
+
+function coreSource(publicDir = DEFAULT_PUBLIC_DIR) {
+  return coreScriptPaths(publicDir)
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+}
+
+// The flowchart model: the modules under js/dm, then diagram-model.js. Same
+// reasoning again — the page decides which files the model is made of.
+function modelScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  const jsDir = path.join(publicDir, "js");
+  return clientScriptPaths(publicDir).filter((file) => {
+    const rel = path.relative(jsDir, file);
+    return rel === "diagram-model.js" || rel.startsWith(`dm${path.sep}`);
+  });
+}
+
+function modelSource(publicDir = DEFAULT_PUBLIC_DIR) {
+  return modelScriptPaths(publicDir)
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+}
+
+// The drawing: the modules under js/dd, then diagram-draw.js.
+function drawScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  const jsDir = path.join(publicDir, "js");
+  return clientScriptPaths(publicDir).filter((file) => {
+    const rel = path.relative(jsDir, file);
+    return rel === "diagram-draw.js" || rel.startsWith(`dd${path.sep}`);
+  });
+}
+
+function drawSource(publicDir = DEFAULT_PUBLIC_DIR) {
+  return drawScriptPaths(publicDir)
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+}
+
+module.exports = {
+  clientScriptPaths, appScriptPaths, appSource,
+  coreScriptPaths, coreSource, modelScriptPaths, modelSource,
+  drawScriptPaths, drawSource
+};

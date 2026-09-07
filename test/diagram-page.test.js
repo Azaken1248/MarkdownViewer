@@ -11,7 +11,9 @@
 
 const fs = require("fs");
 const path = require("path");
-const { appSource: readAppSource } = require("./app-source.js");
+const {
+  appSource: readAppSource, modelScriptPaths, drawScriptPaths
+} = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 
@@ -86,8 +88,16 @@ async function boot(dom, { cookie, origin }) {
   // theme-boot.js first, and for the same reason the page loads it in <head>:
   // it settles the theme before anything paints, and it is where the switch the
   // bar wires up lives.
-  for (const file of ["theme-boot.js", "visual-editor.js", "diagram-model.js",
-    "diagram-icons.js", "diagram-draw.js", "diagram-editor.js", "diagram-page.js"]) {
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "theme-boot.js"), "utf8"));
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
+  for (const file of modelScriptPaths(ROOT)) {
+    window.eval(fs.readFileSync(file, "utf8"));
+  }
+  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-icons.js"), "utf8"));
+  for (const file of drawScriptPaths(ROOT)) {
+    window.eval(fs.readFileSync(file, "utf8"));
+  }
+  for (const file of ["diagram-editor.js", "diagram-page.js"]) {
     window.eval(fs.readFileSync(path.join(ROOT, "js", file), "utf8"));
   }
 

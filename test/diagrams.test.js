@@ -3,14 +3,16 @@
 // zero. Also checks the diagram palette is actually distinguishable.
 const fs = require("fs");
 const path = require("path");
-const { appSource } = require("./app-source.js");
+const {
+  appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths
+} = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
 const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
 // The render engine moved into markdown-core.js so the share page could use the
 // same sanitizer and the same Mermaid security level. Read it from there.
-const js = fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8");
+const js = coreSource(PUBLIC_DIR);
 // The repaint-on-theme-change lives with whichever page owns the DOM it
 // repaints, so those checks read the pages rather than the engine.
 const appJs = appSource(PUBLIC_DIR);
@@ -281,10 +283,16 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
 
   // The model and the renderer are loaded the way the page loads them: plain
   // scripts, before markdown-core, hanging themselves off the window.
-  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-model.js"), "utf8"));
+  for (const file of modelScriptPaths(PUBLIC_DIR)) {
+    win.eval(fs.readFileSync(file, "utf8"));
+  }
   win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-icons.js"), "utf8"));
-  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-draw.js"), "utf8"));
-  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "markdown-core.js"), "utf8"));
+  for (const file of drawScriptPaths(PUBLIC_DIR)) {
+    win.eval(fs.readFileSync(file, "utf8"));
+  }
+  for (const file of coreScriptPaths(PUBLIC_DIR)) {
+    win.eval(fs.readFileSync(file, "utf8"));
+  }
 
   const root = win.document.createElement("div");
   win.document.body.appendChild(root);

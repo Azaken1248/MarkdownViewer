@@ -6,7 +6,9 @@
 // cut, paste, rename, folder create — be exercised for real.
 const fs = require("fs");
 const path = require("path");
-const { appScriptPaths, appSource } = require("./app-source.js");
+const {
+  appScriptPaths, appSource, coreSource, modelScriptPaths, drawScriptPaths
+} = require("./app-source.js");
 const http = require("http");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
@@ -384,10 +386,10 @@ async function run(server) {
   const appScripts = appScriptPaths(ROOT);
   const appModules = appScripts.slice(0, -1);
   const appEntrySource = fs.readFileSync(appScripts[appScripts.length - 1], "utf8");
-  const coreSource = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
+  const engineSource = coreSource(ROOT);
   // markdown-core defines the render engine app.js delegates to; it has to be
-  // in scope before app.js runs, exactly as the two <script> tags arrange.
-  window.eval(coreSource);
+  // in scope before app.js runs, exactly as the script tags on the page arrange.
+  window.eval(engineSource);
 
   // The theme, settled before anything paints — and the cycle app.js switches
   // it with, which lives here because the diagram page needs it too and loads
@@ -400,9 +402,13 @@ async function run(server) {
 
   // And the flowchart model the diagram builder is made of, and the drawing it
   // puts on the screen, the same way.
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-model.js"), "utf8"));
+  for (const file of modelScriptPaths(ROOT)) {
+    window.eval(fs.readFileSync(file, "utf8"));
+  }
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-icons.js"), "utf8"));
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-draw.js"), "utf8"));
+  for (const file of drawScriptPaths(ROOT)) {
+    window.eval(fs.readFileSync(file, "utf8"));
+  }
   window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-editor.js"), "utf8"));
 
   // The notebook Python controller, loaded before app.js the same way the page
@@ -3133,7 +3139,7 @@ async function run(server) {
       shareJs.includes("executableNotebooks"), false);
 
     // The core defaults to off, so forgetting to configure it fails safe.
-    const core = fs.readFileSync(path.join(ROOT, "js", "markdown-core.js"), "utf8");
+    const core = coreSource(ROOT);
     check("the default is off", /executableNotebooks: false/.test(core), true);
   }
 
