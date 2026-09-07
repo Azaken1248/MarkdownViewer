@@ -165,12 +165,10 @@ module.exports = async (ctx) => {
     check("a write with no CSRF token is refused", noToken.status, 403);
     check("...and says why", noToken.body.code, "csrf");
 
-    // eslint-disable-next-line require-atomic-updates
     admin.csrf = "a-token-of-the-right-shape-but-wrong";
     check("a write with the wrong token is refused",
       (await admin.post("/api/docs", { fileName: "csrf-test.md", content: "x" })).status, 403);
 
-    // eslint-disable-next-line require-atomic-updates
     admin.csrf = saved;
     check("a write with the right token succeeds",
       (await admin.post("/api/docs", { fileName: "csrf-test.md", content: "x" })).status, 201);
