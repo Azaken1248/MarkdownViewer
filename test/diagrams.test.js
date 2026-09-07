@@ -4,12 +4,12 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths
+  appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths, styleSource
 } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
-const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
+const css = styleSource(PUBLIC_DIR);
 // The render engine moved into markdown-core.js so the share page could use the
 // same sanitizer and the same Mermaid security level. Read it from there.
 const js = coreSource(PUBLIC_DIR);

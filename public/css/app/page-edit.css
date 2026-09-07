@@ -1,0 +1,407 @@
+/* --------------------------------------------------------------------------
+   Editing the document on the page
+
+   The editing surface is the reading surface: #docContent keeps its class, its
+   column, its width and its type, and the blocks inside it are the same
+   rendering it shows the rest of the time.
+
+   Nothing in here may change the document's metrics. The block wrappers carry
+   no border, no padding and no background, so their children's margins collapse
+   through them exactly as they do when the elements are siblings — which is why
+   the text does not move by a pixel when editing starts. Focus is drawn with an
+   absolutely positioned rule and hover with opacity, neither of which takes up
+   space.
+   -------------------------------------------------------------------------- */
+
+/* Horizontal padding matches .viewer-toolbar at every size: this bar sits
+   directly under it, and two rows of controls a few pixels out of step with
+   each other read as a mistake rather than as a hierarchy. */
+.page-edit-bar {
+  position: sticky;
+  /* Directly under the viewer toolbar, whose height depends on what is in it
+     and is measured rather than guessed. */
+  top: var(--page-edit-top, 48px);
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.page-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.page-edit-state {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+/* While the document is being edited, the controls that would take you
+   somewhere else are the ones in the bar. */
+body.page-editing #editCurrentDocBtn,
+body.page-editing #dockEdit {
+  display: none;
+}
+
+.visual-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.visual-tool {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.visual-tool:hover {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.visual-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.visual-tool-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.visual-tool-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+/* One wrapper per markdown block, because the block boundaries are what the
+   serializer works on: an edited block is rewritten and every other block is
+   emitted exactly as it was found. */
+.markdown-body.doc-editing .ve-block {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* The reading view kills the first element's top margin; with wrappers in the
+   way the same rule has to reach one level deeper. */
+.markdown-body.doc-editing> .ve-block:first-child> :first-child {
+  margin-top: 0;
+}
+
+.markdown-body.doc-editing .ve-block[contenteditable="true"]:focus {
+  outline: none;
+}
+
+/* A rule in the margin, out of the flow, so showing which block has the cursor
+   costs the layout nothing. */
+.markdown-body.doc-editing .ve-block[contenteditable="true"]:focus::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* An empty document still needs somewhere to put the cursor. This block is the
+   one the editor adds for that; it is not in the file until it is typed in. */
+.markdown-body.doc-editing .ve-placeholder {
+  display: block;
+  min-height: 1.7em;
+}
+
+.markdown-body.doc-editing .ve-placeholder:empty::after {
+  content: "Write here";
+  color: var(--fg-subtle);
+}
+
+/* A table is typed into as a table. The cells are editable where they are and
+   the controls act on the cell the cursor is in, so the alignment row and the
+   pipes never have to be thought about. */
+.markdown-body.doc-editing .ve-table {
+  position: relative;
+}
+
+.markdown-body.doc-editing .ve-table th,
+.markdown-body.doc-editing .ve-table td {
+  /* The cell being typed in has to be findable without the table jumping, so
+     the mark is an inset shadow rather than a border. */
+  transition: box-shadow 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-table th:focus,
+.markdown-body.doc-editing .ve-table td:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ve-table-tools {
+  position: absolute;
+  top: -14px;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-table:hover .ve-table-tools,
+.markdown-body.doc-editing .ve-table:focus-within .ve-table-tools {
+  opacity: 1;
+}
+
+.ve-table-tool {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  min-height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.ve-table-tool:hover {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.ve-table-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ve-table-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+/* Code is typed into as code: same box, same font, same colours. The language
+   is a field rather than something to go and find in the source. */
+.markdown-body.doc-editing .ve-code {
+  position: relative;
+}
+
+.markdown-body.doc-editing .ve-code pre code:focus {
+  outline: none;
+}
+
+.markdown-body.doc-editing .ve-code pre:focus-within {
+  box-shadow: inset 0 0 0 2px var(--accent-muted);
+}
+
+.ve-code-language {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 96px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-code:hover .ve-code-language,
+.markdown-body.doc-editing .ve-code:focus-within .ve-code-language {
+  opacity: 1;
+}
+
+.ve-code-language:focus {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+@media (hover: none) {
+
+  .ve-table-tools,
+  .ve-code-language {
+    opacity: 1;
+  }
+}
+
+/* Math, diagrams, raw HTML, front matter: there is nothing in the rendering to
+   type into — an equation is a picture of an equation. These stay rendered and
+   hand over their markdown on request, with a preview so the result is visible
+   while it is being written. */
+.markdown-body.doc-editing .ve-embed {
+  position: relative;
+}
+
+/* A flowchart has two ways in — its steps or its Mermaid — so the corner is a
+   row rather than a single button, and the two never sit on top of each other. */
+.markdown-body.doc-editing .ve-embed-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-body.doc-editing .ve-embed-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.markdown-body.doc-editing .ve-embed:hover .ve-embed-tools,
+.markdown-body.doc-editing .ve-embed-tools:focus-within {
+  opacity: 1;
+}
+
+.markdown-body.doc-editing .ve-embed-edit:hover {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+}
+
+.markdown-body.doc-editing .ve-embed-build {
+  border-color: var(--accent-muted);
+  color: var(--fg);
+}
+
+/* Nothing hovers on a touch screen, so the buttons cannot be something you have
+   to hover to find. */
+@media (hover: none) {
+  .markdown-body.doc-editing .ve-embed-tools {
+    opacity: 1;
+  }
+}
+
+.markdown-body.doc-editing .ve-embed-note {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+}
+
+.markdown-body.doc-editing .ve-embed.is-source-open {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.ve-embed-head {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--raised);
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ve-embed-source {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: vertical;
+  /* Same reason as the source editor: this font draws ### as one glyph. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+
+.ve-embed-source:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-muted);
+}
+
+/* What the source above it comes out as, redrawn as it is typed. Writing an
+   equation blind and pressing Done to find out is what makes source editing
+   feel like a punishment. */
+.ve-embed-preview {
+  padding: 10px;
+  border-top: 1px dashed var(--border-muted);
+  background: var(--canvas);
+  overflow-x: auto;
+}
+
+.ve-embed-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 10px 10px;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-embed-done:hover {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+}
+

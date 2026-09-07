@@ -1,0 +1,251 @@
+/* --------------------------------------------------------------------------
+   Search
+   -------------------------------------------------------------------------- */
+
+.search-wrap {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 520px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.search-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.search-wrap>i {
+  color: var(--fg-muted);
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.search-wrap input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.search-wrap input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.search-wrap input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-hint {
+  flex-shrink: 0;
+  transition: opacity 120ms ease;
+}
+
+.search-wrap:focus-within .search-hint,
+.search-wrap.has-value .search-hint {
+  display: none;
+}
+
+.search-clear {
+  flex-shrink: 0;
+  display: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.search-wrap.has-value .search-clear {
+  display: grid;
+}
+
+.search-clear:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* Top results dropdown */
+
+.supersearch-panel {
+  position: relative;
+  z-index: 25;
+  flex-shrink: 0;
+  margin: 0 16px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  max-height: min(52dvh, 420px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+
+.supersearch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.supersearch-head p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.supersearch-head span {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.supersearch-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.supersearch-item {
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.supersearch-item:hover,
+.supersearch-item:focus-visible {
+  background: var(--raised);
+  border-color: var(--border);
+}
+
+.supersearch-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.supersearch-item-title i {
+  color: var(--fg-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.supersearch-item-file {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+.supersearch-item-snippet {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+.supersearch-item mark {
+  background: var(--attention-subtle);
+  color: var(--fg);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.supersearch-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.supersearch-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--raised);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+.supersearch-hint kbd {
+  font-size: 10px;
+}
+
+.supersearch-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.supersearch-more:hover,
+.supersearch-more:focus-visible {
+  background: var(--raised);
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Layout
+   -------------------------------------------------------------------------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar-overlay {
+  display: none;
+}
+

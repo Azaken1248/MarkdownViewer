@@ -82,8 +82,25 @@ function drawSource(publicDir = DEFAULT_PUBLIC_DIR) {
     .join("\n");
 }
 
+// Every stylesheet the page links from our own /css, in page order. The
+// cascade is the order of these tags, so a check that greps "the stylesheet"
+// has to read them joined and in that order — the same reasoning as the
+// scripts above, and the same failure if a file is added to one and not the
+// other.
+function styleSheetPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  const html = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
+  return [...html.matchAll(/<link[^>]*\shref="\/css\/([^"?]+)/g)]
+    .map(([, file]) => path.join(publicDir, "css", file));
+}
+
+function styleSource(publicDir = DEFAULT_PUBLIC_DIR) {
+  return styleSheetPaths(publicDir)
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("");
+}
+
 module.exports = {
   clientScriptPaths, appScriptPaths, appSource,
   coreScriptPaths, coreSource, modelScriptPaths, modelSource,
-  drawScriptPaths, drawSource
+  drawScriptPaths, drawSource, styleSheetPaths, styleSource
 };

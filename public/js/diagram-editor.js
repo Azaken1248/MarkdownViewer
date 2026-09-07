@@ -3819,9 +3819,9 @@
      */
     const EXPORT_SCALE = 2;
 
-    /* The app's own stylesheet, as the page actually loaded it.
+    /* The app's own styling, as the page actually loaded it.
      *
-     * Asked for by the href on the page rather than by a path written here, so
+     * Asked for by the hrefs on the page rather than by paths written here, so
      * it is the cached copy of the version this page is running and not a
      * second request for whatever is newest. Fetched at the moment of saving
      * rather than held: a picture is saved rarely, and a copy kept from
@@ -3835,12 +3835,21 @@
        * and the second would overwrite what the first had already worked out.
        */
       if (!sheetAsked) {
-        const link = document.querySelector('link[rel="stylesheet"][href*="app.css"]');
-        sheetAsked = fetch(link ? link.href : "/css/app.css")
+        /* All of the page's own stylesheets, in the order it links them. The
+         * rules a diagram is painted by are spread across several files now,
+         * and asking for one of them by name would save a picture with most of
+         * its colours missing.
+         */
+        const links = [...document.querySelectorAll('link[rel="stylesheet"]')]
+          .map((link) => link.getAttribute("href") || "")
+          .filter((href) => href.startsWith("/css/"));
+        const wanted = links.length > 0 ? links : ["/css/app/diagram.css"];
+        sheetAsked = Promise.all(wanted.map((href) => fetch(href)
           .then((answer) => (answer.ok ? answer.text() : ""))
           // A picture with no styling is still a picture of the right shape,
           // and a better answer than a button that does nothing.
-          .catch(() => "");
+          .catch(() => "")))
+          .then((sheets) => sheets.join("\n"));
       }
 
       return sheetAsked;

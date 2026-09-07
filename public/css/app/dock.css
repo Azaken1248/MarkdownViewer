@@ -1,0 +1,42 @@
+/* --------------------------------------------------------------------------
+   Mobile dock
+   -------------------------------------------------------------------------- */
+
+.mobile-dock {
+  display: none;
+}
+
+.mobile-only {
+  display: none;
+}
+
+.dock-btn {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dock-btn i {
+  font-size: 18px;
+}
+
+.dock-btn:hover:not(:disabled),
+.dock-btn:focus-visible {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.dock-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+

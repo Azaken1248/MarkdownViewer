@@ -1,0 +1,411 @@
+/* --------------------------------------------------------------------------
+   Sidebar / file explorer
+   -------------------------------------------------------------------------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-muted);
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+
+.filter-clear:hover,
+.filter-clear:focus-visible {
+  background: var(--selected-hover);
+  border-color: var(--accent);
+}
+
+.sidebar-meta {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  border-bottom: 1px solid var(--border-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.selection-meta {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+
+/* Mode toggles light up so it is never a guess which list you are looking at. */
+#toggleRecycleBinBtn.active {
+  color: var(--attention);
+  background: var(--attention-subtle);
+}
+
+#toggleArchiveBtn.active {
+  color: var(--done);
+  background: var(--done-subtle);
+}
+
+/* --- The tree ----------------------------------------------------------- */
+
+.tree {
+  margin: 0;
+  padding: 4px 0 24px;
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  user-select: none;
+}
+
+.tree-group {
+  display: block;
+}
+
+/* Rows are the unit of the whole explorer: one line, fixed height, no card. */
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--tree-row-height);
+}
+
+.tree-row-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--tree-row-height);
+  padding: 0 8px 0 calc(var(--tree-gutter) + var(--depth, 0) * var(--tree-indent));
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.tree-row:hover .tree-row-btn {
+  background: var(--raised);
+}
+
+.tree-row-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Two different states, deliberately distinguishable: `is-selected` is what a
+   file operation will act on, `is-active` is the document currently open. */
+.tree-row.is-selected .tree-row-btn {
+  background: var(--selected);
+}
+
+.tree-row.is-selected:hover .tree-row-btn {
+  background: var(--selected-hover);
+}
+
+.tree-row.is-active .tree-row-btn {
+  background: var(--accent-subtle);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.tree-row.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+/* A cut file stays visible but reads as "in flight", the way Explorer ghosts it. */
+.tree-row.is-cut .tree-row-btn {
+  opacity: 0.5;
+}
+
+.tree-row.is-cut .tree-label {
+  font-style: italic;
+}
+
+/* Inline rename */
+.tree-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.tree-caret {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  transition: transform 120ms ease;
+}
+
+.tree-group.is-collapsed .tree-caret {
+  transform: rotate(-90deg);
+}
+
+.tree-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  font-size: 15px;
+  color: var(--fg-muted);
+}
+
+.tree-row-folder .tree-icon {
+  color: var(--accent);
+}
+
+.tree-row.is-active .tree-icon {
+  color: var(--accent);
+}
+
+.tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-row-folder .tree-label {
+  font-weight: 600;
+}
+
+.tree-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  padding-right: 2px;
+}
+
+/* The action plate is an overlay, so on a folder row it would land straight on
+   top of the document count. Yield the slot to the actions while they are up —
+   the count is ambient information and the buttons are the thing being aimed
+   at. Same trade an editor's file tree makes. */
+@media (hover: hover) {
+
+  .tree-row:hover .tree-count,
+  .tree-row:focus-within .tree-count {
+    visibility: hidden;
+  }
+}
+
+/* Hover actions sit on an opaque plate so long filenames slide under them
+   instead of showing through. */
+.tree-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px 0 12px;
+  background: var(--raised);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The plate is opaque, so on the open row it has to match that row's fill. */
+.tree-row.is-active .tree-actions {
+  background: var(--selected);
+}
+
+.tree-row:focus-within .tree-actions,
+.tree-row.show-actions .tree-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .tree-row:hover .tree-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.tree-action {
+  display: grid;
+  place-items: center;
+  /* 24px is the WCAG 2.5.8 floor for a pointer target. These were 22. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tree-action:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+.tree-action.danger:hover {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.tree-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tree-action:disabled:hover {
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+/* The overflow button only exists for touch, where hover actions cannot work. */
+.tree-action-more {
+  display: none;
+}
+
+/* Indent guides: one hairline per nesting level, drawn on the child list. */
+.tree-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  position: relative;
+}
+
+.tree-children::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* +7: half of the 16px icon the row starts with, less half the line. */
+  left: calc(var(--tree-gutter) + 7px + var(--depth, 0) * var(--tree-indent));
+  width: 1px;
+  background: var(--border);
+}
+
+.tree-group.is-collapsed>.tree-children {
+  display: none;
+}
+
+/* Drag and drop */
+
+.tree-row-doc[draggable="true"] .tree-row-btn {
+  cursor: pointer;
+}
+
+.tree-row.is-dragging {
+  opacity: 0.4;
+}
+
+.tree-row.is-drop-target .tree-row-btn {
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tree-empty {
+  padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--tree-indent));
+  font-size: 12px;
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+
+/* The whole-tree empty state is a message, not a row, so it centres. */
+.tree>.tree-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-style: normal;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.tree-more {
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--tree-indent));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-more:hover {
+  background: var(--raised);
+  text-decoration: underline;
+}
+

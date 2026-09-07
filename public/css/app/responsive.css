@@ -1,0 +1,585 @@
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+/* One pane at a time below the split point.
+ *
+ * Stacking them put the preview under the textarea, which on a phone meant the
+ * preview was a screen away from the thing that produced it and the textarea
+ * was short enough to be awkward on its own. Tabs give each of them the whole
+ * pane and make switching a single tap.
+ *
+ * The rule is width, not device, so a narrow window on a desktop gets the same
+ * treatment — and the tab bar is display:none above the breakpoint rather than
+ * conditionally rendered, so there is one DOM either way. */
+@media (max-width: 1160px) {
+  .editor-tabs {
+    display: flex;
+  }
+
+  .editor-grid {
+    grid-template-columns: 1fr;
+    /* The pane owns its scrolling, as it does on a wide screen. Scrolling the
+       grid instead would scroll the tab bar away. */
+    overflow: hidden;
+  }
+
+  /* Only the selected pane is laid out at all. Not visibility or opacity: a
+     hidden-but-present pane still takes a grid row, which is what put the
+     preview below the editor in the first place. */
+  .editor-pane {
+    grid-row: 1;
+    grid-column: 1;
+    min-height: 0;
+  }
+
+  .editor-pane[hidden] {
+    display: none;
+  }
+
+  /* The tab already says which pane this is. */
+  .editor-label {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .app-header {
+    gap: 10px;
+    /* max(), not the inset alone: on a phone without a notch the inset is 0
+       and the header would lose its padding entirely. */
+    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  }
+
+  /* Search wraps to its own row, so the actions need to be pushed right
+     explicitly — without this they clump against the brand. */
+  .header-actions {
+    margin-left: auto;
+  }
+
+  /* Search drops to its own full-width row under the brand and actions. */
+  .search-wrap {
+    order: 9;
+    flex: 1 0 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  /* Upload and Edit have a dock button each, so the header copies go.
+     Everything else stays.
+
+     This used to hide every icon button in the header and restore one
+     #lockToggleBtn, which is not in the markup and never has been — so on a
+     phone there was no theme switch, no account menu, and therefore no way to
+     sign out, change a password or reach the account list at all. */
+  .header-actions #uploadWrap,
+  .header-actions #editDocBtn {
+    display: none;
+  }
+
+  .supersearch-panel {
+    margin: 0 12px;
+    max-height: min(46dvh, 340px);
+  }
+
+  .mobile-only {
+    display: grid;
+  }
+
+  /* Positioning context for the drawer and its overlay. */
+  .layout {
+    grid-template-columns: 1fr;
+    position: relative;
+  }
+
+  /* The drawer is absolute inside .layout rather than fixed to the viewport, so
+     it spans exactly the content area and leaves the header — and its toggle
+     button — visible and tappable. No header-height constant involved. */
+  /* padding rather than a left offset: the drawer still starts at the screen
+     edge, so its backdrop reaches under the notch, but nothing readable does. */
+  .sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    padding-left: env(safe-area-inset-left);
+    z-index: 60;
+    width: min(85vw, 340px);
+    height: auto;
+    border-right: 1px solid var(--border);
+    transform: translateX(-101%);
+    transition: transform 200ms ease;
+    box-shadow: var(--shadow-dialog);
+  }
+
+  .app-shell.nav-open .sidebar {
+    transform: none;
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    border: none;
+    padding: 0;
+    background: rgba(0, 2, 2, 0.75);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease;
+  }
+
+  .app-shell.nav-open .sidebar-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Touch has no hover, so row actions have to be permanently visible. Showing
+     three to five of them ate the whole row, so on touch they collapse into one
+     overflow button that opens the same list as a right-click.
+
+     Because that button is permanent, it must not be an overlay: absolutely
+     positioned it sat on top of the folder's document count and clipped long
+     names. In flow it takes its own column, so the label ellipsizes against it
+     and the count keeps its slot. */
+  .tree-actions {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+    flex-shrink: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0 4px 0 0;
+  }
+
+  .tree-row.is-active .tree-actions {
+    background: transparent;
+  }
+
+  .tree-actions .tree-action {
+    display: none;
+  }
+
+  .tree-actions .tree-action-more {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .tree-row {
+    min-height: 44px;
+  }
+
+  .tree-row-btn {
+    height: 44px;
+    font-size: 14px;
+  }
+
+  /* The count is always visible on touch, since nothing overlays it. */
+  .tree-row:hover .tree-count,
+  .tree-row:focus-within .tree-count {
+    visibility: visible;
+  }
+
+  /* Both sizes, not just the small one. The sidebar's buttons grew for touch
+     and the header's did not, which left the two most-tapped controls on the
+     screen smaller than the ones inside a drawer. */
+  .icon-btn,
+  .icon-btn.icon-btn-sm {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* Five actions plus a title do not fit a ~280px drawer on a small phone. */
+  .sidebar-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 8px 8px 12px;
+  }
+
+  .sidebar-head h2 {
+    flex: 1 1 auto;
+  }
+
+  .sidebar-actions {
+    flex: 0 0 auto;
+    gap: 0;
+  }
+
+  /* A second way out beside the header toggle, sitting first in the row. */
+  #closeSidebarBtn {
+    order: -1;
+  }
+
+  /* The dock hides itself while the drawer is open, so the tree only needs
+     enough clearance to not end flush against the bottom edge. */
+  .tree {
+    padding-bottom: 24px;
+  }
+
+  .viewer-toolbar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  /* Scoped to the app shell, because three things wear .markdown-body and only
+     one of them has a floating dock over it. A shared document is a page on its
+     own; the editor's preview pane lives in a modal, and was being given 96px
+     of empty space under the last line of a preview.
+
+     The top of it is the other half of the toolbar's bottom padding. This is
+     the pane that has a bar stuck over it, and the bar is taller here than on
+     a desktop, because the actions wrap under the heading — so the first line
+     of the document needs more room above it here, not less. It had less. */
+  .app-shell .markdown-body {
+    padding: 18px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
+  }
+
+  .empty-state {
+    padding: 48px 16px;
+  }
+
+  .editor-dialog {
+    width: 100vw;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+
+  .modal {
+    padding: 0;
+  }
+
+  .modal:not(#editorModal) {
+    padding: 12px;
+    align-items: flex-start;
+    padding-top: 48px;
+  }
+
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .dialog-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .mobile-dock {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 45;
+    display: grid;
+    /* Auto columns rather than a fixed five: the links pane has no upload, no
+       new document and nothing to edit, so the dock is shorter there and the
+       buttons it does have should spread across the bar. */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-overlay);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  .app-shell.nav-open+.mobile-dock {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+  }
+
+  /* Stacked above the dock, and above the match navigator that sits above the
+     dock, so the three things that float over the bottom of a phone screen
+     each have their own band instead of landing on each other. */
+  .match-nav {
+    left: max(8px, env(safe-area-inset-left));
+    bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  .toast-region {
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(116px + env(safe-area-inset-bottom));
+    max-width: none;
+  }
+
+  /* The pane the links live in gets what the viewer beside it already had:
+     the same side padding, and enough room at the bottom that the last row of
+     cards is not underneath the floating dock. */
+  .links-pane {
+    padding: 16px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left));
+  }
+}
+
+/* A phone, rather than a narrow window.
+ *
+ * Everything above this is one step from the desktop layout: a drawer instead
+ * of a column, a dock instead of a header full of buttons. That step used to
+ * be the only one, so a 360px phone was laid out exactly like a 900px tablet —
+ * words disappeared from buttons that had ample room for them, and the
+ * generous padding a mouse-sized window wants stayed at a size where it is a
+ * quarter of the screen.
+ */
+@media (max-width: 640px) {
+  .app-header {
+    gap: 8px;
+    padding: 8px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
+  }
+
+  /* The wordmark, the section names and the New label all go at once. Each is
+     beside an icon that says the same thing, and together they are about a
+     third of the header's width. */
+  .brand-text,
+  .place-btn span,
+  .btn-compact span {
+    display: none;
+  }
+
+  .place-btn {
+    padding: 0 9px;
+  }
+
+  .supersearch-panel {
+    margin: 0 10px;
+  }
+
+  /* A dialog opened near the top of a small screen, not a third of the way
+     down it. */
+  .modal:not(#editorModal) {
+    padding-top: 24px;
+  }
+
+  .dialog {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .viewer-toolbar {
+    gap: 8px;
+    padding: 10px 12px 14px;
+  }
+
+  /* Still the toolbar's gutter, which just moved in. */
+  .page-edit-bar {
+    padding: 6px 12px;
+  }
+
+  .app-shell .markdown-body {
+    padding: 16px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
+  }
+
+  .empty-state {
+    padding: 40px 14px;
+  }
+
+  .links-pane {
+    gap: 12px;
+    padding: 12px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left));
+  }
+
+  /* One column deliberately rather than by arithmetic: at this width the
+     260px minimum would fit exactly once anyway, and saying so keeps the gap
+     between cards from being the only thing that decides it. */
+  .links-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .link-card {
+    padding: 12px;
+  }
+
+  .editor-toolbar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .editor-tabs {
+    padding: 6px 12px;
+  }
+
+  /* The editor is the whole screen at this width, so a heading saying which
+     dialog it is costs a row of a toolbar that already needs three. */
+  .editor-toolbar h2 {
+    display: none;
+  }
+
+  /* An arrow row is five controls, which is one line on a wide pane and two on
+     a narrow one. The connection reads across the top — from, to — with how it
+     is drawn and what it says underneath. */
+  /* The paper gets less room on a phone than on a laptop, because everything
+     under it — the box being worked on, and its arrows — has to be reachable
+     without scrolling the diagram off the top. */
+  .ve-diagram-canvas {
+    max-height: 46dvh;
+  }
+
+  .ve-embed .ve-diagram-shell {
+    height: 46dvh;
+  }
+
+  /* The same four regions, folded rather than rearranged: the rail becomes a
+     strip under the bar, the panel becomes a tray along the bottom, and the
+     paper keeps the middle. Nothing has moved anywhere it was not, which is
+     what makes the phone the same editor rather than a second one. */
+  .ve-diagram-body {
+    flex-direction: column;
+  }
+
+  .ve-diagram-rail {
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-muted);
+  }
+
+  /* Stacked, the regions are above and below each other, so the bar between
+     two of them lies across rather than down — and there is nothing sideways
+     left to drag, so all it keeps is the chevron. */
+  .ve-diagram-grip {
+    flex: 0 0 auto;
+    height: 14px;
+    margin: -3px 0;
+    cursor: default;
+  }
+
+  .ve-diagram-grip-shut {
+    top: 50%;
+    left: auto;
+    right: 10px;
+    width: 26px;
+    height: 16px;
+    transform: translateY(-50%) rotate(90deg);
+  }
+
+  /* A row again, and it scrolls: a strip of shapes that wraps to a second line
+     pushes the diagram down the screen every time a shape is added to it. */
+  .ve-diagram-palette {
+    flex-direction: row;
+    align-items: center;
+    padding: 6px 8px;
+  }
+
+  /* The words go, the shape stays. Six labelled buttons will not fit across a
+     phone, and the picture is the half that says which shape it is. */
+  .ve-diagram-tool > span {
+    display: none;
+  }
+
+  .ve-diagram-tool {
+    justify-content: center;
+    min-width: 38px;
+    padding: 5px;
+  }
+
+  /* The tray takes a share of the screen rather than a width, and the paper
+     keeps a floor under it — a panel that grows with what is selected must not
+     be able to squeeze the diagram down to nothing. */
+  .ve-diagram-side {
+    flex: 0 1 auto;
+    max-height: 40dvh;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--border-muted);
+  }
+
+  .ve-diagram-body > .ve-diagram-stage {
+    flex: 1 0 34dvh;
+  }
+
+  /* Out of the way of a thumb resting at the bottom corner, and out of the way
+     of the tray. */
+  .ve-diagram-zoom {
+    right: 8px;
+    bottom: 8px;
+  }
+
+}
+
+/* A phone on its side is about 390px tall, and a third of that was chrome.
+ *
+ * Height only, so it also catches a short desktop window — and so it catches
+ * the landscape phones that are wider than 920px and therefore never see the
+ * mobile tier at all.
+ */
+@media (max-height: 560px) {
+
+  /* Centred, a dialog taller than the screen is cropped at both ends. Anchored
+     to the top it is cropped at one, and scrolls. */
+  .modal:not(#editorModal) {
+    align-items: flex-start;
+    padding-top: 12px;
+  }
+
+  .supersearch-panel {
+    max-height: min(60dvh, 220px);
+  }
+
+  .folder-picker-list {
+    max-height: min(40dvh, 160px);
+  }
+
+  .markdown-body .mermaid-block {
+    max-height: 60dvh;
+  }
+}
+
+/* The same screen, where there is also a dock to make room for. */
+@media (max-height: 560px) and (max-width: 920px) {
+  .dock-btn {
+    min-height: 38px;
+  }
+
+  /* The icons carry it. Five labels are worth about a tenth of the screen
+     here, which is a line and a half of the document. */
+  .dock-btn span {
+    display: none;
+  }
+
+  .app-shell .markdown-body,
+  .links-pane {
+    padding-bottom: 72px;
+  }
+
+  .match-nav {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .toast-region {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+}
+
+/* A control that is also the way between the two halves of the library should
+   not be the smallest thing on a touch screen.
+
+   30, not 32: the switch is this plus its own 2px of padding and 1px border a
+   side, and the icon buttons beside it are 36 on touch — as they are 32 on a
+   pointer, which is what the 26px default adds up to. The two have to keep
+   agreeing or the header has a step in it. */
+@media (hover: none) {
+  .place-btn {
+    height: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Without the drain animation the toast still needs to auto-dismiss, which
+     the script handles on a timer, so only the visual bar is suppressed. */
+  .toast-timer {
+    display: none;
+  }
+}
+

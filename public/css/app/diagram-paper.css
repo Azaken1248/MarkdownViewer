@@ -1,0 +1,275 @@
+/* --- The diagram editor on a page of its own ---------------------------
+   The canvas is the page here rather than a strip inside a document, so it
+   takes the height it is given instead of capping itself. Everything else
+   about it — the palette, the handles, the lists underneath — is the same
+   canvas the document uses, which is the point of it being one module. */
+
+.diagram-page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+.diagram-page-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.diagram-page-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagram-page-status {
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+.diagram-page-status.is-good {
+  color: var(--success-emphasis);
+}
+
+.diagram-page-status.is-bad {
+  color: var(--danger);
+}
+
+/* The whole of what is left, and it scrolls itself: an editor whose canvas
+   pushes the save button off the bottom of the window is an editor you cannot
+   save from. */
+/* The editor is the whole of what is left under the bar, and nothing in it
+   scrolls the page: the rail scrolls, the panel scrolls, the paper pans. A
+   page that scrolled as well would be one where the Save button can be pushed
+   off the bottom of the window. */
+.diagram-page-canvas {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.diagram-page-empty {
+  max-width: 34rem;
+  margin: 15dvh auto;
+  padding: 0 24px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+.diagram-page-empty h2 {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-size: 17px;
+}
+
+.diagram-page-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ve-diagram-stage {
+  position: relative;
+}
+
+/* The paper. Drawn at its own size and scrolled, rather than scaled to fit:
+   a pixel dragged has to be a pixel moved, and a diagram that shrank as it
+   grew would be one nobody could aim at. */
+.ve-diagram-canvas {
+  max-height: 60dvh;
+  overflow: auto;
+  background: var(--canvas);
+  border-bottom: 1px dashed var(--border-muted);
+  cursor: default;
+}
+
+.ve-diagram-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The paper takes what the two sides leave, and takes it all: the cap above is
+   what a canvas is worth inside a document, and this is a canvas that is the
+   window. Written after that rule rather than merely more specific than it —
+   an override that reads as one is an override that survives being moved.
+
+   min-width because a flex child defaults to the width of its contents, and
+   the contents of this one is a diagram of no fixed size: without it a wide
+   drawing pushes the panel beside it off the screen. */
+.ve-diagram-body > .ve-diagram-stage {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ve-diagram-body > .ve-diagram-stage > .ve-diagram-canvas {
+  flex: 1;
+  min-width: 0;
+  max-height: none;
+  border-bottom: none;
+}
+
+.ve-diagram-canvas svg {
+  display: block;
+}
+
+/* A box is a thing you pick up, and it has to look like one before it is
+   touched rather than after. touch-action keeps a drag on a box from scrolling
+   the paper as well — a drag on the paper still does. */
+.dd-editing .dd-node {
+  cursor: grab;
+  touch-action: none;
+}
+
+.dd-editing .dd-node.is-target .dd-shape {
+  stroke: var(--accent);
+  stroke-width: 2.5px;
+}
+
+/* Nothing sets a fill here on purpose. The rect carries fill="url(#grid)", and
+   a fill in this stylesheet would beat it: a presentation attribute loses to
+   every author rule, so painting the paper here painted over the grid. The
+   colour lives inside the pattern instead. */
+.dd-editing .dd-grid-back {
+  fill: var(--canvas);
+}
+
+.dd-editing .dd-grid-line {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1px;
+  /* Faint enough to be paper rather than graph paper: it is there to say which
+     way is straight, not to be looked at. */
+  opacity: 0.55;
+}
+
+.dd-editing .dd-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+/* Several at once. Each box keeps a ring so you can see exactly what you have,
+   and one frame goes round the lot so you can see it is one thing now — quieter
+   than the rings, because it is the summary rather than the content. */
+.dd-editing .dd-ring-one {
+  stroke-dasharray: none;
+  stroke-width: 1.5px;
+}
+
+.dd-editing .dd-frame {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1px;
+  stroke-dasharray: 2 3;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* The lines that say why a box stopped where it did. Bright and thin: they are
+   an explanation that appears under the hand and goes away again, so they have
+   to be readable at a glance and gone the moment they are not needed. */
+.dd-editing .dd-guide {
+  stroke: var(--danger);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* The rubber band. Filled, faintly, because a band you can see the area of is
+   a band you can tell has caught something. */
+.dd-editing .dd-marquee {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+  stroke: var(--accent);
+  stroke-width: 1px;
+  pointer-events: none;
+}
+
+.dd-editing .dd-handle {
+  fill: var(--accent-emphasis);
+  stroke: var(--canvas);
+  stroke-width: 1.5px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* Eight grips: four corners and four sides. The cursor is the only thing that
+   says which way a given one goes, and a box you can only resize diagonally is
+   a box you cannot make wider without also making it taller. */
+.dd-editing .dd-resize {
+  cursor: nwse-resize;
+}
+
+.dd-editing .dd-resize[data-grip="ne"],
+.dd-editing .dd-resize[data-grip="sw"] {
+  cursor: nesw-resize;
+}
+
+.dd-editing .dd-resize[data-grip="n"],
+.dd-editing .dd-resize[data-grip="s"] {
+  cursor: ns-resize;
+}
+
+.dd-editing .dd-resize[data-grip="e"],
+.dd-editing .dd-resize[data-grip="w"] {
+  cursor: ew-resize;
+}
+
+/* An arrow is drawn 1.6px wide and is 1.6px wide to a finger too, so each one
+   carries a fat invisible copy of itself while it is being edited. That copy is
+   the thing that gets pressed, and pressing it bends the arrow. */
+.dd-editing .dd-hit {
+  stroke-width: 14px;
+  pointer-events: stroke;
+  cursor: crosshair;
+}
+
+/* A corner somebody put in an arrow, and the two ends they can pin to a side.
+   Hollow, so they read as marks on the line rather than as parts of it — an
+   arrow with a solid dot in the middle looks like an arrow with a dot. */
+.dd-editing .dd-via,
+.dd-editing .dd-pin {
+  fill: var(--canvas);
+  stroke: var(--accent-emphasis);
+  stroke-width: 2px;
+}
+
+.dd-editing .dd-via {
+  cursor: move;
+}
+
+.dd-editing .dd-pin {
+  cursor: grab;
+}
+
+.dd-editing .dd-handle-mark {
+  stroke: var(--fg-on-emphasis);
+  stroke-width: 1.6px;
+  fill: none;
+  pointer-events: none;
+}
+
+/* The arrow being drawn, which is not an arrow yet. */
+.dd-editing .dd-draft {
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+

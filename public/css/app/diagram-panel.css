@@ -1,0 +1,908 @@
+/* A line at the top of the panel saying what can be done to what is picked.
+   Quiet, because it is a reminder rather than an instruction, and it is there
+   on every selection. */
+.ve-diagram-hint {
+  margin: 0;
+  padding: 12px 12px 10px;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.ve-diagram-hint[hidden] {
+  display: none;
+}
+
+.ve-diagram-inspector {
+  padding: 4px 12px 12px;
+}
+
+/* What has been picked, and the one thing you can do to it that is not a
+   property of it. A panel that opens with a heading is a panel you can tell at
+   a glance is about something. */
+.ve-diagram-picked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.ve-diagram-picked > .ve-diagram-legend {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ve-diagram-picked > .ve-diagram-drop {
+  margin-right: -6px;
+}
+
+/* One control per line, with its name over it. Three of them crammed across a
+   column narrower than any of them wanted is what made this panel look
+   assembled rather than designed — and left a menu of six shapes and a menu of
+   three border weights looking like the same unlabelled menu twice. */
+.ve-diagram-field {
+  display: block;
+  margin: 0 0 10px;
+}
+
+.ve-diagram-field-name {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ve-diagram-field > .ve-diagram-colours,
+.ve-diagram-field > .ve-diagram-inks {
+  padding: 0;
+}
+
+/* The cells, laid out the way the table is drawn: the field you type into is
+   in the place on the screen the words will appear in. A grid typed into one
+   box as lines of pipes is a grid you have to hold in your head to edit. */
+.ve-diagram-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--dd-columns, 1), minmax(0, 1fr));
+  gap: 3px;
+}
+
+/* The title spans the whole of it, the same way it is drawn. */
+.ve-diagram-cell-title {
+  grid-column: 1 / -1;
+  font-weight: 600;
+}
+
+.ve-diagram-cell {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.ve-diagram-cell::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-cell:hover:not(:focus) {
+  border-color: var(--border-strong);
+}
+
+.ve-diagram-cell:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+/* The file picker is a button in the panel, not a control anyone looks at. */
+.ve-diagram-picker {
+  display: none;
+}
+
+/* A picture about to be dropped. The paper says it will take it, because a
+   drag that gives no sign of being noticed is a drag people let go of
+   somewhere else. */
+.ve-diagram-canvas.is-dropping {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* The icons: a search over them, and a grid of them under it. Capped and
+   scrolled, because 180 icons down a panel is a panel with nothing else
+   reachable in it. */
+.ve-diagram-icons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Not a cell, though it looks like one: a table's cells are counted, and a box
+   to search icons in is not one of them. */
+.ve-diagram-find {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.ve-diagram-find::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-find:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.ve-diagram-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 2px;
+  max-height: 190px;
+  padding: 2px;
+  overflow-y: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  scrollbar-width: thin;
+}
+
+/* A group's name takes the whole line above the icons in it, so the storage
+   ones read as a group rather than as the first few of a heap. */
+.ve-diagram-icon-legend {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  padding: 0 2px;
+}
+
+.ve-diagram-icon-legend:first-child {
+  margin-top: 0;
+}
+
+.ve-diagram-icon-one {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.ve-diagram-icon-one:hover {
+  border-color: var(--border-muted);
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* The one being worn. Pressing it again takes it off, which is the only way a
+   grid of switches can also be a way to say "none of these". */
+.ve-diagram-icon-one.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+/* Stroked in the box's own text colour, which is what currentColor means, and
+   never filled: Lucide's whole grid is drawn in strokes. */
+.dd .dd-icon {
+  fill: none;
+  stroke: var(--dd-text, var(--fg));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* The icon is scaled to the box, and a stroke scaled with it is a hairline in
+     a small box and a slab in a large one. */
+  vector-effect: non-scaling-stroke;
+}
+
+/* The type: a family and a size on one line, the two switches under them. */
+.ve-diagram-font {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ve-diagram-marks {
+  display: flex;
+  gap: 4px;
+}
+
+/* Switches rather than menus of two. Bold and italic are the things people
+   reach for a keystroke to do, and a menu is not what that reaches. */
+.ve-diagram-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ve-diagram-mark:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.ve-diagram-mark.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+/* The cell controls with no cell to act on. Shown rather than hidden: a strip
+   that appears the moment you click a field is a strip you find by accident,
+   and one that is there but greyed says what it is waiting for. */
+.ve-diagram-mark:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ve-diagram-mark:disabled:hover {
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+
+/* Which cell the type above it is aimed at. Under the controls rather than
+   over them, because it answers a question the controls raise. */
+.ve-diagram-aimed {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* Saving a picture. Words rather than an icon: "SVG" and "PNG" are the whole
+   of what the two buttons differ by, and no drawing says which is which. */
+.ve-diagram-export {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.ve-diagram-export:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+.ve-diagram-export:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Rows and columns are one answer to one question about a table, so they sit
+   on one line and share it evenly. */
+.ve-diagram-grid-size {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ve-diagram-grid-size > .ve-diagram-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* A count with a way up and a way down. Typing a number to say "one more row"
+   is a strange way to ask for one more row, and the count reads as well as
+   sets — so the table's shape is something the panel says rather than
+   something you work out by counting the pipes in the field above. */
+.ve-diagram-stepper {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+}
+
+.ve-diagram-count {
+  flex: 1;
+  min-width: 2ch;
+  padding: 4px 2px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  text-align: center;
+}
+
+.ve-diagram-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-step:hover:not(:disabled) {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+.ve-diagram-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ve-diagram-field > .ve-diagram-border {
+  gap: 8px;
+}
+
+.ve-diagram-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+/* Side by side, two of these are two half-width buttons with their words cut
+   off. Stacked, they are two buttons that say what they do. */
+.ve-diagram-actions > .ve-diagram-add {
+  justify-content: center;
+  margin: 0;
+}
+
+/* Armed: the next box tapped is the one this arrow points at. */
+.ve-diagram-connect.is-armed {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Everything in the diagram at once, for when tapping one thing at a time is
+   not how you want to work. Under a rule, because it is a second panel inside
+   the first rather than more of the one above it. */
+.ve-diagram-all {
+  margin-top: 4px;
+  padding: 8px 12px 14px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.ve-diagram-all > summary {
+  padding: 4px 0;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-all > summary:hover {
+  color: var(--fg);
+}
+
+.ve-diagram-legend {
+  margin: 2px 0 6px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ve-diagram-legend + .ve-diagram-rows:empty + .ve-diagram-add {
+  margin-top: 0;
+}
+
+.ve-diagram-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ve-diagram-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* An arrow is five controls: what it comes from, what it goes to, a way to
+   remove it, how the line is drawn, and what it says. Five will not fit across
+   a panel, and the panel is a narrow column at every size — it is a column
+   beside the paper on a laptop and a tray under it on a phone, and neither is
+   ever wide. So the connection reads across the top, how it is drawn goes
+   under that, and the label takes the line below.
+
+   This used to be the phone's layout only, from when the panel was the full
+   width of the screen under the drawing. The panel is never that now, and a
+   layout that only holds at one width is a layout that has to be got wrong at
+   the others. */
+.ve-diagram-arrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "from  to    drop"
+    "ends  ends  ends"
+    "label label label";
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+
+/* Three lines of controls with nothing between one arrow and the next reads as
+   nine controls rather than as three arrows. */
+.ve-diagram-arrow + .ve-diagram-arrow {
+  margin-top: 2px;
+}
+
+.ve-diagram-arrow > .ve-diagram-pick:first-child {
+  grid-area: from;
+}
+
+.ve-diagram-arrow > .ve-diagram-ends {
+  grid-area: ends;
+}
+
+.ve-diagram-arrow > .ve-diagram-text {
+  grid-area: label;
+}
+
+.ve-diagram-arrow > .ve-diagram-pick:nth-last-child(2) {
+  grid-area: to;
+}
+
+.ve-diagram-arrow > .ve-diagram-drop {
+  grid-area: drop;
+}
+
+/* In a grid the cells decide the widths, and a percentage cap on a select would
+   fight them. */
+.ve-diagram-arrow > .ve-diagram-pick {
+  max-width: none;
+}
+
+.ve-diagram-text,
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-size,
+.ve-diagram-pick {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--fg);
+  font: inherit;
+  /* The head these sit under is small caps at 600; a control in it is not. */
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+/* The menus get the caret they are missing. A select styled by hand keeps the
+   platform arrow only if it is left alone, and everything else about these has
+   been taken over — so it is drawn here, once, and the space for it reserved on
+   the right. */
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-pick {
+  appearance: none;
+  padding-right: 24px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: right 12px center, right 8px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* The label field.
+ *
+ * This is the one control in the panel anybody types into, and the thing they
+ * type is the words on the box — so it is the field that should read as the
+ * diagram rather than as a form. It carries the box's own type size, grows by
+ * the line as it is filled, and never by being dragged: a resize grip in a
+ * panel this narrow drags the panel apart. */
+.ve-diagram-text {
+  resize: none;
+  flex: 1 1 auto;
+  /* A flex item's floor is its content, and an input's content is its size
+     attribute — 20 characters — which is wider than a phone. */
+  min-width: 0;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.ve-diagram-text::placeholder {
+  color: var(--fg-subtle);
+  opacity: 0.7;
+}
+
+.ve-diagram-text:hover:not(:focus) {
+  border-color: var(--border-strong);
+}
+
+/* A table's rows line up under each other or they are not rows. Which the
+   font the rest of the panel is set in cannot do, and a monospaced one does
+   without being asked. */
+.ve-diagram-rowsy {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.ve-diagram-shape,
+.ve-diagram-kind,
+.ve-diagram-pick {
+  flex: 0 1 auto;
+  max-width: 40%;
+}
+
+/* The cap above is what a control is worth in a row it shares with two others.
+   Neither of these shares a row.
+
+   The flow menu is on a bar with nine other things, and 40% of that bar
+   squeezed "Left to right" down to about three letters and an ellipsis. Wide
+   enough for the longest thing it can say, and it never shrinks. */
+.ve-diagram-bar .ve-diagram-direction {
+  flex: 0 0 auto;
+  width: auto;
+  /* Room for the longest thing it can say and the caret beside it. It had
+     neither: `background` as a shorthand wiped the caret the rule above draws,
+     and `padding: 3px 8px` took back the room that caret needs — so the words
+     ran under where it should have been and the menu looked like a box with
+     the end of its label missing. */
+  min-width: 9.5rem;
+  max-width: none;
+  min-height: 26px;
+  padding: 3px 26px 3px 8px;
+  border-color: var(--border-muted);
+  background-color: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+/* A panel field owns its line, so a cap at a fraction of a row it no longer
+   shares leaves most of that line empty. */
+.ve-diagram-field > .ve-diagram-text,
+.ve-diagram-field > .ve-diagram-shape,
+.ve-diagram-field > .ve-diagram-kind {
+  display: block;
+  width: 100%;
+  max-width: none;
+}
+
+/* A line is three choices — what is at its back, how it is drawn, what is at
+   its point — and they read left to right in the order the line does. Held
+   together so the row still counts them as one control. */
+.ve-diagram-ends {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Inside the group the cap is the group, not the row, so a percentage of the
+   row would leave two of the three unreachable on a narrow pane. */
+.ve-diagram-ends > .ve-diagram-kind {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+}
+
+/* The border is a dash and a weight, sharing the line evenly. Same reasoning
+   as the group above: the cap here is the pair, not the panel. */
+.ve-diagram-border > .ve-diagram-kind,
+.ve-diagram-border > .ve-diagram-size {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+}
+
+.ve-diagram-text:focus,
+.ve-diagram-shape:focus,
+.ve-diagram-kind:focus,
+.ve-diagram-size:focus,
+.ve-diagram-pick:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.ve-diagram-drop {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ve-diagram-drop:hover {
+  border-color: var(--danger);
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.ve-diagram-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 14px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-add:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent-muted);
+  border-style: solid;
+}
+
+.ve-diagram-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Nothing hovers on a touch screen and nothing there is a mouse-width either,
+   so every control in the panel grows to something a thumb can hit. */
+@media (hover: none) {
+  .ve-diagram-text,
+  .ve-diagram-shape,
+  .ve-diagram-kind,
+  .ve-diagram-pick {
+    min-height: 38px;
+    font-size: 13px;
+  }
+
+  .ve-diagram-drop {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ve-diagram-add {
+    min-height: 38px;
+  }
+
+  .ve-diagram-tool {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  /* The bar and the zoom are the two places a finger has to hit something
+     26px wide, and a bar of them is the row most often missed. */
+  .ve-diagram-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ve-diagram-tidy {
+    min-height: 38px;
+  }
+
+  .ve-diagram-step {
+    width: 38px;
+    min-height: 38px;
+  }
+
+  .ve-diagram-cell {
+    min-height: 38px;
+  }
+
+  .ve-diagram-mark {
+    width: 40px;
+    min-height: 38px;
+  }
+
+  /* The bar over the box is where a finger reaches first on a phone — the panel
+     at the side is shut there — so everything on it is a finger wide. */
+  .ve-diagram-hud > .ve-diagram-shape {
+    width: 132px;
+  }
+
+  .ve-diagram-hud > .ve-diagram-size {
+    width: 74px;
+  }
+
+  .ve-diagram-icon-grid {
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  }
+
+  /* Both handles are dragged with a finger, so both have to be a finger wide.
+     The SVG is drawn at its own scale, so these are diagram units and screen
+     pixels at the same time. */
+  .dd-editing .dd-connect {
+    r: 13px;
+  }
+
+  /* A grip grown for a finger grows about its own middle, which is why these
+     are circles: a square given a bigger width grows down and to the right,
+     off the corner it was marking. */
+  .dd-editing .dd-resize {
+    r: 9px;
+  }
+}
+
+
+
+/* Hidden until the split becomes a stack; see the media query near the end. */
+.editor-tabs {
+  display: none;
+  gap: 4px;
+  /* Lined up with .editor-toolbar directly above it. */
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.editor-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* 44px, the comfortable touch target, since this is a phone control. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.editor-tab i {
+  font-size: 16px;
+}
+
+.editor-tab[aria-selected="true"] {
+  border-color: var(--accent-muted);
+  background: var(--selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.editor-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  background: var(--border);
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Both of these matter, and min-width is the one that is easy to miss.
+     A grid item's automatic minimum size is its min-content width, not zero,
+     so 1fr 1fr is only an even split until something in the preview refuses to
+     get narrower — a wide table, a long unbroken URL, a code line. Then that
+     column wins and the textarea is squeezed to a sliver. min-width: 0 lets the
+     column shrink; overflow on the preview gives the wide thing somewhere to go
+     instead of pushing. */
+  min-width: 0;
+  background: var(--canvas);
+}
+
+.editor-label {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+#editorInput {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 16px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+
+  /* No ligatures. JetBrains Mono ships a glyph for "###" (and "##", "####",
+     "#{", "#?", "->", "!=", "===" and the rest), drawn as one mark spread over
+     the cells it replaces — so typing ### in a markdown file showed "  #" and
+     looked like two characters had been eaten. Nothing was: the value is
+     untouched, which is why the preview was always right.
+     A ligature is a nice thing in a code font and the wrong thing in a field
+     where the characters themselves are the content. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+
+/* outline:none above is only safe because focus is signalled here instead. */
+#editorInput:focus {
+  box-shadow: inset 0 0 0 2px var(--accent-muted);
+}
+
+.editor-preview {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  /* Anything genuinely too wide scrolls inside the pane rather than widening
+     it. Paired with min-width: 0 on the pane above; either one alone leaves
+     the split uneven. */
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  max-width: none;
+}
+

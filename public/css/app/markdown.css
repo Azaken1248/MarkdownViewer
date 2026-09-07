@@ -1,0 +1,713 @@
+/* --------------------------------------------------------------------------
+   Markdown body
+   -------------------------------------------------------------------------- */
+
+/* No measure cap: the viewer pane is already the constraint, and capping it
+   again left a wide empty gutter on the right at desktop widths. */
+.markdown-body {
+  display: none;
+  padding: 24px 32px 80px;
+  width: 100%;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--fg);
+}
+
+.markdown-body.visible {
+  display: block;
+}
+
+.markdown-body> :first-child {
+  margin-top: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 24px 0 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fg);
+}
+
+.markdown-body h1 {
+  font-size: 2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.markdown-body h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.markdown-body h3 {
+  font-size: 1.25em;
+}
+
+.markdown-body h4 {
+  font-size: 1em;
+}
+
+.markdown-body h5 {
+  font-size: 0.875em;
+}
+
+.markdown-body h6 {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote {
+  margin: 0 0 16px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 2em;
+}
+
+.markdown-body li+li {
+  margin-top: 0.25em;
+}
+
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: var(--fg-muted);
+  border-left: 3px solid var(--border-strong);
+}
+
+.markdown-body hr {
+  height: 1px;
+  margin: 24px 0;
+  border: none;
+  background: var(--border);
+}
+
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--fg);
+
+  /* Same reason as the editor: this font draws "!=", "===", "->" and "###" as
+     single glyphs, and in a document about code the reader should not have to
+     wonder whether what they are looking at is what is written. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+
+.markdown-body pre {
+  margin: 0 0 16px;
+  padding: 16px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.45;
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-size: inherit;
+  white-space: pre;
+}
+
+/* Taking the code away.
+   The button sits in a wrapper around the <pre>, not inside it. A <pre> scrolls
+   sideways, and anything positioned against a scroll container scrolls away
+   with its content — inside, the button would slide off the edge of any block
+   with one long line in it. The wrapper carries no margin of its own, so
+   wrapping a block changes nothing about where it sits: the <pre> keeps the
+   margin it already had, including the zero a notebook cell gives it. */
+.code-block {
+  position: relative;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  /* Hidden until wanted, but never removed from the page: a display:none
+     button is not reachable by keyboard, and this is the only way to take a
+     code block without dragging a selection through it. */
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.is-copied,
+.code-copy.is-failed {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.code-copy.is-copied {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.code-copy.is-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Nothing hovers on a touch screen, so a button that appears on hover is a
+   button that never appears. */
+@media (hover: none) {
+  .code-copy {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-copy {
+    transition: none;
+  }
+}
+
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  margin: 0 0 16px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+}
+
+.markdown-body th {
+  background: var(--surface);
+  font-weight: 600;
+  text-align: left;
+}
+
+.markdown-body tr:nth-child(2n) td {
+  background: var(--surface);
+}
+
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.markdown-body .math-block {
+  margin: 0 0 16px;
+  padding: 12px;
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+
+.markdown-body .math-block .katex-display {
+  margin: 0;
+}
+
+/* Search hit highlighting */
+
+.markdown-body mark.doc-jump-highlight {
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.markdown-body mark.doc-jump-highlight-passive {
+  background: var(--attention-subtle);
+  color: inherit;
+}
+
+.markdown-body mark.doc-jump-highlight-active {
+  background: var(--attention);
+  color: var(--canvas-inset);
+  font-weight: 600;
+}
+
+.markdown-body .doc-jump-focus {
+  outline: 2px solid var(--attention);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Notebooks ---------------------------------------------------------- */
+
+.markdown-body .notebook-summary {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.markdown-body .notebook-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.markdown-body .notebook-summary h1 {
+  margin: 4px 0 0;
+  padding: 0;
+  border: none;
+  font-size: 1.4em;
+}
+
+.markdown-body .notebook-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.markdown-body .notebook-cells {
+  display: grid;
+  gap: 12px;
+}
+
+.markdown-body .notebook-cell {
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.markdown-body .notebook-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.markdown-body .notebook-cell-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+
+.markdown-body .notebook-cell-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+.markdown-body .notebook-cell-content {
+  padding: 12px;
+}
+
+.markdown-body .notebook-cell-content> :first-child {
+  margin-top: 0;
+}
+
+.markdown-body .notebook-cell-content> :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body .notebook-code-block,
+.markdown-body .notebook-output-text,
+.markdown-body .notebook-output-json,
+.markdown-body .notebook-raw-block {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.markdown-body .notebook-output-text,
+.markdown-body .notebook-output-json,
+.markdown-body .notebook-raw-block {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.markdown-body .notebook-outputs {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border-muted);
+  padding: 12px;
+}
+
+.markdown-body .notebook-output {
+  display: grid;
+  gap: 4px;
+}
+
+.markdown-body .notebook-output-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-subtle);
+}
+
+.markdown-body .notebook-output-error {
+  border-left: 3px solid var(--danger);
+  padding-left: 10px;
+}
+
+.markdown-body .notebook-output-error-name {
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.markdown-body .notebook-output-error-value {
+  color: var(--fg-muted);
+}
+
+.markdown-body .notebook-output-html,
+.markdown-body .notebook-output-markdown {
+  overflow-x: auto;
+}
+
+.markdown-body .notebook-output-image {
+  display: block;
+}
+
+.markdown-body .notebook-output-image img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.markdown-body .notebook-empty {
+  padding: 12px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+/* --- Mermaid ------------------------------------------------------------ */
+
+/* aspect-ratio comes from the diagram's viewBox (set in app.js), so a wide
+   three-node flowchart stays short and a tall sequence diagram gets room. The
+   clamps stop either extreme from being unusable: too short to read, or taller
+   than the window. */
+.markdown-body .mermaid-block {
+  margin: 0 0 16px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  /* Low enough not to distort a genuinely small diagram; max-width (set inline
+     from the viewBox) is what stops small ones being blown up. */
+  min-height: 120px;
+  max-height: 78dvh;
+}
+
+/* svg-pan-zoom writes width/height inline; these match so the SVG fills the
+   box the block just established rather than fighting it. */
+.markdown-body .mermaid-block svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* A fallback replaces the SVG with source text, which must not be squeezed
+   into the diagram's aspect box. */
+.markdown-body .mermaid-block:has(.mermaid-fallback-code) {
+  aspect-ratio: auto;
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-preview .mermaid-block {
+  padding: 8px;
+  min-height: 160px;
+  max-height: 52dvh;
+}
+
+.mermaid-fallback-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--fg-muted);
+}
+
+.mermaid-fallback-error {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* --- Diagrams we draw ourselves -----------------------------------------
+   A flowchart carrying its own layout is drawn by diagram-draw.js as ordinary
+   SVG elements with ordinary classes, which is the whole reason it is worth
+   doing: Mermaid bakes a palette into every diagram it renders and has to
+   redraw the lot when the theme changes, and this just recolours. */
+.dd {
+  font-family: "Inter", sans-serif;
+}
+
+/* A box wears its own colour when it has been given one, and the theme's when
+   it has not. The custom properties are set on the group by the drawing, from
+   the classDef in the file — so an uncoloured diagram still recolours with the
+   rest of the app, and a coloured one looks the same here as it does anywhere
+   else Mermaid is rendered. */
+.dd .dd-shape {
+  fill: var(--dd-fill, var(--raised-hover));
+  stroke: var(--dd-stroke, var(--accent-emphasis));
+  stroke-width: var(--dd-stroke-width, 1.5px);
+  stroke-dasharray: var(--dd-dash, none);
+}
+
+/* The colour behind words on the paper. A highlight, so it is the fill and
+   nothing else: a border round a text element would make it the box that the
+   text element exists in order not to be. */
+.dd .dd-back {
+  stroke: none;
+}
+
+.dd .dd-rule {
+  stroke: var(--border-strong);
+  stroke-width: 1px;
+  fill: none;
+}
+
+/* The limbs of a stick figure. The shape's own stroke rather than the fainter
+   rule between parts of one: an actor's arms are the actor, not a seam in it. */
+.dd .dd-actor {
+  stroke: var(--dd-stroke, var(--accent-emphasis));
+  stroke-width: var(--dd-stroke-width, 1.5px);
+  stroke-linecap: round;
+  fill: none;
+}
+
+/* The lines between cells, drawn a little fainter than the rule under the
+   title: one says where the table's heading ends and the others divide what is
+   under it, and a grid drawn as heavily as its heading reads as neither. */
+.dd .dd-cell-rule {
+  opacity: 0.7;
+}
+
+/* The type a diagram is set in. Every one of these is a classDef declaration,
+   which is real Mermaid — so a diagram set in bold serif is set in bold serif
+   on GitHub too, rather than only here.
+
+   One size for every label, so that the drawing has one number to measure a
+   word against when it decides whether it fits. There is a check holding that
+   number and this one together. */
+.dd .dd-text {
+  fill: var(--dd-text, var(--fg));
+  font-size: var(--dd-font-size, 13px);
+  font-weight: var(--dd-font-weight, 400);
+  font-family: var(--dd-font-family, inherit);
+  font-style: var(--dd-font-style, normal);
+}
+
+/* A heading is bolder than what is under it, unless the box has been told what
+   weight to be — in which case it was told, and this is not an argument. */
+.dd .dd-title {
+  font-weight: var(--dd-font-weight, 600);
+}
+
+/* A picture is fitted rather than filled, so it never covers the box it is in
+   and never needs clipping. Rounded a little, to sit inside a rounded box. */
+.dd .dd-picture {
+  border-radius: 3px;
+}
+
+.dd .dd-row {
+  fill: var(--dd-text, var(--fg-muted));
+}
+
+.dd .dd-line {
+  stroke: var(--fg-muted);
+  stroke-width: 1.6px;
+}
+
+.dd .dd-head {
+  fill: var(--fg-muted);
+  stroke: none;
+}
+
+/* The ends that are an outline rather than a shape: UML's "is a" triangle and
+   "has a" diamond, the crow's foot, the cross. Drawn in the line's own colour
+   with no fill, which is what makes a hollow diamond mean something different
+   from a solid one. */
+.dd .dd-head-hollow {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.4px;
+}
+
+.dd .dd-edge-dotted .dd-line,
+.dd .dd-edge-dotted-open .dd-line {
+  stroke-dasharray: 6 4;
+}
+
+.dd .dd-edge-thick .dd-line,
+.dd .dd-edge-thick-open .dd-line {
+  stroke-width: 3px;
+}
+
+/* A group's frame takes no pointer events at all.
+
+   Which is what lets a press inside a group land on the paper, so a rubber band
+   can be pulled across the boxes in one and a box in one is still just a box to
+   press. A group is taken hold of by its name, and that is worked out from
+   where the press was rather than from what the browser says it hit — the same
+   way every other target on this canvas is. */
+.dd .dd-group {
+  pointer-events: none;
+}
+
+/* A group's frame. Behind everything it holds, so it is drawn faintly and
+   filled barely at all: it says what belongs together, and what belongs
+   together is the part worth looking at. Dashed, so it never reads as a box
+   somebody drew — a box has a solid edge here, and a group is not a box. */
+.dd .dd-group-box {
+  fill: var(--dd-fill, var(--raised));
+  fill-opacity: 0.35;
+  stroke: var(--dd-stroke, var(--border-strong));
+  stroke-width: 1.2px;
+  stroke-dasharray: 5 4;
+}
+
+.dd .dd-group-name {
+  fill: var(--dd-text, var(--fg-muted));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dd .dd-label-back {
+  fill: var(--surface);
+  stroke: none;
+}
+
+.dd .dd-label-text {
+  fill: var(--fg-muted);
+  font-size: 12px;
+}
+
+.svg-pan-zoom-control-background {
+  fill: var(--raised);
+  fill-opacity: 1;
+}
+
+.svg-pan-zoom-control-element {
+  fill: var(--fg-muted);
+}
+
+.svg-pan-zoom-control-element:hover {
+  fill: var(--accent);
+}
+
+/* --- Syntax highlighting ---------------------------------- */
+
+.markdown-body pre code.hljs {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+}
+
+.hljs {
+  color: var(--fg);
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag,
+.hljs-name,
+.hljs-strong {
+  color: var(--code-keyword);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-built_in,
+.hljs-type {
+  color: var(--code-entity);
+}
+
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition,
+.hljs-regexp {
+  color: var(--code-string);
+}
+
+.hljs-number,
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--code-constant);
+}
+
+.hljs-meta,
+.hljs-subst,
+.hljs-template-tag {
+  color: var(--code-meta);
+}
+
+.hljs-deletion {
+  color: var(--danger);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+

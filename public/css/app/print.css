@@ -1,0 +1,143 @@
+/* --------------------------------------------------------------------------
+   Print
+
+   A document viewer that could not print the document. Everything that is
+   chrome comes off, the shell stops constraining height so the page can flow
+   across sheets, and the dark palette inverts — printing a near-black
+   background wastes a cartridge and reads worse than the screen.
+   -------------------------------------------------------------------------- */
+
+@media print {
+
+  .app-header,
+  .sidebar,
+  .sidebar-overlay,
+  .viewer-toolbar,
+  .mobile-dock,
+  .supersearch-panel,
+  .toast-region,
+  .tooltip,
+  .match-nav,
+  .modal,
+  .context-menu,
+  /* A button that puts something on the clipboard is nothing on paper. */
+  .code-copy,
+  .empty-state {
+    display: none !important;
+  }
+
+  /* The fixed shell exists to give the sidebar and viewer their own scroll.
+     On paper there is one flow, so every clamp has to come off or only the
+     first sheet prints. */
+  html,
+  body,
+  .app-shell,
+  .layout,
+  .viewer,
+  .markdown-body {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  body,
+  .app-shell,
+  .viewer,
+  .markdown-body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .markdown-body {
+    padding: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    font-size: 11pt;
+  }
+
+  .markdown-body a {
+    color: #000000 !important;
+    text-decoration: underline;
+  }
+
+  /* Link text alone is useless on paper. Skip in-page anchors and anything
+     whose text is already the URL. */
+  .markdown-body a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    word-break: break-all;
+  }
+
+  .markdown-body pre,
+  .markdown-body code,
+  .markdown-body blockquote,
+  .markdown-body table,
+  .markdown-body th,
+  .markdown-body td {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: #999999 !important;
+  }
+
+  .markdown-body pre {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+  }
+
+  /* Splitting a code block, a table row, or a diagram across a page break is
+     the main thing that makes printed docs unusable. */
+  .markdown-body pre,
+  .markdown-body blockquote,
+  .markdown-body tr,
+  .markdown-body img,
+  .markdown-body .mermaid-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+    color: #000000 !important;
+  }
+
+  /* Diagrams are sized from a viewBox aspect-ratio for the screen; on paper
+     they only need to fit the sheet. */
+  .markdown-body .mermaid-block {
+    aspect-ratio: auto !important;
+    max-height: none !important;
+    height: auto !important;
+    border-color: #999999 !important;
+    background: #ffffff !important;
+  }
+
+  .markdown-body .mermaid-block svg {
+    height: auto !important;
+    max-width: 100% !important;
+  }
+
+  /* svg-pan-zoom's own +/- overlay is not part of the diagram. */
+  .svg-pan-zoom-control {
+    display: none !important;
+  }
+
+  .breadcrumbs {
+    color: #000000 !important;
+  }
+
+  .crumb,
+  .crumb-current,
+  .crumb-sep {
+    color: #000000 !important;
+    background: transparent !important;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+}
+

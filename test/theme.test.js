@@ -3,10 +3,10 @@
 // boundaries (WCAG 1.4.11), and 24px for pointer targets (2.5.8).
 const fs = require("fs");
 const path = require("path");
-const { appSource } = require("./app-source.js");
+const { appSource, styleSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
-const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
+const css = styleSource(PUBLIC_DIR);
 const js = appSource(PUBLIC_DIR);
 const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const boot = fs.readFileSync(path.join(PUBLIC_DIR, "js", "theme-boot.js"), "utf8");
@@ -139,7 +139,7 @@ check("a pre-paint boot script exists", boot.includes("document.documentElement.
 // The tags, not the bare paths: a comment mentioning either file would
 // otherwise decide the order for it.
 check("it runs before the stylesheet",
-  html.indexOf('src="/js/theme-boot.js') < html.indexOf('href="/css/app.css'), true);
+  html.indexOf('src="/js/theme-boot.js') < html.indexOf('href="/css/app/'), true);
 check("it is not inline (CSP has no unsafe-inline for scripts)", /<script>[\s\S]*dataset\.theme/.test(html), false);
 check("it defaults to dark, not to the system", boot.includes('stored = "dark"'), true);
 check("only auto consults the system", /if \(stored === "auto"\)/.test(boot), true);

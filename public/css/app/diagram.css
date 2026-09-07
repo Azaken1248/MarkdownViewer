@@ -1,0 +1,805 @@
+/* --- The diagram canvas ----------------------------------------------------
+
+   The canvas and everything around it, on the page a diagram opens on. It used
+   to open inside a document block as well, in a strip a few hundred pixels
+   tall; everything it has grown since — a palette, an inspector, a zoom bar,
+   arrows drawn by dragging — wants room, so there is one way in and it goes to
+   the page.
+
+   Four regions, and each one holds a different kind of thing:
+
+     bar     across the top, what is done to the whole diagram
+     rail    down one side, what can be put into it
+     stage   the paper, taking everything left over
+     side    down the other side, what is true of what is selected
+
+   On a phone the same four are stacked — the rail folds into a strip under the
+   bar and the panel into a tray along the bottom — so nothing moves anywhere
+   unfamiliar, it is only folded differently.
+
+   The panel is plain flow layout on purpose: it is redrawn on every step added
+   or removed, and it has to stay cheap on a phone. */
+.ve-diagram-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ve-diagram-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The shapes. A column beside the paper, so the row of them is never the thing
+   deciding how wide the window has to be. As wide as it was left: the width is
+   a custom property the editor writes, because how much room somebody wants
+   for the shapes is about their screen rather than about the drawing. */
+/* The rail is two things stacked: the shapes you can put down, and the tree of
+   what is down already. The shapes take the room they need and the tree takes
+   the rest, so a long diagram scrolls inside the tree rather than pushing the
+   shapes off the top of the rail. */
+.ve-diagram-rail {
+  display: flex;
+  flex: 0 0 var(--dd-rail, 196px);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border-muted);
+  background: var(--surface);
+}
+
+.ve-diagram-rail > .ve-diagram-palette {
+  flex: 0 0 auto;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* --- The tree of what is on the paper ------------------------------------
+
+   A row is a picture and a name. Everything you can change about a thing is in
+   the panel on the other side, aimed at whatever this is pointing at — so this
+   says what is there and what is held, and stays quiet. */
+.ve-diagram-tree {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px 12px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.ve-diagram-tree > .ve-diagram-legend {
+  padding: 0 4px;
+}
+
+.ve-diagram-branches {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* Indented by how deep in the groups it is, as a padding rather than a margin,
+   so the tint of a held row still reaches the edge of the rail — which is what
+   makes a column of held rows read as one selection and not as a staircase. */
+.ve-diagram-leaf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 2px;
+  padding-left: calc(4px + (var(--dd-depth, 0) * 13px));
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.ve-diagram-leaf:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* What is held on the paper is held here. One selection shown in two places,
+   because a tree that does not say what is selected is a tree you have to
+   check against the drawing every time you look at it. */
+.ve-diagram-leaf.is-picked {
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--fg);
+}
+
+/* Locked reads as out of reach rather than as missing: it is still on the
+   paper and still in the list, it is simply not what a press picks up. */
+.ve-diagram-leaf.is-locked > .ve-diagram-leaf-name {
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-leaf-glyph {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-leaf-name {
+  overflow: hidden;
+  flex: 1 1 auto;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ve-diagram-branch > .ve-diagram-leaf-name {
+  font-weight: 600;
+}
+
+/* The field is only there while a name is being typed. A row that is a field
+   all the time is a row you cannot read at a glance. */
+.ve-diagram-leaf-field {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+/* The triangle that folds a group away, and the lock. Both sized to the row
+   rather than to a button, so a tree of them reads as one column each. */
+.ve-diagram-twist,
+.ve-diagram-lock {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-twist:hover,
+.ve-diagram-lock:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* A lock nobody has turned on is out of the way until it is wanted — which is
+   what keeps a column of rows a column of names. One that is on stays on show,
+   because that is a fact about the group rather than a control. */
+.ve-diagram-lock {
+  opacity: 0;
+}
+
+.ve-diagram-leaf:hover > .ve-diagram-lock,
+.ve-diagram-leaf:focus-within > .ve-diagram-lock,
+.ve-diagram-lock[aria-pressed="true"] {
+  opacity: 1;
+}
+
+/* Shut, a region is gone and its bar is all that is left of it — which is what
+   makes it something you can bring back rather than something you have lost. */
+.ve-diagram-body.is-rail-shut > .ve-diagram-rail,
+.ve-diagram-body.is-side-shut > .ve-diagram-side {
+  display: none;
+}
+
+/* Narrow enough that the words no longer fit beside the pictures, the shapes
+   drop to their pictures — the same thing the phone does with the same rail,
+   said once and reached two ways. */
+.ve-diagram-body.is-rail-tight .ve-diagram-tool > span {
+  display: none;
+}
+
+.ve-diagram-body.is-rail-tight .ve-diagram-tool {
+  justify-content: center;
+  padding: 5px;
+}
+
+/* The bar between two regions. Dragged, it moves the edge; the chevron on it
+   takes the region away and brings it back. Wide enough to hit without being
+   wide enough to notice. */
+.ve-diagram-grip {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 7px;
+  margin: 0 -3px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ve-diagram-grip:hover,
+.ve-diagram-grip.is-dragging,
+.ve-diagram-grip:focus-visible {
+  background: var(--accent-muted);
+  outline: none;
+}
+
+/* The chevron. Sits on the bar rather than beside it, so a region that is shut
+   still has the one thing that opens it. */
+.ve-diagram-grip-shut {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 26px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ve-diagram-grip-shut:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+/* What is true of what is picked. Given a width rather than asked to work one
+   out: it is redrawn every time the selection changes, and a panel that
+   resizes itself as its contents change is a panel the paper jumps about
+   beside. */
+.ve-diagram-side {
+  flex: 0 0 var(--dd-side, 300px);
+  min-width: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border-muted);
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+
+.ve-diagram-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--raised);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ve-diagram-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* A run of buttons that belong together, with a hairline between one run and
+   the next. Which is what tells hand-and-arrow from undo-and-redo without a
+   word being written on the bar. */
+.ve-diagram-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.ve-diagram-group + .ve-diagram-group,
+.ve-diagram-group + .ve-diagram-flow {
+  padding-left: 8px;
+  border-left: 1px solid var(--border-muted);
+}
+
+/* An editor with no host to name the diagram names it itself. The page has a
+   bar of its own that does, and the same words twice on one screen is one of
+   them wasted. */
+.ve-diagram-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.ve-diagram-flow {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+/* The bar's one word and the panel's captions are the same kind of word — the
+   name of the control beside it — and reading as two kinds of word is what
+   makes a screen look assembled out of parts. */
+.ve-diagram-flow > span {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Arranging the whole diagram again is not a shape, so it is not on the rail
+   of shapes — but it is a button, and there is one kind of button here. */
+.ve-diagram-tidy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-tidy:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+
+/* The source box's preview carries .markdown-body, and it carries it on
+   purpose: it is what gives an equation, a code block or a diagram inside it
+   the same type and the same sizing they will have once they are in the
+   document. What comes with
+   it is the article's own two rules — display: none until a document is loaded,
+   and, on a phone, the 96px of clearance the floating dock needs at the bottom
+   of the page. Neither is about a preview a few hundred pixels up inside that
+   page. The first of them wins on source order over a bare class and the second
+   wins on specificity, so the only override that holds is one nested deeper
+   than `.app-shell .markdown-body` is. */
+.app-shell .markdown-body .ve-embed-preview {
+  display: block;
+  padding: 10px;
+}
+
+/* A preview of markdown that renders to nothing is a stripe of empty canvas. */
+.app-shell .markdown-body .ve-embed-preview:empty {
+  display: none;
+}
+
+/* The shapes to drag onto the paper, and the button that arranges everything
+   again. A row that scrolls rather than wraps: it sits directly above the
+   canvas and a second line of it would push the drawing off a phone screen. */
+/* A column beside the paper, a row above it on a phone. Either way it scrolls
+   rather than wrapping: a palette that grows a second line pushes the diagram
+   down the screen every time a shape is added to it. */
+.ve-diagram-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.ve-diagram-tool {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: grab;
+  /* The whole point of this row is that a shape can be dragged out of it, and
+     a touch drag that scrolls the row instead is not that. */
+  touch-action: none;
+  user-select: none;
+}
+
+.ve-diagram-tool:hover {
+  background: var(--raised-hover);
+  border-color: var(--border-muted);
+  color: var(--fg);
+}
+
+/* The one that is armed. A mode has to look like one from the button that
+   turned it on as well as from the canvas it acts on, or the crosshair is the
+   only clue about which of thirteen shapes is coming. */
+.ve-diagram-tool.is-on,
+.ve-diagram-tool.is-on:hover {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+.ve-diagram-tool.is-on .ve-diagram-glyph,
+.ve-diagram-tool.is-on:hover .ve-diagram-glyph {
+  color: var(--fg-on-emphasis);
+}
+
+/* The picture of the shape, which is the half of the button that says what it
+   does. Never squeezed: a flex child with a drawing in it will give up its
+   width to the words beside it before it gives up anything else. */
+.ve-diagram-glyph {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+}
+
+.ve-diagram-tool:hover .ve-diagram-glyph {
+  color: var(--accent);
+}
+
+/* What follows the finger between the palette and the paper. Fixed to the
+   viewport because it is over everything until it is let go. */
+.ve-diagram-ghost {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  border: 1px solid var(--accent-muted);
+  border-radius: var(--radius-sm);
+  background: var(--selected);
+  color: var(--fg);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* A viewport is a window onto a diagram rather than a picture of one: it
+   fills what it is given, never scrolls, and what moves is the drawing inside
+   it. touch-action: none because every gesture on it is ours — a one-finger
+   drag pans, two fingers pinch, and neither should also scroll the page. */
+.ve-diagram-canvas:has(> .dd-viewport) {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+}
+
+/* A window has to be given a height to be a window. The editor is a column of
+   flexible parts all the way down, and a column that ends in "as tall as its
+   contents" is a viewport of no height at all — so an editor inside a document
+   is told how much of the screen it may have. The page it opens on gives it
+   the window instead, and is not in here. */
+.ve-embed .ve-diagram-shell {
+  height: 60dvh;
+}
+
+/* Typing into the box itself. Laid over the shape rather than drawn as part of
+   it: an SVG has no caret, no selection and no input method, and a diagram
+   editor that cannot accept an accented character is not one anyone can use. */
+.ve-diagram-inline {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  line-height: 1.25;
+  text-align: center;
+  resize: none;
+  overflow: hidden;
+}
+
+.ve-diagram-inline:focus {
+  outline: none;
+}
+
+/* A cell of a table is drawn against its left wall, so the field over it is
+   written that way too — a word that jumps the moment you stop typing is a
+   field that was never really over the thing it was editing. */
+.ve-diagram-inline-left {
+  text-align: left;
+}
+
+/* The bar over the box.
+   Everything a box wears could be changed from the panel at the side and
+   nowhere else, which is a long way to go when the box is what you are looking
+   at. So the controls reached for while drawing float over the selection as
+   well — the same controls, laid out along a line instead of down a column. */
+.ve-diagram-hud {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  /* Narrower than the bar wants to be is a bar that scrolls, not one that wraps
+     into two lines over the box it is about. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* In a column the swatches wrap; along a line they stay on it. */
+.ve-diagram-hud > .ve-diagram-colours {
+  flex-wrap: nowrap;
+  padding: 0;
+}
+
+.ve-diagram-hud > .ve-diagram-marks,
+.ve-diagram-hud > .ve-diagram-colours,
+.ve-diagram-hud > .ve-diagram-drop {
+  flex: 0 0 auto;
+}
+
+.ve-diagram-hud > .ve-diagram-shape {
+  flex: 0 0 auto;
+  width: 118px;
+  max-width: none;
+}
+
+.ve-diagram-hud > .ve-diagram-size {
+  flex: 0 0 auto;
+  width: 66px;
+}
+
+.dd-viewport {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The colours a box can be. A row of what there is rather than a menu of names:
+   picking a colour by reading the word "Amber" is picking it twice. */
+.ve-diagram-colours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 2px;
+}
+
+.ve-diagram-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.ve-diagram-swatch:hover {
+  transform: scale(1.08);
+}
+
+/* What is being worn, said with a ring outside the swatch rather than a mark on
+   it — a tick drawn on a colour is a tick you cannot read on half of them. */
+.ve-diagram-swatch.is-on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* No colour at all, which is a choice rather than the absence of one, so it
+   gets a swatch like the rest. Struck through, the way every editor says it. */
+.ve-diagram-swatch-none {
+  position: relative;
+  overflow: hidden;
+}
+
+.ve-diagram-swatch-none::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom right, transparent 45%,
+    var(--danger) 45%, var(--danger) 55%, transparent 55%);
+}
+
+.ve-diagram-swatch-custom {
+  padding: 2px;
+}
+
+/* The two colours said outright: the words, and what is behind them. A well
+   each, with its own way back to the theme's colour beside it — the swatches
+   above set all three of fill, stroke and text at once, and there is no way to
+   say only one of them by choosing a preset. */
+.ve-diagram-inks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+
+.ve-diagram-ink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ve-diagram-ink-name {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* Off rather than back to something. Disabled when there is nothing to take
+   off, so the button says whether this element has a colour of its own. */
+.ve-diagram-unink {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ve-diagram-unink:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.ve-diagram-unink:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* What a text element is, in the list of everything. It stands where the shape
+   menu stands on every other row, so the columns still line up. */
+.ve-diagram-row-kind {
+  align-self: center;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* The hand, switched on. The only thing in the bar that stays pressed, so it
+   is the only one that says so. */
+.ve-diagram-icon.is-on {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+/* Grabbing, and about to grab. The cursor is the only thing that says the
+   space bar or the hand has been noticed. */
+.ve-diagram-canvas.is-panning-armed {
+  cursor: grab;
+}
+
+.ve-diagram-canvas.is-panning,
+.ve-diagram-canvas.is-panning-armed:active {
+  cursor: grabbing;
+}
+
+/* The arrow tool is a mode, and a mode has to look like one or it is a canvas
+   that has quietly stopped doing what it did a moment ago. */
+.ve-diagram-canvas.is-joining {
+  cursor: crosshair;
+}
+
+.ve-diagram-canvas.is-joining .dd-node {
+  cursor: crosshair;
+}
+
+/* Armed with a shape, and waiting to be told where it goes. The same crosshair
+   as the arrow tool, because it is the same promise: the next press on the
+   paper is a place rather than a thing. */
+.ve-diagram-canvas.is-placing,
+.ve-diagram-canvas.is-placing .dd-node {
+  cursor: crosshair;
+}
+
+/* The strokes of the selection ring and its handles are furniture, not part of
+   the diagram, so they keep their width whatever the zoom is. Without this a
+   diagram looked at from far away has a ring too thin to see and one looked at
+   closely has a ring like a border. */
+.dd-viewport .dd-ring,
+.dd-viewport .dd-handle,
+.dd-viewport .dd-frame,
+.dd-viewport .dd-marquee,
+.dd-viewport .dd-guide,
+.dd-viewport .dd-draft {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Everything you can do to what is under the pointer. Positioned against the
+   canvas rather than the page, so it travels with a canvas that scrolls and
+   cannot be left behind pointing at nothing. */
+/* The library's own menu, positioned against the canvas rather than the
+   viewport. Everything about how it looks — the icons, the keystroke in a kbd,
+   the danger colour on a delete — is .context-menu's, because a second menu
+   that looks nearly the same as the first is worse than either of them.
+
+   Absolute, not fixed: it is about a point on a canvas that scrolls and pans,
+   and a fixed menu would be left behind pointing at nothing. */
+.ve-diagram-menu.context-menu {
+  position: absolute;
+  z-index: 5;
+}
+
+/* The keystroke pushed to the far end, so a column of them lines up. The tree's
+   menu has no keystrokes on most of its items and does not need this. */
+.ve-diagram-menu .context-item kbd {
+  margin-left: auto;
+}
+
+/* The zoom sits on the paper, at the corner furthest from everything else. It
+   is about the view rather than about the diagram, so it belongs to the window
+   it changes rather than to the bar of things that change the drawing. */
+.ve-diagram-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Undo and redo sit at the far end of the bar, away from everything that makes
+   a change — the two buttons that take one back are not two more of the ones
+   that make one. */
+.ve-diagram-steps {
+  margin-left: auto;
+}
+
+.ve-diagram-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ve-diagram-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-subtle);
+  cursor: pointer;
+}
+
+.ve-diagram-icon:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.ve-diagram-zoom-value {
+  width: 4.5rem;
+  padding: 4px 6px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: center;
+}
+

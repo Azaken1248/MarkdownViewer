@@ -10,7 +10,9 @@
 
 const fs = require("fs");
 const path = require("path");
-const { appSource, coreSource, coreScriptPaths } = require("./app-source.js");
+const {
+  appSource, coreSource, coreScriptPaths, styleSource
+} = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
@@ -23,7 +25,7 @@ function check(label, actual, expected) {
 }
 
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-const css = fs.readFileSync(path.join(ROOT, "css", "app.css"), "utf8");
+const css = styleSource(ROOT);
 const app = appSource(ROOT);
 const core = coreSource(ROOT);
 

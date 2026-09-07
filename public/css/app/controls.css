@@ -1,0 +1,473 @@
+/* --------------------------------------------------------------------------
+   Buttons and fields
+   -------------------------------------------------------------------------- */
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+}
+
+.icon-btn.icon-btn-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.icon-btn.icon-btn-sm:hover:not(:disabled) {
+  background: var(--raised-hover);
+  color: var(--fg);
+  border-color: transparent;
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  background: var(--danger-subtle);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.btn i {
+  font-size: 15px;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-compact {
+  padding: 0 10px;
+}
+
+.btn-primary {
+  background: var(--success-emphasis);
+  border-color: rgba(240, 246, 252, 0.1);
+  color: var(--fg-on-emphasis);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #3a8155;
+  border-color: rgba(240, 246, 252, 0.1);
+}
+
+.btn-danger {
+  background: var(--danger-emphasis);
+  border-color: rgba(240, 246, 252, 0.1);
+  color: var(--fg-on-emphasis);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #ad5049;
+  border-color: rgba(240, 246, 252, 0.1);
+}
+
+.btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field>span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--canvas-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.field select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.field input:disabled,
+.field select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.field-inline {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Context menu
+   -------------------------------------------------------------------------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 150;
+  min-width: 210px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-item i {
+  font-size: 16px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.context-item span {
+  flex: 1;
+}
+
+.context-item kbd {
+  font-size: 10px;
+  padding: 2px 4px;
+  background: transparent;
+  border-color: var(--border-muted);
+  color: var(--fg-subtle);
+}
+
+.context-item:hover:not(:disabled),
+.context-item:focus-visible {
+  background: var(--raised-hover);
+}
+
+.context-item:hover:not(:disabled) i {
+  color: var(--fg);
+}
+
+.context-item.danger:hover:not(:disabled) {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.context-item.danger:hover:not(:disabled) i {
+  color: var(--danger);
+}
+
+.context-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.context-sep {
+  height: 1px;
+  margin: 3px 0;
+  border: none;
+  background: var(--border);
+}
+
+/* --------------------------------------------------------------------------
+   Tooltips
+
+   Positioned from script against the viewport, so it sits above everything and
+   is never clipped by a scroll container. 250 keeps it over toasts too.
+   -------------------------------------------------------------------------- */
+
+.tooltip {
+  position: fixed;
+  z-index: 250;
+  max-width: 280px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  box-shadow: var(--shadow-overlay);
+  pointer-events: none;
+  animation: tooltip-in 90ms ease-out;
+}
+
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tooltip.is-above {
+  animation-name: tooltip-in-above;
+}
+
+@keyframes tooltip-in-above {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --------------------------------------------------------------------------
+   Toasts
+   -------------------------------------------------------------------------- */
+
+.toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+  max-width: min(400px, calc(100vw - 32px));
+}
+
+.toast-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+}
+
+.toast {
+  pointer-events: auto;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+  animation: toast-in 160ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.toast.is-leaving {
+  animation: toast-out 140ms ease-in forwards;
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+.toast-icon {
+  font-size: 16px;
+  line-height: 1.25;
+  color: var(--fg-muted);
+}
+
+.toast-body {
+  min-width: 0;
+}
+
+.toast-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.toast-message {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: var(--raised-hover);
+  color: var(--fg);
+}
+
+/* A thin bar drains for the toast's lifetime so a dismissal is never a
+   surprise. Pausing on hover keeps long messages readable. */
+.toast-timer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left;
+  background: var(--fg-subtle);
+  opacity: 0.5;
+  animation: toast-drain linear forwards;
+}
+
+@keyframes toast-drain {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toast:hover .toast-timer {
+  animation-play-state: paused;
+}
+
+.toast-success {
+  border-left-color: var(--success);
+}
+
+.toast-success .toast-icon,
+.toast-success .toast-timer {
+  color: var(--success);
+  background: var(--success);
+}
+
+.toast-error {
+  border-left-color: var(--danger);
+}
+
+.toast-error .toast-icon,
+.toast-error .toast-timer {
+  color: var(--danger);
+  background: var(--danger);
+}
+
+.toast-warning {
+  border-left-color: var(--attention);
+}
+
+.toast-warning .toast-icon,
+.toast-warning .toast-timer {
+  color: var(--attention);
+  background: var(--attention);
+}
+
+.toast-info {
+  border-left-color: var(--accent);
+}
+
+.toast-info .toast-icon,
+.toast-info .toast-timer {
+  color: var(--accent);
+  background: var(--accent);
+}
+
+.toast-icon {
+  background: none !important;
+}
+

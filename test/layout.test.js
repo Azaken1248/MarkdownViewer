@@ -2,11 +2,11 @@
 // owner per region, nothing that reintroduces the side gutters.
 const fs = require("fs");
 const path = require("path");
-const { appSource } = require("./app-source.js");
+const { appSource, styleSource } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
-const css = fs.readFileSync(path.join(PUBLIC_DIR, "css", "app.css"), "utf8");
+const css = styleSource(PUBLIC_DIR);
 
 let failures = 0;
 function check(label, actual, expected) {

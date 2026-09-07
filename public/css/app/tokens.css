@@ -1,0 +1,171 @@
+/* ==========================================================================
+   Markdown Docs Viewer
+   Palette: near-black surfaces with pastel accents led by teal. Flat opaque
+   surfaces, 1px hairline borders, no blur, no gradients. Borders do the
+   separating work that shadows used to.
+   ========================================================================== */
+
+:root {
+  /* Surfaces, darkest to lightest */
+  --canvas-inset: #030506;
+  --canvas: #06090a;
+  --surface: #0c1214;
+  --raised: #131b1e;
+  --raised-hover: #1c262a;
+
+  /* Borders */
+  --border: #1c262a;
+  --border-muted: #131b1e;
+  --border-strong: #2e3d42;
+
+  /* Text */
+  --fg: #dce7e5;
+  --fg-muted: #86a09d;
+  --fg-subtle: #5f7573;
+  --fg-on-emphasis: #ffffff;
+
+  /* Accents */
+  --accent: #8ed9cf;
+  --accent-emphasis: #3f8d84;
+  --accent-subtle: rgba(142, 217, 207, 0.12);
+  --accent-muted: rgba(142, 217, 207, 0.32);
+  /* Opaque equivalent of accent-subtle, for rows that need a solid backdrop
+     (selected rows sit under an opaque action plate that must match). */
+  --selected: #0e2221;
+  --selected-hover: #14302d;
+
+  --success: #93d3a5;
+  --success-emphasis: #2f6b46;
+  --success-subtle: rgba(147, 211, 165, 0.12);
+
+  --danger: #eb9b96;
+  --danger-emphasis: #9c463f;
+  --danger-subtle: rgba(235, 155, 150, 0.12);
+
+  --attention: #e0c48a;
+  --attention-emphasis: #7d6631;
+  --attention-subtle: rgba(224, 196, 138, 0.14);
+
+  --done: #bcaae8;
+  --done-subtle: rgba(188, 170, 232, 0.12);
+
+  /* Syntax highlighting. Tokens rather than literals in the .hljs rules,
+     because these were the one part of the palette that never got a light
+     theme: five pastels tuned for a near-black background, left at 1.5–2.1:1
+     on white, which is most of the text in a code block. */
+  --code-keyword: #e8a0a1;
+  --code-entity: #c9b8f2;
+  --code-string: #a9ded7;
+  --code-constant: #a3c8de;
+  --code-meta: #e5bd94;
+
+  /* Geometry */
+  /* Named because two things need to agree about it: the layout column and
+     the match navigator, which floats clear of the tree so it sits over the
+     document it is searching. */
+  --sidebar-width: 280px;
+
+  --radius-lg: 12px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
+
+  /* The only shadows left are for things that genuinely float above the page. */
+  --shadow-overlay: 0 8px 24px rgba(0, 2, 2, 0.8);
+  --shadow-dialog: 0 16px 32px rgba(0, 2, 2, 0.9);
+
+  /* The scrollbar thumb is a control, so WCAG 1.4.11 wants 3:1 against what
+     is behind it — more than the hairline borders need. Its own token, so
+     making it visible does not thicken every border in the app. */
+  --scrollbar-thumb: #566a67;
+  --scrollbar-thumb-hover: #7b918d;
+
+  --tree-row-height: 26px;
+  --tree-indent: 14px;
+  /* The sidebar's left gutter. The title and the meta line were on 12px and
+     the rows on 8px, so every filename sat four pixels inside the heading
+     above it. Named because the guide line down a folder's children has to
+     land on the middle of its icon, which is this plus half of one. */
+  --tree-gutter: 12px;
+
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+   Light theme
+
+   Every colour in the app already goes through the tokens above, so the light
+   theme is a token swap and nothing else — no component knows which theme is
+   running. Same teal, darkened until it carries text weight on a pale surface.
+
+   Dark stays the default: it is what the app has always looked like, and an
+   explicit choice is remembered. "Auto" (the third state of the toggle) is the
+   only mode that follows the operating system.
+   -------------------------------------------------------------------------- */
+
+:root[data-theme="light"] {
+  --canvas-inset: #e7eeec;
+  --canvas: #f4f8f7;
+  --surface: #ffffff;
+  --raised: #eef4f2;
+  --raised-hover: #dfeae7;
+
+  --border: #cfdcd9;
+  --border-muted: #e4ecea;
+  --border-strong: #a6b9b5;
+
+  --fg: #101b1a;
+  --fg-muted: #465956;
+  --fg-subtle: #62756f;
+  --fg-on-emphasis: #ffffff;
+
+  /* The pastel #8ed9cf is decorative on black and unreadable on white, so the
+     light theme keeps the hue and takes the lightness down until body-weight
+     text on --canvas clears 4.5:1. */
+  --accent: #10635a;
+  --accent-emphasis: #0f5b53;
+  --accent-subtle: rgba(16, 99, 90, 0.10);
+  --accent-muted: rgba(16, 99, 90, 0.34);
+  --selected: #dcece9;
+  --selected-hover: #cbe2de;
+
+  --success: #17603a;
+  --success-emphasis: #1c6f43;
+  --success-subtle: rgba(23, 96, 58, 0.12);
+
+  --danger: #97302a;
+  --danger-emphasis: #8f2d27;
+  --danger-subtle: rgba(151, 48, 42, 0.10);
+
+  --attention: #6b5210;
+  --attention-emphasis: #7a5d14;
+  --attention-subtle: rgba(107, 82, 16, 0.12);
+
+  --done: #4c3a8c;
+  --done-subtle: rgba(76, 58, 140, 0.12);
+
+  /* Same five hues, within a few degrees, taken down until each clears 4.5:1
+     on both code backgrounds — the block (--surface, white) and inline
+     (--raised). They land at 6.6–8.7:1. */
+  --code-keyword: #9b2f2b;
+  --code-entity: #5533a8;
+  --code-string: #0f5f56;
+  --code-constant: #1c5674;
+  --code-meta: #7a4c11;
+
+  --shadow-overlay: 0 8px 24px rgba(16, 27, 26, 0.14);
+  --shadow-dialog: 0 16px 32px rgba(16, 27, 26, 0.20);
+
+  --scrollbar-thumb: #808f8c;
+  --scrollbar-thumb-hover: #62756f;
+
+  color-scheme: light;
+}
+
+/* "auto" is resolved to a concrete light/dark value in script before first
+   paint, so this stylesheet only ever has to describe two themes. Duplicating
+   the whole token block inside a prefers-color-scheme query would be the only
+   alternative, and two copies of 30 colours drift. */
+
