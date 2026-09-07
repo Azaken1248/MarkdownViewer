@@ -47,7 +47,7 @@
     // destination's path. Asking for the old one would find nothing there —
     // and only the document actually being read should follow the move.
     const stillOpen = state.activeFile === file ? payload.file : state.activeFile;
-    await App.refreshDocs({ openFile: stillOpen, preserveSearch: true });
+    await AppRefresh.refreshDocs({ openFile: stillOpen, preserveSearch: true });
     setStatus(`Moved ${payload.file} to ${payload.folderName || state.rootFolderLabel || "Ungrouped"}.`, "success");
     return payload;
   }
@@ -69,7 +69,7 @@
 
         await renameFolderOnServer(state.folderModalTargetFolderId, folderName);
         closeFolderModal();
-        await App.refreshDocs({ preserveSearch: true });
+        await AppRefresh.refreshDocs({ preserveSearch: true });
         setStatus(`Renamed folder to ${folderName}.`, "success");
         return;
       }
@@ -79,7 +79,7 @@
       if (state.folderModalMode === "upload") {
         const pending = state.pendingUploadFile;
         closeFolderModal();
-        await App.uploadMarkdown(pending, created.folder.id);
+        await AppUploads.uploadMarkdown(pending, created.folder.id);
         return;
       }
 
@@ -90,7 +90,7 @@
       }
 
       closeFolderModal();
-      await App.refreshDocs({ preserveSearch: true });
+      await AppRefresh.refreshDocs({ preserveSearch: true });
       notify(created.folder.parentId
         ? `Created "${created.folder.name}" in ${created.folder.path.replace(/ \/ [^/]+$/, "")}.`
         : `Created folder "${created.folder.name}".`, "success");

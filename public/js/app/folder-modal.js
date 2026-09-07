@@ -132,7 +132,7 @@
         if (state.folderModalMode === "upload") {
           const pending = state.pendingUploadFile;
           closeFolderModal();
-          await App.uploadMarkdown(pending, folderId);
+          await AppUploads.uploadMarkdown(pending, folderId);
           return;
         }
 

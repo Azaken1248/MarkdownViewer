@@ -78,7 +78,7 @@
     }
 
     if (moved > 0) {
-      await App.refreshDocs({ preserveSearch: true });
+      await AppRefresh.refreshDocs({ preserveSearch: true });
     }
 
     if (!silent) {
@@ -103,7 +103,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parentId: parentId || null })
       });
-      await App.refreshDocs({ preserveSearch: true });
+      await AppRefresh.refreshDocs({ preserveSearch: true });
       notify(`Moved "${getFolderLabel(folderId)}" into ${parentId ? getFolderLabel(parentId) : "the top level"}.`, "success");
     } catch (error) {
       notify(error.message, "error");

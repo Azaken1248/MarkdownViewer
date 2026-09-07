@@ -112,7 +112,7 @@
         });
         state.contentCache.delete(file);
         const openedFile = state.activeFile === file ? payload.file : state.activeFile;
-        await App.refreshDocs({ openFile: openedFile, preserveSearch: true });
+        await AppRefresh.refreshDocs({ openFile: openedFile, preserveSearch: true });
         notify(`Renamed to ${docName(payload.file)}.`, "success");
       } catch (error) {
         notify(error.message, "error");
@@ -136,7 +136,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: nextName })
         });
-        await App.refreshDocs({ preserveSearch: true });
+        await AppRefresh.refreshDocs({ preserveSearch: true });
         notify(`Renamed folder to ${nextName}.`, "success");
       } catch (error) {
         notify(error.message, "error");

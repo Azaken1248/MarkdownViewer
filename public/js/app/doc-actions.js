@@ -46,7 +46,7 @@
       });
 
       state.contentCache.delete(targetFile);
-      await App.refreshDocs({ preserveSearch: true });
+      await AppRefresh.refreshDocs({ preserveSearch: true });
       setStatus(payload.message || `${payload.originalFile} deleted.`, "success");
     } catch (error) {
       if (normalize(error.message).includes("request failed (404)")) {
@@ -73,7 +73,7 @@
       state.isRecycleBinMode = false;
       syncModeUI();
       resetJumpNavigation();
-      await App.refreshDocs({ openFile: payload.file, preserveSearch: false });
+      await AppRefresh.refreshDocs({ openFile: payload.file, preserveSearch: false });
       setStatus(`Restored ${payload.file} from recycle bin.`, "success");
     } catch (error) {
       setStatus(error.message, "error");

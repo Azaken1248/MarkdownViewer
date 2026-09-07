@@ -18,7 +18,7 @@
     for (const file of files) {
       const placeholder = uploadPlaceholder(file);
       insertIntoTextarea(elements.editorInput, placeholder);
-      App.scheduleEditorPreview();
+      AppSourceEditor.scheduleEditorPreview();
 
       try {
         const url = await uploadImage(file);
@@ -30,7 +30,7 @@
         setStatus(error.message, "error");
       }
 
-      App.scheduleEditorPreview();
+      AppSourceEditor.scheduleEditorPreview();
     }
   }
 

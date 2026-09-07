@@ -141,7 +141,7 @@
         return;
       }
 
-      await App.openEditorForDocument(state.activeFile);
+      await AppEditorSave.openEditorForDocument(state.activeFile);
       return;
     }
 
@@ -330,7 +330,7 @@
       }
 
       exitPageEdit();
-      await App.refreshDocs({ openFile: payload.file || file, preserveSearch: true });
+      await AppRefresh.refreshDocs({ openFile: payload.file || file, preserveSearch: true });
 
       if (viewer) {
         viewer.scrollTop = offset;
@@ -399,7 +399,7 @@
     exitPageEdit();
     await restorePageView(file, initial, title);
 
-    App.openEditor({
+    AppSourceEditor.openEditor({
       mode: "edit",
       fileName: file,
       content,

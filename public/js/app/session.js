@@ -161,7 +161,7 @@
       }
 
       notify(`Signed in as ${payload.user.username}.`, "success");
-      await App.refreshDocs({ preserveSearch: false });
+      await AppRefresh.refreshDocs({ preserveSearch: false });
     } catch (error) {
       showFieldError(elements.loginError, error.message || "Sign-in failed.");
     } finally {
@@ -257,7 +257,7 @@
 
       // A forced change blocked the initial load, so the library is still empty.
       if (state.docs.length === 0) {
-        await App.refreshDocs({ preserveSearch: false });
+        await AppRefresh.refreshDocs({ preserveSearch: false });
       }
     } catch (error) {
       showFieldError(elements.passwordError, error.message);

@@ -39,7 +39,7 @@
 
     try {
       const payload = await requestJson(`/api/folders/${encodeURIComponent(folderId)}`, { method: "DELETE" });
-      await App.refreshDocs({ preserveSearch: true });
+      await AppRefresh.refreshDocs({ preserveSearch: true });
       notify(payload.removedFolders > 1
         ? `Deleted "${folder.name}" and ${payload.removedFolders - 1} subfolder(s).`
         : `Deleted folder "${folder.name}".`, "success");
@@ -57,7 +57,7 @@
     }
 
     if (list.length === 1) {
-      await App.deleteDocumentByFile(list[0], mode);
+      await AppFileActions.deleteDocumentByFile(list[0], mode);
       return;
     }
 
@@ -93,7 +93,7 @@
     }
 
     clearSelection();
-    await App.refreshDocs({ preserveSearch: true });
+    await AppRefresh.refreshDocs({ preserveSearch: true });
 
     if (done) {
       notify(`${done} file(s) ${mode === "hard" ? "archived" : "moved to the recycle bin"}.`, "success");

@@ -113,20 +113,20 @@
         {
           label: "Restore",
           icon: "ph-arrow-counter-clockwise",
-          action: () => void (inArchive ? App.restoreArchivedDocumentByFile(doc.file) : App.restoreDeletedDocumentByFile(doc.file))
+          action: () => void (inArchive ? AppFileActions.restoreArchivedDocumentByFile(doc.file) : AppFileActions.restoreDeletedDocumentByFile(doc.file))
         },
         {
           label: inArchive ? "Delete forever" : "Archive",
           icon: inArchive ? "ph-trash" : "ph-archive-box",
           danger: true,
-          action: () => void (inArchive ? App.permanentlyDeleteArchivedDocument(doc.file) : App.hardDeleteDeletedDocumentByFile(doc.file))
+          action: () => void (inArchive ? AppFileActions.permanentlyDeleteArchivedDocument(doc.file) : AppFileActions.hardDeleteDeletedDocumentByFile(doc.file))
         }
       ];
     }
 
     return [
       { label: "Open", icon: "ph-file-text", disabled: many, action: () => void App.openDocument(doc.file, true) },
-      { label: "Edit", icon: "ph-pencil-simple", disabled: many, action: () => void App.openEditorForDocument(doc.file) },
+      { label: "Edit", icon: "ph-pencil-simple", disabled: many, action: () => void AppEditorSave.openEditorForDocument(doc.file) },
       { separator: true },
       {
         label: many ? `Cut ${targets.length} files` : "Cut",
@@ -187,7 +187,7 @@
       {
         label: "New file",
         icon: "ph-file-plus",
-        action: () => App.startNewDocument(folder.id)
+        action: () => AppSourceEditor.startNewDocument(folder.id)
       },
       {
         label: "New subfolder",

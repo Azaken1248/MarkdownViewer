@@ -334,9 +334,9 @@
       actions.append(
         buildTreeAction("Restore", "ph-arrow-counter-clockwise", async () => {
           if (inArchive) {
-            await App.restoreArchivedDocumentByFile(doc.file);
+            await AppFileActions.restoreArchivedDocumentByFile(doc.file);
           } else {
-            await App.restoreDeletedDocumentByFile(doc.file);
+            await AppFileActions.restoreDeletedDocumentByFile(doc.file);
           }
         }),
         buildTreeAction(
@@ -344,9 +344,9 @@
           inArchive ? "ph-trash" : "ph-archive-box",
           async () => {
             if (inArchive) {
-              await App.permanentlyDeleteArchivedDocument(doc.file);
+              await AppFileActions.permanentlyDeleteArchivedDocument(doc.file);
             } else {
-              await App.hardDeleteDeletedDocumentByFile(doc.file);
+              await AppFileActions.hardDeleteDeletedDocumentByFile(doc.file);
             }
           },
           { danger: true }
@@ -356,7 +356,7 @@
     } else if (can("doc:write")) {
       actions.append(
         buildTreeAction("Edit", "ph-pencil-simple", async () => {
-          await App.openEditorForDocument(doc.file);
+          await AppEditorSave.openEditorForDocument(doc.file);
         }),
         buildTreeAction("Rename", "ph-cursor-text", () => beginInlineRename(doc.file)),
         buildTreeAction("Move to recycle bin", "ph-trash", () => {
