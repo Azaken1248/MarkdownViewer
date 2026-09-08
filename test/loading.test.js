@@ -166,5 +166,93 @@ for (const [label, pattern] of [
   check(`${label} settles the panel`, pattern.test(app), true);
 }
 
+console.log("=== the app's own assets go out compressed ===");
+{
+  /* 106 files and 1.1MB of raw text was the largest saving this app had left,
+   * and it needed no build step to take: node has had brotli since 10. The
+   * checks are on the module rather than on a live server, because what can go
+   * wrong here is the negotiation and the bookkeeping, not the compressing.
+   */
+  const zlib = require("zlib");
+  const { createStaticAssets, pickEncoding, MIN_COMPRESS_BYTES } =
+    require("../lib/http/static-assets.js");
+
+  check("brotli is preferred when offered", pickEncoding("gzip, deflate, br"), "br");
+  check("...gzip when it is not", pickEncoding("gzip, deflate"), "gzip");
+  check("...and nothing is assumed of a client that says nothing",
+    pickEncoding(undefined), "identity");
+  check("a header naming neither gets the file itself", pickEncoding("deflate"), "identity");
+
+  // The middleware, driven the way express would drive it.
+  const { createAssetVersions } = require("../lib/http/asset-versions.js");
+  const serve = createStaticAssets({
+    publicDir: PUBLIC_DIR,
+    assetVersions: createAssetVersions({ publicDir: PUBLIC_DIR })
+  });
+
+  function ask(urlPath, acceptEncoding, query = {}) {
+    const answer = { headers: {}, status: 200, body: null, passed: false };
+    const res = {
+      set(name, value) { answer.headers[name] = value; return res; },
+      status(code) { answer.status = code; return res; },
+      send(body) { answer.body = body; return res; },
+      end() { return res; }
+    };
+    serve(
+      { method: "GET", path: urlPath, query, headers: { "accept-encoding": acceptEncoding }, fresh: false },
+      res,
+      () => { answer.passed = true; }
+    );
+    return answer;
+  }
+
+  const raw = fs.readFileSync(path.join(PUBLIC_DIR, "js", "app.js"));
+
+  const brotli = ask("/js/app.js", "br");
+  check("a script is answered brotli", brotli.headers["Content-Encoding"], "br");
+  check("...and it is the file, decompressed",
+    zlib.brotliDecompressSync(brotli.body).equals(raw), true);
+  check("...and it is smaller than the file", brotli.body.length < raw.length, true);
+  check("...typed as javascript", brotli.headers["Content-Type"], "text/javascript; charset=utf-8");
+  check("...and marked as varying by what was accepted",
+    brotli.headers.Vary, "Accept-Encoding");
+
+  const gzipped = ask("/js/app.js", "gzip");
+  check("a client that only has gzip gets gzip", gzipped.headers["Content-Encoding"], "gzip");
+  check("...and that is the file too", zlib.gunzipSync(gzipped.body).equals(raw), true);
+
+  const plain = ask("/js/app.js", "");
+  check("a client that accepts no encoding gets the file", plain.headers["Content-Encoding"], undefined);
+  check("...unencoded and unchanged", plain.body.equals(raw), true);
+
+  // Two bodies, so two tags. One tag for both is how a 304 delivers bytes the
+  // client cannot read.
+  check("each encoding carries its own ETag",
+    brotli.headers.ETag === plain.headers.ETag, false);
+
+  check("a stylesheet is served as one too",
+    ask("/css/app/markdown.css", "br").headers["Content-Type"], "text/css; charset=utf-8");
+
+  // Everything it is not responsible for has to fall through, or express.static
+  // behind it never gets the chance to answer.
+  check("an image is left to the static handler", ask("/favicon.svg", "br").passed, true);
+  check("a missing script is left to it as well", ask("/js/nope.js", "br").passed, true);
+  check("and a traversal is not answered here",
+    ask("/js/../../package.json", "br").passed, true);
+
+  // The immutable pairing from the version work next door still applies.
+  const versioned = createAssetVersions({ publicDir: PUBLIC_DIR });
+  const current = versioned.versionOf("/js/app.js");
+  check("a request carrying the current version may be kept",
+    ask("/js/app.js", "br", { v: current }).headers["Cache-Control"],
+    "public, max-age=31536000, immutable");
+  check("...and one carrying a stale version may not",
+    ask("/js/app.js", "br", { v: "deadbeef" }).headers["Cache-Control"],
+    "public, max-age=0");
+
+  check("the threshold below which compressing is not worth the framing",
+    MIN_COMPRESS_BYTES, 512);
+}
+
 console.log(failures === 0 ? "\nALL LOADING CHECKS PASSED" : `\n${failures} LOADING CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

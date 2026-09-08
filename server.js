@@ -38,6 +38,8 @@ const { requestLogger } = require("./lib/http/logging");
 const { templateReader } = require("./lib/http/html");
 const { createBaseUrlResolver } = require("./lib/http/urls");
 const { createErrorPages } = require("./lib/http/errors");
+const { createAssetVersions } = require("./lib/http/asset-versions");
+const { createStaticAssets } = require("./lib/http/static-assets");
 const { createGuards } = require("./lib/guards");
 const {
   createOrganizerFile
@@ -241,7 +243,20 @@ const { searchDocuments: searchIn } = createSearch({
   resultLimit: SEARCH_RESULT_LIMIT
 });
 
-const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH);
+/* The `?v=` on every script and stylesheet, taken from the file's own bytes.
+ *
+ * The pages name their assets without a version; this puts the current one on
+ * as they are served, and the static route below trusts a version that matches
+ * far enough to call the answer immutable.
+ */
+const assetVersions = createAssetVersions({ publicDir: PUBLIC_DIR });
+
+// The same files, compressed and kept. Sits in front of express.static and
+// answers only for /css and /js; everything else falls through untouched.
+const serveStaticAsset = createStaticAssets({ publicDir: PUBLIC_DIR, assetVersions });
+
+const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH, assetVersions.stamp);
+const getDiagramTemplate = templateReader(DIAGRAM_TEMPLATE_PATH, assetVersions.stamp);
 
 /* Which documents a search covers. Scoring them is lib/docs/search.js; picking
  * the corpus is here, because it is the storage layout that decides it.
@@ -275,6 +290,7 @@ const {
 
 const { sendError, notFound, errorHandler } = createErrorPages({
   templatePath: ERROR_TEMPLATE_PATH,
+  stampAssetVersions: assetVersions.stamp,
   siteName: SITE_NAME,
   faviconPath: FAVICON_PATH,
   themeColor: EMBED_THEME_COLOR,
@@ -283,7 +299,7 @@ const { sendError, notFound, errorHandler } = createErrorPages({
   maxAssetBytes: MAX_ASSET_BYTES
 });
 
-const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH);
+const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH, assetVersions.stamp);
 
 // ---------------------------------------------------------------------------
 // The routes
@@ -400,7 +416,9 @@ app.use(createUploadRoutes({
 app.use(createPagesRoutes({
   publicDir: PUBLIC_DIR,
   markdownDir: MARKDOWN_DIR,
-  diagramTemplatePath: DIAGRAM_TEMPLATE_PATH,
+  getDiagramTemplate,
+  assetVersions,
+  serveStaticAsset,
   shareStore,
   fileExists,
   readCachedTextFile,
@@ -475,6 +493,16 @@ async function bootstrap() {
 
   const server = app.listen(PORT, () => {
     console.log(`AzaDocs running on http://localhost:${PORT}`);
+
+    /* Compress the scripts and stylesheets now rather than on the first
+     * request. The port is already open, so this costs nobody a wait, and the
+     * first visitor after a restart finds every file ready instead of paying
+     * for full-quality brotli one file at a time.
+     */
+    void serveStaticAsset.warm().catch(() => {
+      // A file that will not compress is served as itself. Not worth a line of
+      // output at boot, and certainly not worth failing to start over.
+    });
     console.log(PUBLIC_READS
       ? "  Reads are PUBLIC (PUBLIC_READS=true). Anyone can read every document."
       : "  Reads require a session. Individual documents can still be shared by link.");
