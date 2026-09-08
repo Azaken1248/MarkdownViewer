@@ -440,28 +440,55 @@ console.log("=== touch targets in the header ===");
     seat(mediaBlock("@media (hover: none)", css.indexOf("@media (max-height: 560px)"))), 36);
 }
 
-console.log("=== one file, one version of it ===");
+console.log("=== the version in an asset's URL is the asset ===");
 {
-  // The query string is what makes a browser fetch a changed asset. Three
-  // pages sharing app.css had drifted to two different numbers, so a visitor
-  // who had opened a shared document kept serving themselves the old
-  // stylesheet from cache under the old address — including, until this, none
-  // of the responsive rules that page needs.
-  const versions = new Map();
-  for (const [page, markup] of [["index.html", html], ["share.html", shareHtml], ["error.html", errorHtml], ["diagram.html", diagramHtml]]) {
-    for (const [, file, version] of markup.matchAll(/\/((?:css|js)\/(?:[a-z-]+\/)?[a-z-]+\.(?:css|js))\?v=(\d+)/g)) {
-      if (!versions.has(file)) versions.set(file, new Map());
-      versions.get(file).set(page, version);
-    }
+  /* This used to be a number typed into four HTML files, and this check was
+   * that the four agreed with each other. They could all agree and all be
+   * wrong: nothing could check that the number matched the file it versioned,
+   * so "you changed the file and bumped nothing" served a stale asset to a
+   * returning visitor and looked fine to whoever wrote the fix.
+   *
+   * There is no number now. The pages name their files, and lib/http/
+   * asset-versions.js stamps the content hash on as they are served — so the
+   * invariant to check is that the pages carry nothing to forget, and that the
+   * stamping puts a real version on everything they name.
+   */
+  const { createAssetVersions } = require("../lib/http/asset-versions.js");
+  const assetVersions = createAssetVersions({ publicDir: PUBLIC_DIR });
+
+  const pages = [["index.html", html], ["share.html", shareHtml],
+    ["error.html", errorHtml], ["diagram.html", diagramHtml]];
+
+  for (const [page, markup] of pages) {
+    const handWritten = [...markup.matchAll(/\/(?:css|js)\/[^"?]+\?v=[^"]*/g)].map(([m]) => m);
+    check(`${page} carries no hand-written version`, handWritten, []);
   }
 
-  for (const [file, pages] of versions) {
-    const seen = [...new Set(pages.values())];
-    if (seen.length > 1) {
-      console.log(`  (${file}: ${[...pages].map(([p, v]) => `${p}=${v}`).join(", ")})`);
-    }
-    check(`${file} carries one version everywhere it is loaded`, seen.length, 1);
+  for (const [page, markup] of pages) {
+    const named = [...markup.matchAll(/(?:src|href)="(\/(?:css|js)\/[^"?]+)"/g)].map(([, file]) => file);
+    const unstamped = named.filter((file) => assetVersions.versionOf(file) === null);
+    check(`${page} names ${named.length} assets and every one of them exists to be hashed`,
+      unstamped, []);
   }
+
+  // Same bytes, same URL — otherwise a deploy that changed nothing would still
+  // evict every cache that was correct.
+  const twice = assetVersions.versionOf("/js/app.js");
+  check("hashing the same file twice gives the same version",
+    assetVersions.versionOf("/js/app.js"), twice);
+
+  // And the half that makes it worth having: only a request carrying the
+  // current version is allowed to be answered as immutable.
+  check("the current version is recognised", assetVersions.isCurrent("/js/app.js", twice), true);
+  check("...and a stale one is not", assetVersions.isCurrent("/js/app.js", "deadbeef"), false);
+  check("...and a missing one is not", assetVersions.isCurrent("/js/app.js", undefined), false);
+
+  // A page cannot version its way out of the public directory.
+  check("a traversal is not a versionable asset",
+    assetVersions.versionOf("/js/../../package.json"), null);
+  check("a CDN URL is left alone",
+    assetVersions.stamp('<script src="https://cdn.example/x.js"></script>'),
+    '<script src="https://cdn.example/x.js"></script>');
 }
 
 console.log("=== the notch ===");

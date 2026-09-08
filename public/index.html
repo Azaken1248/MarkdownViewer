@@ -56,26 +56,26 @@
   <!-- Absolute, not relative. This same page is served for every document
        address, so at /Notes/day-one.md a relative "css/app.css" would ask for
        /Notes/css/app.css and get a 404 — an unstyled page with no script. -->
-  <script src="/js/theme-boot.js?v=65"></script>
-  <link rel="stylesheet" href="/css/app/tokens.css?v=1" />
-  <link rel="stylesheet" href="/css/app/base.css?v=1" />
-  <link rel="stylesheet" href="/css/app/search.css?v=1" />
-  <link rel="stylesheet" href="/css/app/sidebar.css?v=1" />
-  <link rel="stylesheet" href="/css/app/viewer.css?v=1" />
-  <link rel="stylesheet" href="/css/app/markdown.css?v=1" />
-  <link rel="stylesheet" href="/css/app/controls.css?v=1" />
-  <link rel="stylesheet" href="/css/app/modals.css?v=1" />
-  <link rel="stylesheet" href="/css/app/page-edit.css?v=1" />
-  <link rel="stylesheet" href="/css/app/diagram.css?v=1" />
-  <link rel="stylesheet" href="/css/app/diagram-paper.css?v=1" />
-  <link rel="stylesheet" href="/css/app/diagram-panel.css?v=1" />
-  <link rel="stylesheet" href="/css/app/dock.css?v=1" />
-  <link rel="stylesheet" href="/css/app/responsive.css?v=1" />
-  <link rel="stylesheet" href="/css/app/print.css?v=1" />
-  <link rel="stylesheet" href="/css/app/accounts.css?v=1" />
-  <link rel="stylesheet" href="/css/app/share.css?v=1" />
-  <link rel="stylesheet" href="/css/app/error.css?v=1" />
-  <link rel="stylesheet" href="/css/app/notebook-run.css?v=1" />
+  <script src="/js/theme-boot.js"></script>
+  <link rel="stylesheet" href="/css/app/tokens.css" />
+  <link rel="stylesheet" href="/css/app/base.css" />
+  <link rel="stylesheet" href="/css/app/search.css" />
+  <link rel="stylesheet" href="/css/app/sidebar.css" />
+  <link rel="stylesheet" href="/css/app/viewer.css" />
+  <link rel="stylesheet" href="/css/app/markdown.css" />
+  <link rel="stylesheet" href="/css/app/controls.css" />
+  <link rel="stylesheet" href="/css/app/modals.css" />
+  <link rel="stylesheet" href="/css/app/page-edit.css" />
+  <link rel="stylesheet" href="/css/app/diagram.css" />
+  <link rel="stylesheet" href="/css/app/diagram-paper.css" />
+  <link rel="stylesheet" href="/css/app/diagram-panel.css" />
+  <link rel="stylesheet" href="/css/app/dock.css" />
+  <link rel="stylesheet" href="/css/app/responsive.css" />
+  <link rel="stylesheet" href="/css/app/print.css" />
+  <link rel="stylesheet" href="/css/app/accounts.css" />
+  <link rel="stylesheet" href="/css/app/share.css" />
+  <link rel="stylesheet" href="/css/app/error.css" />
+  <link rel="stylesheet" href="/css/app/notebook-run.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
     integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"
     defer></script>
@@ -91,105 +91,105 @@
        integrity hashes live in LAZY_LIBRARIES there.
 
        marked and DOMPurify stay: nothing renders without them. -->
-  <script src="/js/md/lazy.js?v=1" defer></script>
-  <script src="/js/md/text.js?v=1" defer></script>
-  <script src="/js/md/math.js?v=1" defer></script>
-  <script src="/js/md/notebook.js?v=1" defer></script>
-  <script src="/js/md/diagram-theme.js?v=1" defer></script>
-  <script src="/js/md/code.js?v=1" defer></script>
-  <script src="/js/md/mermaid.js?v=1" defer></script>
-  <script src="/js/md/panzoom.js?v=1" defer></script>
-  <script src="/js/markdown-core.js?v=79" defer></script>
+  <script src="/js/md/lazy.js" defer></script>
+  <script src="/js/md/text.js" defer></script>
+  <script src="/js/md/math.js" defer></script>
+  <script src="/js/md/notebook.js" defer></script>
+  <script src="/js/md/diagram-theme.js" defer></script>
+  <script src="/js/md/code.js" defer></script>
+  <script src="/js/md/mermaid.js" defer></script>
+  <script src="/js/md/panzoom.js" defer></script>
+  <script src="/js/markdown-core.js" defer></script>
   <!-- Block splitting and markdown serialization for the visual editor. -->
-  <script src="/js/visual-editor.js?v=65" defer></script>
+  <script src="/js/visual-editor.js" defer></script>
   <!-- Mermaid flowcharts as steps and arrows, for building one without typing
        its syntax. A few kilobytes and no dependency on Mermaid itself, which is
        still only downloaded when a document has a diagram in it. -->
-  <script src="/js/dm/shapes.js?v=1" defer></script>
-  <script src="/js/dm/grammar.js?v=1" defer></script>
-  <script src="/js/dm/cells.js?v=1" defer></script>
-  <script src="/js/dm/declarations.js?v=1" defer></script>
-  <script src="/js/dm/parse.js?v=1" defer></script>
-  <script src="/js/dm/serialize.js?v=1" defer></script>
-  <script src="/js/dm/layout.js?v=1" defer></script>
-  <script src="/js/diagram-model.js?v=95" defer></script>
+  <script src="/js/dm/shapes.js" defer></script>
+  <script src="/js/dm/grammar.js" defer></script>
+  <script src="/js/dm/cells.js" defer></script>
+  <script src="/js/dm/declarations.js" defer></script>
+  <script src="/js/dm/parse.js" defer></script>
+  <script src="/js/dm/serialize.js" defer></script>
+  <script src="/js/dm/layout.js" defer></script>
+  <script src="/js/diagram-model.js" defer></script>
   <!-- Draws a flowchart that carries its own layout, without the 3.5MB engine. -->
-  <script src="/js/diagram-icons.js?v=1" defer></script>
-  <script src="/js/dd/base.js?v=1" defer></script>
-  <script src="/js/dd/paint.js?v=1" defer></script>
-  <script src="/js/dd/shapes.js?v=1" defer></script>
-  <script src="/js/dd/ends.js?v=1" defer></script>
-  <script src="/js/dd/route.js?v=1" defer></script>
-  <script src="/js/dd/edges.js?v=1" defer></script>
-  <script src="/js/dd/marks.js?v=1" defer></script>
-  <script src="/js/dd/groups.js?v=1" defer></script>
-  <script src="/js/diagram-draw.js?v=104" defer></script>
+  <script src="/js/diagram-icons.js" defer></script>
+  <script src="/js/dd/base.js" defer></script>
+  <script src="/js/dd/paint.js" defer></script>
+  <script src="/js/dd/shapes.js" defer></script>
+  <script src="/js/dd/ends.js" defer></script>
+  <script src="/js/dd/route.js" defer></script>
+  <script src="/js/dd/edges.js" defer></script>
+  <script src="/js/dd/marks.js" defer></script>
+  <script src="/js/dd/groups.js" defer></script>
+  <script src="/js/diagram-draw.js" defer></script>
   <!-- The canvas the diagram is edited on. The same one the standalone editor
        page mounts, so a fence in a document and a .mmd file on its own are the
        same diagram to it. -->
-  <script src="/js/diagram-editor.js?v=36" defer></script>
+  <script src="/js/diagram-editor.js" defer></script>
   <!-- The Python runtime controller. Pyodide itself is not downloaded until a
        Run button is pressed. -->
-  <script src="/js/notebook-runtime.js?v=64" defer></script>
+  <script src="/js/notebook-runtime.js" defer></script>
   <!-- app.js is assembled from the modules in /js/app, each loaded before it.
        They are plain scripts in dependency order: a module only ever uses what
        an earlier one put on the page. -->
-  <script src="/js/app/text.js?v=1" defer></script>
-  <script src="/js/app/dom.js?v=1" defer></script>
-  <script src="/js/app/state.js?v=1" defer></script>
-  <script src="/js/app/api.js?v=1" defer></script>
-  <script src="/js/app/library.js?v=1" defer></script>
-  <script src="/js/app/search.js?v=1" defer></script>
-  <script src="/js/app/location.js?v=1" defer></script>
-  <script src="/js/app/selection.js?v=1" defer></script>
-  <script src="/js/app/tooltips.js?v=1" defer></script>
-  <script src="/js/app/modal.js?v=1" defer></script>
-  <script src="/js/app/shell.js?v=1" defer></script>
-  <script src="/js/app/notify.js?v=1" defer></script>
-  <script src="/js/app/links.js?v=1" defer></script>
-  <script src="/js/app/share.js?v=1" defer></script>
-  <script src="/js/app/pasted-images.js?v=1" defer></script>
-  <script src="/js/app/theme.js?v=1" defer></script>
-  <script src="/js/app/notebook.js?v=1" defer></script>
-  <script src="/js/app/textarea.js?v=1" defer></script>
-  <script src="/js/app/inline-rename.js?v=1" defer></script>
-  <script src="/js/app/folder-collapse.js?v=1" defer></script>
-  <script src="/js/app/jump.js?v=1" defer></script>
-  <script src="/js/app/search-panel.js?v=1" defer></script>
-  <script src="/js/app/viewer-header.js?v=1" defer></script>
-  <script src="/js/app/session.js?v=1" defer></script>
-  <script src="/js/app/users.js?v=1" defer></script>
-  <script src="/js/app/folder-modal.js?v=1" defer></script>
-  <script src="/js/app/render.js?v=1" defer></script>
-  <script src="/js/app/source-editor.js?v=1" defer></script>
-  <script src="/js/app/docs.js?v=1" defer></script>
-  <script src="/js/app/task-lists.js?v=1" defer></script>
-  <script src="/js/app/page-images.js?v=1" defer></script>
-  <script src="/js/app/clipboard.js?v=1" defer></script>
-  <script src="/js/app/deletion.js?v=1" defer></script>
-  <script src="/js/app/context-menu.js?v=1" defer></script>
-  <script src="/js/app/tree.js?v=1" defer></script>
-  <script src="/js/app/searching.js?v=1" defer></script>
-  <script src="/js/app/opening.js?v=1" defer></script>
-  <script src="/js/app/doc-actions.js?v=1" defer></script>
-  <script src="/js/app/refresh.js?v=1" defer></script>
-  <script src="/js/app/uploads.js?v=1" defer></script>
-  <script src="/js/app/editor-save.js?v=1" defer></script>
-  <script src="/js/app/folder-ops.js?v=1" defer></script>
-  <script src="/js/app/page-blocks.js?v=1" defer></script>
-  <script src="/js/app/page-tables.js?v=1" defer></script>
-  <script src="/js/app/page-code.js?v=1" defer></script>
-  <script src="/js/app/page-embeds.js?v=1" defer></script>
-  <script src="/js/app/page-insert.js?v=1" defer></script>
-  <script src="/js/app/page-history.js?v=1" defer></script>
-  <script src="/js/app/page-edit.js?v=1" defer></script>
-  <script src="/js/app/file-actions.js?v=1" defer></script>
-  <script src="/js/app/match-nav.js?v=1" defer></script>
-  <script src="/js/app/places.js?v=1" defer></script>
-  <script src="/js/app/account-menu.js?v=1" defer></script>
-  <script src="/js/app/sidebar.js?v=1" defer></script>
-  <script src="/js/app/editor-keys.js?v=1" defer></script>
-  <script src="/js/app.js?v=132" defer></script>
+  <script src="/js/app/text.js" defer></script>
+  <script src="/js/app/dom.js" defer></script>
+  <script src="/js/app/state.js" defer></script>
+  <script src="/js/app/api.js" defer></script>
+  <script src="/js/app/library.js" defer></script>
+  <script src="/js/app/search.js" defer></script>
+  <script src="/js/app/location.js" defer></script>
+  <script src="/js/app/selection.js" defer></script>
+  <script src="/js/app/tooltips.js" defer></script>
+  <script src="/js/app/modal.js" defer></script>
+  <script src="/js/app/shell.js" defer></script>
+  <script src="/js/app/notify.js" defer></script>
+  <script src="/js/app/links.js" defer></script>
+  <script src="/js/app/share.js" defer></script>
+  <script src="/js/app/pasted-images.js" defer></script>
+  <script src="/js/app/theme.js" defer></script>
+  <script src="/js/app/notebook.js" defer></script>
+  <script src="/js/app/textarea.js" defer></script>
+  <script src="/js/app/inline-rename.js" defer></script>
+  <script src="/js/app/folder-collapse.js" defer></script>
+  <script src="/js/app/jump.js" defer></script>
+  <script src="/js/app/search-panel.js" defer></script>
+  <script src="/js/app/viewer-header.js" defer></script>
+  <script src="/js/app/session.js" defer></script>
+  <script src="/js/app/users.js" defer></script>
+  <script src="/js/app/folder-modal.js" defer></script>
+  <script src="/js/app/render.js" defer></script>
+  <script src="/js/app/source-editor.js" defer></script>
+  <script src="/js/app/docs.js" defer></script>
+  <script src="/js/app/task-lists.js" defer></script>
+  <script src="/js/app/page-images.js" defer></script>
+  <script src="/js/app/clipboard.js" defer></script>
+  <script src="/js/app/deletion.js" defer></script>
+  <script src="/js/app/context-menu.js" defer></script>
+  <script src="/js/app/tree.js" defer></script>
+  <script src="/js/app/searching.js" defer></script>
+  <script src="/js/app/opening.js" defer></script>
+  <script src="/js/app/doc-actions.js" defer></script>
+  <script src="/js/app/refresh.js" defer></script>
+  <script src="/js/app/uploads.js" defer></script>
+  <script src="/js/app/editor-save.js" defer></script>
+  <script src="/js/app/folder-ops.js" defer></script>
+  <script src="/js/app/page-blocks.js" defer></script>
+  <script src="/js/app/page-tables.js" defer></script>
+  <script src="/js/app/page-code.js" defer></script>
+  <script src="/js/app/page-embeds.js" defer></script>
+  <script src="/js/app/page-insert.js" defer></script>
+  <script src="/js/app/page-history.js" defer></script>
+  <script src="/js/app/page-edit.js" defer></script>
+  <script src="/js/app/file-actions.js" defer></script>
+  <script src="/js/app/match-nav.js" defer></script>
+  <script src="/js/app/places.js" defer></script>
+  <script src="/js/app/account-menu.js" defer></script>
+  <script src="/js/app/sidebar.js" defer></script>
+  <script src="/js/app/editor-keys.js" defer></script>
+  <script src="/js/app.js" defer></script>
 </head>
 
 <body>
