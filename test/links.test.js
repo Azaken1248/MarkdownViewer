@@ -340,7 +340,14 @@ function refuses(label, url) {
     check("a link is saved", link.title, "Express");
     check("...with its note", link.note, "the server framework");
     check("...and who saved it", link.createdBy, "aza");
-    check("...and it is on disk", JSON.parse(fs.readFileSync(path.join(dir, "links.json"), "utf8")).links.length, 1);
+    // Durability asked the way it matters: a store that opens the same
+    // directory again finds it. Reading the file back was the same question
+    // when the answer was a file; the answer is a database now.
+    check("...and it is stored", await (async () => {
+      const fresh = new LinkStore({ dataDir: dir });
+      await fresh.load();
+      return fresh.list().length;
+    })(), 1);
 
     // Two URLs that differ by a trailing slash are the same page.
     check("the same URL is not saved twice", await (async () => {
@@ -426,8 +433,11 @@ function refuses(label, url) {
 
     check("a link is removed", await store.remove(link.id), true);
     check("...and removing it twice is not an error", await store.remove(link.id), false);
-    check("...and the file reflects it",
-      JSON.parse(fs.readFileSync(path.join(dir, "links.json"), "utf8")).links, []);
+    check("...and the store reflects it", await (async () => {
+      const fresh = new LinkStore({ dataDir: dir });
+      await fresh.load();
+      return fresh.list();
+    })(), []);
 
     // A second store over the same directory sees what the first wrote.
     const reopened = new LinkStore({ dataDir: dir });

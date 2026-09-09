@@ -38,6 +38,7 @@ const { requestLogger } = require("./lib/http/logging");
 const { templateReader } = require("./lib/http/html");
 const { createBaseUrlResolver } = require("./lib/http/urls");
 const { createErrorPages } = require("./lib/http/errors");
+const db = require("./lib/db");
 const { createAssetVersions } = require("./lib/http/asset-versions");
 const { createStaticAssets } = require("./lib/http/static-assets");
 const { createBundles } = require("./lib/http/bundles");
@@ -158,9 +159,14 @@ app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "true";
 
+/* The metadata database. Opened before the stores, because each of them is a
+ * view onto it rather than a file of its own — see lib/db.js for why.
+ */
+const metadata = db.open(DATA_DIR);
+
 const authStore = new AuthStore({ dataDir: DATA_DIR });
-const shareStore = new ShareStore({ dataDir: DATA_DIR });
-const linkStore = new LinkStore({ dataDir: DATA_DIR });
+const shareStore = new ShareStore({ dataDir: DATA_DIR, db: metadata });
+const linkStore = new LinkStore({ dataDir: DATA_DIR, db: metadata });
 
 // Cookies must be Secure in production or the session travels in clear text on
 // the first plain-HTTP request. Derived from the public base URL rather than
