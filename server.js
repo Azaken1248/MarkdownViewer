@@ -40,6 +40,7 @@ const { createBaseUrlResolver } = require("./lib/http/urls");
 const { createErrorPages } = require("./lib/http/errors");
 const { createAssetVersions } = require("./lib/http/asset-versions");
 const { createStaticAssets } = require("./lib/http/static-assets");
+const { createBundles } = require("./lib/http/bundles");
 const { createGuards } = require("./lib/guards");
 const {
   createOrganizerFile
@@ -255,8 +256,16 @@ const assetVersions = createAssetVersions({ publicDir: PUBLIC_DIR });
 // answers only for /css and /js; everything else falls through untouched.
 const serveStaticAsset = createStaticAssets({ publicDir: PUBLIC_DIR, assetVersions });
 
-const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH, assetVersions.stamp);
-const getDiagramTemplate = templateReader(DIAGRAM_TEMPLATE_PATH, assetVersions.stamp);
+/* One script tag in place of the run a page names, when a build exists.
+ *
+ * Bundling first and stamping second, so what gets a version is the tag that
+ * survives: the bundle if there is one, the individual scripts if not.
+ */
+const bundles = createBundles({ publicDir: PUBLIC_DIR });
+const served = (page) => (html) => assetVersions.stamp(bundles.forPage(page)(html));
+
+const getIndexTemplate = templateReader(INDEX_TEMPLATE_PATH, served("index"));
+const getDiagramTemplate = templateReader(DIAGRAM_TEMPLATE_PATH, served("diagram"));
 
 /* Which documents a search covers. Scoring them is lib/docs/search.js; picking
  * the corpus is here, because it is the storage layout that decides it.
@@ -290,7 +299,7 @@ const {
 
 const { sendError, notFound, errorHandler } = createErrorPages({
   templatePath: ERROR_TEMPLATE_PATH,
-  stampAssetVersions: assetVersions.stamp,
+  stampAssetVersions: served("error"),
   siteName: SITE_NAME,
   faviconPath: FAVICON_PATH,
   themeColor: EMBED_THEME_COLOR,
@@ -299,7 +308,7 @@ const { sendError, notFound, errorHandler } = createErrorPages({
   maxAssetBytes: MAX_ASSET_BYTES
 });
 
-const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH, assetVersions.stamp);
+const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH, served("share"));
 
 // ---------------------------------------------------------------------------
 // The routes

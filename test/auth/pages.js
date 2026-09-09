@@ -145,8 +145,16 @@ module.exports = async (ctx) => {
       const referenced = [...nested.raw.matchAll(/(?:href|src)="([^"]+)"/g)]
         .map((match) => match[1])
         .filter((value) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#|data:)/i.test(value));
-      check("the shell asks this server for its own stylesheet and scripts",
-        referenced.length >= 6, true);
+      /* Counting them was a proxy for "several", and it stopped being true the
+       * day `npm run build` collapsed a hundred tags into two. What the check
+       * is actually defending is that none of them is relative — so say that.
+       */
+      check("the shell asks this server for a stylesheet and a script of its own",
+        [referenced.some((value) => value.includes(".css")),
+          referenced.some((value) => value.includes(".js"))],
+        [true, true]);
+      check("...every one of them from the root rather than beside the document",
+        referenced.filter((value) => !value.startsWith("/")), []);
 
       for (const reference of referenced) {
         const resolved = new URL(reference, "http://localhost/Notes/delta.md");

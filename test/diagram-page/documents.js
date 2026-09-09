@@ -26,7 +26,14 @@ module.exports = async (ctx) => {
     ]) {
       const res = await server.request("GET", url, undefined, { Cookie: cookie });
       check(`${what} gets the editor page`, res.status, 200);
-      check("...which is the editor and not the app", /diagram-page\.js/.test(res.raw), true);
+      /* By what the page *is*, not by the name of a script it loads: with a
+       * build in place the editor's scripts are one bundle and none of them is
+       * called diagram-page.js any more. The canvas is only on this page and
+       * the document view is only on the other, so the pair says both halves.
+       */
+      check("...which is the editor and not the app",
+        [res.raw.includes('id="diagramCanvas"'), res.raw.includes('id="docContent"')],
+        [true, false]);
     }
 
     // Same reason the document shell does not: answering differently for a real

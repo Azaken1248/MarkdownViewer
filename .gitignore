@@ -34,3 +34,7 @@ data/
 deleted_markdowns/
 public/docs/
 assets/
+
+# Optional bundles (npm run build). Absent = the pages serve the individual
+# scripts they name, which is the development path and stays working.
+public/build/

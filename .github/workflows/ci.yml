@@ -33,6 +33,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Optional at runtime — with no build the pages serve the scripts they
+      # name — but built here so the bundles are what the suite compares
+      # against, and so a change that breaks the build fails now rather than
+      # on somebody's deploy.
+      - name: Build
+        run: npm run build
+
       # The DOM suite spawns its own server against a temp state directory, so
       # there is nothing to start here and nothing to clean up.
       - name: Test

@@ -6,7 +6,8 @@ Jupyter notebooks rendered inline.
 
 Live at **<https://md.azaken.com>**.
 
-- Vanilla JavaScript on the client. No framework, no bundler, no build step.
+- Vanilla JavaScript on the client. No framework, and no build step needed —
+  there is an optional one that bundles what a page already loads.
 - Notebook code cells run Python in the browser via Pyodide, on request.
 - A Links section for the docs sites you keep coming back to, saved as cards
   carrying each page's own title and description, filed into groups.
@@ -59,8 +60,9 @@ already known to everyone.
 | Script | What it does |
 | --- | --- |
 | `npm start` | Run the server |
+| `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `visual`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `build`, `visual`, `dom` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -224,6 +226,42 @@ twelve suites drive the real client in jsdom — so `type="module"` would mean
 either a bundler in the test path or nine suites that quietly stop testing
 anything. The namespaces are what the four diagram modules already used, and
 they cost nothing at runtime.
+
+### The optional build
+
+Nothing here needs building. The pages name their scripts and stylesheets, the
+server serves them, and the source in the browser is the source in this
+repository — which is worth more day to day than the bytes a build saves.
+
+What it costs is requests: the shell names 86 deferred scripts and 19
+stylesheets, and over HTTP/1.1 that is a lot of round trips before anything
+draws. So `npm run build` is there for deployments that care:
+
+```
+npm run build      # writes public/build, which is gitignored
+```
+
+It reads each page for what that page already loads, in the order it already
+loads it, concatenates and minifies, and leaves a manifest saying which tags
+each bundle stands in for. The server swaps them in as it serves. Delete
+`public/build` and the individual files come back — no restart, no flag, no
+"dev mode" that rots from disuse. Both paths are the same HTML.
+
+| | requests | brotli |
+| --- | --- | --- |
+| unbundled | 106 | 297,782 |
+| built | 3 | 113,830 |
+
+`theme-boot.js` is deliberately left out of the bundle: it is the one script
+that is not deferred, because it settles the theme before the stylesheet
+paints, and folding it into a deferred bundle would put back the flash it
+exists to prevent.
+
+The `build` suite is what makes shipping a bundle safe. It loads the individual
+scripts into one window and the bundle into another and requires the two to
+offer the same namespaces with the same keys — so a minifier that dropped
+something, or a concatenation in the wrong order, fails the build rather than
+the deploy.
 
 ---
 
