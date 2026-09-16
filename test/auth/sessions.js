@@ -7,7 +7,7 @@
 // the two clients the checks are made through. Split out of one file only
 // because that file had grown past a thousand lines.
 module.exports = async (ctx) => {
-  const { check, server, anon, admin, ALPHA, fsp, path, makeClient, passwords, excerpt } = ctx;
+  const { check, server, anon, admin, ALPHA, path, makeClient, passwords, excerpt } = ctx;
 
   console.log("=== password hashing ===");
   {
@@ -298,19 +298,31 @@ module.exports = async (ctx) => {
 
   console.log("=== stored credentials on disk ===");
   {
-    const users = JSON.parse(await fsp.readFile(path.join(server.stateDir, "data", "users.json"), "utf8"));
-    const stored = users.users.find((u) => u.username === "aza");
-    check("no plaintext password is stored", "password" in stored, false);
-    check("the hash is a scrypt record", stored.passwordHash.startsWith("scrypt$"), true);
-    check("no known password appears anywhere in the file",
-      JSON.stringify(users).includes("kettle-drum-fifteen"), false);
+    /* Read straight out of the database rather than through the store, for the
+     * same reason this used to read the JSON file rather than call a getter:
+     * the question is what is actually written down, and a method that returns
+     * a tidied-up view of it cannot answer that.
+     */
+    const Database = require("better-sqlite3");
+    const db = new Database(path.join(server.stateDir, "data", "azadocs.db"), { readonly: true });
+    try {
+      const stored = db.prepare("SELECT * FROM users WHERE username = ?").get("aza");
+      check("no plaintext password is stored", "password" in stored, false);
+      check("the hash is a scrypt record", stored.password_hash.startsWith("scrypt$"), true);
 
-    const sessions = JSON.parse(await fsp.readFile(path.join(server.stateDir, "data", "sessions.json"), "utf8"));
-    const cookieValue = [...makeClient(server.origin).jar.values()][0];
-    check("session ids are stored hashed, not raw",
-      sessions.sessions.some((s) => s.id === cookieValue), false);
-    check("a stored id is a sha256 digest",
-      sessions.sessions.every((s) => /^[a-f0-9]{64}$/.test(s.id)), true);
+      const everyUser = db.prepare("SELECT * FROM users").all();
+      check("no known password appears anywhere in the table",
+        JSON.stringify(everyUser).includes("kettle-drum-fifteen"), false);
+
+      const sessions = db.prepare("SELECT * FROM sessions").all();
+      const cookieValue = [...makeClient(server.origin).jar.values()][0];
+      check("session ids are stored hashed, not raw",
+        sessions.some((s) => s.id === cookieValue), false);
+      check("a stored id is a sha256 digest",
+        sessions.every((s) => /^[a-f0-9]{64}$/.test(s.id)), true);
+    } finally {
+      db.close();
+    }
   }
 
   console.log("=== share links ===");

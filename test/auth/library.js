@@ -99,9 +99,16 @@ module.exports = async (ctx) => {
       check("a mapping to a missing folder leaves the file alone", await exists("orphan.md"), true);
       check("an empty folder still gets its directory", await exists("Empty"), true);
 
-      const organizer = JSON.parse(await fs.readFile(path.join(stateDir, "data", "document-organizer.json"), "utf8"));
+      // The organizer lives in the database now; the JSON above was imported
+      // on boot and set aside. What was acted on is what the row says.
+      const Database = require("better-sqlite3");
+      const rows = new Database(path.join(stateDir, "data", "azadocs.db"), { readonly: true });
+      const organizer = JSON.parse(rows.prepare("SELECT state_json FROM organizer WHERE id = 1").get().state_json);
+      rows.close();
       check("the old map is dropped once it has been acted on", organizer.fileFolders, {});
       check("...and the folder tree is untouched", organizer.folders.length, 3);
+      check("...and the file it came from was set aside rather than left to be imported twice",
+        await exists("../data/document-organizer.json.imported"), true);
 
       // Running again must be a no-op rather than a second round of moves.
       await migrated.stop();
@@ -171,8 +178,11 @@ module.exports = async (ctx) => {
   {
     // Sessions and accounts are files, not memory: a restart must not sign
     // everyone out or lose an account.
-    const users = JSON.parse(await fsp.readFile(path.join(server.stateDir, "data", "users.json"), "utf8"));
-    check("accounts persisted", users.users.length >= 2, true);
+    const Database = require("better-sqlite3");
+    const db = new Database(path.join(server.stateDir, "data", "azadocs.db"), { readonly: true });
+    const accounts = db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
+    db.close();
+    check("accounts persisted", accounts >= 2, true);
     // The shared editor token is gone; presenting one must not be a way in.
     check("a bearer token is no longer an authentication path",
       (await makeClient(server.origin).get("/api/docs",

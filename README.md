@@ -62,7 +62,7 @@ already known to everyone.
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `build`, `visual`, `dom` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -155,16 +155,16 @@ proxy hop rather than the client's scheme.
 │   ├── excerpt.js            # Title and summary for link previews
 │   ├── link-preview.js       # Fetches a URL safely and reads its og: tags
 │   ├── links.js              # Saved links
+│   ├── db.js                 # The one SQLite database the metadata lives in
 │   ├── lru.js                # The byte-budgeted cache the read caches use
 │   ├── passwords.js          # scrypt hashing and the password policy
 │   ├── shares.js             # Per-document share links
 │   └── site.js               # The name and icons this site calls itself by
 ├── data/                     # All gitignored
-│   ├── document-organizer.json   # The folder tree (ids, names, nesting, order)
-│   ├── users.json            # Accounts and password hashes
-│   ├── sessions.json         # Live sessions, ids stored hashed
-│   ├── shares.json           # Share links, tokens stored hashed
-│   └── links.json            # Saved links
+│   ├── azadocs.db            # The metadata: accounts, sessions (ids hashed),
+│   │                         # share links (tokens hashed), saved links, and
+│   │                         # the folder tree. SQLite, WAL mode; see lib/db.js
+│   └── *.json.imported       # The files those used to be, set aside on first boot
 ├── deleted_markdowns/
 │   ├── soft/                 # Recycle bin (gitignored)
 │   └── hard/                 # Archive (gitignored)
@@ -187,11 +187,13 @@ proxy hop rather than the client's scheme.
 are your documents and your runtime state, not part of the project. The server
 recreates them on boot.
 
-> **The organizer file has no backup.** `data/document-organizer.json` holds
-> the folder tree and its ordering, and it is gitignored, so nothing
+> **The database has no backup.** `data/azadocs.db` holds the accounts, the
+> share links and the folder tree, and it is gitignored, so nothing
 > version-controls it. Losing it no longer loses which documents are in which
-> folder — the directories say that — but it does lose the folders' ids,
-> ordering and any empty ones. Back it up if you care about those.
+> folder — the directories say that — but it does lose every account, every
+> share link and the folders' ids and ordering. Back it up if you care about
+> those: it is one file, and `sqlite3 data/azadocs.db ".backup copy.db"` takes
+> a consistent copy while the app is running.
 
 ### How the client is put together
 
@@ -270,9 +272,23 @@ the deploy.
 ## Storage model
 
 Documents are plain files in `public/docs/`, in real directories that mirror the
-folders you see. Nothing is in a database, and the library is readable,
-editable and re-organisable with any tool — `mv` a file between directories and
-the app agrees on the next load.
+folders you see. The documents are never in a database, and the library is
+readable, editable and re-organisable with any tool — `mv` a file between
+directories and the app agrees on the next load.
+
+The metadata around them — accounts, sessions, share links, saved links and the
+folder tree — lives in one SQLite file, `data/azadocs.db`, in WAL mode. It used
+to be four JSON files, each rewritten whole under an in-process lock, which was
+safe in one process and silently lossy in two. That is the whole reason for the
+database: **the app can now be run as more than one process** — under
+`cluster`, under PM2 in cluster mode, or as several containers sharing the data
+directory — and the `db` suite proves it by running three processes against
+one database at once and requiring that nothing any of them wrote is lost.
+
+A library from before is picked up on the first boot: each JSON file is
+imported and renamed to `.imported` rather than deleted, so a rollback needs no
+backup anyone remembered to take. A file that will not parse is left exactly
+where it is, under its own name, for a person to look at.
 
 A document is identified by its path: `Azalea/Roadmap/README.md`. That is what
 makes two documents with the same name in different folders possible, which a
@@ -280,10 +296,10 @@ flat directory could not express — the second used to become `README-1.md`.
 Names have to be unique within a folder, which is the filesystem's own rule
 rather than one this app adds.
 
-`data/document-organizer.json` still holds the folder tree — ids, names and
-nesting — because a folder needs a stable identity that survives being renamed.
-But it no longer records where any document lives: the directory a file sits in
-*is* the answer, so the two can never disagree. Folders nest up to 8 levels.
+The folder tree — ids, names and nesting — is kept because a folder needs a
+stable identity that survives being renamed. But it does not record where any
+document lives: the directory a file sits in *is* the answer, so the two can
+never disagree. Folders nest up to 8 levels.
 
 Folders and documents are listed **alphabetically**, case-insensitively, with
 numbers compared as numbers so `page-2.md` comes before `page-10.md`. There is

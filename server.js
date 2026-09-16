@@ -164,7 +164,7 @@ const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "t
  */
 const metadata = db.open(DATA_DIR);
 
-const authStore = new AuthStore({ dataDir: DATA_DIR });
+const authStore = new AuthStore({ dataDir: DATA_DIR, db: metadata });
 const shareStore = new ShareStore({ dataDir: DATA_DIR, db: metadata });
 const linkStore = new LinkStore({ dataDir: DATA_DIR, db: metadata });
 
@@ -208,7 +208,7 @@ app.use(requireCsrf);
 const {
   readOrganizerState,
   mutateOrganizerState
-} = createOrganizerFile({ filePath: ORGANIZER_FILE_PATH });
+} = createOrganizerFile({ filePath: ORGANIZER_FILE_PATH, db: metadata });
 
 const {
   readCachedTextFile,

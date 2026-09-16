@@ -112,8 +112,11 @@ module.exports = async (ctx) => {
     check("moving a box makes the diagram saveable",
       page.document.getElementById("diagramSave").disabled, false);
 
-    page.document.getElementById("diagramSave").click();
-    await settle();
+    // Wait for the page to say the save finished, not for a fixed moment. A
+    // PUT is a round trip to the server, and a delay that happened to cover it
+    // on one machine is a delay that races it on the next — this used to read
+    // the document back while the status still said "Saving…".
+    await saveAndWait(page);
 
     const saved = await server.request("GET", "/api/docs/deploy.md", undefined, { Cookie: cookie });
     check("saving writes the document back", /%% @ A /.test(saved.body.content), true);
