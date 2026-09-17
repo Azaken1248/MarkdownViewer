@@ -245,8 +245,12 @@ const {
 });
 
 const { searchDocuments: searchIn } = createSearch({
+  db: metadata,
   readSearchIndexEntry,
   readSnippetSource,
+  // What the index reads a changed document with. Through the content cache,
+  // so a document just opened is not read a second time to be indexed.
+  readContent: async (fullPath) => (await readCachedTextFile(fullPath)).content,
   resultLimit: SEARCH_RESULT_LIMIT
 });
 
@@ -288,7 +292,7 @@ async function searchDocuments(query, scope = "docs") {
     ? await getDocs(organizer)
     : await getRecycleDocs(organizer, scopeDir);
 
-  return searchIn({ query, docs, scopeDir });
+  return searchIn({ query, docs, scopeDir, scope });
 }
 
 const {

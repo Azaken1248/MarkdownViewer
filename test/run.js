@@ -18,6 +18,7 @@ const SUITES = [
   ["links", "links.test.js", "Saved links: SSRF refusals, metadata parsing, storage and RBAC"],
   ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],
   ["code", "code.test.js", "Code blocks: copy buttons, the clipboard paths and live highlighting"],
+  ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
   ["build", "build.test.js", "The optional bundles, and that they are the same app unbundled"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],

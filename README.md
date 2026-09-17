@@ -62,7 +62,7 @@ already known to everyone.
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -289,6 +289,21 @@ A library from before is picked up on the first boot: each JSON file is
 imported and renamed to `.imported` rather than deleted, so a rollback needs no
 backup anyone remembered to take. A file that will not parse is left exactly
 where it is, under its own name, for a person to look at.
+
+The search index lives there too, as an FTS5 table over trigrams — which is
+what keeps the search box meaning what it always meant: any three or more
+characters, in any case, anywhere in a title, a folder name or the text. A
+query used to read every document in the library to find out which ones
+matched; it now asks the index and reads none. The index keeps itself honest
+against the disk without watching it: the listing a search starts from already
+carries every document's mtime and size, so a file edited, moved or deleted
+outside the app is re-read, re-keyed or dropped on the next search, and a
+library that has not changed costs nothing to check. The order of the results
+is not the index's — FTS5 would rank by how often a word appears — but the same
+name-first, folder-second, text-third ladder the scan used; the index only says
+which documents could match, and the `search` suite runs the same queries
+through both and requires them to agree. A query with a word under three
+characters is too short for trigrams and takes the scan instead.
 
 A document is identified by its path: `Azalea/Roadmap/README.md`. That is what
 makes two documents with the same name in different folders possible, which a
