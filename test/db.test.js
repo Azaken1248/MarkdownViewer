@@ -138,6 +138,65 @@ function runChild(dataDir, tag) {
     }
   }
 
+  console.log("=== the login lockout survives a restart and is shared ===");
+  {
+    // It used to be in memory: a restart reset the count, which turned eight
+    // guesses into eight per restart, and two processes each allowed eight.
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-lockout-"));
+    try {
+      const first = new AuthStore({ dataDir });
+      await first.load();
+      await first.createUser({ username: "target", password: "kettle-drum-twenty", role: "viewer", skipPasswordPolicy: true });
+
+      for (let i = 0; i < 7; i += 1) {
+        await first.login("target", "wrong-guess", { ip: "10.0.0.9" });
+      }
+      check("seven wrong guesses do not lock the account",
+        (await first.login("target", "kettle-drum-twenty", { ip: "10.0.0.9" })).ok, true);
+
+      // A success clears the count, so start the eight again from a clean slate.
+      for (let i = 0; i < 8; i += 1) {
+        await first.login("target", "wrong-guess", { ip: "10.0.0.9" });
+      }
+      const locked = await first.login("target", "kettle-drum-twenty", { ip: "10.0.0.9" });
+      check("the eighth locks it, and the right password is refused", locked.ok, false);
+      check("...saying for how long", locked.retryAfterMs > 0, true);
+
+      // "A restart": a second store over the same directory, as a new process
+      // would be. The lockout is still there.
+      const second = new AuthStore({ dataDir });
+      await second.load();
+      const stillLocked = await second.login("target", "kettle-drum-twenty", { ip: "10.0.0.9" });
+      check("a restart does not lift the lockout", stillLocked.ok, false);
+
+      // "A second process": a third store, the two open at once, counting
+      // toward the same eight for a fresh account.
+      await first.createUser({ username: "shared", password: "kettle-drum-twenty-one", role: "viewer", skipPasswordPolicy: true });
+      const third = new AuthStore({ dataDir });
+      await third.load();
+      for (let i = 0; i < 4; i += 1) {
+        await second.login("shared", "wrong-guess", { ip: "10.0.0.10" });
+        await third.login("shared", "wrong-guess", { ip: "10.0.0.10" });
+      }
+      const eightAcrossTwo = await first.login("shared", "kettle-drum-twenty-one", { ip: "10.0.0.10" });
+      check("four guesses from each of two processes are eight, not four and four", eightAcrossTwo.ok, false);
+
+      // Bounded: an attacker presenting a fresh address per guess fills the
+      // table only as far as the window, because each failure sweeps what has
+      // aged out.
+      const handle = db.open(dataDir);
+      const before = handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get().n;
+      const aged = Date.now() - 16 * 60 * 1000;
+      handle.prepare("UPDATE login_attempts SET locked_until = 0, last_attempt_at = ?").run(aged);
+      await first.login("nobody", "wrong-guess", { ip: "10.0.0.11" });
+      const after = handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get().n;
+      check("rows that have aged out of the window are swept by the next failure",
+        [before > 2, after <= 2], [true, true]);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nALL DB CHECKS PASSED" : `\n${failures} DB CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);
 })().catch((error) => {

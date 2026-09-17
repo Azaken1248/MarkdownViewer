@@ -138,8 +138,15 @@ A refusal is a `429` with a `Retry-After` header and a message saying which
 budget ran out. The map behind each bucket is capped at ten thousand keys, so
 a caller presenting addresses by the thousand fills it and is forgotten rather
 than growing it. The limits are per process: under two, every ceiling is
-twice as high, which for a ceiling is fine. The login lockout is the one limit
-that is a boundary and it is not one of these; see `lib/auth.js`.
+twice as high, which for a ceiling is fine.
+
+The login lockout is the one limit that is a boundary rather than a ceiling,
+and it is the one that does not work this way. Eight wrong guesses in fifteen
+minutes lock an account for fifteen; forty from one address lock the address.
+The count lives in the database, so a restart does not reset it — a crash loop
+or a redeploy used to turn the lockout into a speed bump — and two processes
+share one count rather than each allowing eight. The `db` suite checks all
+three.
 
 ### Notes on the public deployment
 
