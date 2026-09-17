@@ -62,7 +62,7 @@ already known to everyone.
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -122,7 +122,8 @@ proxy hop rather than the client's scheme.
 │   │   │   ├── links.js      # Saved links
 │   │   │   ├── share.js      # Share links
 │   │   │   └── pasted-images.js  # A screenshot becomes an image link
-│   │   ├── markdown-core.js  # Render engine shared by both pages
+│   │   ├── doc-kinds.js          # What a document is, by its name — loaded by the server too
+│   ├── markdown-core.js  # Render engine shared by both pages
 │   │   ├── visual-editor.js  # Block splitting + markdown serialization
 │   │   ├── diagram-model.js  # Mermaid flowcharts as steps, arrows and positions
 │   │   ├── diagram-draw.js   # Draws the ones that carry their own layout

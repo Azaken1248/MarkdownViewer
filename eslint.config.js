@@ -118,6 +118,7 @@ const BROWSER_GLOBALS = {
   AppPageHistory: "readonly",
   AppPageEdit: "readonly",
   // Our own shared render engine, loaded as a plain script before app.js.
+  DocKinds: "readonly",
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
   VisualEditor: "readonly",
@@ -235,11 +236,24 @@ module.exports = [
   {
     // Browser code. No bundler, no modules — these are plain scripts.
     files: ["public/js/**/*.js"],
-    ignores: ["public/js/pyodide-worker.js"],
+    ignores: ["public/js/pyodide-worker.js", "public/js/doc-kinds.js"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",
       globals: BROWSER_GLOBALS
+    },
+    rules: SHARED_RULES
+  },
+
+  {
+    // The one file both sides load: a plain script in the browser and a
+    // CommonJS module on the server, so it may say `module` as well as
+    // `window`. Kept to that one file on purpose.
+    files: ["public/js/doc-kinds.js"],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: "script",
+      globals: { ...BROWSER_GLOBALS, module: "readonly" }
     },
     rules: SHARED_RULES
   }

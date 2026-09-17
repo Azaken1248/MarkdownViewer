@@ -27,7 +27,7 @@
   }
 
   function stripDocumentExtension(filename) {
-    return String(filename || "").replace(/\.(md|markdown|mmd|mermaid|ipynb)$/i, "");
+    return DocKinds.stripDocExtension(filename);
   }
 
   function isNotebookFile(fileName) {
@@ -80,7 +80,7 @@
       return "ph-book-open-text";
     }
 
-    if (value.endsWith(".mmd") || value.endsWith(".mermaid")) {
+    if (DocKinds.isDiagramFile(value)) {
       return "ph-graph";
     }
 
@@ -88,20 +88,12 @@
   }
 
   // What this app will open, and therefore what it is worth uploading. The
-  // server checks too; this is convenience, not the security boundary.
-  const UPLOADABLE_EXTENSIONS = [".md", ".markdown", ".mmd", ".mermaid", ".ipynb"];
+  // same list the server checks against — the one in doc-kinds.js — so this
+  // is convenience that cannot drift from the security boundary behind it.
+  const UPLOADABLE_EXTENSIONS = DocKinds.DOC_EXTENSIONS;
 
   function ensureDocFilename(fileName) {
-    const value = String(fileName || "").trim();
-    if (!value) {
-      return "";
-    }
-
-    if (/\.(md|markdown|mmd|mermaid)$/i.test(value)) {
-      return value;
-    }
-
-    return `${value}.md`;
+    return DocKinds.ensureDocFilename(fileName);
   }
 
   function isDiagramFile(fileName) {

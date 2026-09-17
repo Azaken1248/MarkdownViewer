@@ -57,13 +57,9 @@
       .replace(/'/g, "&#39;");
   }
 
-  function isNotebookFile(fileName) {
-    return /\.ipynb$/i.test(String(fileName || ""));
-  }
-
-  function isDiagramFile(fileName) {
-    return /\.(mmd|mermaid)$/i.test(String(fileName || ""));
-  }
+  // What a name means is decided once, in doc-kinds.js, for the server and
+  // the client alike. These are the engine's names for the same answers.
+  const { isNotebookFile, isDiagramFile } = global.DocKinds;
 
   function toMermaidMarkdown(diagramSource) {
     return `\n\

@@ -41,7 +41,9 @@ function coreScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
   const jsDir = path.join(publicDir, "js");
   return clientScriptPaths(publicDir).filter((file) => {
     const rel = path.relative(jsDir, file);
-    return rel === "markdown-core.js" || rel.startsWith(`md${path.sep}`);
+    // doc-kinds.js is the engine's too: md/text.js takes its answers about a
+    // name from it, so it has to be there before the engine is.
+    return rel === "doc-kinds.js" || rel === "markdown-core.js" || rel.startsWith(`md${path.sep}`);
   });
 }
 
