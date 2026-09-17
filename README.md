@@ -1235,8 +1235,21 @@ block, so it is there by the time the first pause is.
 
 ## API
 
+> **`/api/*` is private.** It is the contract between this server and this
+> client, which ship together, and it changes whenever the app needs it to —
+> no version prefix, no deprecation period, no stability promise. Build
+> against it and you are building against a moving part. The table below is a
+> description of what exists, not an offer.
+
 Reads require a session unless `PUBLIC_READS=true`. Writes require a session
 with the right role, plus the `X-CSRF-Token` header.
+
+Every handler reads its request body through one helper, `lib/http/body.js`,
+which declares the fields the endpoint takes and their types at the top of the
+handler. A field of the wrong type is a `400` that names the field; a field
+nobody declared is ignored. That is typing at the edge and nothing more —
+whether a username is acceptable or a folder id is real is the store's
+decision, and the message for that comes from the store.
 
 ### Documents
 

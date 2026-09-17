@@ -296,6 +296,40 @@ module.exports = async (ctx) => {
     check("the session no longer works", (await client.get("/api/docs")).status, 401);
   }
 
+  console.log("=== a body of the wrong shape is refused at the edge, by name ===");
+  {
+    // Every handler reads its body through one helper now, so the shape of a
+    // refusal is the same everywhere: a 400 that says which field. Before,
+    // a password sent as an object became the string "[object Object]" and
+    // went on to be hashed.
+    const wrongShape = await admin.post("/api/users", { username: "shape", password: { $gt: "" } });
+    check("a password that is not a string is refused", wrongShape.status, 400);
+    check("...naming the field", wrongShape.body.error, "password must be a string.");
+
+    const wrongEnum = await admin.post("/api/users", { username: "shape", password: "kettle-drum-nineteen", role: "root" });
+    check("a role off the list is refused", wrongEnum.status, 400);
+    check("...by the store, which owns what a role is", /Role must be one of/.test(wrongEnum.body.error), true);
+
+    const wrongFlag = await admin.post("/api/users", { username: "shape", password: "kettle-drum-nineteen", mustChangePassword: "yes" });
+    check("a flag that is not a boolean is refused", wrongFlag.status, 400);
+    check("...naming the field", wrongFlag.body.error, "mustChangePassword must be true or false.");
+
+    const notObject = await admin.post("/api/users", ["not", "an", "object"]);
+    check("a body that is not an object is treated as empty, and the store says what is missing",
+      notObject.status, 400);
+
+    const extra = await admin.post("/api/users", { username: "shape-extra", password: "kettle-drum-nineteen", role: "viewer", surprise: 1 });
+    check("a field nobody asked for is ignored, not refused", extra.status, 201);
+    check("...and does not come back", "surprise" in extra.body.user, false);
+
+    const spaced = await admin.post("/api/users", { username: "spaced", password: " leading space kept ", role: "viewer", mustChangePassword: false });
+    check("a password is taken exactly as sent", spaced.status, 201);
+    check("...spaces and all",
+      (await makeClient(server.origin).post("/api/auth/login", { username: "spaced", password: " leading space kept " })).status, 200);
+    check("...so the trimmed one is a different password",
+      (await makeClient(server.origin).post("/api/auth/login", { username: "spaced", password: "leading space kept" })).status, 401);
+  }
+
   console.log("=== stored credentials on disk ===");
   {
     /* Read straight out of the database rather than through the store, for the
