@@ -33,6 +33,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # After lint, not before, so an advisory in a dependency cannot mask a
+      # mistake in the code. High and critical fail the build; moderate and low
+      # show in the log and in Dependabot's queue without stopping work.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       # Optional at runtime — with no build the pages serve the scripts they
       # name — but built here so the bundles are what the suite compares
       # against, and so a change that breaks the build fails now rather than

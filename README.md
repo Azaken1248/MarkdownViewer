@@ -55,6 +55,34 @@ Sign in with those, and the app will make you replace the password before it
 lets you do anything else — that password is in this file, so treat it as
 already known to everyone.
 
+### Dependencies, and the ones `npm audit` cannot see
+
+The runtime surface is four packages — `express`, `multer`, `better-sqlite3`,
+`graphql` — and it is kept that small on purpose. CI runs `npm audit
+--audit-level=high` after lint, so a high or critical advisory fails the build
+and a lower one shows in the log; Dependabot opens a weekly pull request for
+anything behind.
+
+The libraries the browser loads from a CDN are not in `package.json`, so
+`npm audit` never sees them. They are pinned to exact versions and checked by
+SRI hash, which defends against a compromised CDN but not against a
+vulnerability in the library itself. This is the list to check an advisory
+against:
+
+| Library | Version | Loaded |
+| --- | --- | --- |
+| marked | 15.0.12 | on every page |
+| DOMPurify | 3.1.6 | on every page |
+| Phosphor icons | 2.1.2 | on every page |
+| Mermaid | 11.16.1 | only when a document has a diagram |
+| KaTeX | 0.16.11 | only when a document has maths |
+| highlight.js | 11.11.1 | only when a document has code |
+| svg-pan-zoom | 3.6.1 | only when a diagram is drawn |
+| Pyodide | 314.0.3 | only when a notebook cell is run |
+
+Bumping one means changing the version in the tag and recomputing the hash —
+`public/index.html` says how, beside the tags.
+
 ### Scripts
 
 | Script | What it does |

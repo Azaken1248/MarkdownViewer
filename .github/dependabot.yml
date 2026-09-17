@@ -1,0 +1,21 @@
+# Somebody watching the dependencies, because nobody was: three advisories,
+# one of them high, sat in the lockfile with nothing to say so. The surface is
+# small on purpose — a handful of runtime dependencies, a few for development —
+# which is what makes this cheap to keep clean.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One pull request for the development tools rather than one each, since
+      # a bump to eslint or jsdom is reviewed the same way whichever it is.
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
