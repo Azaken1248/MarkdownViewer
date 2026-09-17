@@ -26,8 +26,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "eslint": "^9.15.0",
-    "jsdom": "^25.0.1",
-    "lucide-static": "^1.34.0"
+    "eslint": "^10.10.0",
+    "jsdom": "^30.0.1",
+    "lucide-static": "^1.46.0"
   }
 }
