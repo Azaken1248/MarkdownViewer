@@ -74,7 +74,7 @@ function emptyWindow() {
 function surfaceOf(window) {
   return Object.keys(window)
     .filter((key) => /^(?:App[A-Z]|App$|Md[A-Z]|Dm[A-Z]|Dd[A-Z])/.test(key)
-      || ["MarkdownCore", "VisualEditor", "DiagramModel", "DiagramDraw", "DiagramEditor",
+      || ["DocKinds", "MarkdownCore", "VisualEditor", "DiagramModel", "DiagramDraw", "DiagramEditor",
         "DiagramIcons", "NotebookRuntime", "ThemeSwitch"].includes(key))
     .sort();
 }
