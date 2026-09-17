@@ -38,6 +38,7 @@ const { requestLogger } = require("./lib/http/logging");
 const { templateReader } = require("./lib/http/html");
 const { createBaseUrlResolver } = require("./lib/http/urls");
 const { createErrorPages } = require("./lib/http/errors");
+const { createLimiter, bySession, byAddress, isRead } = require("./lib/http/limiter");
 const db = require("./lib/db");
 const { createAssetVersions } = require("./lib/http/asset-versions");
 const { createStaticAssets } = require("./lib/http/static-assets");
@@ -97,6 +98,26 @@ const SEARCH_RESULT_LIMIT = 200;
 const CONTENT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const SEARCH_INDEX_MAX_BYTES = 48 * 1024 * 1024;
 const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+/* How much of the API one caller may use in a minute. See lib/http/limiter.js
+ * for what these are and are not: ceilings against a runaway, not the
+ * boundary — that is the guards.
+ *
+ * The wide one counts state changes — POST, PUT, PATCH, DELETE — per account,
+ * or per address for a request with no session. Not reads: the client reads a
+ * great deal, including every document once to warm its search cache, and
+ * that grows with the library. The reads that cost something get a bucket of
+ * their own below; the rest come from a cache. The tight ones sit on the
+ * routes that cost something — an upload held in memory, a search over the
+ * index, a write that re-indexes — and on the two addresses anyone may ask.
+ */
+const RATE_WINDOW_MS = 60_000;
+const RATE_API_PER_SESSION = 300;
+const RATE_API_PER_ADDRESS = 60;
+const RATE_UPLOADS_PER_SESSION = 30;
+const RATE_WRITES_PER_SESSION = 120;
+const RATE_SEARCHES_PER_SESSION = 240;
+const RATE_PUBLIC_PER_ADDRESS = 60;
 
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
@@ -195,6 +216,41 @@ const {
 // what that means. CSRF is checked globally so a new route cannot forget it.
 app.use(attachSession);
 app.use(requireCsrf);
+
+/* The ceilings, mounted here so that what is limited is answerable in one
+ * place. Each is a path and a budget; the routers below know nothing of them.
+ * After attachSession, so a signed-in caller is counted as an account rather
+ * than as whichever address a household happens to share.
+ */
+const limitApi = createLimiter({
+  name: "api", windowMs: RATE_WINDOW_MS, keyOf: bySession, skip: isRead,
+  max: (req) => (req.auth?.user ? RATE_API_PER_SESSION : RATE_API_PER_ADDRESS)
+});
+const limitUploads = createLimiter({
+  name: "uploads", windowMs: RATE_WINDOW_MS, max: RATE_UPLOADS_PER_SESSION, keyOf: bySession,
+  message: "Too many uploads just now. Wait a minute and try again."
+});
+const limitWrites = createLimiter({
+  name: "writes", windowMs: RATE_WINDOW_MS, max: RATE_WRITES_PER_SESSION, keyOf: bySession,
+  message: "Too many saves just now. Wait a minute and try again."
+});
+const limitSearch = createLimiter({
+  name: "search", windowMs: RATE_WINDOW_MS, max: RATE_SEARCHES_PER_SESSION, keyOf: bySession,
+  message: "Too many searches just now. Wait a minute and try again."
+});
+// The two addresses that need no session, keyed by the only thing such a
+// request has: where it came from. A monitor polling every ten seconds uses a
+// tenth of this.
+const limitPublic = createLimiter({
+  name: "public", windowMs: RATE_WINDOW_MS, max: RATE_PUBLIC_PER_ADDRESS, keyOf: byAddress
+});
+
+app.use("/api", limitApi);
+app.post(["/api/docs/upload", "/api/upload/folder", "/api/assets"], limitUploads);
+app.post("/api/docs", limitWrites);
+app.put("/api/docs/*file", limitWrites);
+app.get("/api/docs/search", limitSearch);
+app.use(["/healthz", "/graphql"], limitPublic);
 
 // ---------------------------------------------------------------------------
 // What the app is built out of

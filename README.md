@@ -90,7 +90,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -111,6 +111,35 @@ Everything is environment variables; there is no config file.
 | `LOG_REQUESTS` | `true` | One log line per request, written when the response finishes. |
 | `LOG_STATIC` | `false` | Include static assets in that log. Off by default because they drown out everything else. |
 | `ENABLE_GRAPHQL_INTROSPECTION` | `false` | Re-enables GraphQL schema introspection for local schema work. |
+
+### Rate limits
+
+Every ceiling is a fixed window of one minute, and every one is a ceiling
+against a runaway rather than a security boundary — the guards are the
+boundary. They are set in one place at the top of `server.js` and mounted in
+one place beside it, so what is limited is answerable without reading a route.
+
+| What | Per | Budget |
+| --- | --- | --- |
+| State changes on `/api/*` (POST, PUT, PATCH, DELETE) | account, or address with no session | 300, or 60 |
+| Saves — `POST /api/docs`, `PUT /api/docs/…` | account | 120 |
+| Uploads — a document, a folder, a pasted image | account | 30 |
+| `GET /api/docs/search` | account | 240 |
+| Link previews fetched from elsewhere | account | 20 |
+| `/healthz` and `/graphql`, which need no session | address | 60 |
+
+Reads are not counted by the wide ceiling on purpose. The client reads a great
+deal — it fetches every document once to warm its offline search — and that
+grows with the library, so a cap on reads low enough to mean anything would
+break it and one high enough to allow it would mean nothing. The reads that
+cost something have the buckets above.
+
+A refusal is a `429` with a `Retry-After` header and a message saying which
+budget ran out. The map behind each bucket is capped at ten thousand keys, so
+a caller presenting addresses by the thousand fills it and is forgotten rather
+than growing it. The limits are per process: under two, every ceiling is
+twice as high, which for a ceiling is fine. The login lockout is the one limit
+that is a boundary and it is not one of these; see `lib/auth.js`.
 
 ### Notes on the public deployment
 
