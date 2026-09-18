@@ -21,6 +21,10 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
 // the source and in the README — which is exactly why the app forces it to be
 // changed at first sign-in.
 const SEED_USERNAME = "aza";
+// The first admin's password is generated at boot unless SEED_ADMIN_PASSWORD
+// says otherwise. The suites say so, which is the scripted-setup path and is
+// what lets them sign in without reading the boot log. The one check that
+// exercises the generated path reads the log on purpose.
 const SEED_PASSWORD = "lolface123";
 // What the DOM suite changes it to, so it can get past the forced change.
 const TEST_PASSWORD = "harness-password-9134";
@@ -209,6 +213,7 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
       ...process.env,
       PORT: String(port),
       MDVIEWER_STATE_DIR: stateDir,
+      SEED_ADMIN_PASSWORD: SEED_PASSWORD,
       ...env,
       // The suite prints its own output; per-request lines just bury it.
       LOG_REQUESTS: "false"
@@ -250,7 +255,13 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
 
   try {
     await Promise.race([waitForHealth(origin), exitedEarly]);
-    return { origin, stateDir, folderIds, docPaths, stop, request: (m, p, b, h) => request(origin, m, p, b, h) };
+    return {
+      origin, stateDir, folderIds, docPaths, stop,
+      // What the server printed while starting: the one place a generated
+      // first-admin password is ever shown.
+      startupLog: () => startupLog.join(""),
+      request: (m, p, b, h) => request(origin, m, p, b, h)
+    };
   } catch (error) {
     await stop();
     throw error;

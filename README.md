@@ -38,18 +38,28 @@ npm start
 
 Then open <http://localhost:4321>.
 
-On first boot, with no accounts on disk, the server creates an admin and prints
-its credentials:
+On first boot, with no accounts, the server creates an admin with a password
+it makes up on the spot and prints once:
 
 ```
   No accounts existed, so an admin was created:
 
       username: aza
-      password: lolface123
+      password: k3n9Q2xWv8mLp0Ra
 
-  This password is in the source and the README, so it is public
-  knowledge. You will be required to change it at first login.
+  That password was generated just now and is printed here once.
+  It is not stored anywhere in the clear. You will be required to
+  change it at first login; if this line has gone to a log you do
+  not control, do that soon.
 ```
+
+It used to be a constant, in the source and in this README, and the app was
+honest about that — but between first boot and first login a known username
+and a known password authenticated, and on a host reachable from the internet
+that window is however long it takes to boot the app and get distracted. Now
+there is nothing to know. For a scripted setup, set `SEED_ADMIN_PASSWORD` and
+the server uses that instead and prints only the variable's name, so the value
+never enters a log; the forced change at first login applies either way.
 
 Sign in with those, and the app will make you replace the password before it
 lets you do anything else — that password is in this file, so treat it as
@@ -107,6 +117,7 @@ Everything is environment variables; there is no config file.
 | `PUBLIC_READS` | `false` | When `true`, anyone can read every document without signing in — the behaviour before accounts existed. Leave it off unless you want the whole library public; individual documents can be shared without it. |
 | `PUBLIC_BASE_URL` | `https://md.azaken.com` | Origin used to build canonical, `og:*` and oEmbed URLs. Set it to `http://localhost:4321` when working locally if you want link previews to point at your own machine. |
 | `TRUST_PROXY` | `false` | Set to `true` (or an Express trust-proxy value like `loopback`) only when running behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured. |
+| `SEED_ADMIN_PASSWORD` | *(generated)* | The first admin's password, for a scripted setup. Used only when no account exists yet; not echoed to the log. Without it one is generated and printed once at first boot. |
 | `ALLOWED_ORIGINS` | *(none)* | Extra origins the CSRF origin check accepts, comma-separated, for a deployment reached under more than one name. `PUBLIC_BASE_URL` and loopback on `PORT` are always accepted. |
 | `MDVIEWER_STATE_DIR` | the checkout | Moves the documents, recycle bin and organizer somewhere else, so runtime state can live outside the repo. The test suite uses it to point at a temp directory. |
 | `LOG_REQUESTS` | `true` | One log line per request, written when the response finishes. |
@@ -1563,9 +1574,11 @@ disk on each request, so a refresh is enough — no restart needed.
 accounts that cannot use them. Check the role on your account — a `viewer` sees
 no create, upload or edit buttons.
 
-**Locked out entirely.** If the last admin password is lost, stop the server and
-delete `data/users.json`. The next boot seeds a fresh admin and prints its
-credentials. Documents, folders and shares are untouched.
+**Locked out entirely.** If the last admin password is lost, stop the server
+and empty the accounts: `sqlite3 data/azadocs.db "DELETE FROM users"` (sessions
+go with them). The next boot sees no account, seeds a fresh admin and prints a
+new generated password once. Documents, folders, shares and links are
+untouched.
 
 **"Too many failed attempts."** That account is locked for 15 minutes. It clears
 on a server restart, since the limiter is in memory.

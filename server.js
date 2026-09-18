@@ -22,8 +22,7 @@ const path = require("path");
 const {
   AuthStore,
   ROLES,
-  SEED_ADMIN_USERNAME,
-  SEED_ADMIN_PASSWORD
+  SEED_ADMIN_USERNAME
 } = require("./lib/auth");
 const { ShareStore } = require("./lib/shares");
 const { LinkStore, publicLink } = require("./lib/links");
@@ -613,7 +612,11 @@ async function bootstrap() {
   await shareStore.load();
   await linkStore.load();
 
-  const seeded = await authStore.seedAdminIfEmpty();
+  // A scripted setup may supply the first admin's password; otherwise one is
+  // made now and printed once, below, and nowhere else.
+  const seeded = await authStore.seedAdminIfEmpty({
+    password: process.env.SEED_ADMIN_PASSWORD || null
+  });
 
   const server = app.listen(PORT, () => {
     console.log(`AzaDocs running on http://localhost:${PORT}`);
@@ -636,10 +639,18 @@ async function bootstrap() {
       console.log("  No accounts existed, so an admin was created:");
       console.log("");
       console.log(`      username: ${SEED_ADMIN_USERNAME}`);
-      console.log(`      password: ${SEED_ADMIN_PASSWORD}`);
-      console.log("");
-      console.log("  This password is in the source and the README, so it is public");
-      console.log("  knowledge. You will be required to change it at first login.");
+      if (seeded.password) {
+        console.log(`      password: ${seeded.password}`);
+        console.log("");
+        console.log("  That password was generated just now and is printed here once.");
+        console.log("  It is not stored anywhere in the clear. You will be required to");
+        console.log("  change it at first login; if this line has gone to a log you do");
+        console.log("  not control, do that soon.");
+      } else {
+        console.log("      password: (from SEED_ADMIN_PASSWORD)");
+        console.log("");
+        console.log("  You will be required to change it at first login.");
+      }
       console.log("");
     }
   });

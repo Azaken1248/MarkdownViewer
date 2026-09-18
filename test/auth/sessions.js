@@ -379,6 +379,51 @@ module.exports = async (ctx) => {
       (await makeClient(server.origin).post("/api/auth/login", { username: "spaced", password: "leading space kept" })).status, 401);
   }
 
+  console.log("=== the first admin's password is made, not known ===");
+  {
+    /* Every other suite boots with SEED_ADMIN_PASSWORD set, which is the
+     * scripted-setup path. This boots one without it — a fresh state
+     * directory, no accounts — and reads the password off the boot log,
+     * because that is the only place it ever appears.
+     */
+    const { startTestServer: startFresh } = require("../helpers/server");
+    const os = require("os");
+    const fsp = require("fs/promises");
+    const stateDir = await fsp.mkdtemp(path.join(os.tmpdir(), "azadocs-seed-"));
+    await fsp.mkdir(path.join(stateDir, "docs"), { recursive: true });
+    const fresh = await startFresh({ stateDir, env: { SEED_ADMIN_PASSWORD: "" } });
+    try {
+      const log = fresh.startupLog();
+      const printed = /password: (\S+)/.exec(log)?.[1];
+      check("a password is printed once at boot", typeof printed, "string");
+      check("...and it is not the one that used to be in the README", printed === "lolface123", false);
+      check("...and it is long enough to be worth having", printed.length >= 16, true);
+      check("...and the log says it was generated", /generated just now/.test(log), true);
+
+      const client = makeClient(fresh.origin);
+      const login = await client.post("/api/auth/login", { username: "aza", password: printed });
+      check("it signs the admin in", login.status, 200);
+      check("...who must change it before doing anything else", login.body.user.mustChangePassword, true);
+      check("a second boot of the same store makes no new admin and prints no password",
+        await (async () => {
+          await fresh.stop();
+          const again = await startFresh({ stateDir, env: { SEED_ADMIN_PASSWORD: "" } });
+          const second = again.startupLog();
+          await again.stop();
+          return /password:/.test(second);
+        })(), false);
+    } finally {
+      await fresh.stop().catch(() => {});
+      await fsp.rm(stateDir, { recursive: true, force: true });
+    }
+
+    // The scripted path, which every other suite here is running on: the
+    // password came from outside, so the log names the variable, not the value.
+    check("a supplied password is not echoed back into the log",
+      /password: \(from SEED_ADMIN_PASSWORD\)/.test(server.startupLog()), true);
+    check("...and the value itself is nowhere in it", server.startupLog().includes("lolface123"), false);
+  }
+
   console.log("=== stored credentials on disk ===");
   {
     /* Read straight out of the database rather than through the store, for the
