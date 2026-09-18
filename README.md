@@ -686,6 +686,13 @@ Only PNG, JPEG, GIF, WebP and AVIF are accepted, up to 10MB. **SVG is refused**:
 it is a document format that can carry script, and serving one inline from this
 origin would hand an author a way to run code in every reader's session.
 
+What a file *is* is decided by its bytes, not by the type the upload declared.
+Each of the five formats announces itself in its first few bytes; the type is
+read from there, the extension follows from the type, and a file whose bytes
+and declared type disagree is refused with a message saying what it actually
+is. So the store cannot hold HTML under a name that ends in `.png`, and the
+name and the content can never say different things.
+
 Attaching needs `doc:write`; reading an image needs whatever reading a document
 needs. A picture inside a *shared* document is the exception worth stating —
 whoever opens a share link has no account, so those images are served through a

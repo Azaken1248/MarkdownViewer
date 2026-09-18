@@ -92,6 +92,55 @@ const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("he
         fs.existsSync(path.join(server.stateDir, "docs", "assets")), false);
     }
 
+    console.log("=== the bytes decide what a file is, not the header ===");
+    {
+      /* Every format this app takes, by its signature — the smallest bytes
+       * that are recognisably that format, followed by padding so the sniff
+       * has its twelve bytes. None of these is a viewable picture; what is
+       * being checked is that the type comes from the content and the
+       * extension from the type, so the two cannot diverge.
+       */
+      const pad = Buffer.alloc(24, 0);
+      const samples = [
+        ["image/png", ".png", Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pad])],
+        ["image/jpeg", ".jpg", Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), pad])],
+        ["image/gif", ".gif", Buffer.concat([Buffer.from("GIF89a"), pad])],
+        ["image/webp", ".webp", Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBPVP8 "), pad])],
+        ["image/avif", ".avif", Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from("ftypavif"), Buffer.from([0, 0, 0, 0]), Buffer.from("avifmif1miaf"), pad])]
+      ];
+
+      const { sniffImageType } = require("../lib/routes/assets");
+      for (const [type, ext, bytes] of samples) {
+        check(`${type} is recognised by its bytes`, sniffImageType(bytes), type);
+        const res = await admin.postMultipart("/api/assets", [image(bytes, `pic${ext}`, type)]);
+        check(`...and stored with ${ext}`, [res.status, res.body.name?.endsWith(ext), res.body.type], [201, true, type]);
+      }
+
+      // The classic: HTML in a file called a PNG. It used to be stored as one.
+      const html = await admin.postMultipart("/api/assets",
+        [image(Buffer.from("<html><script>alert(1)</script></html>"), "innocent.png", "image/png")]);
+      check("HTML declared as a PNG is refused", html.status, 400);
+      check("...as not an image at all", html.body.error, "Only PNG, JPEG, GIF, WebP and AVIF images can be attached");
+
+      // A real JPEG declared as a PNG: the bytes are fine, the header lies.
+      const lying = await admin.postMultipart("/api/assets", [image(samples[1][2], "photo.png", "image/png")]);
+      check("a JPEG sent as a PNG is refused", lying.status, 400);
+      check("...saying what it actually is", lying.body.error, "That file is image/jpeg, not image/png.");
+
+      // Under the old code this was the whole store: a sha256.png that was not a PNG.
+      check("nothing was written for either", await (async () => {
+        const fetched = await admin.getBytes(`/api/assets/${sha256(samples[1][2])}.png`);
+        return fetched.status;
+      })(), 404);
+
+      // Not a lookalike: "GIF8" followed by nothing, and the RIFF of a WAV.
+      check("a RIFF that is not WEBP is not a WebP",
+        sniffImageType(Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WAVEfmt "), pad])), null);
+      check("an ftyp that is not AVIF is not an AVIF",
+        sniffImageType(Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42"), Buffer.from([0, 0, 0, 0]), Buffer.from("mp42isom"), pad])), null);
+      check("too few bytes to say anything is nothing", sniffImageType(Buffer.from([0x89, 0x50])), null);
+    }
+
     console.log("=== only images, and only so large ===");
     {
       const script = await admin.postMultipart("/api/assets",
