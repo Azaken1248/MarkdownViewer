@@ -90,7 +90,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -157,6 +157,27 @@ overrides the default; nothing else does.
 
 Behind a reverse proxy, set `TRUST_PROXY` — otherwise `req.protocol` reports the
 proxy hop rather than the client's scheme.
+
+Every response carries the same set of headers — a Content Security Policy,
+`nosniff`, a referrer policy, `X-Frame-Options`, a same-origin opener policy
+and resource policy, and a permissions policy that denies the camera, the
+microphone, location, USB and payment — including static files, errors and
+refused API calls, because a policy that covers only the pages somebody
+remembered to cover is not a policy. They live in `lib/http/headers.js` with
+the reason for each, and the `headers` suite asks eight kinds of response for
+the set.
+
+`Strict-Transport-Security` is the one that depends on the deployment. It is
+sent when `PUBLIC_BASE_URL` is HTTPS and not otherwise: a plain-HTTP box that
+sent it would tell the browser never to come back the way it can. A year,
+with subdomains, and without `preload` — that submits the domain to a list
+browsers ship with and is effectively irreversible, so it is a decision to
+make on purpose.
+
+The resource policy means the app's own responses — a pasted image, an icon,
+the embed card — cannot be embedded by a page on another origin. A crawler
+fetching `og:image` for a link preview is a server, not a browser, and is not
+affected.
 
 ---
 

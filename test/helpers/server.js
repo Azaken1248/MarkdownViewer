@@ -193,7 +193,9 @@ async function seedOnDisk(stateDir) {
  * how the migration is tested: an old flat library is written to disk and a
  * fresh server is pointed at it, exactly as the real data was.
  */
-async function startTestServer({ stateDir: existingStateDir = null } = {}) {
+// `env` lets a suite boot the server as a particular deployment would see
+// it — a public HTTPS origin, say — for the checks that depend on that.
+async function startTestServer({ stateDir: existingStateDir = null, env = {} } = {}) {
   const stateDir = existingStateDir || await fs.mkdtemp(path.join(os.tmpdir(), "azadocs-test-"));
   const { folderIds, docPaths } = existingStateDir
     ? { folderIds: new Map(), docPaths: {} }
@@ -207,6 +209,7 @@ async function startTestServer({ stateDir: existingStateDir = null } = {}) {
       ...process.env,
       PORT: String(port),
       MDVIEWER_STATE_DIR: stateDir,
+      ...env,
       // The suite prints its own output; per-request lines just bury it.
       LOG_REQUESTS: "false"
     },

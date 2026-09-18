@@ -148,7 +148,15 @@ if (TRUST_PROXY) {
   app.set("trust proxy", false);
 }
 
-app.use(securityHeaders());
+// Whether this deployment is reached over HTTPS. Derived from the public base
+// URL rather than from the request, which an attacker controls. It decides two
+// things: that the session cookie is Secure, so it does not travel in clear
+// text on the first plain-HTTP request, and that HSTS is sent, which is what
+// stops there being a plain-HTTP request at all after the first.
+const COOKIES_SECURE = String(process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL)
+  .startsWith("https://");
+
+app.use(securityHeaders({ secure: COOKIES_SECURE }));
 
 // Logging is off entirely in the test suite (LOG_REQUESTS=false) to keep its
 // output readable, and skips static assets unless LOG_STATIC=true.
@@ -190,11 +198,6 @@ const authStore = new AuthStore({ dataDir: DATA_DIR, db: metadata });
 const shareStore = new ShareStore({ dataDir: DATA_DIR, db: metadata });
 const linkStore = new LinkStore({ dataDir: DATA_DIR, db: metadata });
 
-// Cookies must be Secure in production or the session travels in clear text on
-// the first plain-HTTP request. Derived from the public base URL rather than
-// from the request, which an attacker controls.
-const COOKIES_SECURE = String(process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL)
-  .startsWith("https://");
 
 const {
   attachSession,
