@@ -18,6 +18,7 @@ const SUITES = [
   ["links", "links.test.js", "Saved links: SSRF refusals, metadata parsing, storage and RBAC"],
   ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],
   ["code", "code.test.js", "Code blocks: copy buttons, the clipboard paths and live highlighting"],
+  ["graphql", "graphql.test.js", "The graph: behind the read policy, says what /api says, and has limits"],
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],

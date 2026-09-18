@@ -90,7 +90,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -126,7 +126,7 @@ one place beside it, so what is limited is answerable without reading a route.
 | Uploads — a document, a folder, a pasted image | account | 30 |
 | `GET /api/docs/search` | account | 240 |
 | Link previews fetched from elsewhere | account | 20 |
-| `/healthz` and `/graphql`, which need no session | address | 60 |
+| `/healthz`, which needs no session, and `/graphql` | address | 60 |
 
 Reads are not counted by the wide ceiling on purpose. The client reads a great
 deal — it fetches every document once to warm its offline search — and that
@@ -1394,10 +1394,40 @@ gets a styled page, a program gets JSON.
 The error page loads no application script, only the theme boot, so it still
 renders when whatever failed is the app itself. A `500` reports the status and
 nothing more; the stack goes to the log.
-| `ALL` | `/graphql` | `embedMeta`, `docsCount`, `health`. Introspection is off by default |
+| `POST` | `/graphql` | A read-only graph of the library — see below. Introspection is off by default |
 | `GET` | `/oembed?url=` | oEmbed metadata for link-preview consumers |
 
 ---
+
+
+### The graph
+
+`POST /graphql` is a read-only view of the same library, for a script that
+wants it in one question rather than a walk over several endpoints. It is
+behind the same read policy as everything else (a session, or `PUBLIC_READS`),
+answers with exactly what the REST reads answer with — the same functions, not
+a parallel set — and has no mutations. Writes belong to REST, where CSRF and
+roles already live; because the graph changes nothing, a session alone is
+enough to ask it and no CSRF token is needed.
+
+```graphql
+{
+  documents(folderId: "folder_x", limit: 50) { file title size updatedAt }
+  document(file: "Notes/day-one.md") { content }
+  folders { id name path depth }
+  search(query: "deploy") { file score snippet }
+  links(group: "reading") { url title groups }
+}
+```
+
+`content` is read only when a query asks for it, so listing a thousand
+documents opens no files and asking for one does. A query may not nest deeper
+than 6, may not name more than 200 fields (aliases included — an alias is how
+one request asks for the same thing ten thousand times), and must be a POST,
+so it cannot be put in a URL and land in a proxy log. List limits are clamped
+to 1,000. The `graphql` suite checks each of these against a real server, and
+checks that the schema still has no mutation type — the day one is added, the
+CSRF exemption has to go with it, and that is the test that says so.
 
 ## Supported file types
 

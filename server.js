@@ -26,12 +26,13 @@ const {
   SEED_ADMIN_PASSWORD
 } = require("./lib/auth");
 const { ShareStore } = require("./lib/shares");
-const { LinkStore } = require("./lib/links");
+const { LinkStore, publicLink } = require("./lib/links");
 const {
   MAX_FOLDER_DEPTH,
   paramDocPath,
   paramEntryPath,
-  toDocTitle
+  toDocTitle,
+  sanitizeDocPath
 } = require("./lib/docs/paths");
 const { securityHeaders } = require("./lib/http/headers");
 const { requestLogger } = require("./lib/http/logging");
@@ -238,9 +239,10 @@ const limitSearch = createLimiter({
   name: "search", windowMs: RATE_WINDOW_MS, max: RATE_SEARCHES_PER_SESSION, keyOf: bySession,
   message: "Too many searches just now. Wait a minute and try again."
 });
-// The two addresses that need no session, keyed by the only thing such a
-// request has: where it came from. A monitor polling every ten seconds uses a
-// tenth of this.
+// /healthz needs no session and is keyed by the only thing such a request
+// has, where it came from; a monitor polling every ten seconds uses a tenth of
+// this. /graphql needs a session now, but stays here by address: it is the
+// endpoint a script hits in a loop, and a script is one address.
 const limitPublic = createLimiter({
   name: "public", windowMs: RATE_WINDOW_MS, max: RATE_PUBLIC_PER_ADDRESS, keyOf: byAddress
 });
@@ -411,6 +413,26 @@ app.use(createUserRoutes({ authStore, roles: ROLES, requirePermission }));
 app.use(createMetaRoutes({
   buildEmbedMeta,
   getDocs,
+  readOrganizerState,
+  searchDocuments,
+  requireRead,
+  // A document by its path, read the way GET /api/docs/*file reads it — the
+  // same sanitiser, the same cache — or null for a path that is not one.
+  readDocument: async (file) => {
+    const fileName = sanitizeDocPath(file);
+    if (!fileName) {
+      return null;
+    }
+
+    const fullPath = path.join(MARKDOWN_DIR, fileName);
+    if (!(await fileExists(fullPath))) {
+      return null;
+    }
+
+    const { content } = await readCachedTextFile(fullPath);
+    return { file: fileName, content };
+  },
+  listLinks: () => linkStore.list().map(publicLink),
   enableIntrospection: process.env.ENABLE_GRAPHQL_INTROSPECTION === "true"
 }));
 
