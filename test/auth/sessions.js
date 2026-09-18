@@ -177,7 +177,56 @@ module.exports = async (ctx) => {
       { Origin: "https://evil.example.com" });
     check("a cross-origin write is refused even with a valid token", crossOrigin.status, 403);
 
+    // The origin this test server was started as, and loopback, are the
+    // origins it answers on; a write that names one of them is same-site.
+    check("a same-origin write with a valid token succeeds",
+      (await admin.post("/api/docs", { fileName: "csrf-same-origin.md", content: "y" },
+        { Origin: `http://localhost:${new URL(server.origin).port}` })).status, 201);
+    check("an Origin that is not a URL is refused, not thrown at",
+      (await admin.post("/api/docs", { fileName: "csrf-bad-origin.md", content: "z" },
+        { Origin: "not a url" })).status, 403);
+
     check("reads do not need a CSRF token", (await admin.get("/api/docs")).status, 200);
+  }
+
+  console.log("=== the origin check holds behind a proxy ===");
+  {
+    /* It used to switch itself off under TRUST_PROXY, on the grounds that
+     * behind a proxy the request's idea of its origin could legitimately
+     * differ from the public one — which meant the deployment that most
+     * needed it, the public one behind a reverse proxy, was the one without
+     * it. It compares against configured origins now, so the proxy setting
+     * has nothing to do with it.
+     */
+    const { startTestServer: startProxied } = require("../helpers/server");
+    const proxied = await startProxied({
+      env: { TRUST_PROXY: "true", PUBLIC_BASE_URL: "https://docs.example.test", ALLOWED_ORIGINS: "https://also.example.test, not-a-url" }
+    });
+    try {
+      const client = makeClient(proxied.origin);
+      await client.post("/api/auth/login", { username: "aza", password: "lolface123" });
+      await client.post("/api/auth/password", { currentPassword: "lolface123", newPassword: "kettle-drum-thirty" });
+
+      const evil = await client.post("/api/docs", { fileName: "evil.md", content: "x" },
+        { Origin: "https://evil.example.com" });
+      check("behind a proxy, a cross-origin write is still refused", evil.status, 403);
+      check("...as cross-origin, not as a bad token", evil.body.error, "Cross-origin request refused.");
+
+      check("the public origin is accepted",
+        (await client.post("/api/docs", { fileName: "ok-1.md", content: "x" },
+          { Origin: "https://docs.example.test" })).status, 201);
+      check("...and so is one listed in ALLOWED_ORIGINS",
+        (await client.post("/api/docs", { fileName: "ok-2.md", content: "x" },
+          { Origin: "https://also.example.test" })).status, 201);
+      check("...and loopback on this port, so localhost needs no setting",
+        (await client.post("/api/docs", { fileName: "ok-3.md", content: "x" },
+          { Origin: `http://127.0.0.1:${new URL(proxied.origin).port}` })).status, 201);
+      check("a listed entry that is not a URL is ignored rather than fatal",
+        (await client.post("/api/docs", { fileName: "ok-4.md", content: "x" },
+          { Origin: "https://docs.example.test" })).status, 201);
+    } finally {
+      await proxied.stop();
+    }
   }
 
   console.log("=== roles ===");

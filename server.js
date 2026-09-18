@@ -148,6 +148,31 @@ if (TRUST_PROXY) {
   app.set("trust proxy", false);
 }
 
+/* The origins this deployment answers on, for the CSRF origin check.
+ *
+ * Configuration, not something the request gets a say in. The public base
+ * URL is always one; ALLOWED_ORIGINS adds more, comma-separated, for a
+ * deployment reached under more than one name; and loopback on this port is
+ * always allowed, so working on localhost needs no setting — a page on
+ * another site cannot have a loopback origin.
+ */
+const ALLOWED_ORIGINS = new Set(
+  [
+    process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL,
+    ...String(process.env.ALLOWED_ORIGINS || "").split(","),
+    `http://localhost:${PORT}`,
+    `http://127.0.0.1:${PORT}`
+  ]
+    .map((one) => {
+      try {
+        return new URL(String(one).trim()).origin;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+);
+
 // Whether this deployment is reached over HTTPS. Derived from the public base
 // URL rather than from the request, which an attacker controls. It decides two
 // things: that the session cookie is Secure, so it does not travel in clear
@@ -211,9 +236,8 @@ const {
 } = createGuards({
   authStore,
   publicReads: PUBLIC_READS,
-  trustProxy: TRUST_PROXY,
-  cookiesSecure: COOKIES_SECURE,
-  getBaseUrl: getBaseUrlFromRequest
+  allowedOrigins: ALLOWED_ORIGINS,
+  cookiesSecure: COOKIES_SECURE
 });
 
 // Every request learns who it is from before any route runs; the guards decide

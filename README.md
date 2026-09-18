@@ -107,6 +107,7 @@ Everything is environment variables; there is no config file.
 | `PUBLIC_READS` | `false` | When `true`, anyone can read every document without signing in — the behaviour before accounts existed. Leave it off unless you want the whole library public; individual documents can be shared without it. |
 | `PUBLIC_BASE_URL` | `https://md.azaken.com` | Origin used to build canonical, `og:*` and oEmbed URLs. Set it to `http://localhost:4321` when working locally if you want link previews to point at your own machine. |
 | `TRUST_PROXY` | `false` | Set to `true` (or an Express trust-proxy value like `loopback`) only when running behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured. |
+| `ALLOWED_ORIGINS` | *(none)* | Extra origins the CSRF origin check accepts, comma-separated, for a deployment reached under more than one name. `PUBLIC_BASE_URL` and loopback on `PORT` are always accepted. |
 | `MDVIEWER_STATE_DIR` | the checkout | Moves the documents, recycle bin and organizer somewhere else, so runtime state can live outside the repo. The test suite uses it to point at a temp directory. |
 | `LOG_REQUESTS` | `true` | One log line per request, written when the response finishes. |
 | `LOG_STATIC` | `false` | Include static assets in that log. Off by default because they drown out everything else. |
@@ -157,6 +158,15 @@ overrides the default; nothing else does.
 
 Behind a reverse proxy, set `TRUST_PROXY` — otherwise `req.protocol` reports the
 proxy hop rather than the client's scheme.
+
+A write that arrives with an `Origin` header has to name an origin this
+deployment answers on: `PUBLIC_BASE_URL`, anything in `ALLOWED_ORIGINS`, or
+loopback on `PORT`. That list is configuration, not something read off the
+request, and the check no longer switches itself off under `TRUST_PROXY` — it
+used to, on the grounds that behind a proxy the request's own idea of its
+origin could differ from the public one, which meant the deployment that
+most needed the check was the one without it. It is the layer in front of
+the CSRF token, not the only lock.
 
 Every response carries the same set of headers — a Content Security Policy,
 `nosniff`, a referrer policy, `X-Frame-Options`, a same-origin opener policy
