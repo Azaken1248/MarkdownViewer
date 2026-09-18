@@ -37,6 +37,27 @@ function runChild(dataDir, tag) {
 }
 
 (async () => {
+  console.log("=== many processes open one new database at the same instant ===");
+  {
+    /* A cluster starts all its workers at once, and every one of them opens
+     * the same file that does not exist yet. The switch into WAL takes a lock
+     * that SQLite will not wait for, and one boot in a thousand used to die
+     * on it before reaching the schema. Eight at once, ten times: eighty
+     * chances, and none of them may be refused.
+     */
+    const opener = path.join(__dirname, "helpers", "open-once.js");
+    let refused = 0;
+    for (let round = 0; round < 10; round += 1) {
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-open-"));
+      const codes = await Promise.all(Array.from({ length: 8 }, () => new Promise((resolve) => {
+        fork(opener, [dataDir], { stdio: "ignore" }).on("exit", resolve);
+      })));
+      refused += codes.filter((code) => code !== 0).length;
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+    check("eighty simultaneous first opens, none refused", refused, 0);
+  }
+
   console.log("=== three processes write to one database at once ===");
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-db-"));
   try {
