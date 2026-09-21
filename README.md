@@ -218,6 +218,18 @@ remembered to cover is not a policy. They live in `lib/http/headers.js` with
 the reason for each, and the `headers` suite asks eight kinds of response for
 the set.
 
+The Content Security Policy allows no inline or evaluated *script*. It does
+allow inline *styles* — `style-src 'unsafe-inline'` — and that is a deliberate
+trade with three reasons, all of them checked by the `headers` suite so the
+allowance expires the day none of them holds: the app's own diagram drawing
+writes `style` attributes whose values come from the document (a box's colour
+from its `classDef`), which no hash can cover and no nonce applies to, since
+nonces cover `<style>` elements and never attributes; KaTeX sets inline style
+attributes on what it typesets; and Mermaid injects a `<style>` into every SVG
+it renders. Styles cannot execute; what style injection can do is redress the
+page, and scripts — the vector that matters — stay pinned to this origin and
+two SRI-checked CDNs.
+
 `Strict-Transport-Security` is the one that depends on the deployment. It is
 sent when `PUBLIC_BASE_URL` is HTTPS and not otherwise: a plain-HTTP box that
 sent it would tell the browser never to come back the way it can. A year,

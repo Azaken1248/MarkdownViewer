@@ -72,6 +72,43 @@ function carried(headers) {
     await secure.stop();
   }
 
+  console.log("=== the one allowance in the CSP, and the reasons it stays ===");
+  {
+    /* style-src 'unsafe-inline' is an accepted trade, and this is what keeps
+     * it an honest one: the reasons are enumerated and checked, so the day
+     * none of them holds this fails and says to take it out. A comment alone
+     * is read once; this is read every run.
+     */
+    const path = require("path");
+    const fs = require("fs");
+    const { clientScriptPaths, coreScriptPaths, drawScriptPaths } = require("./app-source.js");
+    const publicDir = path.join(__dirname, "..", "public");
+
+    check("style-src allows inline styles", /style-src [^;]*'unsafe-inline'/.test(CSP_DIRECTIVES), true);
+    check("...and script-src does not, which is the one that would matter",
+      /script-src [^;]*'unsafe-inline'/.test(CSP_DIRECTIVES), false);
+
+    // Reason 1: this app's own generated markup carries style attributes
+    // whose values come from documents — which no hash or nonce can cover.
+    const ownSources = [...new Set([...clientScriptPaths(publicDir), ...coreScriptPaths(publicDir), ...drawScriptPaths(publicDir)])];
+    const withStyleAttributes = ownSources.filter((file) => /\bstyle="/.test(fs.readFileSync(file, "utf8")))
+      .map((file) => path.relative(publicDir, file));
+    check("the app's own drawing writes style attributes into its markup",
+      withStyleAttributes.length > 0, true);
+    console.log(`  (in ${withStyleAttributes.join(", ")})`);
+
+    // Reasons 2 and 3: the two libraries that inject styles they cannot be
+    // told a nonce for are still the ones the engine fetches.
+    const lazy = fs.readFileSync(path.join(publicDir, "js", "md", "lazy.js"), "utf8");
+    check("KaTeX is still loaded, and sets inline style attributes", /katex/i.test(lazy), true);
+    check("Mermaid is still loaded, and injects a <style> into every SVG", /mermaid/i.test(lazy), true);
+
+    // If every one of those three checks stopped being true, the allowance
+    // would have no reason left, and this is the check that would say so.
+    check("so the allowance still has a reason; when this fails, take it out",
+      withStyleAttributes.length > 0 || /katex/i.test(lazy) || /mermaid/i.test(lazy), true);
+  }
+
   console.log("=== and not on a deployment that is plain HTTP ===");
   const plain = await startTestServer({ env: { PUBLIC_BASE_URL: "http://localhost:4321" } });
   try {
