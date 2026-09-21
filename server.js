@@ -41,6 +41,7 @@ const { createErrorPages } = require("./lib/http/errors");
 const { createLimiter, bySession, byAddress, isRead } = require("./lib/http/limiter");
 const db = require("./lib/db");
 const { createAssetVersions } = require("./lib/http/asset-versions");
+const { createAudit } = require("./lib/audit");
 const { createStaticAssets } = require("./lib/http/static-assets");
 const { createBundles } = require("./lib/http/bundles");
 const { createGuards } = require("./lib/guards");
@@ -218,7 +219,14 @@ const PUBLIC_READS = String(process.env.PUBLIC_READS || "").toLowerCase() === "t
  */
 const metadata = db.open(DATA_DIR);
 
-const authStore = new AuthStore({ dataDir: DATA_DIR, db: metadata });
+/* Where the security events go: sign-ins and their failures, lockouts,
+ * permission denials, share links made and revoked, passwords changed,
+ * accounts disabled, documents erased. One JSON line each, to
+ * data/audit.jsonl unless AUDIT_LOG says otherwise. See lib/audit.js.
+ */
+const audit = createAudit({ dataDir: DATA_DIR });
+
+const authStore = new AuthStore({ dataDir: DATA_DIR, db: metadata, audit });
 const shareStore = new ShareStore({ dataDir: DATA_DIR, db: metadata });
 const linkStore = new LinkStore({ dataDir: DATA_DIR, db: metadata });
 
@@ -236,7 +244,8 @@ const {
   authStore,
   publicReads: PUBLIC_READS,
   allowedOrigins: ALLOWED_ORIGINS,
-  cookiesSecure: COOKIES_SECURE
+  cookiesSecure: COOKIES_SECURE,
+  audit
 });
 
 // Every request learns who it is from before any route runs; the guards decide
@@ -415,6 +424,7 @@ const getShareTemplate = templateReader(SHARE_TEMPLATE_PATH, served("share"));
 
 app.use(createAuthRoutes({
   authStore,
+  audit,
   requireAuth,
   sessionPayload,
   issueSessionCookie,
@@ -424,6 +434,7 @@ app.use(createAuthRoutes({
 app.use(createSharesRoutes({
   markdownDir: MARKDOWN_DIR,
   shareStore,
+  audit,
   requirePermission,
   getBaseUrl: getBaseUrlFromRequest,
   fileExists,
@@ -434,7 +445,7 @@ app.use(createSharesRoutes({
 
 app.use(createLinksRoutes({ linkStore, requireRead, requirePermission }));
 
-app.use(createUserRoutes({ authStore, roles: ROLES, requirePermission }));
+app.use(createUserRoutes({ authStore, roles: ROLES, requirePermission, audit }));
 
 app.use(createMetaRoutes({
   buildEmbedMeta,
@@ -497,6 +508,7 @@ app.use(createFoldersRoutes({
 
 app.use(createRecycleRoutes({
   markdownDir: MARKDOWN_DIR,
+  audit,
   softDeletedDir: DELETED_SOFT_DIR,
   hardDeletedDir: DELETED_HARD_DIR,
   requireRead,

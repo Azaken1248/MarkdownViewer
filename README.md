@@ -100,7 +100,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -117,6 +117,7 @@ Everything is environment variables; there is no config file.
 | `PUBLIC_READS` | `false` | When `true`, anyone can read every document without signing in — the behaviour before accounts existed. Leave it off unless you want the whole library public; individual documents can be shared without it. |
 | `PUBLIC_BASE_URL` | `https://md.azaken.com` | Origin used to build canonical, `og:*` and oEmbed URLs. Set it to `http://localhost:4321` when working locally if you want link previews to point at your own machine. |
 | `TRUST_PROXY` | `false` | Set to `true` (or an Express trust-proxy value like `loopback`) only when running behind a reverse proxy. Controls whether `X-Forwarded-*` is honoured. |
+| `AUDIT_LOG` | `data/audit.jsonl` | Where the security events go: a path, `stderr` to hand them to whatever collects the process's output, or `off`. |
 | `SEED_ADMIN_PASSWORD` | *(generated)* | The first admin's password, for a scripted setup. Used only when no account exists yet; not echoed to the log. Without it one is generated and printed once at first boot. |
 | `ALLOWED_ORIGINS` | *(none)* | Extra origins the CSRF origin check accepts, comma-separated, for a deployment reached under more than one name. `PUBLIC_BASE_URL` and loopback on `PORT` are always accepted. |
 | `MDVIEWER_STATE_DIR` | the checkout | Moves the documents, recycle bin and organizer somewhere else, so runtime state can live outside the repo. The test suite uses it to point at a temp directory. |
@@ -159,6 +160,35 @@ The count lives in the database, so a restart does not reset it — a crash loop
 or a redeploy used to turn the lockout into a speed bump — and two processes
 share one count rather than each allowing eight. The `db` suite checks all
 three.
+
+### The audit log
+
+The request log says what was asked and how it was answered. It does not say
+who signed in from where, whose password was changed by whom, or who erased a
+document — so after an incident, "what did this account do before we
+noticed?" had no answer. `data/audit.jsonl` is the answer: one JSON line per
+event that matters, appended, owner-readable only.
+
+| Event | When |
+| --- | --- |
+| `login.ok`, `login.failed`, `login.refused` | a sign-in, a wrong guess (with the reason the response never gives: no such user, disabled, bad password), a guess made while locked |
+| `login.locked` | the guess that locked an account or an address, and for how long |
+| `permission.denied` | a signed-in account asking for what its role does not allow — a viewer trying to write |
+| `share.created`, `share.rotated`, `share.revoked` | a share link's life; rotation is how a leaked link is revoked |
+| `password.changed`, `password.change.failed` | by the owner or by an admin; and a wrong current password, which is a guess from inside a session |
+| `user.created`, `user.role`, `user.disabled`, `user.enabled`, `user.deleted` | what changed about an account, and by whom |
+| `doc.erased` | the one thing here that cannot be undone |
+
+Every line carries who (the signed-in account, when there is one), the
+address, and a user agent cut to 120 characters. Never a document's text, a
+search term, a token, a password or a hash of one — the `audit` suite walks a
+server through all of the above and then searches the log for each of those
+and requires them absent. Reads and saves write no line: the log is for what
+an incident review asks about, not a second request log.
+
+`AUDIT_LOG=stderr` hands the lines to whatever collects the process's output,
+for a deployment that ships logs somewhere; the default is a file because the
+point is to still have it later.
 
 ### Notes on the public deployment
 
