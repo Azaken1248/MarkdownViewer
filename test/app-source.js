@@ -10,12 +10,23 @@ const { pathToFileURL } = require("url");
 
 const DEFAULT_PUBLIC_DIR = path.join(__dirname, "..", "public");
 
-// Every script the page loads from our own /js, in page order, as absolute
+// Every script a page loads from our own /js, in page order, as absolute
 // paths. The CDN tags are not ours and are not included.
-function clientScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
-  const html = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
+function pageScriptPaths(page, publicDir = DEFAULT_PUBLIC_DIR) {
+  const html = fs.readFileSync(path.join(publicDir, page), "utf8");
   return [...html.matchAll(/<script[^>]*\ssrc="\/js\/([^"?]+)/g)]
     .map(([, file]) => path.join(publicDir, "js", file));
+}
+
+function clientScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  return pageScriptPaths("index.html", publicDir);
+}
+
+// The share view is its own page with its own, shorter list: the render engine
+// and share.js, and none of the app. Read from share.html for the same reason
+// the list above is read from index.html — the page is where that is decided.
+function sharePageScriptPaths(publicDir = DEFAULT_PUBLIC_DIR) {
+  return pageScriptPaths("share.html", publicDir);
 }
 
 // Only the ones app.js is made of: the modules under js/app/, then app.js.
@@ -118,6 +129,7 @@ function loadScript(window, file) {
 
 module.exports = {
   loadScript,
+  pageScriptPaths, sharePageScriptPaths,
   clientScriptPaths, appScriptPaths, appSource,
   coreScriptPaths, coreSource, modelScriptPaths, modelSource,
   drawScriptPaths, drawSource, styleSheetPaths, styleSource

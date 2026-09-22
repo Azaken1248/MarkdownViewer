@@ -24,6 +24,7 @@ const SUITES = [
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
+  ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
   ["build", "build.test.js", "The optional bundles, and that they are the same app unbundled"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],

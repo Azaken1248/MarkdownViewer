@@ -125,7 +125,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
 | `npm run coverage` | The same suite under c8; the report of what it never reaches lands in `coverage/` |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `recycle`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -348,7 +348,7 @@ affected.
 │   ├── run.js                # Runner: `npm test`
 │   ├── helpers/server.js     # Spawns a real server against a temp state dir
 │   ├── app-source.js         # Reads the client's script order out of index.html
-│   └── *.test.js             # The twelve suites
+│   └── *.test.js             # The twenty-one suites
 ├── tools/
 │   └── make-embed-images.js  # Draws public/img/*.png. No dependencies.
 ├── types/                    # What the checker cannot read off the source
@@ -400,9 +400,9 @@ own. And a module reaches downward only: `notify.js` is handed the modal layers,
 the modal layers know nothing about toasts.
 
 **Not ES modules**, though `import`/`export` would state the order better than a
-script tag can. jsdom does not execute `<script type="module">`, and nine of the
-twelve suites drive the real client in jsdom — so `type="module"` would mean
-either a bundler in the test path or nine suites that quietly stop testing
+script tag can. jsdom does not execute `<script type="module">`, and seven of
+the suites drive the real client in jsdom — so `type="module"` would mean
+either a bundler in the test path or seven suites that quietly stop testing
 anything. The namespaces are what the four diagram modules already used, and
 they cost nothing at runtime.
 
@@ -1565,8 +1565,8 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Eleven suites, ~1,600 checks, under a minute. No browser required, and no
-network: the suite is deterministic on a runner with no egress.
+Twenty-one suites, ~3,500 checks, about four minutes. No browser required, and
+no network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
 | --- | --- |
@@ -1580,7 +1580,8 @@ network: the suite is deterministic on a runner with no egress.
 | `assets` | Pasted images: what may be uploaded, size and type refusals, deduplication, RBAC, share scoping |
 | `code` | Copy buttons, both clipboard paths, and the live-highlighting policy |
 | `visual` | The block round trip, over fixtures and over every real document |
-| `dom` | The real `index.html` + `app.js` in jsdom against a real server |
+| `recycle` | The recycle bin and the archive: delete, restore, erase, and who may do which |
+| `dom` | The real `index.html` + `app.js` in jsdom against a real server, and the share view in a window of its own |
 | `diagram-page` | The diagram editor page, its address, and the document handoff |
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`
@@ -1609,13 +1610,24 @@ as its own job and attaches the report to the run.
 It is a map, not a target. There is no threshold and there will not be one: a
 percentage that has to go up is a percentage people write tests to raise, and
 the value here is the other thing — the list of what a suite this thorough
-still does not touch, which is where confidence exceeds evidence. On its first
-run the map said: every route under `/api/recycle-bin/*` and `/api/archive/*`
-that restores or erases (`lib/routes/recycle.js`), the single-file
-`/api/docs/upload` route, `restoreFromBin` in the store, and the whole of the
-share page's client (`public/js/share.js`, which no suite evaluates). The
-security-adjacent code — guards, sessions, the limiter, headers, the CSRF
-check — is in the nineties.
+still does not touch, which is where confidence exceeds evidence.
+
+On its first run the map named four places, all of them now covered by tests
+written because it named them:
+
+| What it found | Where the tests are now |
+| --- | --- |
+| Nothing reached restore, hard-delete or erase — the routes that move somebody's work about, and the only route in the app that deletes a file for good | the `recycle` suite |
+| `restoreFromBin` in the store, including a restore into a folder and onto a name taken since the delete | the `recycle` suite |
+| The single-file `/api/docs/upload` route | `test/auth/library.js` |
+| `public/js/share.js` — the entire client a visitor following a share link runs, evaluated by no suite at all | `test/dom/share-page.js` |
+
+That moved `lib/routes/recycle.js` from 55% to 88%, the store from 83% to 92%,
+and the share client from nothing to 87%. What is left low is mostly the app's
+own interface modules, which the `dom` suite reaches only as far as it drives
+them, and `pyodide-worker.js`, which runs in a Web Worker that jsdom does not
+implement. The security-adjacent code — guards, sessions, the limiter, headers,
+the CSRF check — is in the nineties.
 
 Two things make the client's numbers mean something. `test/app-source.js`
 evaluates each script in jsdom with a `//# sourceURL` naming the file, so V8

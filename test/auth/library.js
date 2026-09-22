@@ -189,6 +189,62 @@ module.exports = async (ctx) => {
         { Authorization: "Bearer any-token-at-all" })).status, 401);
   }
 
+  console.log("=== one file at a time goes up the same way ===");
+  {
+    // /api/docs/upload is the single-file endpoint the toolbar uses; the
+    // folder endpoint below is the drag-a-directory one. Until the coverage
+    // map was drawn, nothing exercised this one at all.
+    const send = (name, content, fields = {}) => admin.postMultipart(
+      "/api/docs/upload",
+      [{ field: "markdownFile", name, content }],
+      fields
+    );
+
+    const made = await send("uploaded-alone.md", "# Uploaded alone\n");
+    check("a markdown file is taken", made.status, 201);
+    check("...under its own name", made.body.file, "uploaded-alone.md");
+    check("...with a title and a size", [made.body.title, made.body.size > 0], ["Uploaded Alone", true]);
+    check("...and it is readable straight away",
+      (await admin.get("/api/docs/uploaded-alone.md")).body.content, "# Uploaded alone\n");
+
+    // The form may rename the file on the way in, which is what the dialog
+    // does when the name on disk is not the name wanted here.
+    const renamed = await send("whatever.md", "# Renamed on arrival\n", { fileName: "chosen-name.md" });
+    check("the form's name wins over the file's", renamed.body.file, "chosen-name.md");
+
+    const second = await send("uploaded-alone.md", "# The second one\n");
+    check("a name already taken is kept, not overwritten", second.status, 201);
+    check("...by landing under a name of its own", second.body.file !== "uploaded-alone.md", true);
+    check("...leaving the first one alone",
+      (await admin.get("/api/docs/uploaded-alone.md")).body.content, "# Uploaded alone\n");
+
+    const filed = await admin.post("/api/folders", { name: "Uploads" });
+    const intoFolder = await send("filed-upload.md", "# Filed\n", { folderId: filed.body.folder.id });
+    check("a folder id puts it in that folder", intoFolder.body.file, "Uploads/filed-upload.md");
+    check("...and says which folder that was", intoFolder.body.folderName, "Uploads");
+
+    check("a file type this app does not hold is refused",
+      (await send("notes.txt", "plain text")).status, 400);
+    check("...and so is a request with no file at all",
+      (await admin.postMultipart("/api/docs/upload", [], {})).status, 400);
+
+    // multer's own limit, which is the one that protects memory: the body is
+    // read into a buffer before any of this app's code sees it.
+    const tooBig = await send("enormous.md", "#".repeat(2 * 1024 * 1024 + 1024));
+    check("a document past the 2MB limit is refused", tooBig.status, 413);
+
+    const reader = makeClient(server.origin);
+    await admin.post("/api/users", { username: "single-upload-viewer", password: "kettle-drum-twentytwo", role: "viewer" });
+    await reader.post("/api/auth/login", { username: "single-upload-viewer", password: "kettle-drum-twentytwo" });
+    await reader.post("/api/auth/password", {
+      currentPassword: "kettle-drum-twentytwo",
+      newPassword: "single-reader-password-1"
+    });
+    check("a viewer cannot upload one either",
+      (await reader.postMultipart("/api/docs/upload",
+        [{ field: "markdownFile", name: "sneaky.md", content: "# No\n" }], {})).status, 403);
+  }
+
   console.log("=== folder upload ===");
   {
     const upload = (entries, fields = {}) => admin.postMultipart(

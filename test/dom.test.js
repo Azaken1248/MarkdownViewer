@@ -472,7 +472,7 @@ async function run(server) {
 
   const doc = window.document;
 
-  /* The checks themselves, in five files beside this one.
+  /* The checks themselves, in six files beside this one.
    *
    * Order matters: each leaves the app somewhere the next one starts from, the
    * same way a person using it would. What they share is the context built
@@ -489,6 +489,7 @@ async function run(server) {
   await require("./dom/page-editor.js")(ctx);
   await require("./dom/editing.js")(ctx);
   await require("./dom/links-and-roles.js")(ctx);
+  await require("./dom/share-page.js")(ctx);
 
   console.log("=== console output ===");
   const realErrors = consoleErrors.filter((e) => !/Could not parse CSS|Not implemented/.test(e));
