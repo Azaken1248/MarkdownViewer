@@ -5,7 +5,8 @@
  * Mermaid, KaTeX, highlight.js and svg-pan-zoom come to nearly four megabytes
  * between them, and a document with none of those in it downloads none of them.
  */
-(function (global) {
+/* exported MdLazy */
+var MdLazy = (function () {
   "use strict";
 
   const mermaidState = { ready: false, theme: null, panZoomCounter: 0 };
@@ -64,7 +65,7 @@
   const LAZY_LIBRARIES = {
     mermaid: {
       label: "The diagram engine",
-      loaded: () => Boolean(global.mermaid),
+      loaded: () => Boolean(window.mermaid),
       assets: [
         {
           js: "https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js",
@@ -74,7 +75,7 @@
     },
     panZoom: {
       label: "Diagram pan and zoom",
-      loaded: () => Boolean(global.svgPanZoom),
+      loaded: () => Boolean(window.svgPanZoom),
       assets: [
         {
           js: "https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js",
@@ -84,7 +85,7 @@
     },
     highlight: {
       label: "Syntax highlighting",
-      loaded: () => Boolean(global.hljs),
+      loaded: () => Boolean(window.hljs),
       assets: [
         {
           js: "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js",
@@ -98,7 +99,7 @@
     // which is why assets load one after another rather than all at once.
     math: {
       label: "Maths typesetting",
-      loaded: () => Boolean(global.katex && global.renderMathInElement),
+      loaded: () => Boolean(window.katex && window.renderMathInElement),
       assets: [
         {
           css: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
@@ -120,8 +121,10 @@
 
   function loadAsset(asset) {
     return new Promise((resolve, reject) => {
-      const node = document.createElement(asset.css ? "link" : "script");
-      if (asset.css) {
+      const node = asset.css
+        ? document.createElement("link")
+        : document.createElement("script");
+      if (node instanceof HTMLLinkElement) {
         node.rel = "stylesheet";
         node.href = asset.css;
       } else {
@@ -134,7 +137,7 @@
       node.integrity = asset.integrity;
       node.crossOrigin = "anonymous";
       node.referrerPolicy = "no-referrer";
-      node.addEventListener("load", () => resolve());
+      node.addEventListener("load", () => resolve(node));
       node.addEventListener("error", () => reject(new Error(`Could not load ${asset.css || asset.js}`)));
       document.head.appendChild(node);
     });
@@ -186,7 +189,7 @@
 
   // Local copy: a lowercase helper, not shared behaviour worth coupling over.
 
-  global.MdLazy = {
+  return {
     mermaidState, hooks, configure, SANITIZE_ALLOWED_URI_PATTERN, MARKDOWN_SANITIZE_OPTIONS, CODE_LANGUAGE_ALIAS, LAZY_LIBRARIES, ensureLibrary
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

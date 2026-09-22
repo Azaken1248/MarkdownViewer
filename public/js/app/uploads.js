@@ -5,15 +5,16 @@
  * server say no — a real folder is mostly images and dotfiles, and there is no
  * reason to spend the bandwidth. The server still checks; this is convenience.
  */
-(function (global) {
+/* exported AppUploads */
+var AppUploads = (function () {
 
-const { UPLOADABLE_EXTENSIONS } = global.AppText;
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { requestJson } = global.AppApi;
-const { notify, setStatus } = global.AppNotify;
-const { revealFolderInTree } = global.AppViewerHeader;
-const { refreshDocs } = global.AppRefresh;
+const { UPLOADABLE_EXTENSIONS } = AppText;
+const { elements } = AppDom;
+const { state } = AppState;
+const { requestJson } = AppApi;
+const { notify, setStatus } = AppNotify;
+const { revealFolderInTree } = AppViewerHeader;
+const { refreshDocs } = AppRefresh;
 
 async function uploadMarkdown(file, folderId = null) {
   if (!file) {
@@ -152,8 +153,8 @@ async function uploadFolder(picked, folderId = null) {
 }
 
 
-global.AppUploads = {
+return {
   MAX_FOLDER_UPLOAD_FILES, uploadMarkdown, isUploadableFile, relativePathFor, uploadFolder
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

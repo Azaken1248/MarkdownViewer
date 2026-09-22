@@ -39,26 +39,115 @@
  * which is what makes a round trip through the builder lossless for everything
  * the builder can see.
  */
-(function (global) {
+
+/* The model, written down once.
+ *
+ * dm/parse.js makes it, dm/serialize.js writes it back, diagram-draw.js draws
+ * it, diagram-editor.js changes it and markdown-core.js renders from it — five
+ * modules, one shape, and until this was here the shape lived in each of their
+ * heads. A field added in one and forgotten in another was caught only if a
+ * test happened to walk that path; now `npm run typecheck` walks all of them.
+ * Optional fields are optional in the file too: absent means the default, and
+ * the serializer writes nothing for them, which is what keeps
+ * parse(serialize(model)) equal to model.
+ */
+
+/** @typedef {{ x: number, y: number, w: number, h: number }} Box */
+/** @typedef {{ x: number, y: number }} Point */
+
+/**
+ * A box on the paper. `shape` is the Mermaid bracket pair or one of the shapes
+ * drawn by name; `kind` says what is in it when that is not just a label.
+ * @typedef {Object} ModelNode
+ * @property {string} id
+ * @property {string} shape
+ * @property {string} text
+ * @property {string} [parent]              the subgraph it is in
+ * @property {string[]} [classes]           classDef names, in written order
+ * @property {"box" | "table" | "container" | "text"} [kind]   absent is an ordinary box
+ * @property {string} [icon]                a Lucide icon name
+ * @property {string} [image]               a picture it shows instead of an icon
+ * @property {"none"} [frame]               drawn without its outline
+ * @property {Record<string, string>} [style]   its own `style A fill:#f00` declarations
+ * @property {Record<string, string>} [cells]   per-cell styles of a table
+ * @property {number} [layer]
+ * @property {number} [z]
+ * @property {number} [pad]
+ * @property {number} [gap]
+ * @property {Record<string, string>} [extra]   attributes this build does not know, kept as written
+ */
+
+/**
+ * @typedef {Object} ModelEdge
+ * @property {string} from
+ * @property {string} to
+ * @property {string} kind                  the arrow as written: "-->", "-.->", "==>", ...
+ * @property {string} [label]
+ * @property {string[]} [sides]             which side each end leaves from: l, t, r, b or a (auto)
+ * @property {Point[]} [waypoints]
+ * @property {string[]} [ends]              the marker at each end
+ * @property {string} [route]
+ * @property {string} [class]
+ * @property {Record<string, string>} [extra]
+ */
+
+/**
+ * @typedef {Object} ModelGroup
+ * @property {string} id
+ * @property {string} label
+ * @property {string | null} parent
+ * @property {string} [direction]
+ * @property {boolean} [lock]
+ * @property {Record<string, string>} [extra]
+ */
+
+/**
+ * @typedef {Object} ModelLayer
+ * @property {number} id
+ * @property {string} name
+ * @property {boolean} locked
+ * @property {boolean} hidden
+ */
+
+/**
+ * @typedef {Object} FlowchartModel
+ * @property {true} [ok]                    set by the parser; a model built by hand need not say it
+ * @property {string} direction             TD, LR, BT or RL
+ * @property {ModelNode[]} nodes
+ * @property {ModelEdge[]} edges
+ * @property {ModelGroup[]} [groups]
+ * @property {ModelLayer[]} [layers]
+ * @property {Record<string, Record<string, string>>} [classes]   classDef name -> declarations
+ * @property {Record<string, Box>} [layout]   node id -> where it was put; absent means never arranged
+ */
+
+/** What parseFlowchart answers when it will not open something: the reason, for the person.
+ * @typedef {{ ok: false, reason: string }} RefusedModel
+ */
+
+/* exported DiagramModel */
+var DiagramModel = (function () {
   "use strict";
 
   const {
     ACTOR_BAND, ACTOR_LEAST, DIRECTIONS, DRAWN_SHAPES, EDGE_KINDS, LINE_STYLES,
     ROUTE_DEFAULT, ROUTE_SHAPES, SHAPES, SHAPE_CHOICES, lineStyleOf, linkFor
-  } = global.DmShapes;
+  } = DmShapes;
   const {
     GRID, HAS_LAYOUT_RE, LAYOUT_MARK, MARGIN, MAX_EDGES, MAX_NODES, NODE_KINDS,
     TABLE_GAP, TABLE_PAD, quoteText, snap, tableMetrics, unquoteText, wordsOnly
-  } = global.DmGrammar;
+  } = DmGrammar;
   const {
     CELL_MARKS, CELL_SIZE, FONT_SIZE, TEXT_SIZE, cellDeclarations, cellKey, cellToken,
     columnsOf, fontScale, joinCells, joinRows, readCellStyles, resizeGrid, textCells,
     textRows, writeCellStyles
-  } = global.DmCells;
-  const { parseFlowchart } = global.DmParse;
-  const { serializeFlowchart } = global.DmSerialize;
-  const { autoLayout, ensureLayout, layoutBounds, measureNode } = global.DmLayout;
+  } = DmCells;
+  const { parseFlowchart } = DmParse;
+  const { serializeFlowchart } = DmSerialize;
+  const { autoLayout, ensureLayout, layoutBounds, measureNode } = DmLayout;
 
+  // Which axis an edge lies on, what to call it, and where it is on a box.
+  /** @type {[string, string, (at: { x: number, y: number, w: number, h: number }) => number][]} */
   const GUIDE_KINDS = [
     ["x", "left", (at) => at.x],
     ["x", "centre", (at) => at.x + (at.w / 2)],
@@ -168,7 +257,7 @@
     return parseFlowchart(source).ok;
   }
 
-  global.DiagramModel = {
+  return {
     DIRECTIONS,
     SHAPES,
     DRAWN_SHAPES,
@@ -222,4 +311,4 @@
     quoteText,
     unquoteText
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

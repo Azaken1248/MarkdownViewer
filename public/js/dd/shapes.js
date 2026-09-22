@@ -5,14 +5,15 @@
  * table's grid, an actor, a picture, an icon. Every one of them returns a
  * string, so a box can be redrawn without anything around it moving.
  */
-(function (global) {
+/* exported DdShapes */
+var DdShapes = (function () {
   "use strict";
 
   const {
     Model, ELLIPSIS, LINE_HEIGHT, RADIUS, ROUND_RADIUS, SLANT, escapeText, leadFor, polygon,
     rect, round
-  } = global.DdBase;
-  const { cellChar, cellPaint, sizeOf, wornBy, paintOf } = global.DdPaint;
+  } = DdBase;
+  const { cellChar, cellPaint, sizeOf, wornBy, paintOf } = DdPaint;
 
   function shapeMarkup(shape, w, h) {
     const slant = Math.min(SLANT, w / 3);
@@ -341,7 +342,7 @@
 
   function iconBody(node) {
     const found = ICON_RE.exec(String(node?.icon || ""));
-    return found ? (global.DiagramIcons?.bodyOf(found[1]) || "") : "";
+    return found ? (DiagramIcons?.bodyOf(found[1]) || "") : "";
   }
 
   /* The icon, drawn as big as the box will let it be and no bigger.
@@ -482,7 +483,7 @@
    * first every time anything moves.
    */
 
-  global.DdShapes = {
+  return {
     shapeMarkup, cellBoxes, cellAt, labelMarkup, nodeBody, nodeMarkup
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

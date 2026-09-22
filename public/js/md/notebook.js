@@ -5,11 +5,12 @@
  * kept so the Run button has something to send. Everything arrives through the
  * same sanitizer as ordinary markdown.
  */
-(function (global) {
+/* exported MdNotebook */
+var MdNotebook = (function () {
   "use strict";
 
-  const { hooks, CODE_LANGUAGE_ALIAS, MARKDOWN_SANITIZE_OPTIONS } = global.MdLazy;
-  const { normalize, escapeHtml, isNotebookFile, isDiagramFile, toMermaidMarkdown, renderMarkdown } = global.MdText;
+  const { hooks, CODE_LANGUAGE_ALIAS, MARKDOWN_SANITIZE_OPTIONS } = MdLazy;
+  const { normalize, escapeHtml, isNotebookFile, isDiagramFile, toMermaidMarkdown, renderMarkdown } = MdText;
 
   function normalizeNotebookText(value) {
     if (Array.isArray(value)) {
@@ -290,7 +291,7 @@
   // diagram-side mirror of the light and dark token sets in app.css; if a token
   // there changes, change its counterpart here.
 
-  global.MdNotebook = {
+  return {
     notebookSourceFor, renderNotebookDocument, renderDocumentContent
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

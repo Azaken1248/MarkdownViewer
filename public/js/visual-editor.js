@@ -27,7 +27,8 @@
  * damage this design exists to avoid.
  */
 
-(function (global) {
+/* exported VisualEditor */
+var VisualEditor = (function () {
   "use strict";
 
   // Blocks whose meaning survives being shown as formatted text and written
@@ -340,7 +341,7 @@
 
       // A checkbox is the task-list syntax, and the box has to go back as
       // text rather than as an <input>.
-      const checkbox = own.querySelector('input[type="checkbox"]');
+      const checkbox = /** @type {HTMLInputElement} */ (own.querySelector('input[type="checkbox"]'));
       if (checkbox) {
         checkbox.remove();
         marker += checkbox.checked ? " [x]" : " [ ]";
@@ -817,7 +818,7 @@
     return joinBlocks(blocks);
   }
 
-  global.VisualEditor = {
+  return {
     splitBlocks,
     joinBlocks,
     isRich,
@@ -841,4 +842,4 @@
     replaceDiagram,
     RICH_TYPES
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -304,7 +304,7 @@ module.exports = async (ctx) => {
     // Pyodide hands Python the host's JS scope through `import js`. On the main
     // thread that is `window`; in a worker it is the worker scope, with no DOM
     // and nothing the app holds.
-    check("Python runs in a worker, not on the page", runtime.includes("new global.Worker("), true);
+    check("Python runs in a worker, not on the page", runtime.includes("new window.Worker("), true);
     check("the worker never touches document", /\bdocument\./.test(worker), false);
     check("...or window", /\bwindow\./.test(worker), false);
     check("...or localStorage", worker.includes("localStorage"), false);

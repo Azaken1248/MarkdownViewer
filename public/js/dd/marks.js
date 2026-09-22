@@ -3,11 +3,12 @@
  * None of it is part of the diagram — it is the editor showing what it is
  * about to do — so it is drawn in its own layer and thrown away freely.
  */
-(function (global) {
+/* exported DdMarks */
+var DdMarks = (function () {
   "use strict";
 
-  const { round } = global.DdBase;
-  const { routeEdge, wayPoints } = global.DdRoute;
+  const { round } = DdBase;
+  const { routeEdge, wayPoints } = DdRoute;
 
   const RING_PAD = 5;
   const HANDLE = 9;
@@ -60,6 +61,8 @@
    * grip leaves alone. Which is the whole of what tells a corner from a side:
    * a corner moves two edges and a side moves one.
    */
+  // A name and the corner it pulls, as -1, 0 or 1 along each axis.
+  /** @type {[string, number, number][]} */
   const GRIPS = [
     ["nw", -1, -1], ["n", 0, -1], ["ne", 1, -1],
     ["w", -1, 0], ["e", 1, 0],
@@ -145,8 +148,8 @@
    */
 
 
-  global.DdMarks = {
+  return {
     RING_PAD, HANDLE, FRAME_PAD, frameMarkup, guidesMarkup, marqueeMarkup, GRIPS, RESIZE_R,
     marksMarkup, edgeMarks
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -5,14 +5,15 @@
  * renderMermaidBlocks at the bottom is what a page calls to turn every diagram
  * in a document into a picture.
  */
-(function (global) {
+/* exported MdPanZoom */
+var MdPanZoom = (function () {
   "use strict";
 
-  const { ensureLibrary, hooks, mermaidState } = global.MdLazy;
-  const { renderMathBlocks, waitForNextFrame } = global.MdMath;
-  const { decorateCodeBlocks } = global.MdCode;
-  const { ensureMermaidInitialized, promoteMermaidCodeBlocks, drawLaidOutDiagrams } = global.MdDiagramTheme;
-  const { renderSingleMermaidNode } = global.MdMermaid;
+  const { ensureLibrary, hooks, mermaidState } = MdLazy;
+  const { renderMathBlocks, waitForNextFrame } = MdMath;
+  const { decorateCodeBlocks } = MdCode;
+  const { ensureMermaidInitialized, promoteMermaidCodeBlocks, drawLaidOutDiagrams } = MdDiagramTheme;
+  const { renderSingleMermaidNode } = MdMermaid;
 
   const livePanZoomInstances = new Map();
 
@@ -135,7 +136,7 @@
       return Promise.resolve();
     }
 
-    if (global.svgPanZoom) {
+    if (window.svgPanZoom) {
       applyLoadedPanZoom(root);
       return Promise.resolve();
     }
@@ -281,7 +282,7 @@
   }
 
 
-  global.MdPanZoom = {
+  return {
     sizeDiagramContainer, applyPanZoom, destroyPanZoomInstances, setWheelZoomArmed, bindWheelZoomModifier, renderMermaidBlocks
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

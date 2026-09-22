@@ -7,7 +7,8 @@
  * Each is the inside of Lucide's own 24x24 file: no size, no viewBox, no
  * stroke. Those belong to the box the icon is drawn in.
  */
-(function (global) {
+/* exported DiagramIcons */
+var DiagramIcons = (function () {
   "use strict";
 
   const VERSION = "1.35.0";
@@ -218,7 +219,7 @@
     ["Weather", ["sun","moon","cloud-rain","wind","droplet","flame","leaf","tree-pine","mountain"]],
   ];
 
-  global.DiagramIcons = {
+  return {
     VERSION,
     ICONS,
     GROUPS,
@@ -227,4 +228,4 @@
     bodyOf: (name) => ICONS[String(name || "")] || "",
     names: () => Object.keys(ICONS)
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

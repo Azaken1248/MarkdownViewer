@@ -270,7 +270,7 @@ const written = [
   ["icon-180.png", icon(180)]
 ];
 
-for (const [name, bytes] of written) {
+for (const [name, bytes] of /** @type {[string, Buffer][]} */ (written)) {
   fs.writeFileSync(path.join(OUT_DIR, name), bytes);
   console.log(`${name}  ${bytes.length} bytes`);
 }

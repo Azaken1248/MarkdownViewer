@@ -4,15 +4,16 @@
  * them back in a stable order on the way out. Read after the flowchart itself
  * is parsed, and attached to the nodes they name.
  */
-(function (global) {
+/* exported DmDeclarations */
+var DmDeclarations = (function () {
   "use strict";
 
-  const { DRAWN_BY_NAME, ROUTE_NAMES } = global.DmShapes;
+  const { DRAWN_BY_NAME, ROUTE_NAMES } = DmShapes;
   const {
     ANON_GROUP, DECL_RE, NODE_KINDS, wordsOnly, readPoints, restAttributes, NODE_ATTRS,
     GROUP_ATTRS, EDGE_ATTRS
-  } = global.DmGrammar;
-  const { readCellStyles } = global.DmCells;
+  } = DmGrammar;
+  const { readCellStyles } = DmCells;
 
   function readDeclarations(text) {
     const declarations = {};
@@ -309,8 +310,8 @@
     return all.filter((item) => !seen.has(item));
   }
 
-  global.DmDeclarations = {
+  return {
     readDeclarations, nameAnonymousGroups, attachLayout, orderClasses, orderNodes,
     parentIn, unreached
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

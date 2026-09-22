@@ -50,7 +50,7 @@ function emptyWindow() {
 
   dom.window.TextEncoder = TextEncoder;
   dom.window.TextDecoder = TextDecoder;
-  dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  dom.window.matchMedia = () => /** @type {any} */ ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
   /* The libraries the page loads from a CDN, stubbed to the shape the scripts
    * touch at load. What they return does not matter here — both windows get

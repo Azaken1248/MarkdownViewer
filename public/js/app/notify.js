@@ -7,11 +7,12 @@
 // The confirmation dialog is here too, because it is the same question asked
 // in a way that blocks: both are how the app speaks to the person using it.
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
-  const { syncBodyLock } = global.AppShell;
+/* exported AppNotify */
+var AppNotify = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { enterModalLayer, exitModalLayer } = AppModal;
+  const { syncBodyLock } = AppShell;
 
   const TOAST_TONES = {
     success: { icon: "ph-check-circle", title: "Done", duration: 4000 },
@@ -222,11 +223,11 @@
     });
   }
 
-  global.AppNotify = {
+  return {
     notify,
     setStatus,
     requestConfirmation,
     resolveConfirmDialog,
     askAboutUnsavedWork
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -4,11 +4,12 @@
  * so there is a simplifier that strips what the engine cannot read and tries
  * again, rather than showing a stack trace where a picture should be.
  */
-(function (global) {
+/* exported MdMermaid */
+var MdMermaid = (function () {
   "use strict";
 
-  const { mermaidState } = global.MdLazy;
-  const { escapeHtml } = global.MdText;
+  const { mermaidState } = MdLazy;
+  const { escapeHtml } = MdText;
 
   function normalizeMermaidSource(source) {
     return String(source || "")
@@ -174,7 +175,7 @@
   // never released, so every re-render and every document switch leaked another
   // set that kept firing against detached SVGs for the life of the page.
 
-  global.MdMermaid = {
+  return {
     normalizeMermaidSource, simplifyErDiagramSource, mermaidSourceOf, renderSingleMermaidNode
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

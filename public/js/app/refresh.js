@@ -5,19 +5,20 @@
  * whatever should be open afterwards. Everything that changes the library on
  * the server — an upload, a save, a delete, a move — ends by calling this.
  */
-(function (global) {
+/* exported AppRefresh */
+var AppRefresh = (function () {
 
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { showDocumentInUrl } = global.AppLocation;
-const { setMeta } = global.AppShell;
-const { setStatus } = global.AppNotify;
-const { updateActiveDocUI } = global.AppViewerHeader;
+const { elements } = AppDom;
+const { state } = AppState;
+const { showDocumentInUrl } = AppLocation;
+const { setMeta } = AppShell;
+const { setStatus } = AppNotify;
+const { updateActiveDocUI } = AppViewerHeader;
 const {
   fetchDocs, hydrateSearchContent, showEmptyState, showNoDocumentOpen
-} = global.AppDocs;
-const { applySearch } = global.AppSearching;
-const { openDocument } = global.AppOpening;
+} = AppDocs;
+const { applySearch } = AppSearching;
+const { openDocument } = AppOpening;
 
 async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
   setMeta("Loading documents...");
@@ -67,6 +68,6 @@ async function refreshDocs({ openFile = null, preserveSearch = true } = {}) {
 }
 
 
-global.AppRefresh = { refreshDocs };
+return { refreshDocs };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

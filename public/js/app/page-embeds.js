@@ -14,18 +14,19 @@
  * of them rather than in a module of its own.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { docUrl } = global.AppText;
-  const { renderMermaidBlocks, destroyPanZoomInstances } = global.AppRender;
-  const { setStatus } = global.AppNotify;
-  const { loadDocContent } = global.AppDocs;
+/* exported AppPageEmbeds */
+var AppPageEmbeds = (function () {
+  const { state } = AppState;
+  const { docUrl } = AppText;
+  const { renderMermaidBlocks, destroyPanZoomInstances } = AppRender;
+  const { setStatus } = AppNotify;
+  const { loadDocContent } = AppDocs;
   const {
     pageModel, isDefinitionsBlock, blockSource, embedLabel,
     markPageEditDirty, renderRichBlock
-  } = global.AppPageBlocks;
-  const { renderTableBlock } = global.AppPageTables;
-  const { renderCodeBlock } = global.AppPageCode;
+  } = AppPageBlocks;
+  const { renderTableBlock } = AppPageTables;
+  const { renderCodeBlock } = AppPageCode;
 
   function renderEmbedBlock(block, index) {
     const node = document.createElement("div");
@@ -275,7 +276,7 @@
     return renderEmbedBlock(block, index);
   }
 
-  global.AppPageEmbeds = {
+  return {
     renderEmbedBlock,
     diagramStashKey,
     stashDocument,
@@ -285,4 +286,4 @@
     renderBlock,
     drawBlock
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

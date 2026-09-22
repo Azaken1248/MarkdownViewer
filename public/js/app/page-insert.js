@@ -10,12 +10,13 @@
  * second idea of what a table is.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { setStatus } = global.AppNotify;
-  const { renderMermaidBlocks } = global.AppRender;
-  const { pageModel, pageEditActive, markPageEditDirty } = global.AppPageBlocks;
-  const { renderBlock } = global.AppPageEmbeds;
+/* exported AppPageInsert */
+var AppPageInsert = (function () {
+  const { elements } = AppDom;
+  const { setStatus } = AppNotify;
+  const { renderMermaidBlocks } = AppRender;
+  const { pageModel, pageEditActive, markPageEditDirty } = AppPageBlocks;
+  const { renderBlock } = AppPageEmbeds;
 
   const NEW_BLOCKS = {
     fence: {
@@ -38,18 +39,19 @@
 
   // Where a new block should go: after the block the cursor is in, or at the end
   // when the cursor is nowhere.
+  /** @returns {HTMLElement | null} */
   function currentPageBlockNode() {
     const editing = AppPageEdit.editableBlockFromSelection();
     if (editing) {
       return editing;
     }
 
-    const focused = document.activeElement?.closest?.(".ve-block");
+    const focused = /** @type {HTMLElement} */ (document.activeElement?.closest?.(".ve-block"));
     if (focused) {
       return focused;
     }
 
-    const all = elements.docContent.querySelectorAll(".ve-block");
+    const all = /** @type {NodeListOf<HTMLElement>} */ (elements.docContent.querySelectorAll(".ve-block"));
     return all.length > 0 ? all[all.length - 1] : null;
   }
 
@@ -154,8 +156,8 @@
     node.focus?.();
   }
 
-  global.AppPageInsert = {
+  return {
     currentPageBlockNode,
     insertPageBlock
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -5,18 +5,19 @@
  * prev/next buttons and the little floating bar step through. Leaving search
  * mode has to undo both at once, which is why they live together.
  */
-(function (global) {
+/* exported AppMatchNav */
+var AppMatchNav = (function () {
 
-const { normalize } = global.AppText;
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { buildJumpSearchTerms } = global.AppSearch;
-const { closeSidebarOnMobile } = global.AppShell;
-const { setStatus } = global.AppNotify;
-const { moveToAdjacentJumpMatch } = global.AppJump;
-const { setSuperSearchOpen } = global.AppSearchPanel;
-const { applySearch } = global.AppSearching;
-const { openDocument, openRecycleBinDocument } = global.AppOpening;
+const { normalize } = AppText;
+const { elements } = AppDom;
+const { state } = AppState;
+const { buildJumpSearchTerms } = AppSearch;
+const { closeSidebarOnMobile } = AppShell;
+const { setStatus } = AppNotify;
+const { moveToAdjacentJumpMatch } = AppJump;
+const { setSuperSearchOpen } = AppSearchPanel;
+const { applySearch } = AppSearching;
+const { openDocument, openRecycleBinDocument } = AppOpening;
 
 function mountMatchNavToViewportLayer() {
   if (!elements.matchNav) {
@@ -142,9 +143,9 @@ function bindSearchInput() {
   });
 }
 
-global.AppMatchNav = {
+return {
   mountMatchNavToViewportLayer, handleSearchEvent, exitSearchMode, navigateMatches,
   bindSearchInput
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -5,17 +5,18 @@
  * coordinates. What follows is ordinary Mermaid, in a stable order, so that
  * parse(serialize(model)) gives the model back.
  */
-(function (global) {
+/* exported DmSerialize */
+var DmSerialize = (function () {
   "use strict";
 
   const {
     DIRECTIONS, DRAWN_BY_NAME, ROUTE_DEFAULT, SHAPE_BY_NAME, EDGE_BY_NAME
-  } = global.DmShapes;
+  } = DmShapes;
   const {
     TABLE_GAP, TABLE_PAD, LAYOUT_MARK, quoteText, writeAttributes, writePoints, pad
-  } = global.DmGrammar;
-  const { parentIn, unreached } = global.DmDeclarations;
-  const { textCells, writeCellStyles } = global.DmCells;
+  } = DmGrammar;
+  const { parentIn, unreached } = DmDeclarations;
+  const { textCells, writeCellStyles } = DmCells;
 
   /* The model back to Mermaid.
    *
@@ -30,6 +31,7 @@
    * bolted on — a flowchart, which GitHub renders, with its arrangement and its
    * icons written where Mermaid will not look.
    */
+  /** @param {FlowchartModel} model @returns {string} */
   function serializeFlowchart(model) {
     const direction = DIRECTIONS.includes(model?.direction) ? model.direction : "TD";
     const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
@@ -245,7 +247,7 @@
    */
 
 
-  global.DmSerialize = {
+  return {
     serializeFlowchart
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

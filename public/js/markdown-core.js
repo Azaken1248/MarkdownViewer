@@ -15,32 +15,33 @@
 // own Mermaid/pan-zoom state and asks the host page for the two things it
 // cannot know: which theme is showing, and where to report a render failure.
 
-(function (global) {
+/* exported MarkdownCore */
+var MarkdownCore = (function () {
   "use strict";
 
   const {
     mermaidState, configure, ensureLibrary,
     MARKDOWN_SANITIZE_OPTIONS, SANITIZE_ALLOWED_URI_PATTERN
-  } = global.MdLazy;
+  } = MdLazy;
   const {
     renderMarkdown, normalizeMarkdownMath, escapeHtml, activeThemeName,
     isNotebookFile, isDiagramFile, toMermaidMarkdown
-  } = global.MdText;
-  const { renderMathBlocks } = global.MdMath;
-  const { renderNotebookDocument, notebookSourceFor, renderDocumentContent } = global.MdNotebook;
+  } = MdText;
+  const { renderMathBlocks } = MdMath;
+  const { renderNotebookDocument, notebookSourceFor, renderDocumentContent } = MdNotebook;
   const {
     DIAGRAM_PALETTES, ensureMermaidInitialized, promoteMermaidCodeBlocks, drawLaidOutDiagrams
-  } = global.MdDiagramTheme;
+  } = MdDiagramTheme;
   const {
     highlightCodeBlocks, decorateCodeBlocks, addCopyButtons, copyText,
     liveHighlightCode, selectionOffsetsWithin, placeSelectionWithin
-  } = global.MdCode;
+  } = MdCode;
   const {
     sizeDiagramContainer, applyPanZoom, destroyPanZoomInstances,
     bindWheelZoomModifier, renderMermaidBlocks
-  } = global.MdPanZoom;
+  } = MdPanZoom;
 
-  global.MarkdownCore = {
+  return {
     configure,
     // Markdown
     renderMarkdown,
@@ -89,4 +90,4 @@
     activeThemeName,
     DIAGRAM_PALETTES
   };
-})(window);
+})();

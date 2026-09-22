@@ -409,7 +409,7 @@ function refuses(label, url) {
     check("the number of groups is capped",
       normalizeGroups(Array.from({ length: 40 }, (_, i) => `g${i}`)).length, MAX_GROUPS_PER_LINK);
 
-    await store.update(link.id, { groups: "osu, APIs" });
+    await store.update(link.id, { groups: normalizeGroups("osu, APIs") });
     check("a link can be filed", store.find(link.id).groups, ["osu", "APIs"]);
 
     // The bug this guards: refreshing sends new metadata and no groups, and a

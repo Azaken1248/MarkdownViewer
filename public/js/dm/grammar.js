@@ -5,7 +5,8 @@
  * a label safely. `refuse` is here too — the parser declines a diagram it
  * cannot model rather than dropping the part it does not understand.
  */
-(function (global) {
+/* exported DmGrammar */
+var DmGrammar = (function () {
   "use strict";
 
   const ID_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*/;
@@ -251,6 +252,7 @@
 
   const round = (value) => Math.round(Number(value) * 10) / 10;
 
+  /** @param {string} reason @returns {RefusedModel} */
   function refuse(reason) {
     return { ok: false, reason };
   }
@@ -309,7 +311,7 @@
   // The lines inside a box. One for an ordinary box; for a table box the first
   // is its title and the rest are its rows.
 
-  global.DmGrammar = {
+  return {
     GRID, CHAR_WIDTH, LINE_HEIGHT, PAD_X, PAD_Y, MIN_WIDTH, MIN_HEIGHT, TABLE_MIN_WIDTH,
     TABLE_MIN_TEXT, TABLE_TITLE, TABLE_PAD, TABLE_GAP, withinBounds, tableMetrics, RANK_GAP,
     SIBLING_GAP, MARGIN, ID_RE, HEADER_RE, LAYOUT_MARK, LAYOUT_HEAD_RE, HAS_LAYOUT_RE,
@@ -320,4 +322,4 @@
     GROUP_ATTRS, EDGE_ATTRS, readPoints, writePoints, round, refuse, isBareSafe, quoteText,
     unquoteText, pad, snap, snapUp
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

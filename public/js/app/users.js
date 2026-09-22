@@ -5,14 +5,15 @@
  * without the permission the server checks again on every request.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson } = global.AppApi;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
-  const { syncBodyLock } = global.AppShell;
-  const { notify, requestConfirmation } = global.AppNotify;
-  const { showFieldError } = global.AppSession;
+/* exported AppUsers */
+var AppUsers = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson } = AppApi;
+  const { enterModalLayer, exitModalLayer } = AppModal;
+  const { syncBodyLock } = AppShell;
+  const { notify, requestConfirmation } = AppNotify;
+  const { showFieldError } = AppSession;
 
   async function openUsersModal() {
     state.usersOpen = true;
@@ -219,7 +220,7 @@
     }
   }
 
-  global.AppUsers = {
+  return {
     openUsersModal,
     closeUsersModal,
     refreshUsers,
@@ -229,4 +230,4 @@
     resetUserPassword,
     deleteUser
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

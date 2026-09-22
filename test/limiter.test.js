@@ -88,15 +88,15 @@ console.log("=== who is who ===");
 
     // Reads are not counted by the wide ceiling: four hundred of them in a
     // row, which is what warming the search cache on a big library looks like.
-    let statuses = new Set();
+    const readStatuses = new Set();
     for (let i = 0; i < 400; i += 1) {
-      statuses.add((await server.request("GET", "/api/docs", undefined, headers)).status);
+      readStatuses.add((await server.request("GET", "/api/docs", undefined, headers)).status);
     }
-    check("four hundred reads in a minute are all answered", [...statuses], [200]);
+    check("four hundred reads in a minute are all answered", [...readStatuses], [200]);
 
     // Writes are. The write bucket is the tighter of the two that apply, so it
     // is the one that answers first.
-    statuses = new Map();
+    const statuses = new Map();
     let firstRefusal = null;
     for (let i = 0; i < 130; i += 1) {
       const res = await server.request("PUT", "/api/docs/beta.md", { content: `# beta ${i}\n` }, headers);
@@ -116,11 +116,11 @@ console.log("=== who is who ===");
     check("a refused save changed nothing", after.body.content, "# beta 119\n");
 
     // The public bucket, keyed by address, for the one endpoint anyone may ask.
-    statuses = new Set();
+    const healthStatuses = new Set();
     for (let i = 0; i < 70; i += 1) {
-      statuses.add((await server.request("GET", "/healthz")).status);
+      healthStatuses.add((await server.request("GET", "/healthz")).status);
     }
-    check("the health check has a ceiling of its own", [...statuses].sort(), [200, 429]);
+    check("the health check has a ceiling of its own", [...healthStatuses].sort(), [200, 429]);
   } finally {
     await server.stop();
   }

@@ -5,17 +5,18 @@
  * one menu is how anyone reaches them. The wiring is here, and the work is
  * next door in AppSession, AppUsers and AppShare.
  */
-(function (global) {
+/* exported AppAccountMenu */
+var AppAccountMenu = (function () {
 
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { notify } = global.AppNotify;
-const { openShareModal, closeShareModal, createShareLink, revokeShareLink } = global.AppShare;
+const { elements } = AppDom;
+const { state } = AppState;
+const { notify } = AppNotify;
+const { openShareModal, closeShareModal, createShareLink, revokeShareLink } = AppShare;
 const {
   openLoginModal, submitLogin, signOut,
   openPasswordModal, closePasswordModal, submitPasswordChange
-} = global.AppSession;
-const { openUsersModal, closeUsersModal, submitNewUser } = global.AppUsers;
+} = AppSession;
+const { openUsersModal, closeUsersModal, submitNewUser } = AppUsers;
 
 function setAccountMenuOpen(open) {
   elements.accountMenu.hidden = !open;
@@ -25,7 +26,7 @@ function setAccountMenuOpen(open) {
     elements.accountIdentity.textContent = state.user
       ? `${state.user.username} · ${state.user.role}`
       : "";
-    elements.accountMenu.querySelector(".account-item:not([hidden])")?.focus();
+    /** @type {HTMLElement} */ (elements.accountMenu.querySelector(".account-item:not([hidden])"))?.focus();
   }
 }
 
@@ -46,7 +47,7 @@ function bindAccountMenu() {
       return;
     }
 
-    if (!elements.accountMenu.contains(event.target) && !elements.accountBtn.contains(event.target)) {
+    if (!elements.accountMenu.contains(/** @type {Node} */ (event.target)) && !elements.accountBtn.contains(/** @type {Node} */ (event.target))) {
       setAccountMenuOpen(false);
     }
   });
@@ -141,6 +142,6 @@ function bindAccountMenu() {
   });
 }
 
-global.AppAccountMenu = { setAccountMenuOpen, bindAccountMenu };
+return { setAccountMenuOpen, bindAccountMenu };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

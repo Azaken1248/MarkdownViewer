@@ -11,14 +11,15 @@
  * change what you see is worse than no control.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { escapeHtml, compareNames } = global.AppText;
-  const { getDocByFile, getFolderRecord } = global.AppLibrary;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
-  const { syncBodyLock } = global.AppShell;
-  const { setStatus } = global.AppNotify;
+/* exported AppFolderModal */
+var AppFolderModal = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { escapeHtml, compareNames } = AppText;
+  const { getDocByFile, getFolderRecord } = AppLibrary;
+  const { enterModalLayer, exitModalLayer } = AppModal;
+  const { syncBodyLock } = AppShell;
+  const { setStatus } = AppNotify;
 
   function syncFolderModalUI() {
     if (!elements.folderModal) {
@@ -193,10 +194,10 @@
     syncBodyLock();
   }
 
-  global.AppFolderModal = {
+  return {
     syncFolderModalUI,
     renderFolderPickerList,
     openFolderModal,
     closeFolderModal
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

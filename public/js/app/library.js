@@ -5,10 +5,11 @@
 // writes none of it: ask the same question twice and get the same answer twice,
 // which is what lets every other module ask without coordinating.
 
-(function (global) {
-  const { state } = global.AppState;
-  const { compareNames } = global.AppText;
-  const { elements } = global.AppDom;
+/* exported AppLibrary */
+var AppLibrary = (function () {
+  const { state } = AppState;
+  const { compareNames } = AppText;
+  const { elements } = AppDom;
 
   function getCurrentDocsCollection() {
     return state.isRecycleBinMode ? state.deletedDocs : state.docs;
@@ -133,7 +134,7 @@
     return roots;
   }
 
-  global.AppLibrary = {
+  return {
     getCurrentDocsCollection,
     getDocByFile,
     getFolderRecord,
@@ -143,4 +144,4 @@
     folderPathIds,
     buildFolderTree
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

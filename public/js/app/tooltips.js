@@ -10,7 +10,8 @@
 // `aria-label` still carries the accessible name, so the tooltip itself is
 // decorative and hidden from assistive tech.
 
-(function (global) {
+/* exported AppTooltips */
+var AppTooltips = (function () {
   const TOOLTIP_GAP = 8;
   const TOOLTIP_EDGE_PADDING = 8;
 
@@ -139,9 +140,9 @@
     window.addEventListener("resize", hideTooltip);
   }
 
-  global.AppTooltips = {
+  return {
     showTooltip,
     hideTooltip,
     bindTooltips
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

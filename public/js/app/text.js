@@ -5,7 +5,8 @@
 // together because they are used from everywhere, and a function that only
 // looks at its arguments is the cheapest kind of thing to move.
 
-(function (global) {
+/* exported AppText */
+var AppText = (function () {
   // The sanitizer configuration, the marked options and the code-language
   // aliases now live in markdown-core.js, shared with the share page.
   function filenameToTitle(filename) {
@@ -135,7 +136,7 @@
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  global.AppText = {
+  return {
     UPLOADABLE_EXTENSIONS,
     filenameToTitle,
     normalize,
@@ -153,4 +154,4 @@
     formatDate,
     formatBytes
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

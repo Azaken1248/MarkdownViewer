@@ -4,11 +4,12 @@
  * to do when the straight line is blocked. A route the diagram pinned is
  * honoured as written; everything else is decided here.
  */
-(function (global) {
+/* exported DdRoute */
+var DdRoute = (function () {
   "use strict";
 
-  const { CLEARANCE, STANDOFF, round } = global.DdBase;
-  const { endsOf } = global.DdEnds;
+  const { CLEARANCE, STANDOFF, round } = DdBase;
+  const { endsOf } = DdEnds;
 
   const hits = (segment, box) => {
     const [[x1, y1], [x2, y2]] = segment;
@@ -184,6 +185,7 @@
 
   // Where on a side a line meets it. Offset along the side by the lane, the
   // same way the auto-router spreads two arrows between the same two boxes.
+  /** @returns {[number, number]} a point on that side of the box */
   function anchorOn(box, side, spread) {
     const along = spread || 0;
     const x = clamp(box.x + (box.w / 2) + along, box.x + 8, box.x + box.w - 8);
@@ -539,9 +541,9 @@
    * pair of boxes and still needs its own lane.
    */
 
-  global.DdRoute = {
+  return {
     hits, clear, tidy, selfLoop, routeBetween, anchorOn, autoSides, wayPoints, sideTowards,
     pinnedSides, guidedRoute, pathData, pathCurved, middleOf, straightBetween,
     straightThrough, shapeOf, midpoint, routeEdge, pullBack, stopShort
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

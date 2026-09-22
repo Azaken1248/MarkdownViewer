@@ -5,11 +5,12 @@
  * Below that: promoting a ```mermaid fence into a diagram container, and
  * drawing the ones that carry their own layout without the engine at all.
  */
-(function (global) {
+/* exported MdDiagramTheme */
+var MdDiagramTheme = (function () {
   "use strict";
 
-  const { mermaidState } = global.MdLazy;
-  const { activeThemeName } = global.MdText;
+  const { mermaidState } = MdLazy;
+  const { activeThemeName } = MdText;
 
   const DIAGRAM_PALETTES = {
     dark: {
@@ -222,7 +223,7 @@
    * loading it comes up.
    */
   function drawLaidOutDiagrams(root) {
-    if (!root || !global.DiagramDraw || !global.DiagramModel) {
+    if (!root || !DiagramDraw || !DiagramModel) {
       return 0;
     }
 
@@ -244,11 +245,11 @@
         ? node.dataset.mermaidSource
         : (node.textContent || "");
 
-      if (!global.DiagramModel.hasLayout(source)) {
+      if (!DiagramModel.hasLayout(source)) {
         continue;
       }
 
-      const svg = global.DiagramDraw.renderSource(source);
+      const svg = DiagramDraw.renderSource(source);
       if (!svg) {
         // Layout comments on something this cannot draw. Mermaid ignores them,
         // so leaving it alone leaves a diagram rather than an error.
@@ -272,7 +273,7 @@
   // loaded highlighter runs synchronously: the editor preview repaints on every
   // keystroke and must not lose its colours to a microtask each time.
 
-  global.MdDiagramTheme = {
+  return {
     DIAGRAM_PALETTES, buildDiagramThemeCss, ensureMermaidInitialized, promoteMermaidCodeBlock, promoteMermaidCodeBlocks, drawLaidOutDiagrams
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

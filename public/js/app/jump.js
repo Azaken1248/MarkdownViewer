@@ -8,11 +8,12 @@
  * lives next door.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { normalize } = global.AppText;
-  const { buildJumpSearchTerms } = global.AppSearch;
+/* exported AppJump */
+var AppJump = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { normalize } = AppText;
+  const { buildJumpSearchTerms } = AppSearch;
 
   function clearDocumentJumpDecorations() {
     if (state.jumpHighlightTimer) {
@@ -389,7 +390,7 @@
     };
   }
 
-  global.AppJump = {
+  return {
     clearDocumentJumpDecorations,
     areSameJumpTerms,
     updateJumpNavigationUI,
@@ -401,4 +402,4 @@
     getNavigationDocFilesForJump,
     moveToAdjacentJumpMatch
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

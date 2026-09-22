@@ -10,8 +10,9 @@
  * table is emitted exactly as it was found, however irregularly it was typed.
  */
 
-(function (global) {
-  const { markPageEditDirty } = global.AppPageBlocks;
+/* exported AppPageTables */
+var AppPageTables = (function () {
+  const { markPageEditDirty } = AppPageBlocks;
   function renderTableBlock(block, index) {
     const node = document.createElement("div");
     node.className = "ve-block ve-table";
@@ -41,13 +42,13 @@
     node.append(buildTableTools(node, block, paint, touched));
 
     node.addEventListener("input", (event) => {
-      if (event.target.closest("th, td")) {
+      if (/** @type {Element} */ (event.target).closest("th, td")) {
         touched();
       }
     });
 
     node.addEventListener("focusin", (event) => {
-      const cell = event.target.closest?.("th, td");
+      const cell = /** @type {Element} */ (event.target).closest?.("th, td");
       if (cell) {
         block.lastCell = cell;
       }
@@ -217,7 +218,7 @@
     }
   }
 
-  global.AppPageTables = {
+  return {
     renderTableBlock
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -181,7 +181,7 @@
       MarkdownCore.resetMermaidForThemeChange();
       MarkdownCore.destroyPanZoomInstances();
 
-      for (const block of elements.content.querySelectorAll(".mermaid-block")) {
+      for (const block of /** @type {NodeListOf<HTMLElement>} */ (elements.content.querySelectorAll(".mermaid-block"))) {
         const source = block.dataset.mermaidSource;
         if (!source) {
           continue;

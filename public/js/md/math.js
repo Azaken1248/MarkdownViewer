@@ -3,11 +3,12 @@
  * Nothing loads KaTeX unless a document actually has math in it, so this checks
  * first and only then asks for the library.
  */
-(function (global) {
+/* exported MdMath */
+var MdMath = (function () {
   "use strict";
 
-  const { ensureLibrary } = global.MdLazy;
-  const { decodeBase64Utf8 } = global.MdText;
+  const { ensureLibrary } = MdLazy;
+  const { decodeBase64Utf8 } = MdText;
 
   const INLINE_MATH_PATTERN = /\$[^$\n]+\$|\\\(|\\\[|\\begin\{/;
 
@@ -27,7 +28,7 @@
       return Promise.resolve();
     }
 
-    if (global.katex || global.renderMathInElement) {
+    if (window.katex || window.renderMathInElement) {
       renderLoadedMathBlocks(root);
       return Promise.resolve();
     }
@@ -89,11 +90,13 @@
   }
 
   function waitForNextFrame() {
-    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+    return /** @type {Promise<void>} */ (new Promise((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    }));
   }
 
 
-  global.MdMath = {
+  return {
     INLINE_MATH_PATTERN, hasMathContent, renderMathBlocks, waitForNextFrame
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

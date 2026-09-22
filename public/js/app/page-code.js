@@ -19,8 +19,9 @@
  * since it is the one part of a fence that is not the code.
  */
 
-(function (global) {
-  const { markPageEditDirty } = global.AppPageBlocks;
+/* exported AppPageCode */
+var AppPageCode = (function () {
+  const { markPageEditDirty } = AppPageBlocks;
 
   // Long enough that it never fires inside a run of typing, short enough that it
   // reads as "as you type" rather than as an afterthought.
@@ -41,7 +42,7 @@
     node.setAttribute("contenteditable", "false");
     node.innerHTML = MarkdownCore.renderMarkdown(block.source);
 
-    const code = node.querySelector("pre code");
+    const code = /** @type {HTMLElement} */ (node.querySelector("pre code"));
     if (!code) {
       return AppPageEmbeds.renderEmbedBlock(block, index);
     }
@@ -150,7 +151,7 @@
     return node;
   }
 
-  global.AppPageCode = {
+  return {
     renderCodeBlock
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

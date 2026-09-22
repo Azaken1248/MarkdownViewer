@@ -6,16 +6,17 @@
  * archive — and getting out of the last two is not the same as getting into
  * the first.
  */
-(function (global) {
+/* exported AppFileActions */
+var AppFileActions = (function () {
 
-const { normalize, docUrl } = global.AppText;
-const { state } = global.AppState;
-const { requestJson } = global.AppApi;
-const { setStatus, requestConfirmation } = global.AppNotify;
-const { resetJumpNavigation } = global.AppJump;
-const { syncModeUI } = global.AppDocs;
-const { refreshDeletedDocs } = global.AppOpening;
-const { refreshDocs } = global.AppRefresh;
+const { normalize, docUrl } = AppText;
+const { state } = AppState;
+const { requestJson } = AppApi;
+const { setStatus, requestConfirmation } = AppNotify;
+const { resetJumpNavigation } = AppJump;
+const { syncModeUI } = AppDocs;
+const { refreshDeletedDocs } = AppOpening;
+const { refreshDocs } = AppRefresh;
 
 async function deleteDocumentByFile(file, mode) {
   if (!file || state.isRecycleBinMode) {
@@ -178,9 +179,9 @@ async function hardDeleteDeletedDocumentByFile(file) {
   }
 }
 
-global.AppFileActions = {
+return {
   deleteDocumentByFile, restoreDeletedDocumentByFile, restoreArchivedDocumentByFile,
   permanentlyDeleteArchivedDocument, hardDeleteDeletedDocumentByFile
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

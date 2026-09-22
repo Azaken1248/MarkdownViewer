@@ -8,11 +8,13 @@
  * document in a library should ever execute anything.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { notify } = global.AppNotify;
+/* exported AppNotebook */
+var AppNotebook = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { notify } = AppNotify;
 
+  /** @returns {HTMLElement | null} */
   function notebookOutputFor(cellNumber) {
     return elements.docContent.querySelector(`.notebook-live-output[data-cell="${cellNumber}"]`);
   }
@@ -132,7 +134,7 @@
     // Delegated, because the notebook markup is replaced wholesale every time a
     // document opens.
     elements.docContent.addEventListener("click", (event) => {
-      const button = event.target.closest(".notebook-run");
+      const button = /** @type {Element} */ (event.target).closest(".notebook-run");
       if (button) {
         void runNotebookCell(button);
       }
@@ -144,7 +146,7 @@
 
     elements.restartKernelBtn?.addEventListener("click", () => {
       NotebookRuntime.restart();
-      for (const output of elements.docContent.querySelectorAll(".notebook-live-output")) {
+      for (const output of /** @type {NodeListOf<HTMLElement>} */ (elements.docContent.querySelectorAll(".notebook-live-output"))) {
         output.hidden = true;
         output.innerHTML = "";
       }
@@ -153,8 +155,8 @@
     });
   }
 
-  global.AppNotebook = {
+  return {
     setKernelStatus,
     bindNotebookExecution
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -6,16 +6,17 @@
  * Saving is next door, in AppEditorSave, because a save reaches out to the
  * server and back into the document list, and this file reaches nowhere.
  */
-(function (global) {
+/* exported AppSourceEditor */
+var AppSourceEditor = (function () {
 
-const { docName, compareNames, isDiagramFile, toMermaidMarkdown } = global.AppText;
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { enterModalLayer, exitModalLayer } = global.AppModal;
-const { syncBodyLock } = global.AppShell;
+const { docName, compareNames, isDiagramFile, toMermaidMarkdown } = AppText;
+const { elements } = AppDom;
+const { state } = AppState;
+const { enterModalLayer, exitModalLayer } = AppModal;
+const { syncBodyLock } = AppShell;
 const {
   renderMarkdown, highlightCodeBlocks, renderMermaidBlocks, destroyPanZoomInstances
-} = global.AppRender;
+} = AppRender;
 
 // One entry point for "make a new document", so the toolbar button and the two
 // context menus cannot drift apart. folderId preselects the picker.
@@ -178,10 +179,10 @@ function syncEditorTabs() {
   const tabbed = editorTabsActive();
   const showing = state.editorTab === "preview" ? "preview" : "write";
 
-  for (const [name, tab, pane] of [
+  for (const [name, tab, pane] of /** @type {[string, HTMLElement, HTMLElement][]} */ ([
     ["write", elements.editorTabWrite, elements.editorWritePane],
     ["preview", elements.editorTabPreview, elements.editorPreviewPane]
-  ]) {
+  ])) {
     if (!tab || !pane) {
       continue;
     }
@@ -283,11 +284,11 @@ function isEditorDirty() {
 }
 
 
-global.AppSourceEditor = {
+return {
   EDITOR_TABS_QUERY, startNewDocument, openEditor, closeEditor, isEditorDirty,
   renderEditorPreview, renderEditorPreviewText, scheduleEditorPreview,
   syncEditorPaneScroll, syncEditorFolderPicker, syncEditorTabs, selectEditorTab,
   editorTabsActive
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

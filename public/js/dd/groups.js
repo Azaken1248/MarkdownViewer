@@ -4,10 +4,11 @@
  * its box is computed from them, and nested groups are drawn outermost first
  * so an inner one is not hidden under the one containing it.
  */
-(function (global) {
+/* exported DdGroups */
+var DdGroups = (function () {
   "use strict";
 
-  const { LABEL_CHAR, escapeText, round } = global.DdBase;
+  const { LABEL_CHAR, escapeText, round } = DdBase;
 
   const areaOf = (at) => at.w * at.h;
 
@@ -165,8 +166,8 @@
   }
 
 
-  global.DdGroups = {
+  return {
     areaOf, surrounds, nestingDepths, GROUP_PAD, GROUP_HEAD, groupDepths, groupBoxes,
     groupName, groupMarkup, viewOf
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

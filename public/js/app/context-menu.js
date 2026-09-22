@@ -10,18 +10,31 @@
  * that does it.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { can } = global.AppApi;
-  const { resolveTargetFiles } = global.AppSelection;
-  const { cutFiles, pasteIntoFolder, moveFolderToParent } = global.AppClipboard;
-  const { deleteFolderById, deleteFiles } = global.AppDeletion;
-  const { openFolderModal } = global.AppFolderModal;
-  const { beginInlineRename, beginInlineFolderRename } = global.AppInlineRename;
-  const { openShareModal } = global.AppShare;
+/* exported AppContextMenu */
+var AppContextMenu = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { can } = AppApi;
+  const { resolveTargetFiles } = AppSelection;
+  const { cutFiles, pasteIntoFolder, moveFolderToParent } = AppClipboard;
+  const { deleteFolderById, deleteFiles } = AppDeletion;
+  const { openFolderModal } = AppFolderModal;
+  const { beginInlineRename, beginInlineFolderRename } = AppInlineRename;
+  const { openShareModal } = AppShare;
 
   // --- Context menu ---------------------------------------------------------
+
+  /** One row of the menu: a command, or a rule between groups of them.
+   *
+   * @typedef {Object} ContextMenuItem
+   * @property {string} [label]
+   * @property {string} [icon]         a Phosphor class, e.g. "ph-file-text"
+   * @property {() => any} [action]
+   * @property {string} [shortcut]     shown right-aligned, not bound here
+   * @property {boolean} [danger]
+   * @property {boolean} [disabled]
+   * @property {boolean} [separator]   a rule; everything else is ignored
+   */
 
   function closeContextMenu() {
     if (!elements.contextMenu || elements.contextMenu.hidden) {
@@ -31,6 +44,7 @@
     elements.contextMenu.innerHTML = "";
   }
 
+  /** @param {number} x @param {number} y @param {ContextMenuItem[]} items */
   function openContextMenu(x, y, items) {
     if (!elements.contextMenu) {
       return;
@@ -76,7 +90,7 @@
     elements.contextMenu.style.left = `${Math.max(8, left)}px`;
     elements.contextMenu.style.top = `${Math.max(8, top)}px`;
 
-    elements.contextMenu.querySelector(".context-item:not(:disabled)")?.focus();
+    /** @type {HTMLElement} */ (elements.contextMenu.querySelector(".context-item:not(:disabled)"))?.focus();
   }
 
   function buildDocContextItems(doc) {
@@ -88,6 +102,7 @@
     // and share it if the role allows. Offering Cut/Rename/Delete that only fail
     // at the server is worse than not offering them.
     if (!can("doc:write")) {
+      /** @type {ContextMenuItem[]} */
       const items = state.isRecycleBinMode
         ? [{ label: "Open", icon: "ph-file-text", action: () => void App.openRecycleBinDocument(doc.file) }]
         : [{ label: "Open", icon: "ph-file-text", action: () => void App.openDocument(doc.file, true) }];
@@ -224,10 +239,10 @@
     ];
   }
 
-  global.AppContextMenu = {
+  return {
     closeContextMenu,
     openContextMenu,
     buildDocContextItems,
     buildFolderContextItems
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

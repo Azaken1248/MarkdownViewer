@@ -65,6 +65,7 @@ function ratio(fgv, bgv, T) {
 const dark = tokens(":root");
 const light = { ...dark, ...tokens(':root[data-theme="light"]') };
 
+/** @type {[string, string, string, number][]} */
 const PAIRS = [
   ["body text on the canvas", "--fg", "--canvas", 4.5],
   ["body text on a surface", "--fg", "--surface", 4.5],

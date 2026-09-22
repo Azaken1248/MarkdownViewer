@@ -65,6 +65,30 @@ Sign in with those, and the app will make you replace the password before it
 lets you do anything else — that password is in this file, so treat it as
 already known to everyone.
 
+### Types, without TypeScript
+
+There is no TypeScript and no compile step: what the browser loads is what is
+in the repository. The types are JSDoc comments in the source — `@typedef` for
+the shapes that cross module boundaries (the diagram model, the user and
+session records, a link preview, `req.auth`) and `@param`/`@returns` where a
+signature is not obvious — checked by `tsc --checkJs` through `jsconfig.json`.
+`npm run typecheck` runs it, and CI runs it after lint.
+
+Two things follow from wanting that check. Each browser module is
+`var Name = (function () { ... return { ... }; })();` rather than assigning to
+`window`, because a top-level `var` is a declaration the checker can read the
+type of, and a classic script's top-level `var` is still a property of the
+window, so nothing about how the page loads has changed. And ESLint allows
+`var` at the top level of those files and nowhere else, which is the rule that
+keeps it to that one use.
+
+`strict` is off. This is a check for the mistake that spans two files — a field
+added to the model in one place and not read in another — not an exhaustive
+proof, and the error count had to be something a person could finish.
+
+The names that arrive from outside the source — the CDN libraries, the worker's
+own scope, `req.auth` — are declared in `types/globals.d.ts`.
+
 ### Dependencies, and the ones `npm audit` cannot see
 
 The runtime surface is four packages — `express`, `multer`, `better-sqlite3`,
@@ -104,6 +128,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
+| `npm run typecheck` | Check the JSDoc types with `tsc --checkJs`. No TypeScript, no build |
 
 ---
 
@@ -325,8 +350,10 @@ affected.
 │   └── *.test.js             # The twelve suites
 ├── tools/
 │   └── make-embed-images.js  # Draws public/img/*.png. No dependencies.
+├── types/                    # What the checker cannot read off the source
 ├── server.js                 # Configuration, middleware order, mounts, boot
 ├── eslint.config.js
+├── jsconfig.json             # `npm run typecheck`: checkJs over everything
 ├── package.json
 ├── package-lock.json         # Tracked — `npm ci` needs it
 └── .github/workflows/ci.yml

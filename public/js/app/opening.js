@@ -9,20 +9,21 @@
  * you have moved on must not paint itself over the one you are reading.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { docName, isNotebookFile } = global.AppText;
-  const { renderDocumentContent, renderMermaidBlocks, waitForNextFrame, destroyPanZoomInstances } = global.AppRender;
-  const { loadDocContent, loadDeletedDocContent, fetchDeletedDocs, showEmptyState, hydrateDeletedSearchContent } = global.AppDocs;
-  const { updateActiveDocUI } = global.AppViewerHeader;
-  const { updateActiveRowHighlight } = global.AppTree;
-  const { jumpToSearchMatch, resetJumpNavigation } = global.AppJump;
-  const { showDocumentInUrl } = global.AppLocation;
-  const { setMeta } = global.AppShell;
-  const { bindTaskCheckboxes } = global.AppTaskLists;
-  const { setStatus } = global.AppNotify;
-  const { applySearch } = global.AppSearching;
+/* exported AppOpening */
+var AppOpening = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { docName, isNotebookFile } = AppText;
+  const { renderDocumentContent, renderMermaidBlocks, waitForNextFrame, destroyPanZoomInstances } = AppRender;
+  const { loadDocContent, loadDeletedDocContent, fetchDeletedDocs, showEmptyState, hydrateDeletedSearchContent } = AppDocs;
+  const { updateActiveDocUI } = AppViewerHeader;
+  const { updateActiveRowHighlight } = AppTree;
+  const { jumpToSearchMatch, resetJumpNavigation } = AppJump;
+  const { showDocumentInUrl } = AppLocation;
+  const { setMeta } = AppShell;
+  const { bindTaskCheckboxes } = AppTaskLists;
+  const { setStatus } = AppNotify;
+  const { applySearch } = AppSearching;
 
   async function openDocument(file, pushHash, options = {}) {
     // Opening something else while the page is being edited would replace the
@@ -244,9 +245,9 @@
     await openRecycleBinDocument(target, { forceReload: true });
   }
 
-  global.AppOpening = {
+  return {
     openDocument,
     openRecycleBinDocument,
     refreshDeletedDocs
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

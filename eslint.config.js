@@ -24,6 +24,7 @@ const BROWSER_GLOBALS = {
   KeyboardEvent: "readonly",
   DragEvent: "readonly",
   HTMLElement: "readonly",
+  HTMLLinkElement: "readonly",
   Element: "readonly",
   Node: "readonly",
   DataTransfer: "readonly",
@@ -117,13 +118,38 @@ const BROWSER_GLOBALS = {
   AppPageInsert: "readonly",
   AppPageHistory: "readonly",
   AppPageEdit: "readonly",
-  // Our own shared render engine, loaded as a plain script before app.js.
+  // Our own shared render engine, loaded as a plain script before app.js:
+  // the modules under /js/md, then markdown-core.js, which is made of them.
   DocKinds: "readonly",
+  MdLazy: "readonly",
+  MdText: "readonly",
+  MdCode: "readonly",
+  MdMath: "readonly",
+  MdDiagramTheme: "readonly",
+  MdMermaid: "readonly",
+  MdNotebook: "readonly",
+  MdPanZoom: "readonly",
   MarkdownCore: "readonly",
   // Block splitting and markdown serialization for the visual editor.
   VisualEditor: "readonly",
-  // Mermaid flowcharts as steps and arrows, for the diagram builder.
+  // Mermaid flowcharts as steps and arrows, for the diagram builder: the
+  // model under /js/dm, the drawing under /js/dd, and the two files made of them.
+  DmGrammar: "readonly",
+  DmCells: "readonly",
+  DmDeclarations: "readonly",
+  DmShapes: "readonly",
+  DmLayout: "readonly",
+  DmParse: "readonly",
+  DmSerialize: "readonly",
   DiagramModel: "readonly",
+  DdBase: "readonly",
+  DdEnds: "readonly",
+  DdMarks: "readonly",
+  DdRoute: "readonly",
+  DdEdges: "readonly",
+  DdGroups: "readonly",
+  DdShapes: "readonly",
+  DdPaint: "readonly",
   DiagramDraw: "readonly",
   DiagramEditor: "readonly",
   // The notebook Python controller, loaded before app.js.
@@ -181,6 +207,25 @@ const SHARED_RULES = {
   "no-fallthrough": "error",
   "no-constant-condition": ["error", { checkLoops: false }],
   "no-empty": ["error", { allowEmptyCatch: true }]
+};
+
+// A browser module is `var Name = (function () { ... return {...}; })();` — a
+// top-level `var`, because that is the one declaration a classic script can
+// make that later scripts, the concatenated bundle and a test's window.eval
+// all see the same way (a `const` at top level is invisible to window.eval),
+// and because the type checker (`npm run typecheck`) reads every script's
+// top-level declarations as the globals they are, so a call from one module
+// into another is checked against the real signature. So `var` is allowed at
+// the top level of a module and nowhere else, and a module declaring the
+// namespace the globals list already names is not a redeclaration.
+const BROWSER_RULES = {
+  ...SHARED_RULES,
+  "no-var": "off",
+  "no-restricted-syntax": ["error", {
+    selector: "VariableDeclaration[kind='var']:not(Program > VariableDeclaration)",
+    message: "var is only for a module's namespace at the top level; use let or const."
+  }],
+  "no-redeclare": ["error", { builtinGlobals: false }]
 };
 
 module.exports = [
@@ -242,7 +287,7 @@ module.exports = [
       sourceType: "script",
       globals: BROWSER_GLOBALS
     },
-    rules: SHARED_RULES
+    rules: BROWSER_RULES
   },
 
   {
@@ -255,6 +300,6 @@ module.exports = [
       sourceType: "script",
       globals: { ...BROWSER_GLOBALS, module: "readonly" }
     },
-    rules: SHARED_RULES
+    rules: BROWSER_RULES
   }
 ];

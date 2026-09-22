@@ -6,8 +6,9 @@
  * left off instead of throwing the whole tree open again.
  */
 
-(function (global) {
-  const { state } = global.AppState;
+/* exported AppFolderCollapse */
+var AppFolderCollapse = (function () {
+  const { state } = AppState;
 
   const COLLAPSED_FOLDERS_STORAGE_KEY = "mdviewer.collapsedFolders";
   let collapseStateRestored = false;
@@ -74,9 +75,9 @@
     App.renderDocList();
   }
 
-  global.AppFolderCollapse = {
+  return {
     persistCollapsedFolders,
     applyInitialFolderCollapse,
     toggleFolderCollapse
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

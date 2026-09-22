@@ -8,8 +8,9 @@
 // of a double-submit token is that script has to echo it back and cross-origin
 // script cannot.
 
-(function (global) {
-  const { state } = global.AppState;
+/* exported AppApi */
+var AppApi = (function () {
+  const { state } = AppState;
 
   const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -31,6 +32,7 @@
   }
 
   async function requestJson(url, options = {}) {
+    /** @type {RequestInit} */
     const requestOptions = { ...options, credentials: "same-origin" };
     const method = String(options.method || "GET").toUpperCase();
     const headers = { ...(options.headers || {}) };
@@ -83,9 +85,9 @@
     return state.permissions.includes(permission);
   }
 
-  global.AppApi = {
+  return {
     requestJson,
     can,
     onSessionSignal
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -4,12 +4,13 @@
  * drawn on top of each other, and the marker definitions are emitted once per
  * drawing rather than once per arrow.
  */
-(function (global) {
+/* exported DdEdges */
+var DdEdges = (function () {
   "use strict";
 
-  const { LABEL_CHAR, escapeText, round } = global.DdBase;
-  const { END_ANCHOR, END_BY_NAME, endsOf } = global.DdEnds;
-  const { routeEdge } = global.DdRoute;
+  const { LABEL_CHAR, escapeText, round } = DdBase;
+  const { END_ANCHOR, END_BY_NAME, endsOf } = DdEnds;
+  const { routeEdge } = DdRoute;
 
   const LANE_GAP = 16;
 
@@ -120,7 +121,7 @@
    * inside the other and both ending up a layer deeper than everything else.
    */
 
-  global.DdEdges = {
+  return {
     LANE_GAP, lanes, markerDefs, edgeMarkup
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

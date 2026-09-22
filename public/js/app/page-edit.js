@@ -8,19 +8,20 @@
  * Saves of a document run one after another, never at the same time.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson, can } = global.AppApi;
-  const { docUrl, docName, isNotebookFile, isDiagramFile } = global.AppText;
-  const { resetJumpNavigation } = global.AppJump;
-  const { getDocByFile } = global.AppLibrary;
-  const { renderMermaidBlocks, destroyPanZoomInstances, renderDocumentContent } = global.AppRender;
-  const { notify, setStatus, askAboutUnsavedWork } = global.AppNotify;
-  const { loadDocContent } = global.AppDocs;
-  const { pageModel, collectLinkReferences, pageEditActive, updatePageEditState, renderRichBlock } = global.AppPageBlocks;
-  const { renderBlock, diagramFileOpens, takeStashedDocument } = global.AppPageEmbeds;
-  const { pageHistory, resetPageHistory, commitPageHistory } = global.AppPageHistory;
+/* exported AppPageEdit */
+var AppPageEdit = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson, can } = AppApi;
+  const { docUrl, docName, isNotebookFile, isDiagramFile } = AppText;
+  const { resetJumpNavigation } = AppJump;
+  const { getDocByFile } = AppLibrary;
+  const { renderMermaidBlocks, destroyPanZoomInstances, renderDocumentContent } = AppRender;
+  const { notify, setStatus, askAboutUnsavedWork } = AppNotify;
+  const { loadDocContent } = AppDocs;
+  const { pageModel, collectLinkReferences, pageEditActive, updatePageEditState, renderRichBlock } = AppPageBlocks;
+  const { renderBlock, diagramFileOpens, takeStashedDocument } = AppPageEmbeds;
+  const { pageHistory, resetPageHistory, commitPageHistory } = AppPageHistory;
 
   function renderPageEditor(markdown) {
     pageModel.blocks = VisualEditor.splitBlocks(markdown);
@@ -191,7 +192,7 @@
     resetPageHistory();
     pageHistory.present = { markdown: content, caret: null };
 
-    elements.docContent.querySelector('[contenteditable="true"]')?.focus();
+    /** @type {HTMLElement} */ (elements.docContent.querySelector('[contenteditable="true"]'))?.focus();
 
     // A document that came back from the diagram page already has a change in it
     // that nobody made by typing, so the line under the bar says where it came
@@ -415,6 +416,7 @@
    * reimplement worse. What it produces is normalised by the serializer anyway —
    * a <b> becomes ** either way.
    */
+  /** @returns {HTMLElement | null} */
   function editableBlockFromSelection() {
     const selection = window.getSelection();
     const anchor = selection?.anchorNode;
@@ -422,7 +424,7 @@
       return null;
     }
 
-    const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    const element = anchor.nodeType === 1 ? /** @type {Element} */ (anchor) : anchor.parentElement;
     return element?.closest('.ve-block[contenteditable="true"]') || null;
   }
 
@@ -489,7 +491,7 @@
     commitPageHistory();
   }
 
-  global.AppPageEdit = {
+  return {
     renderPageEditor,
     collectPageMarkdown,
     isPageEditDirty,
@@ -506,4 +508,4 @@
     applyVisualCommand,
     applyVisualBlockFormat
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -136,10 +136,10 @@ const order = (result) => result.matches.map((match) => match.file);
 
     const handle = db.open(path.join(dir, "data"));
     check("...and from the index itself",
-      handle.prepare("SELECT COUNT(*) AS n FROM document_index WHERE file = ?").get("Notes/kube.md").n, 0);
+      /** @type {any} */ (handle.prepare("SELECT COUNT(*) AS n FROM document_index WHERE file = ?").get("Notes/kube.md")).n, 0);
     check("nothing is indexed twice",
-      handle.prepare("SELECT COUNT(*) AS n FROM documents_fts").get().n,
-      handle.prepare("SELECT COUNT(*) AS n FROM document_index").get().n);
+      /** @type {any} */ (handle.prepare("SELECT COUNT(*) AS n FROM documents_fts").get()).n,
+      /** @type {any} */ (handle.prepare("SELECT COUNT(*) AS n FROM document_index").get()).n);
   }
 
   console.log("=== the recycle bin is not the library ===");

@@ -5,25 +5,26 @@
  * them do their own work — each one calls into the module that owns the job —
  * but every one of them is attached here, in the order the sidebar reads.
  */
-(function (global) {
+/* exported AppSidebar */
+var AppSidebar = (function () {
 
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { can } = global.AppApi;
-const { setSelection, clearSelection } = global.AppSelection;
-const { setNavOpen } = global.AppShell;
-const { setStatus } = global.AppNotify;
-const { refreshLinks } = global.AppLinks;
-const { persistCollapsedFolders } = global.AppFolderCollapse;
-const { openFolderModal, closeFolderModal } = global.AppFolderModal;
-const { startNewDocument } = global.AppSourceEditor;
-const { pasteIntoFolder } = global.AppClipboard;
-const { closeContextMenu, openContextMenu } = global.AppContextMenu;
-const { renderDocList, handleTreeKeydown } = global.AppTree;
-const { refreshDeletedDocs } = global.AppOpening;
-const { refreshDocs } = global.AppRefresh;
-const { uploadMarkdown } = global.AppUploads;
-const { moveDocumentToFolder, handleFolderModalAction } = global.AppFolderOps;
+const { elements } = AppDom;
+const { state } = AppState;
+const { can } = AppApi;
+const { setSelection, clearSelection } = AppSelection;
+const { setNavOpen } = AppShell;
+const { setStatus } = AppNotify;
+const { refreshLinks } = AppLinks;
+const { persistCollapsedFolders } = AppFolderCollapse;
+const { openFolderModal, closeFolderModal } = AppFolderModal;
+const { startNewDocument } = AppSourceEditor;
+const { pasteIntoFolder } = AppClipboard;
+const { closeContextMenu, openContextMenu } = AppContextMenu;
+const { renderDocList, handleTreeKeydown } = AppTree;
+const { refreshDeletedDocs } = AppOpening;
+const { refreshDocs } = AppRefresh;
+const { uploadMarkdown } = AppUploads;
+const { moveDocumentToFolder, handleFolderModalAction } = AppFolderOps;
 
 function bindSidebar() {
   elements.createFolderBtn.addEventListener("click", () => {
@@ -87,7 +88,7 @@ function bindSidebar() {
 
   // A context menu must not survive the next interaction anywhere on the page.
   window.addEventListener("mousedown", (event) => {
-    if (elements.contextMenu && !elements.contextMenu.contains(event.target)) {
+    if (elements.contextMenu && !elements.contextMenu.contains(/** @type {Node} */ (event.target))) {
       closeContextMenu();
     }
   });
@@ -102,7 +103,7 @@ function bindSidebar() {
   });
 
   elements.collapseAllBtn?.addEventListener("click", () => {
-    const groups = [...elements.docList.querySelectorAll(".tree-group")];
+    const groups = [.../** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-group"))];
     const anyExpanded = groups.some((group) => !group.classList.contains("is-collapsed"));
 
     if (anyExpanded) {
@@ -178,6 +179,6 @@ function bindSidebar() {
   });
 }
 
-global.AppSidebar = { bindSidebar };
+return { bindSidebar };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

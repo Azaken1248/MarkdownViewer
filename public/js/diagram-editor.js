@@ -24,7 +24,8 @@
  * back a string. That is what lets one canvas serve a fence inside a document
  * and a .mmd file on its own.
  */
-(function (global) {
+/* exported DiagramEditor */
+var DiagramEditor = (function () {
   "use strict";
 
   const DIAGRAM_PREVIEW_DELAY = 250;
@@ -875,7 +876,7 @@
       // where they were drawn, which is recorded when a drag begins. A move with
       // no drag behind it (an arrow key) has no such record and no need of one:
       // the redraw that follows puts them where they belong.
-      const marks = svg?.querySelector(".dd-marks");
+      const marks = /** @type {SVGElement} */ (svg?.querySelector(".dd-marks"));
       const drawnAt = marks ? Number(marks.dataset.x) : NaN;
       if (marks && id === marks.dataset.id && Number.isFinite(drawnAt)) {
         marks.setAttribute("transform", `translate(${at.x - drawnAt},${at.y - Number(marks.dataset.y)})`);
@@ -1120,7 +1121,7 @@
         moved: false
       };
 
-      const marks = drawing()?.querySelector(".dd-marks");
+      const marks = /** @type {SVGElement} */ (drawing()?.querySelector(".dd-marks"));
       if (marks && at) {
         // Where the marks were drawn, so moving them is a difference rather than
         // a re-render. Only worth doing for one box: a frame round several is
@@ -1512,7 +1513,7 @@
        * drawing the second arrow bent the first.
        */
       if (arrowTool) {
-        const from = pickable(event.target.closest?.(".dd-node")?.getAttribute("data-id"))
+        const from = pickable(/** @type {Element} */ (event.target).closest?.(".dd-node")?.getAttribute("data-id"))
           || boxAt(point);
 
         if (from) {
@@ -1556,7 +1557,7 @@
         return;
       }
 
-      const handle = event.target.closest?.("[data-role]");
+      const handle = /** @type {Element} */ (event.target).closest?.("[data-role]");
 
       if (handle && selectedId) {
         const role = handle.getAttribute("data-role");
@@ -1587,7 +1588,7 @@
        * down, dragged from there. Which is how it works everywhere that has
        * ever let anyone bend an arrow, and needs nothing explaining.
        */
-      const bendable = event.target.closest?.(".dd-edge");
+      const bendable = /** @type {Element} */ (event.target).closest?.(".dd-edge");
       const bending = bendable
         && (bendable.getAttribute("data-from") === selectedId
           || bendable.getAttribute("data-to") === selectedId);
@@ -1604,7 +1605,7 @@
         }
       }
 
-      const id = pickable(event.target.closest?.(".dd-node")?.getAttribute("data-id"))
+      const id = pickable(/** @type {Element} */ (event.target).closest?.(".dd-node")?.getAttribute("data-id"))
         || boxAt(point);
 
       const adding = Boolean(event.shiftKey);
@@ -3907,10 +3908,10 @@
       const size = DiagramDraw.exportSize(model, model.layout);
       const picture = document.createElement("img");
 
-      const drawn = new Promise((done, fail) => {
+      const drawn = /** @type {Promise<void>} */ (new Promise((done, fail) => {
         picture.onload = () => done();
         picture.onerror = () => fail(new Error("the drawing could not be rasterised"));
-      });
+      }));
 
       picture.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
       await drawn;
@@ -5086,7 +5087,7 @@
         const looking = iconSearch.trim().toLowerCase();
         let shown = 0;
 
-        for (const [title, names] of DiagramIcons.GROUPS) {
+        for (const [title, names] of /** @type {[string, string[]][]} */ (DiagramIcons.GROUPS)) {
           const found = looking
             ? names.filter((name) => name.includes(looking))
             : names;
@@ -5413,7 +5414,7 @@
         }));
 
         marks.append(button);
-        return [button, letter];
+        return /** @type {[HTMLButtonElement, string]} */ ([button, letter]);
       });
 
       const show = () => {
@@ -5649,9 +5650,9 @@
        */
       const words = item.kind === "text";
       const cells = table ? cellGrid(item) : null;
-      const name = table
+      const name = /** @type {HTMLInputElement} */ (table
         ? cells.querySelector(".ve-diagram-cell-title")
-        : labelField(item);
+        : labelField(item));
 
       const drop = dropButton(`Remove ${stepLabel(item)}`);
       drop.addEventListener("click", () => removeStep(item.id));
@@ -6012,7 +6013,7 @@
 
       row.append(twist, words, lock);
       row.addEventListener("click", (event) => {
-        if (!event.target.closest("button, input")) {
+        if (!/** @type {Element} */ (event.target).closest("button, input")) {
           holdGroup(group.id);
         }
       });
@@ -6090,7 +6091,7 @@
 
       const held = groupHeld();
 
-      for (const row of treeBody.querySelectorAll(".ve-diagram-leaf")) {
+      for (const row of /** @type {NodeListOf<HTMLElement>} */ (treeBody.querySelectorAll(".ve-diagram-leaf"))) {
         row.classList.toggle("is-picked", row.dataset.groupId
           ? row.dataset.groupId === held?.id
           : isSelected(row.dataset.nodeId));
@@ -6419,7 +6420,7 @@
         button.setAttribute("aria-label", button.title);
         // The chevron points the way pressing it moves the edge.
         const away = which === "rail" ? shut : !shut;
-        button.firstChild.className = `ph ph-caret-${away ? "right" : "left"}`;
+        /** @type {HTMLElement} */ (button.firstChild).className = `ph ph-caret-${away ? "right" : "left"}`;
       };
 
       button.addEventListener("click", () => {
@@ -6438,7 +6439,7 @@
 
       let dragging = null;
       grip.addEventListener("pointerdown", (event) => {
-        if (event.target.closest(".ve-diagram-grip-shut")) {
+        if (/** @type {Element} */ (event.target).closest(".ve-diagram-grip-shut")) {
           return;
         }
 
@@ -6505,6 +6506,7 @@
     shell.addEventListener("keydown", onKey);
     shell.addEventListener("keyup", onKeyUp);
 
+    /** @type {HTMLElement[]} */
     const parts = [shell];
 
     // A host with somewhere to go back to gets a way back. The page has nowhere
@@ -6585,7 +6587,7 @@
     };
   }
 
-  global.DiagramEditor = {
+  return {
     PALETTE: DIAGRAM_PALETTE,
     FLOWS: DIAGRAM_FLOWS,
     PAPER_PAD: DIAGRAM_PAPER_PAD,
@@ -6594,4 +6596,4 @@
     canOpen,
     mount
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

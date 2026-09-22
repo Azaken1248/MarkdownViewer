@@ -8,18 +8,19 @@
  * has to read documents says so while it does.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { normalize, filenameToTitle, inferIcon } = global.AppText;
-  const { requestJson } = global.AppApi;
-  const { getCurrentDocsCollection, getFolderOrder } = global.AppLibrary;
-  const { buildSuperSearchMatches, buildJumpSearchTerms } = global.AppSearch;
-  const { renderSuperSearchPanel, setSuperSearchOpen } = global.AppSearchPanel;
-  const { setMeta } = global.AppShell;
-  const { resetJumpNavigation } = global.AppJump;
-  const { renderDocList } = global.AppTree;
-  const { renderLinks } = global.AppLinks;
-  const { setStatus } = global.AppNotify;
+/* exported AppSearching */
+var AppSearching = (function () {
+  const { state } = AppState;
+  const { normalize, filenameToTitle, inferIcon } = AppText;
+  const { requestJson } = AppApi;
+  const { getCurrentDocsCollection, getFolderOrder } = AppLibrary;
+  const { buildSuperSearchMatches, buildJumpSearchTerms } = AppSearch;
+  const { renderSuperSearchPanel, setSuperSearchOpen } = AppSearchPanel;
+  const { setMeta } = AppShell;
+  const { resetJumpNavigation } = AppJump;
+  const { renderDocList } = AppTree;
+  const { renderLinks } = AppLinks;
+  const { setStatus } = AppNotify;
 
   async function applySearch(query) {
     const rawQuery = String(query || "");
@@ -124,7 +125,7 @@
     }
   }
 
-  global.AppSearching = {
+  return {
     applySearch
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

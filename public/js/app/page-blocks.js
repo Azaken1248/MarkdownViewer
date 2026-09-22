@@ -16,10 +16,11 @@
  * four kinds of block are drawn in the four modules after it.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { taskCheckboxes } = global.AppTaskLists;
+/* exported AppPageBlocks */
+var AppPageBlocks = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { taskCheckboxes } = AppTaskLists;
 
   /* The document being edited on the page, as blocks.
    *
@@ -165,7 +166,7 @@
     }
   }
 
-  global.AppPageBlocks = {
+  return {
     pageModel,
     collectLinkReferences,
     isDefinitionsBlock,
@@ -177,4 +178,4 @@
     renderRichBlock,
     makeEditorTasksLive
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

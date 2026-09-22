@@ -8,7 +8,8 @@
 // A stack, not a flag, because dialogs open on top of dialogs — the share
 // dialog over the document, a confirmation over that.
 
-(function (global) {
+/* exported AppModal */
+var AppModal = (function () {
   const FOCUSABLE_SELECTOR = [
     "a[href]",
     "button:not([disabled])",
@@ -33,7 +34,7 @@
       ? modalLayerStack[modalLayerStack.length - 1].element
       : null;
 
-    for (const node of document.body.children) {
+    for (const node of /** @type {HTMLCollectionOf<HTMLElement>} */ (document.body.children)) {
       // Toasts have to stay announceable even while a dialog is up.
       if (node.id === "toastRegion") {
         continue;
@@ -104,8 +105,8 @@
     }
   }
 
-  global.AppModal = {
+  return {
     enterModalLayer,
     exitModalLayer
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

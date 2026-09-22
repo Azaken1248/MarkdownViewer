@@ -10,14 +10,15 @@
  * box you clicked is the box that changes.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson, can } = global.AppApi;
-  const { docUrl, docName, isNotebookFile } = global.AppText;
-  const { getDocByFile } = global.AppLibrary;
-  const { loadDocContent } = global.AppDocs;
-  const { setStatus } = global.AppNotify;
+/* exported AppTaskLists */
+var AppTaskLists = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson, can } = AppApi;
+  const { docUrl, docName, isNotebookFile } = AppText;
+  const { getDocByFile } = AppLibrary;
+  const { loadDocContent } = AppDocs;
+  const { setStatus } = AppNotify;
 
   // you clicked is the box that changes.
 
@@ -125,10 +126,10 @@
     }
   }
 
-  global.AppTaskLists = {
+  return {
     taskCheckboxes,
     bindTaskCheckboxes,
     settleTaskCheckbox,
     toggleTaskCheckbox
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

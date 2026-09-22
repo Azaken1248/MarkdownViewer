@@ -4,7 +4,8 @@
  * both the way it is written and the way it is drawn. Everything below reads
  * from these rather than matching on the syntax a second time.
  */
-(function (global) {
+/* exported DmShapes */
+var DmShapes = (function () {
   "use strict";
 
   const DIRECTIONS = ["TB", "TD", "BT", "LR", "RL"];
@@ -211,9 +212,9 @@
   // therefore only part of an id when something alphanumeric follows it, which
   // takes "my-node" and leaves every run of dashes to the link parser.
 
-  global.DmShapes = {
+  return {
     DIRECTIONS, SHAPES, DRAWN_SHAPES, DRAWN_BY_NAME, ACTOR_BAND, ACTOR_LEAST, SHAPE_CHOICES,
     EDGE_KINDS, EDGE_ORDER, EDGE_TEXT_FORMS, LINE_STYLES, LINK_BY_STYLE, lineStyleOf, linkFor,
     ROUTE_SHAPES, ROUTE_DEFAULT, ROUTE_NAMES, SHAPE_BY_NAME, OPENERS, EDGE_BY_NAME
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -5,20 +5,21 @@
  * keep track of. Below them: the tabs the two panes collapse into on a narrow
  * screen, paste and drop of images, the linked scroll, and the buttons.
  */
-(function (global) {
+/* exported AppEditorKeys */
+var AppEditorKeys = (function () {
 
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { can } = global.AppApi;
-const { resolveConfirmDialog } = global.AppNotify;
-const { imagesFromTransfer } = global.AppPastedImages;
-const { replaceRangeInTextarea } = global.AppTextarea;
+const { elements } = AppDom;
+const { state } = AppState;
+const { can } = AppApi;
+const { resolveConfirmDialog } = AppNotify;
+const { imagesFromTransfer } = AppPastedImages;
+const { replaceRangeInTextarea } = AppTextarea;
 const {
   EDITOR_TABS_QUERY, scheduleEditorPreview, syncEditorPaneScroll,
   syncEditorTabs, selectEditorTab
-} = global.AppSourceEditor;
-const { attachImagesToSource } = global.AppPageImages;
-const { saveEditorDocument, requestEditorClose } = global.AppEditorSave;
+} = AppSourceEditor;
+const { attachImagesToSource } = AppPageImages;
+const { saveEditorDocument, requestEditorClose } = AppEditorSave;
 
 /* --- The source editor's shortcuts ----------------------------------------
  *
@@ -210,6 +211,6 @@ function bindSourceEditorSurface() {
   });
 }
 
-global.AppEditorKeys = { toggleMarkdownWrap, applySourceShortcut, bindSourceEditorSurface };
+return { toggleMarkdownWrap, applySourceShortcut, bindSourceEditorSurface };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

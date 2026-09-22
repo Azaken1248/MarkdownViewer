@@ -9,8 +9,9 @@
 // fetching anything; the server route of the same name exists only for when
 // that address is typed, refreshed or opened from a link somewhere else.
 
-(function (global) {
-  const { docUrl, UPLOADABLE_EXTENSIONS } = global.AppText;
+/* exported AppLocation */
+var AppLocation = (function () {
+  const { docUrl, UPLOADABLE_EXTENSIONS } = AppText;
 
   function documentPath(file) {
     return `/${docUrl(file)}`;
@@ -85,11 +86,11 @@
     window.history[replace ? "replaceState" : "pushState"]({ file: file || null }, "", next);
   }
 
-  global.AppLocation = {
+  return {
     documentPath,
     viewFromLocation,
     showLinksInUrl,
     fileFromLocation,
     showDocumentInUrl
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

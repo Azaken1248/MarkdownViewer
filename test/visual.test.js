@@ -11,29 +11,33 @@
 
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
 const { modelScriptPaths, drawScriptPaths, styleSource } = require("./app-source.js");
 
-// The module is a plain script that hangs itself off the global, the same way
-// the browser loads it.
-global.window = globalThis;
-require(path.join(ROOT, "js", "visual-editor.js"));
+// The modules are plain scripts whose top-level `var` is the namespace, the
+// same way the browser loads them. require() would wrap each in a function
+// and keep that var to itself, so they are run as the scripts they are, in
+// this process's global scope.
+global.window = /** @type {any} */ (globalThis);
+const loadScript = (file) => vm.runInThisContext(fs.readFileSync(file, "utf8"), { filename: file });
+loadScript(path.join(ROOT, "js", "visual-editor.js"));
 const VE = globalThis.VisualEditor;
 
 // The flowchart builder's model, loaded the same way and tested here for the
 // same reason: it is the other half of "edit this without retyping it".
 for (const file of modelScriptPaths(ROOT)) {
-  require(file);
+  loadScript(file);
 }
 const DM = globalThis.DiagramModel;
 
 // And the drawing, which is what makes writing the layout down worth doing: a
 // diagram that says where its boxes are is one this app can draw itself.
-require(path.join(ROOT, "js", "diagram-icons.js"));
+loadScript(path.join(ROOT, "js", "diagram-icons.js"));
 for (const file of drawScriptPaths(ROOT)) {
-  require(file);
+  loadScript(file);
 }
 const DD = globalThis.DiagramDraw;
 

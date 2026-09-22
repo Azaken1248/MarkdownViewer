@@ -10,14 +10,15 @@
  * this module is what owns the consequence.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { updateActiveDocUI } = global.AppViewerHeader;
-  const { state } = global.AppState;
-  const { requestJson, can, onSessionSignal } = global.AppApi;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
-  const { syncBodyLock } = global.AppShell;
-  const { notify } = global.AppNotify;
+/* exported AppSession */
+var AppSession = (function () {
+  const { elements } = AppDom;
+  const { updateActiveDocUI } = AppViewerHeader;
+  const { state } = AppState;
+  const { requestJson, can, onSessionSignal } = AppApi;
+  const { enterModalLayer, exitModalLayer } = AppModal;
+  const { syncBodyLock } = AppShell;
+  const { notify } = AppNotify;
 
   /* The answers to the two signals api.js raises, given by the parts that own
    * what has to change: the session state here, the forced password dialog
@@ -264,7 +265,7 @@
     }
   }
 
-  global.AppSession = {
+  return {
     applySession,
     syncAccountUI,
     refreshSession,
@@ -277,4 +278,4 @@
     closePasswordModal,
     submitPasswordChange
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

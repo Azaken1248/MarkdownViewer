@@ -4,18 +4,19 @@
  * rebuilds the markup underneath a caret that someone is still typing into,
  * which is why the caret arithmetic below is exported rather than repeated.
  */
-(function (global) {
+/* exported MdCode */
+var MdCode = (function () {
   "use strict";
 
-  const { ensureLibrary, CODE_LANGUAGE_ALIAS } = global.MdLazy;
-  const { normalize } = global.MdText;
+  const { ensureLibrary, CODE_LANGUAGE_ALIAS } = MdLazy;
+  const { normalize } = MdText;
 
   function highlightCodeBlocks(root) {
     if (!root) {
       return Promise.resolve();
     }
 
-    if (global.hljs) {
+    if (window.hljs) {
       highlightLoadedCodeBlocks(root);
       return Promise.resolve();
     }
@@ -132,8 +133,8 @@
   function copyText(text) {
     const value = String(text == null ? "" : text);
 
-    if (global.isSecureContext && global.navigator?.clipboard?.writeText) {
-      return global.navigator.clipboard.writeText(value).catch(() => {
+    if (window.isSecureContext && window.navigator?.clipboard?.writeText) {
+      return window.navigator.clipboard.writeText(value).catch(() => {
         // Permission can still be refused on a secure origin, and the older
         // path is not subject to the same policy.
         if (!copyByExecCommand(value)) {
@@ -185,7 +186,7 @@
 
     copyDelegateBound = true;
     document.addEventListener("click", (event) => {
-      const button = event.target?.closest?.(".code-copy");
+      const button = /** @type {Element} */ (event.target)?.closest?.(".code-copy");
       if (!button) {
         return;
       }
@@ -294,7 +295,7 @@
 
   function detectCodeLanguage(source) {
     try {
-      const guess = global.hljs.highlightAuto(source);
+      const guess = window.hljs.highlightAuto(source);
       return guess.language && guess.relevance >= LIVE_DETECT_RELEVANCE ? guess.language : "";
     } catch (error) {
       console.error("Language detection failed", error);
@@ -382,7 +383,7 @@
    * the auto-detector is still owed, which is what happens on blur.
    */
   function liveHighlightCode(codeNode, declaredLanguage) {
-    if (!codeNode || !global.hljs) {
+    if (!codeNode || !window.hljs) {
       return false;
     }
 
@@ -406,7 +407,7 @@
 
     const named = CODE_LANGUAGE_ALIAS[declared] || declared;
 
-    if (named && global.hljs.getLanguage(named)) {
+    if (named && window.hljs.getLanguage(named)) {
       live.language = named;
     } else if (!live.language
       && source.length >= LIVE_DETECT_MINIMUM
@@ -421,7 +422,7 @@
 
     let markup = "";
     try {
-      markup = global.hljs.highlight(source, { language: live.language, ignoreIllegals: true }).value;
+      markup = window.hljs.highlight(source, { language: live.language, ignoreIllegals: true }).value;
     } catch (error) {
       console.error("Live highlighting failed", error);
       live.language = "";
@@ -450,7 +451,7 @@
   }
 
 
-  global.MdCode = {
+  return {
     highlightCodeBlocks, copyText, addCopyButtons, decorateCodeBlocks, detectCodeLanguage, selectionOffsetsWithin, placeSelectionWithin, liveHighlightCode
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

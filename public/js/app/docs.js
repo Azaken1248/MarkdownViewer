@@ -9,18 +9,19 @@
  * bin, or the archive.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson, can } = global.AppApi;
-  const { docUrl, escapeHtml, filenameToTitle, inferIcon } = global.AppText;
-  const { getDocByFile, getDocCacheVersion, getFolderOrder } = global.AppLibrary;
-  const { showDocumentInUrl } = global.AppLocation;
-  const { updateActiveDocUI } = global.AppViewerHeader;
-  const { pruneSelection } = global.AppSelection;
-  const { refreshShares } = global.AppShare;
-  const { applyInitialFolderCollapse } = global.AppFolderCollapse;
-  const { setSuperSearchOpen } = global.AppSearchPanel;
+/* exported AppDocs */
+var AppDocs = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson, can } = AppApi;
+  const { docUrl, escapeHtml, filenameToTitle, inferIcon } = AppText;
+  const { getDocByFile, getDocCacheVersion, getFolderOrder } = AppLibrary;
+  const { showDocumentInUrl } = AppLocation;
+  const { updateActiveDocUI } = AppViewerHeader;
+  const { pruneSelection } = AppSelection;
+  const { refreshShares } = AppShare;
+  const { applyInitialFolderCollapse } = AppFolderCollapse;
+  const { setSuperSearchOpen } = AppSearchPanel;
 
   async function fetchDocs() {
     const payload = await requestJson("/api/docs", { cache: "no-store" });
@@ -299,7 +300,7 @@
     showEmptyState("No file selected", "Pick a file from the explorer, or search across every document.", "ph-file-dashed");
   }
 
-  global.AppDocs = {
+  return {
     fetchDocs,
     fetchDeletedDocs,
     loadDocContent,
@@ -311,4 +312,4 @@
     showLoadingState,
     showNoDocumentOpen
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

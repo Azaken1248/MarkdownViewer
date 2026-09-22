@@ -5,15 +5,16 @@
  * flowchart declares — and from then on the file remembers its own positions.
  * measureNode is what decides how big a box has to be to hold its words.
  */
-(function (global) {
+/* exported DmLayout */
+var DmLayout = (function () {
   "use strict";
 
-  const { ACTOR_BAND, ACTOR_LEAST, DIRECTIONS } = global.DmShapes;
+  const { ACTOR_BAND, ACTOR_LEAST, DIRECTIONS } = DmShapes;
   const {
     CHAR_WIDTH, LINE_HEIGHT, MARGIN, MIN_HEIGHT, MIN_WIDTH, PAD_X, PAD_Y, RANK_GAP,
     SIBLING_GAP, TABLE_MIN_TEXT, TABLE_MIN_WIDTH, tableMetrics, snap, snapUp
-  } = global.DmGrammar;
-  const { columnsOf, fontScale, textCells, textRows } = global.DmCells;
+  } = DmGrammar;
+  const { columnsOf, fontScale, textCells, textRows } = DmCells;
 
   function measureNode(node, options = {}) {
     const kind = node?.kind;
@@ -361,7 +362,7 @@
    * Comes back with where the box should actually go, and the lines to draw.
    */
 
-  global.DmLayout = {
+  return {
     measureNode, forwardEdges, autoLayout, ensureLayout, layoutBounds
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

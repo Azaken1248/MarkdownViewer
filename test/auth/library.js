@@ -7,6 +7,8 @@
 // Everything it needs is handed to it: the suite's own check(), the server, and
 // the two clients the checks are made through. Split out of one file only
 // because that file had grown past a thousand lines.
+const Database = require("better-sqlite3");
+
 module.exports = async (ctx) => {
   const { check, server, admin, fsp, path, makeClient, fail } = ctx;
 
@@ -101,9 +103,8 @@ module.exports = async (ctx) => {
 
       // The organizer lives in the database now; the JSON above was imported
       // on boot and set aside. What was acted on is what the row says.
-      const Database = require("better-sqlite3");
       const rows = new Database(path.join(stateDir, "data", "azadocs.db"), { readonly: true });
-      const organizer = JSON.parse(rows.prepare("SELECT state_json FROM organizer WHERE id = 1").get().state_json);
+      const organizer = JSON.parse(/** @type {any} */ (rows.prepare("SELECT state_json FROM organizer WHERE id = 1").get()).state_json);
       rows.close();
       check("the old map is dropped once it has been acted on", organizer.fileFolders, {});
       check("...and the folder tree is untouched", organizer.folders.length, 3);
@@ -178,9 +179,8 @@ module.exports = async (ctx) => {
   {
     // Sessions and accounts are files, not memory: a restart must not sign
     // everyone out or lose an account.
-    const Database = require("better-sqlite3");
     const db = new Database(path.join(server.stateDir, "data", "azadocs.db"), { readonly: true });
-    const accounts = db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
+    const accounts = /** @type {any} */ (db.prepare("SELECT COUNT(*) AS n FROM users").get()).n;
     db.close();
     check("accounts persisted", accounts >= 2, true);
     // The shared editor token is gone; presenting one must not be a way in.

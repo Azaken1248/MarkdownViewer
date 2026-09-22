@@ -4,10 +4,11 @@
  * markdown and marked would mangle them; what comes back is placeholder spans
  * carrying the TeX, for AppMdMath to fill in once KaTeX has arrived.
  */
-(function (global) {
+/* exported MdText */
+var MdText = (function () {
   "use strict";
 
-  const { MARKDOWN_SANITIZE_OPTIONS } = global.MdLazy;
+  const { MARKDOWN_SANITIZE_OPTIONS } = MdLazy;
 
   function normalize(text) {
     return String(text || "").toLowerCase();
@@ -59,7 +60,7 @@
 
   // What a name means is decided once, in doc-kinds.js, for the server and
   // the client alike. These are the engine's names for the same answers.
-  const { isNotebookFile, isDiagramFile } = global.DocKinds;
+  const { isNotebookFile, isDiagramFile } = DocKinds;
 
   function toMermaidMarkdown(diagramSource) {
     return `\n\
@@ -164,7 +165,7 @@
   // false positive costs one download nobody reads; a false negative leaves an
   // equation as raw TeX, so the pattern errs towards fetching.
 
-  global.MdText = {
+  return {
     normalize, encodeBase64Utf8, decodeBase64Utf8, normalizeMatrixEnvironments, escapeHtml, isNotebookFile, isDiagramFile, toMermaidMarkdown, activeThemeName, normalizeMarkdownMath, renderMarkdown
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

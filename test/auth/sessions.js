@@ -434,7 +434,7 @@ module.exports = async (ctx) => {
     const Database = require("better-sqlite3");
     const db = new Database(path.join(server.stateDir, "data", "azadocs.db"), { readonly: true });
     try {
-      const stored = db.prepare("SELECT * FROM users WHERE username = ?").get("aza");
+      const stored = /** @type {any} */ (db.prepare("SELECT * FROM users WHERE username = ?").get("aza"));
       check("no plaintext password is stored", "password" in stored, false);
       check("the hash is a scrypt record", stored.password_hash.startsWith("scrypt$"), true);
 
@@ -442,7 +442,7 @@ module.exports = async (ctx) => {
       check("no known password appears anywhere in the table",
         JSON.stringify(everyUser).includes("kettle-drum-fifteen"), false);
 
-      const sessions = db.prepare("SELECT * FROM sessions").all();
+      const sessions = /** @type {any[]} */ (db.prepare("SELECT * FROM sessions").all());
       const cookieValue = [...makeClient(server.origin).jar.values()][0];
       check("session ids are stored hashed, not raw",
         sessions.some((s) => s.id === cookieValue), false);

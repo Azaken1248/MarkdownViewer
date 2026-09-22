@@ -5,17 +5,18 @@
  * The editor window itself knows none of that, and this file is where the
  * knowing is kept.
  */
-(function (global) {
+/* exported AppEditorSave */
+var AppEditorSave = (function () {
 
-const { normalize, isNotebookFile, docUrl, docName, ensureDocFilename } = global.AppText;
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { requestJson } = global.AppApi;
-const { getDocByFile } = global.AppLibrary;
-const { setStatus, requestConfirmation, askAboutUnsavedWork } = global.AppNotify;
-const { openEditor, closeEditor, isEditorDirty } = global.AppSourceEditor;
-const { loadDocContent } = global.AppDocs;
-const { refreshDocs } = global.AppRefresh;
+const { normalize, isNotebookFile, docUrl, docName, ensureDocFilename } = AppText;
+const { elements } = AppDom;
+const { state } = AppState;
+const { requestJson } = AppApi;
+const { getDocByFile } = AppLibrary;
+const { setStatus, requestConfirmation, askAboutUnsavedWork } = AppNotify;
+const { openEditor, closeEditor, isEditorDirty } = AppSourceEditor;
+const { loadDocContent } = AppDocs;
+const { refreshDocs } = AppRefresh;
 
 // The source editor's half of the overlapping-saves problem; see pageSaveChain.
 let editorSaveChain = Promise.resolve();
@@ -217,9 +218,9 @@ async function requestEditorClose() {
 }
 
 
-global.AppEditorSave = {
+return {
   saveEditorDocument, settleEditorSave, runEditorSave,
   openEditorForCurrentDoc, openEditorForDocument, requestEditorClose
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

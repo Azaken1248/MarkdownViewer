@@ -26,11 +26,12 @@
  * whole-document step would make them worse, not better.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { setStatus } = global.AppNotify;
-  const { pageEditActive, updatePageEditState } = global.AppPageBlocks;
-  const { currentPageBlockNode } = global.AppPageInsert;
+/* exported AppPageHistory */
+var AppPageHistory = (function () {
+  const { elements } = AppDom;
+  const { setStatus } = AppNotify;
+  const { pageEditActive, updatePageEditState } = AppPageBlocks;
+  const { currentPageBlockNode } = AppPageInsert;
 
   // Long enough that a burst of typing is one undo step rather than forty.
   const PAGE_HISTORY_IDLE = 450;
@@ -59,7 +60,7 @@
     }
 
     const index = node.dataset.index;
-    const field = document.activeElement;
+    const field = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (document.activeElement);
 
     if (field && node.contains(field) && (field.tagName === "TEXTAREA" || field.tagName === "INPUT")) {
       return { index, offset: field.selectionStart ?? 0, field: true };
@@ -82,16 +83,16 @@
       return;
     }
 
-    const node = elements.docContent.querySelector(`.ve-block[data-index="${anchor.index}"]`);
+    const node = /** @type {HTMLElement} */ (elements.docContent.querySelector(`.ve-block[data-index="${anchor.index}"]`));
     if (!node) {
       return;
     }
 
     // A block that was open on its source is re-rendered as its view, so the
     // caret lands on the block rather than back in the box it was typed in.
-    const host = node.getAttribute("contenteditable") === "true"
+    const host = /** @type {HTMLElement} */ (node.getAttribute("contenteditable") === "true"
       ? node
-      : node.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]');
+      : node.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]'));
 
     if (!host) {
       node.focus?.();
@@ -225,7 +226,7 @@
     return true;
   }
 
-  global.AppPageHistory = {
+  return {
     pageHistory,
     pageCaretAnchor,
     restorePageCaret,
@@ -237,4 +238,4 @@
     undoPageEdit,
     redoPageEdit
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

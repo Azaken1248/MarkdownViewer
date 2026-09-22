@@ -117,9 +117,9 @@ check("the engine is settled before any block is promoted",
 // preview repaints on every keystroke and measures its own scroll height
 // immediately afterwards, so a microtask between the two is a visible flicker.
 check("loaded highlighting still runs on the spot",
-  /if \(global\.hljs\) \{\s*highlightLoadedCodeBlocks\(root\);/.test(core), true);
+  /if \(window\.hljs\) \{\s*highlightLoadedCodeBlocks\(root\);/.test(core), true);
 check("loaded maths still runs on the spot",
-  /if \(global\.katex \|\| global\.renderMathInElement\) \{\s*renderLoadedMathBlocks\(root\);/.test(core), true);
+  /if \(window\.katex \|\| window\.renderMathInElement\) \{\s*renderLoadedMathBlocks\(root\);/.test(core), true);
 
 // A CDN blip must not cost the rest of the session its syntax colours.
 check("a failed load is not cached", /libraryLoads\.delete\(name\)/.test(core), true);
@@ -156,13 +156,13 @@ check("...before the first request goes out",
 
 // Every way out of initialize() has to replace the spinner, or it turns for
 // ever behind whatever is on screen.
-for (const [label, pattern] of [
+for (const [label, pattern] of /** @type {[string, RegExp][]} */ ([
   ["the sign-in wall", /showEmptyState\("This library is private"/],
   ["the forced password change", /showEmptyState\("Set a new password"/],
   ["an empty library", /showEmptyState\("No markdowns yet"/],
   ["a document that is not there", /showEmptyState\("Document not found"/],
   ["a failure to load at all", /showEmptyState\("Document loading failed"/]
-]) {
+])) {
   check(`${label} settles the panel`, pattern.test(app), true);
 }
 

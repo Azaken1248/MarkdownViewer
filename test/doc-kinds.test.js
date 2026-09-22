@@ -26,12 +26,17 @@ const paths = require("../lib/docs/paths.js");
 
 console.log("=== the server's list is the shared one ===");
 check("the same five extensions", [...paths.ALLOWED_DOC_EXTENSIONS], DocKinds.DOC_EXTENSIONS);
+// A name that already ends in one of them is kept as it is...
 check("...and the server takes each of them",
-  DocKinds.DOC_EXTENSIONS.map((ext) => paths.sanitizeNewFilename(`note${ext}`).ok ?? Boolean(paths.sanitizeNewFilename(`note${ext}`))),
-  DocKinds.DOC_EXTENSIONS.map(() => true));
-check("...and refuses what is not on it",
-  [".txt", ".html", ".md.bak", ""].map((ext) => Boolean(paths.sanitizeNewFilename(`note${ext}`)?.ok)),
-  [false, false, false, false]);
+  DocKinds.DOC_EXTENSIONS.map((ext) => paths.sanitizeNewFilename(`note${ext}`)),
+  DocKinds.DOC_EXTENSIONS.map((ext) => `note${ext}`));
+// ...and anything else is a name without an extension this app knows, so it
+// becomes a markdown file rather than being refused. (This check used to read
+// `.sanitizeNewFilename(...)?.ok`, which is undefined for the string this
+// returns and so was false whatever the answer was.)
+check("...and anything else becomes markdown",
+  [".txt", ".html", ".md.bak", ""].map((ext) => paths.sanitizeNewFilename(`note${ext}`)),
+  ["note.txt.md", "note.html.md", "note.md.bak.md", "note.md"]);
 
 console.log("=== what a name means ===");
 {

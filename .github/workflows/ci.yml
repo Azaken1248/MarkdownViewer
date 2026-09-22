@@ -33,6 +33,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The types are the JSDoc already in the source, checked by tsc with
+      # checkJs — no TypeScript, no build, and the file in the browser is still
+      # the file in the repository. It runs here because the shapes it checks
+      # (the diagram model, the stores, req.auth) cross five modules each, and
+      # a field added in one and forgotten in another is otherwise caught only
+      # if some test happens to walk that path.
+      - name: Type check
+        run: npm run typecheck
+
       # After lint, not before, so an advisory in a dependency cannot mask a
       # mistake in the code. High and critical fail the build; moderate and low
       # show in the log and in Dependabot's queue without stopping work.

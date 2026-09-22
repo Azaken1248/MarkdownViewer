@@ -42,8 +42,10 @@ async function waitUntil(condition, timeout = 5000) {
 let ORIGIN = "";
 
 let sendCookies = () => "";
+/** @type {(res: import("http").IncomingMessage) => void} */
 let receiveCookies = () => {};
 
+/** @returns {Promise<{ status: number, body: string }>} */
 function get(pathname) {
   return new Promise((resolve, reject) => {
     const headers = sendCookies() ? { Cookie: sendCookies() } : {};
@@ -223,7 +225,7 @@ async function run(server) {
       return false;
     }
 
-    const field = window.document.activeElement;
+    const field = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (window.document.activeElement);
     if (!field || !["TEXTAREA", "INPUT"].includes(field.tagName)) {
       return false;
     }
@@ -239,7 +241,7 @@ async function run(server) {
   // jsdom builds neither a clipboard nor a secure context, and the app checks
   // for both before it will use the modern path.
   const clipboardWrites = [];
-  window.isSecureContext = true;
+  Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
   Object.defineProperty(window.navigator, "clipboard", {
     configurable: true,
     value: { writeText: (text) => { clipboardWrites.push(String(text)); return Promise.resolve(); } }
@@ -274,13 +276,13 @@ async function run(server) {
   // reader it does implement.
   const blobBytes = (blob) => new Promise((resolve, reject) => {
     const reader = new window.FileReader();
-    reader.onload = () => resolve(Buffer.from(reader.result));
+    reader.onload = () => resolve(Buffer.from(/** @type {ArrayBuffer} */ (reader.result)));
     reader.onerror = () => reject(reader.error || new Error("Could not read blob"));
     reader.readAsArrayBuffer(blob);
   });
 
   // Proxy fetch to the spawned server so the app sees a real corpus.
-  window.fetch = async (url, options = {}) => {
+  window.fetch = /** @type {any} */ (async (url, options = {}) => {
     const target = String(url).startsWith("http") ? String(url) : `${ORIGIN}${url}`;
     const method = (options.method || "GET").toUpperCase();
     // jsdom has no Response constructor, so hand back the shape requestJson uses.
@@ -297,15 +299,15 @@ async function run(server) {
     let payload = options.body;
     let extraHeaders = {};
 
-    if (payload && typeof payload !== "string" && typeof payload.entries === "function") {
+    if (payload && typeof payload !== "string" && typeof /** @type {any} */ (payload).entries === "function") {
       const boundary = `----domsuite${Math.random().toString(16).slice(2)}`;
       const chunks = [];
 
-      for (const [name, value] of payload.entries()) {
+      for (const [name, value] of /** @type {FormData} */ (payload).entries()) {
         if (value instanceof window.Blob) {
           chunks.push(Buffer.from(
             `--${boundary}\r\n`
-            + `Content-Disposition: form-data; name="${name}"; filename="${value.name || "file"}"\r\n`
+            + `Content-Disposition: form-data; name="${name}"; filename="${/** @type {File} */ (value).name || "file"}"\r\n`
             + `Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`
           ));
           chunks.push(await blobBytes(value));
@@ -321,7 +323,7 @@ async function run(server) {
       payload = Buffer.concat(chunks);
       extraHeaders = {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        "Content-Length": payload.length
+        "Content-Length": /** @type {Buffer} */ (payload).length
       };
     }
 
@@ -361,7 +363,7 @@ async function run(server) {
     const parsed = new URL(target);
     const res = await get(parsed.pathname + parsed.search);
     return makeResponse(res.status, res.body);
-  };
+  });
 
   // Sign in the way a browser does, before the app boots, so it comes up with a
   // real session. The seeded admin must replace its public password first.

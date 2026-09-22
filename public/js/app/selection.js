@@ -4,9 +4,10 @@
 // Shift extends from the anchor, across state.visibleFileOrder — rebuilt on
 // every render so a Shift-range always matches what is actually on screen.
 
-(function (global) {
-  const { state } = global.AppState;
-  const { elements } = global.AppDom;
+/* exported AppSelection */
+var AppSelection = (function () {
+  const { state } = AppState;
+  const { elements } = AppDom;
 
   function pruneSelection() {
     const known = new Set([
@@ -28,7 +29,7 @@
   }
 
   function updateSelectionUI() {
-    for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+    for (const row of /** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-row-doc"))) {
       const selected = state.selection.has(row.dataset.file);
       row.classList.toggle("is-selected", selected);
       row.setAttribute("aria-selected", String(selected));
@@ -104,7 +105,7 @@
     return file ? [file] : [...state.selection];
   }
 
-  global.AppSelection = {
+  return {
     pruneSelection,
     resolveTargetFiles,
     setSelection,
@@ -113,4 +114,4 @@
     updateSelectionUI,
     handleRowSelection
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

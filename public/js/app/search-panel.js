@@ -9,12 +9,13 @@
  * those two calls name their module at the call site.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { escapeHtml, normalize } = global.AppText;
-  const { SUPERSEARCH_LIMIT, SUPERSEARCH_PAGE_SIZE, highlightMatches } = global.AppSearch;
-  const { closeSidebarOnMobile } = global.AppShell;
+/* exported AppSearchPanel */
+var AppSearchPanel = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { escapeHtml, normalize } = AppText;
+  const { SUPERSEARCH_LIMIT, SUPERSEARCH_PAGE_SIZE, highlightMatches } = AppSearch;
+  const { closeSidebarOnMobile } = AppShell;
 
   function setSuperSearchOpen(isOpen) {
     state.searchPanelOpen = Boolean(isOpen);
@@ -109,7 +110,7 @@
         renderSuperSearchPanel(query, matches, searchTerms);
         // Land the reader on the first newly-revealed row, not back at the top.
         const rows = elements.superSearchList.querySelectorAll(".supersearch-item");
-        rows[revealCount]?.focus();
+        /** @type {HTMLElement} */ (rows[revealCount])?.focus();
       });
       elements.superSearchList.appendChild(more);
     }
@@ -141,10 +142,10 @@
     setSuperSearchOpen(true);
   }
 
-  global.AppSearchPanel = {
+  return {
     setSuperSearchOpen,
     syncSearchInputState,
     renderSearchShortcutHint,
     renderSuperSearchPanel
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -6,14 +6,15 @@
  * nothing open rather than with a document that is gone.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { requestJson } = global.AppApi;
-  const { docUrl, normalize } = global.AppText;
-  const { requestConfirmation, setStatus } = global.AppNotify;
-  const { syncModeUI } = global.AppDocs;
-  const { resetJumpNavigation } = global.AppJump;
-  const { refreshDeletedDocs } = global.AppOpening;
+/* exported AppDocActions */
+var AppDocActions = (function () {
+  const { state } = AppState;
+  const { requestJson } = AppApi;
+  const { docUrl, normalize } = AppText;
+  const { requestConfirmation, setStatus } = AppNotify;
+  const { syncModeUI } = AppDocs;
+  const { resetJumpNavigation } = AppJump;
+  const { refreshDeletedDocs } = AppOpening;
 
   async function deleteCurrentDocument(mode) {
     if (!state.activeFile || state.isRecycleBinMode) {
@@ -112,9 +113,9 @@
     }
   }
 
-  global.AppDocActions = {
+  return {
     deleteCurrentDocument,
     restoreCurrentDeletedDocument,
     hardDeleteCurrentDeletedDocument
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

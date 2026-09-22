@@ -10,7 +10,8 @@
  * out of. The wrapper is one line at each end, and it stays that way while the
  * sections inside it move out one at a time.
  */
-(function (global) {
+/* exported App */
+var App = (function () {
 
 // The modules this file is assembled from.
 //
@@ -174,7 +175,7 @@ let docSwipeStart = null;
 // Delegated: the document's markup is replaced wholesale every time one opens,
 // and while editing in place the blocks are rebuilt under it as well.
 elements.docContent.addEventListener("change", (event) => {
-  const box = event.target?.closest?.('input[type="checkbox"][data-task-index]');
+  const box = /** @type {Element} */ (event.target)?.closest?.('input[type="checkbox"][data-task-index]');
   if (box && !pageEditActive()) {
     void toggleTaskCheckbox(box);
   }
@@ -403,7 +404,7 @@ function setUploadMenuOpen(open) {
   elements.uploadTrigger.setAttribute("aria-expanded", open ? "true" : "false");
 
   if (open) {
-    elements.uploadMenu.querySelector(".account-item")?.focus();
+    /** @type {HTMLElement} */ (elements.uploadMenu.querySelector(".account-item"))?.focus();
   }
 }
 
@@ -417,7 +418,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (!elements.uploadMenu.contains(event.target) && !elements.uploadTrigger.contains(event.target)) {
+  if (!elements.uploadMenu.contains(/** @type {Node} */ (event.target)) && !elements.uploadTrigger.contains(/** @type {Node} */ (event.target))) {
     setUploadMenuOpen(false);
   }
 });
@@ -528,13 +529,13 @@ elements.pageEditSourceBtn.addEventListener("click", () => {
 elements.visualToolbar.addEventListener("mousedown", (event) => {
   // The selection in the contenteditable must survive the click, and focusing
   // a button destroys it.
-  if (event.target.closest(".visual-tool")) {
+  if (/** @type {Element} */ (event.target).closest(".visual-tool")) {
     event.preventDefault();
   }
 });
 
 elements.visualToolbar.addEventListener("click", (event) => {
-  const tool = event.target.closest(".visual-tool");
+  const tool = /** @type {HTMLElement} */ (/** @type {Element} */ (event.target).closest(".visual-tool"));
   if (!tool) {
     return;
   }
@@ -625,7 +626,7 @@ elements.docContent.addEventListener("keydown", (event) => {
   // A source box and the language field are ordinary form controls, and their
   // own undo is character-accurate and keeps the caret exactly where it was.
   // Replacing it with a whole-document step would be a downgrade.
-  const inFormControl = ["TEXTAREA", "INPUT"].includes(event.target?.tagName);
+  const inFormControl = ["TEXTAREA", "INPUT"].includes(/** @type {Element} */ (event.target)?.tagName);
 
   if ((key === "z" || key === "y") && !inFormControl) {
     event.preventDefault();
@@ -655,7 +656,7 @@ elements.docContent.addEventListener("keydown", (event) => {
 // with it — fonts, colours, spans, classes. Only the text is wanted; the
 // formatting people are pasting is not the formatting this document uses.
 elements.docContent.addEventListener("paste", (event) => {
-  if (!pageEditActive() || !event.target.closest?.('[contenteditable="true"]')) {
+  if (!pageEditActive() || !/** @type {Element} */ (event.target).closest?.('[contenteditable="true"]')) {
     return;
   }
 
@@ -816,12 +817,11 @@ document.addEventListener("click", (event) => {
  *
  * It shrinks as the sections below become modules of their own.
  */
-global.App = {
-  openContextMenu, setUploadMenuOpen, openDocument, openRecycleBinDocument, renderDocList,
-  moveDocumentToFolder, cancelPageEdit, pageEditActive, commitPageHistory
-};
-
 bindTooltips();
 initialize();
 
-})(typeof window === "undefined" ? globalThis : window);
+return {
+  openContextMenu, setUploadMenuOpen, openDocument, openRecycleBinDocument, renderDocList,
+  moveDocumentToFolder, cancelPageEdit, pageEditActive, commitPageHistory
+};
+})();

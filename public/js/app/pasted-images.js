@@ -9,8 +9,9 @@
 // carries on around it, which is why the placeholder is found again by text
 // rather than held as a position.
 
-(function (global) {
-  const { requestJson } = global.AppApi;
+/* exported AppPastedImages */
+var AppPastedImages = (function () {
+  const { requestJson } = AppApi;
 
   const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 
@@ -55,11 +56,11 @@
     return `![${alt}](${url})`;
   }
 
-  global.AppPastedImages = {
+  return {
     imagesFromTransfer,
     imageName,
     uploadPlaceholder,
     uploadImage,
     imageMarkdown
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

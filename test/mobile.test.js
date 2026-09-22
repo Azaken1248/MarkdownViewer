@@ -549,6 +549,7 @@ for (const m of darkBlock.matchAll(/^\s*(--[a-z-]+):\s*(#[0-9a-f]{6});/gim)) {
 }
 
 console.log("=== palette contrast (WCAG on the new darker surfaces) ===");
+/** @type {[string, string, string, number][]} */
 const pairs = [
   ["body text on canvas", "--fg", "--canvas", 4.5],
   ["body text on surface", "--fg", "--surface", 4.5],

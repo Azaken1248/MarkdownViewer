@@ -486,7 +486,6 @@ app.use(createDocsRoutes({
   fileExists,
   moveFile,
   ensureUniqueFilename,
-  ensureUniqueFilenameInDir,
   readCachedTextFile,
   invalidateCachedContent,
   paramDocPath

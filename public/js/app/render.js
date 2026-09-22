@@ -9,9 +9,12 @@
  * every module can reach them without each one naming MarkdownCore.
  */
 
-(function (global) {
+/* exported AppRender */
+var AppRender = (function () {
   function waitForNextFrame() {
-    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+    return /** @type {Promise<void>} */ (new Promise((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    }));
   }
 
   function renderMarkdown(markdown) {
@@ -41,7 +44,7 @@
     return MarkdownCore.bindWheelZoomModifier();
   }
 
-  global.AppRender = {
+  return {
     waitForNextFrame,
     renderMarkdown,
     highlightCodeBlocks,
@@ -50,4 +53,4 @@
     destroyPanZoomInstances,
     bindWheelZoomModifier
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

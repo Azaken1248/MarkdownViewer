@@ -101,6 +101,7 @@ function caretAt(element) {
   return { start: leading.toString().length, length: range.toString().length };
 }
 
+/** @returns {[Node, number] | null} */
 function findOffset(element, offset) {
   const walker = document.createTreeWalker(element, 4);
   let seen = 0;
@@ -195,7 +196,9 @@ console.log("=== one listener, not one per block ===");
 console.log("=== clicking one puts the code on the clipboard ===");
 (async () => {
   const written = [];
-  window.isSecureContext = true;
+  // jsdom's window says this is read-only; the code under test asks for it
+  // before reaching for the clipboard, so the test has to answer.
+  Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
   Object.defineProperty(window.navigator, "clipboard", {
     configurable: true,
     value: { writeText: (text) => { written.push(text); return Promise.resolve(); } }
@@ -377,7 +380,7 @@ function runSourceChecks() {
   console.log("=== the clipboard is asked for in both ways ===");
   // navigator.clipboard does not exist off a secure origin, and this app is
   // usually reached at http://<lan-address>:4321.
-  check("the modern path is tried first", /isSecureContext && global\.navigator\?\.clipboard\?\.writeText/.test(core), true);
+  check("the modern path is tried first", /isSecureContext && window\.navigator\?\.clipboard\?\.writeText/.test(core), true);
   check("...and the older one catches a refusal", /\.catch\(\(\) => \{\s*\n[\s\S]{0,200}copyByExecCommand\(value\)/.test(core), true);
   check("...and stands alone on an insecure origin",
     core.indexOf("if (copyByExecCommand(value)) {") > core.indexOf("isSecureContext"), true);

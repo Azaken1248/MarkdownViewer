@@ -6,9 +6,10 @@
 // turned it off on the way out would leave the page scrolling under the one
 // still open.
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
+/* exported AppShell */
+var AppShell = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
 
   // The width at which the sidebar stops being a column beside the page and
   // becomes a drawer over it. Matches the breakpoint the stylesheet uses.
@@ -50,7 +51,7 @@
     }
   }
 
-  global.AppShell = {
+  return {
     MOBILE_BREAKPOINT,
     setNavOpen,
     closeSidebarOnMobile,
@@ -58,4 +59,4 @@
     setMeta,
     syncFilterChip
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

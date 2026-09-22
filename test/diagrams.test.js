@@ -63,6 +63,7 @@ const maxH = 0.78 * 1080;
 const minW = Number(js.match(/DIAGRAM_MIN_WIDTH = (\d+)/)[1]);
 const chrome = Number(js.match(/DIAGRAM_BLOCK_CHROME = (\d+)/)[1]);
 
+/** @type {[string, number, number][]} */
 const shapes = [
   ["3-node flowchart (wide, short)", 900, 220],
   ["typical flowchart", 800, 600],

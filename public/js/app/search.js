@@ -5,10 +5,11 @@
 // shown. Exact beats prefix beats a loose subsequence, a title match beats a
 // body match, and a recent document breaks a tie.
 
-(function (global) {
-  const { normalize, escapeHtml, escapeRegExp } = global.AppText;
-  const { state } = global.AppState;
-  const { getCurrentDocsCollection } = global.AppLibrary;
+/* exported AppSearch */
+var AppSearch = (function () {
+  const { normalize, escapeHtml, escapeRegExp } = AppText;
+  const { state } = AppState;
+  const { getCurrentDocsCollection } = AppLibrary;
 
   const SUPERSEARCH_LIMIT = 8;
   // Each "Show more" click in the results panel reveals this many further rows.
@@ -236,7 +237,7 @@
       .sort((left, right) => right.length - left.length);
   }
 
-  global.AppSearch = {
+  return {
     SUPERSEARCH_LIMIT,
     SUPERSEARCH_PAGE_SIZE,
     tokenizeSearchQuery,
@@ -244,4 +245,4 @@
     buildSuperSearchMatches,
     buildJumpSearchTerms
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -206,11 +206,11 @@ function runChild(dataDir, tag) {
       // table only as far as the window, because each failure sweeps what has
       // aged out.
       const handle = db.open(dataDir);
-      const before = handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get().n;
+      const before = /** @type {any} */ (handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get()).n;
       const aged = Date.now() - 16 * 60 * 1000;
       handle.prepare("UPDATE login_attempts SET locked_until = 0, last_attempt_at = ?").run(aged);
       await first.login("nobody", "wrong-guess", { ip: "10.0.0.11" });
-      const after = handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get().n;
+      const after = /** @type {any} */ (handle.prepare("SELECT COUNT(*) AS n FROM login_attempts").get()).n;
       check("rows that have aged out of the window are swept by the next failure",
         [before > 2, after <= 2], [true, true]);
     } finally {

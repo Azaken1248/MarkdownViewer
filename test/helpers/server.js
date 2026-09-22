@@ -60,7 +60,7 @@ function findFreePort() {
     const probe = http.createServer();
     probe.on("error", reject);
     probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address();
+      const { port } = /** @type {import("net").AddressInfo} */ (probe.address());
       probe.close(() => resolve(port));
     });
   });
@@ -134,6 +134,7 @@ async function seedOnDisk(stateDir) {
 
   const now = new Date().toISOString();
   const folderIds = new Map();
+  /** @type {{ id: string, name: string, order: number, createdAt: string, updatedAt: string, parentId?: string | null }[]} */
   const folders = FOLDERS.map((folder, index) => {
     const id = `folder_test_${index}`;
     folderIds.set(folder.name, id);
@@ -234,7 +235,7 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
   async function stop() {
     if (!child.killed && child.exitCode === null) {
       child.kill("SIGTERM");
-      await new Promise((resolve) => {
+      await /** @type {Promise<void>} */ (new Promise((resolve) => {
         const timer = setTimeout(() => {
           child.kill("SIGKILL");
           resolve();
@@ -243,7 +244,7 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
           clearTimeout(timer);
           resolve();
         });
-      });
+      }));
     }
 
     // Guard against ever deleting something outside the temp directory, and

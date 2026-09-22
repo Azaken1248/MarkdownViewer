@@ -5,7 +5,8 @@
 // by reference — every module reads and writes the same object, which is what
 // makes "set it, then render" work from anywhere.
 
-(function (global) {
+/* exported AppState */
+var AppState = (function () {
   const state = {
     docs: [],
     deletedDocs: [],
@@ -144,5 +145,5 @@
     shares: new Map()
   };
 
-  global.AppState = { state };
-})(typeof window === "undefined" ? globalThis : window);
+  return { state };
+})();

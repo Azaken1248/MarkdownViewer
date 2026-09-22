@@ -69,7 +69,7 @@ for (const [name, file, description] of selected) {
     if (result.status === null) {
       console.log(`\n${name} was cut off after `
         + `${((Date.now() - began) / 1000).toFixed(1)}s — `
-        + `${result.signal || result.error?.code || "no exit status"}. `
+        + `${result.signal || /** @type {NodeJS.ErrnoException} */ (result.error)?.code || "no exit status"}. `
         + "This is the runner's own clock, not a failing check.");
     }
 

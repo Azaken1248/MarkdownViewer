@@ -15,7 +15,8 @@
  * that no other file spells the list out again.
  */
 
-(function (global) {
+/* exported DocKinds */
+var DocKinds = (function () {
   "use strict";
 
   // Everything this app will store, list and open.
@@ -105,5 +106,5 @@
     module.exports = DocKinds;
   }
 
-  global.DocKinds = DocKinds;
-})(typeof window === "undefined" ? globalThis : window);
+  return DocKinds;
+})();

@@ -4,13 +4,14 @@
 // server reads the page once, on add; the card renders from that snapshot, so
 // opening this section makes no request to any of the sites in it.
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson, can } = global.AppApi;
-  const { setMeta, syncBodyLock } = global.AppShell;
-  const { notify, setStatus, requestConfirmation } = global.AppNotify;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
+/* exported AppLinks */
+var AppLinks = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson, can } = AppApi;
+  const { setMeta, syncBodyLock } = AppShell;
+  const { notify, setStatus, requestConfirmation } = AppNotify;
+  const { enterModalLayer, exitModalLayer } = AppModal;
 
   function linkHost(link) {
     try {
@@ -772,7 +773,7 @@
     }
   }
 
-  global.AppLinks = {
+  return {
     renderLinks,
     refreshLinks,
     submitLink,
@@ -782,4 +783,4 @@
     linksNeedingIcons,
     backfillLinkIcons
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

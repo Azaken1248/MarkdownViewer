@@ -3,7 +3,8 @@
  * An arrowhead sits outside the line it belongs to, so a route has to stop
  * short of the box by however much its head is about to occupy.
  */
-(function (global) {
+/* exported DdEnds */
+var DdEnds = (function () {
   "use strict";
 
   const END_ANCHOR = 10;
@@ -61,7 +62,7 @@
   // The markers a drawing actually needs, defined once each. Every end style in
   // every edge, and nothing else: a diagram of plain arrows carries one marker.
 
-  global.DdEnds = {
+  return {
     END_ANCHOR, END_KINDS, END_BY_NAME, endsOf
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

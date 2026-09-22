@@ -5,7 +5,8 @@
  * previews, only about a textarea and a caret.
  */
 
-(function (global) {
+/* exported AppTextarea */
+var AppTextarea = (function () {
   /* Put text into a textarea in a way the browser's own undo can see.
    *
    * Assigning to .value clears a textarea's undo history outright in every
@@ -60,9 +61,9 @@
     return true;
   }
 
-  global.AppTextarea = {
+  return {
     replaceRangeInTextarea,
     insertIntoTextarea,
     replaceInTextarea
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -15,32 +15,34 @@
  * string, which is what makes the same picture reachable from the editor, from
  * the page, and from a test.
  */
-(function (global) {
+/* exported DiagramDraw */
+var DiagramDraw = (function () {
 
   "use strict";
 
   const {
     Model, STANDOFF, CLEARANCE, LINE_HEIGHT, LEADING, GRID_STEP, leadFor, escapeText, round
-  } = global.DdBase;
-  const { paintOf, sizeOf, cellSize, COLOUR_RE, TEXT_SIZE } = global.DdPaint;
-  const { shapeMarkup, cellBoxes, cellAt, nodeBody, nodeMarkup } = global.DdShapes;
-  const { END_KINDS, endsOf } = global.DdEnds;
+  } = DdBase;
+  const { paintOf, sizeOf, cellSize, COLOUR_RE, TEXT_SIZE } = DdPaint;
+  const { shapeMarkup, cellBoxes, cellAt, nodeBody, nodeMarkup } = DdShapes;
+  const { END_KINDS, endsOf } = DdEnds;
   const {
     anchorOn, autoSides, midpoint, pathCurved, pathData, pinnedSides,
     routeEdge, shapeOf, sideTowards, wayPoints
-  } = global.DdRoute;
-  const { lanes, markerDefs, edgeMarkup } = global.DdEdges;
+  } = DdRoute;
+  const { lanes, markerDefs, edgeMarkup } = DdEdges;
   const {
     GRIPS, frameMarkup, guidesMarkup, marqueeMarkup, marksMarkup, edgeMarks
-  } = global.DdMarks;
+  } = DdMarks;
   const {
     GROUP_HEAD, GROUP_PAD, groupBoxes, groupDepths, groupName, nestingDepths,
     surrounds, viewOf, groupMarkup
-  } = global.DdGroups;
+  } = DdGroups;
 
   // A `let`, so it stays with the only thing that moves it. A module that
   // destructured it would get the number it held at load and keep it forever.
   let drawCounter = 0;
+  /** @param {FlowchartModel} model @param {Record<string, any>} [options] */
   function render(model, options = {}) {
     const layout = options.layout || Model.ensureLayout(model);
     const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
@@ -133,7 +135,7 @@
 
     for (let level = 0; level <= deepest; level += 1) {
       const lines = edges
-        .map((edge, index) => [edge, index])
+        .map((edge, index) => /** @type {[ModelEdge, number]} */ ([edge, index]))
         .filter(([edge]) => Math.max(depthOf(edge.from), depthOf(edge.to)) === level);
 
       // The outermost layer is always written, empty or not, because a drawing
@@ -338,7 +340,7 @@
     return render(model, { ...options, layout: Model.ensureLayout(model) });
   }
 
-  global.DiagramDraw = {
+  return {
     viewOf,
     render,
     renderSource,
@@ -386,4 +388,4 @@
     GRIPS,
     TEXT_SIZE
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

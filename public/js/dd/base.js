@@ -4,10 +4,11 @@
  * small functions that turn numbers into SVG. Nothing here knows what a
  * flowchart is.
  */
-(function (global) {
+/* exported DdBase */
+var DdBase = (function () {
   "use strict";
 
-  const Model = global.DiagramModel;
+  const Model = DiagramModel;
 
   // How far outside a box an arrow turns, and how much room a route keeps
   // between itself and a box it is going around.
@@ -72,8 +73,8 @@
   }
 
 
-  global.DdBase = {
+  return {
     Model, STANDOFF, CLEARANCE, SLANT, RADIUS, ROUND_RADIUS, LINE_HEIGHT, LEADING, leadFor,
     LABEL_CHAR, GRID_STEP, ELLIPSIS, escapeText, round, polygon, rect
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

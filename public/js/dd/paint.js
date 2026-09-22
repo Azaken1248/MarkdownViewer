@@ -4,10 +4,11 @@
  * string, which is the only place it can be written and still be a flowchart
  * anything else can render. This is where that string is read.
  */
-(function (global) {
+/* exported DdPaint */
+var DdPaint = (function () {
   "use strict";
 
-  const { Model } = global.DdBase;
+  const { Model } = DdBase;
 
   const COLOUR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([0-9.,%/\s]+\))$/i;
   const WIDTH_RE = /^[0-9.]+(?:px)?$/i;
@@ -37,6 +38,9 @@
   // Which declaration goes where. A classDef speaks CSS, and the two names that
   // do not line up are `color`, which is the text rather than the shape, and
   // `fill`, which SVG has and CSS text does not.
+  // Each entry is a declaration this app will copy through: what Mermaid calls
+  // it, the custom property it becomes, and what a value has to look like.
+  /** @type {[string, string, RegExp][]} */
   const PAINTED = [
     ["fill", "--dd-fill", COLOUR_RE],
     ["stroke", "--dd-stroke", COLOUR_RE],
@@ -135,8 +139,8 @@
   }
 
 
-  global.DdPaint = {
+  return {
     PAINTED, wornBy, sizeOf, CELL_PAINTED, cellPaint, cellSize, cellChar, paintOf, COLOUR_RE,
     TEXT_SIZE
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

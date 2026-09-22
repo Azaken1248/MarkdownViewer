@@ -8,11 +8,12 @@
  * ![alt](src).
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { insertIntoTextarea, replaceInTextarea } = global.AppTextarea;
-  const { uploadPlaceholder, uploadImage, imageMarkdown, imageName } = global.AppPastedImages;
-  const { setStatus } = global.AppNotify;
+/* exported AppPageImages */
+var AppPageImages = (function () {
+  const { elements } = AppDom;
+  const { insertIntoTextarea, replaceInTextarea } = AppTextarea;
+  const { uploadPlaceholder, uploadImage, imageMarkdown, imageName } = AppPastedImages;
+  const { setStatus } = AppNotify;
 
   async function attachImagesToSource(files) {
     for (const file of files) {
@@ -113,10 +114,10 @@
     }
   }
 
-  global.AppPageImages = {
+  return {
     attachImagesToSource,
     insertNodeAtCaret,
     announceEdit,
     attachImagesToPage
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

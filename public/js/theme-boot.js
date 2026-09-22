@@ -12,7 +12,8 @@
  * consults the operating system. Dark is the default, because it is what this
  * app has always looked like.
  */
-(function () {
+/* exported ThemeSwitch */
+var ThemeSwitch = (function () {
   const STORAGE_KEY = "mdviewer.theme";
   let stored = null;
 
@@ -120,7 +121,7 @@
     delete button.dataset.tip;
   }
 
-  window.ThemeSwitch = {
+  return {
     STORAGE_KEY,
     CYCLE,
     META,

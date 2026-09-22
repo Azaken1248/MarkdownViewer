@@ -9,9 +9,10 @@
  * this only takes over once the user touches the toggle.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { notify } = global.AppNotify;
+/* exported AppTheme */
+var AppTheme = (function () {
+  const { elements } = AppDom;
+  const { notify } = AppNotify;
 
   /* The cycle, the icons and the writing-down all live in theme-boot.js, which
    * runs on every page that has a theme — including the diagram page, which does
@@ -47,7 +48,7 @@
   // recolour a diagram is to draw it again from its source.
   async function repaintDiagramsForTheme() {
     const roots = [elements.docContent, elements.editorPreview].filter(Boolean);
-    const blocks = roots.flatMap((root) => [...root.querySelectorAll(".mermaid-block")]);
+    const blocks = roots.flatMap((root) => [.../** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(".mermaid-block"))]);
     if (blocks.length === 0) {
       // Nothing on screen to redraw, but the next render must not reuse the old
       // palette.
@@ -96,7 +97,7 @@
     });
   }
 
-  global.AppTheme = {
+  return {
     THEME_META,
     themePreference,
     activeThemeName,
@@ -104,4 +105,4 @@
     applyThemePreference,
     bindThemeToggle
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

@@ -10,17 +10,18 @@
  * are one place now.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { MOBILE_BREAKPOINT, setNavOpen } = global.AppShell;
-  const { state } = global.AppState;
-  const { can } = global.AppApi;
-  const { docName, isNotebookFile, formatDate, formatBytes } = global.AppText;
-  const { getDocByFile, getFolderRecord, folderPathIds } = global.AppLibrary;
-  const { persistCollapsedFolders } = global.AppFolderCollapse;
-  const { updateShareButton } = global.AppShare;
-  const { renderLinks, closeLinkModal } = global.AppLinks;
-  const { findFolderRow } = global.AppInlineRename;
+/* exported AppViewerHeader */
+var AppViewerHeader = (function () {
+  const { elements } = AppDom;
+  const { MOBILE_BREAKPOINT, setNavOpen } = AppShell;
+  const { state } = AppState;
+  const { can } = AppApi;
+  const { docName, isNotebookFile, formatDate, formatBytes } = AppText;
+  const { getDocByFile, getFolderRecord, folderPathIds } = AppLibrary;
+  const { persistCollapsedFolders } = AppFolderCollapse;
+  const { updateShareButton } = AppShare;
+  const { renderLinks, closeLinkModal } = AppLinks;
+  const { findFolderRow } = AppInlineRename;
 
   // Beyond this many crumbs the middle ancestors collapse behind an overflow
   // button, so a deep path cannot push the file name out of view.
@@ -49,7 +50,7 @@
 
     const row = findFolderRow(folderId);
     scrollTreeRowIntoView(row);
-    row?.querySelector(".tree-row-btn")?.focus();
+    /** @type {HTMLElement} */ (row?.querySelector(".tree-row-btn"))?.focus();
 
     if (window.innerWidth <= MOBILE_BREAKPOINT) {
       setNavOpen(true);
@@ -294,7 +295,7 @@
     applyPermissionGating();
   }
 
-  global.AppViewerHeader = {
+  return {
     scrollTreeRowIntoView,
     revealFolderInTree,
     renderBreadcrumbs,
@@ -302,4 +303,4 @@
     applyPermissionGating,
     updateActiveDocUI
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

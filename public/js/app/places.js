@@ -6,23 +6,24 @@
  * one being entered put up, in the right order and with the address bar kept
  * honest. When a move fails halfway the rollback below puts it all back.
  */
-(function (global) {
+/* exported AppPlaces */
+var AppPlaces = (function () {
 
-const { elements } = global.AppDom;
-const { state } = global.AppState;
-const { showLinksInUrl, showDocumentInUrl } = global.AppLocation;
-const { setMeta } = global.AppShell;
-const { setStatus } = global.AppNotify;
-const { renderLinks, refreshLinks, showLinksLoading } = global.AppLinks;
-const { resetJumpNavigation } = global.AppJump;
-const { syncSearchInputState } = global.AppSearchPanel;
-const { updateActiveDocUI } = global.AppViewerHeader;
-const { syncModeUI, showLoadingState, showNoDocumentOpen } = global.AppDocs;
-const { renderDocList } = global.AppTree;
-const { openDocument, refreshDeletedDocs } = global.AppOpening;
-const { refreshDocs } = global.AppRefresh;
-const { pageEditActive } = global.AppPageBlocks;
-const { cancelPageEdit } = global.AppPageEdit;
+const { elements } = AppDom;
+const { state } = AppState;
+const { showLinksInUrl, showDocumentInUrl } = AppLocation;
+const { setMeta } = AppShell;
+const { setStatus } = AppNotify;
+const { renderLinks, refreshLinks, showLinksLoading } = AppLinks;
+const { resetJumpNavigation } = AppJump;
+const { syncSearchInputState } = AppSearchPanel;
+const { updateActiveDocUI } = AppViewerHeader;
+const { syncModeUI, showLoadingState, showNoDocumentOpen } = AppDocs;
+const { renderDocList } = AppTree;
+const { openDocument, refreshDeletedDocs } = AppOpening;
+const { refreshDocs } = AppRefresh;
+const { pageEditActive } = AppPageBlocks;
+const { cancelPageEdit } = AppPageEdit;
 
 /* A switch that has to wait says so.
  *
@@ -313,9 +314,9 @@ function bindPlaceSwitcher() {
   bindPlaceButton(elements.placeLinksBtn, "links");
 }
 
-global.AppPlaces = {
+return {
   setPlaceBusy, stashSearchQuery, restoreDocumentList, restoreDocumentView,
   rollbackPlace, goToPlace, switchViewMode, bindPlaceSwitcher
 };
 
-})(typeof window === "undefined" ? globalThis : window);
+})();

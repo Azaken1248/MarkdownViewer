@@ -9,13 +9,14 @@
  * of hiding an upward reach behind an alias.
  */
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { docName, docUrl } = global.AppText;
-  const { getFolderRecord } = global.AppLibrary;
-  const { requestJson } = global.AppApi;
-  const { notify } = global.AppNotify;
+/* exported AppInlineRename */
+var AppInlineRename = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { docName, docUrl } = AppText;
+  const { getFolderRecord } = AppLibrary;
+  const { requestJson } = AppApi;
+  const { notify } = AppNotify;
 
   // F2 edits the label in place rather than opening the editor, which is what
   // makes renaming feel like a filesystem instead of a document workflow.
@@ -75,7 +76,7 @@
   // Filenames here legitimately contain spaces, quotes and brackets, so match on
   // the dataset directly rather than building an attribute selector out of them.
   function findDocRow(file) {
-    for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+    for (const row of /** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-row-doc"))) {
       if (row.dataset.file === file) {
         return row;
       }
@@ -84,7 +85,7 @@
   }
 
   function findFolderRow(folderId) {
-    for (const row of elements.docList.querySelectorAll(".tree-row-folder")) {
+    for (const row of /** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-row-folder"))) {
       if (row.dataset.folderId === folderId) {
         return row;
       }
@@ -145,11 +146,11 @@
     });
   }
 
-  global.AppInlineRename = {
+  return {
     beginInlineEdit,
     findDocRow,
     findFolderRow,
     beginInlineRename,
     beginInlineFolderRename
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

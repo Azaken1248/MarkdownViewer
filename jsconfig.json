@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "allowJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "punycode": [
+        "./types/punycode.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "types/*.d.ts",
+    "server.js",
+    "lib/**/*.js",
+    "public/js/**/*.js",
+    "test/**/*.js",
+    "tools/**/*.js"
+  ]
+}

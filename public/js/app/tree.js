@@ -13,24 +13,25 @@
  * readable.
  */
 
-(function (global) {
+/* exported AppTree */
+var AppTree = (function () {
   // How many document rows each folder group renders before offering
   // "show more".
   const DOC_LIST_PAGE_SIZE = 50;
 
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { can } = global.AppApi;
-  const { docName, formatDate, formatBytes } = global.AppText;
-  const { getDocByFile, getFolderRecord, buildFolderTree, folderPathIds } = global.AppLibrary;
-  const { resolveTargetFiles, setSelection, handleRowSelection, updateSelectionMeta } = global.AppSelection;
-  const { closeSidebarOnMobile } = global.AppShell;
-  const { toggleFolderCollapse } = global.AppFolderCollapse;
-  const { openFolderModal } = global.AppFolderModal;
-  const { beginInlineRename, beginInlineFolderRename } = global.AppInlineRename;
-  const { cutFiles, pasteIntoFolder, moveFilesToFolder, moveFolderToParent } = global.AppClipboard;
-  const { deleteFolderById, deleteFiles } = global.AppDeletion;
-  const { openContextMenu, buildDocContextItems, buildFolderContextItems } = global.AppContextMenu;
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { can } = AppApi;
+  const { docName, formatDate, formatBytes } = AppText;
+  const { getDocByFile, getFolderRecord, buildFolderTree, folderPathIds } = AppLibrary;
+  const { resolveTargetFiles, setSelection, handleRowSelection, updateSelectionMeta } = AppSelection;
+  const { closeSidebarOnMobile } = AppShell;
+  const { toggleFolderCollapse } = AppFolderCollapse;
+  const { openFolderModal } = AppFolderModal;
+  const { beginInlineRename, beginInlineFolderRename } = AppInlineRename;
+  const { cutFiles, pasteIntoFolder, moveFilesToFolder, moveFolderToParent } = AppClipboard;
+  const { deleteFolderById, deleteFiles } = AppDeletion;
+  const { openContextMenu, buildDocContextItems, buildFolderContextItems } = AppContextMenu;
 
   function buildTreeAction(label, iconClass, handler, { danger = false, disabled = false } = {}) {
     const button = document.createElement("button");
@@ -483,7 +484,7 @@
    * browser's to keep and this only ever moves it.
    */
   function getVisibleTreeButtons() {
-    return [...elements.docList.querySelectorAll(".tree-row-btn")]
+    return [.../** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-row-btn"))]
       .filter((button) => button.offsetParent !== null);
   }
 
@@ -610,14 +611,14 @@
   // emptying the list collapsed the page height and threw the scroll position
   // back to the top.
   function updateActiveRowHighlight() {
-    for (const row of elements.docList.querySelectorAll(".tree-row-doc")) {
+    for (const row of /** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-row-doc"))) {
       const isActive = row.dataset.file === state.activeFile;
       row.classList.toggle("is-active", isActive);
       row.setAttribute("aria-current", isActive ? "true" : "false");
     }
   }
 
-  global.AppTree = {
+  return {
     updateActiveRowHighlight,
     getVisibleTreeButtons,
     moveTreeFocus,
@@ -628,4 +629,4 @@
     renderTreeNode,
     renderDocList
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

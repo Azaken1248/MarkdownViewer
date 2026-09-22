@@ -6,13 +6,14 @@
  * documents feel like the interface was fighting itself.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { requestJson } = global.AppApi;
-  const { docUrl } = global.AppText;
-  const { getDocByFile, getFolderLabel } = global.AppLibrary;
-  const { updateSelectionUI } = global.AppSelection;
-  const { notify } = global.AppNotify;
+/* exported AppClipboard */
+var AppClipboard = (function () {
+  const { state } = AppState;
+  const { requestJson } = AppApi;
+  const { docUrl } = AppText;
+  const { getDocByFile, getFolderLabel } = AppLibrary;
+  const { updateSelectionUI } = AppSelection;
+  const { notify } = AppNotify;
 
   function cutFiles(files) {
     const list = files.filter(Boolean);
@@ -110,10 +111,10 @@
     }
   }
 
-  global.AppClipboard = {
+  return {
     cutFiles,
     pasteIntoFolder,
     moveFilesToFolder,
     moveFolderToParent
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

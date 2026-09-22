@@ -5,13 +5,14 @@
  * the dialog so that the dialog is only about what is on the screen.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { requestJson } = global.AppApi;
-  const { elements } = global.AppDom;
-  const { docUrl } = global.AppText;
-  const { notify, setStatus } = global.AppNotify;
-  const { closeFolderModal } = global.AppFolderModal;
+/* exported AppFolderOps */
+var AppFolderOps = (function () {
+  const { state } = AppState;
+  const { requestJson } = AppApi;
+  const { elements } = AppDom;
+  const { docUrl } = AppText;
+  const { notify, setStatus } = AppNotify;
+  const { closeFolderModal } = AppFolderModal;
 
   async function createFolderOnServer(folderName, parentId = null) {
     return requestJson("/api/folders", {
@@ -99,10 +100,10 @@
     }
   }
 
-  global.AppFolderOps = {
+  return {
     createFolderOnServer,
     renameFolderOnServer,
     moveDocumentToFolder,
     handleFolderModalAction
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

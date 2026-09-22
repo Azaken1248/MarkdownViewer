@@ -14,7 +14,8 @@
  *   a markdown file.
  */
 
-(function (global) {
+/* exported NotebookRuntime */
+var NotebookRuntime = (function () {
   "use strict";
 
   const WORKER_URL = "/js/pyodide-worker.js";
@@ -47,7 +48,7 @@
       return worker;
     }
 
-    worker = new global.Worker(WORKER_URL);
+    worker = new window.Worker(WORKER_URL);
 
     worker.addEventListener("message", (event) => {
       const message = event.data || {};
@@ -97,12 +98,14 @@
   // still going and that Restart is the way out.
   const SLOW_CELL_MS = 20000;
 
-  function runCell(notebookId, code, { onSlow } = {}) {
+  /** @param {{ onSlow?: () => void }} [handlers] */
+  function runCell(notebookId, code, handlers = {}) {
+    const { onSlow } = handlers;
     const id = nextRunId++;
     const target = ensureWorker();
 
     return new Promise((resolve) => {
-      const slowTimer = global.setTimeout(() => {
+      const slowTimer = window.setTimeout(() => {
         try {
           onSlow?.();
         } catch (error) {
@@ -111,7 +114,7 @@
       }, SLOW_CELL_MS);
 
       pending.set(id, (message) => {
-        global.clearTimeout(slowTimer);
+        window.clearTimeout(slowTimer);
         resolve(message);
       });
 
@@ -154,7 +157,7 @@
     ensureWorker().postMessage({ type: "preload" });
   }
 
-  global.NotebookRuntime = {
+  return {
     runCell,
     restart,
     resetNamespace,
@@ -165,4 +168,4 @@
       return worker !== null;
     }
   };
-})(window);
+})();

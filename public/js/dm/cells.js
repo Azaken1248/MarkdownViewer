@@ -4,10 +4,11 @@
  * text arithmetic — splitting a label into rows and cells, and putting it back
  * together without losing an empty one.
  */
-(function (global) {
+/* exported DmCells */
+var DmCells = (function () {
   "use strict";
 
-  const { ROW_BREAK, ROW_SPLIT_RE } = global.DmGrammar;
+  const { ROW_BREAK, ROW_SPLIT_RE } = DmGrammar;
 
   function textRows(text) {
     const rows = String(text ?? "").split(ROW_SPLIT_RE).map((row) => row.trim());
@@ -120,6 +121,7 @@
     const rows = grid || [];
     const columns = columnsOf(rows);
 
+    /** @type {[number, number, string][]} */
     const kept = Object.entries(styles || {}).flatMap(([key, token]) => {
       const found = /^(\d+)\.(\d+)$/.exec(key);
       if (!found || !token) {
@@ -222,9 +224,9 @@
    * and once it has been, this is not consulted about that box again.
    */
 
-  global.DmCells = {
+  return {
     textRows, joinRows, textCells, joinCells, columnsOf, CELL_MARKS, CELL_SIZE, cellKey,
     readCellStyles, writeCellStyles, cellDeclarations, cellToken, resizeGrid, TEXT_SIZE,
     FONT_SIZE, fontScale
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

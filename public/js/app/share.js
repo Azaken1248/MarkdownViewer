@@ -5,14 +5,15 @@
 // exactly once — which is why the dialog says so, and why "create" on an
 // already-shared document is a rotation that invalidates the old link.
 
-(function (global) {
-  const { elements } = global.AppDom;
-  const { state } = global.AppState;
-  const { requestJson, can } = global.AppApi;
-  const { escapeHtml, docUrl } = global.AppText;
-  const { syncBodyLock } = global.AppShell;
-  const { notify, requestConfirmation } = global.AppNotify;
-  const { enterModalLayer, exitModalLayer } = global.AppModal;
+/* exported AppShare */
+var AppShare = (function () {
+  const { elements } = AppDom;
+  const { state } = AppState;
+  const { requestJson, can } = AppApi;
+  const { escapeHtml, docUrl } = AppText;
+  const { syncBodyLock } = AppShell;
+  const { notify, requestConfirmation } = AppNotify;
+  const { enterModalLayer, exitModalLayer } = AppModal;
 
   async function refreshShares() {
     if (!can("share:manage")) {
@@ -164,7 +165,7 @@
     delete elements.shareDocBtn.dataset.tip;
   }
 
-  global.AppShare = {
+  return {
     refreshShares,
     openShareModal,
     closeShareModal,
@@ -172,4 +173,4 @@
     revokeShareLink,
     updateShareButton
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

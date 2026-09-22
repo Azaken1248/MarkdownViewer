@@ -4,16 +4,17 @@
  * and nothing else. Anything outside that is refused rather than dropped, so a
  * diagram this cannot open is still exactly the diagram it was.
  */
-(function (global) {
+/* exported DmParse */
+var DmParse = (function () {
   "use strict";
 
-  const { EDGE_BY_NAME, EDGE_ORDER, EDGE_TEXT_FORMS, OPENERS } = global.DmShapes;
+  const { EDGE_BY_NAME, EDGE_ORDER, EDGE_TEXT_FORMS, OPENERS } = DmShapes;
   const {
     CLASSDEF_RE, CLASS_RE, EDGE_LINE_RE, END_RE, GROUP_LINE_RE, HEADER_RE, ID_RE,
     LAYER_LINE_RE, LAYOUT_HEAD_RE, LAYOUT_LINE_RE, STYLE_RE, SUBGRAPH_HEAD_RE, SUBGRAPH_RE,
     ANON_GROUP, readAttributes, refuse, unquoteAttribute, unquoteText
-  } = global.DmGrammar;
-  const { readDeclarations, nameAnonymousGroups, attachLayout, orderClasses, orderNodes } = global.DmDeclarations;
+  } = DmGrammar;
+  const { readDeclarations, nameAnonymousGroups, attachLayout, orderClasses, orderNodes } = DmDeclarations;
 
   function matchNode(line, pos) {
     const matched = line.slice(pos).match(ID_RE);
@@ -222,6 +223,7 @@
    * it. What it cannot account for it refuses, and the refusals are the safety
    * property — a diagram opened half-read is a diagram written back half-gone.
    */
+  /** @param {string} source @returns {FlowchartModel | RefusedModel} */
   function parseFlowchart(source) {
     const text = String(source == null ? "" : source);
     const nodes = new Map();
@@ -488,6 +490,7 @@
       node.classes = [...(node.classes || []), wears.name];
     }
 
+    /** @type {FlowchartModel} */
     const model = {
       ok: true,
       direction,
@@ -516,7 +519,7 @@
   // `fill:#f00,stroke:#333` — the value half of a classDef or a style, which
   // are the same list written after different words.
 
-  global.DmParse = {
+  return {
     matchNode, matchLink, parseChain, parseFlowchart
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();

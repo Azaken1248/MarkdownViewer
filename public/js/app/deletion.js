@@ -6,13 +6,14 @@
  * each item.
  */
 
-(function (global) {
-  const { state } = global.AppState;
-  const { requestJson } = global.AppApi;
-  const { docUrl } = global.AppText;
-  const { getFolderRecord, folderPathIds } = global.AppLibrary;
-  const { clearSelection } = global.AppSelection;
-  const { notify, requestConfirmation } = global.AppNotify;
+/* exported AppDeletion */
+var AppDeletion = (function () {
+  const { state } = AppState;
+  const { requestJson } = AppApi;
+  const { docUrl } = AppText;
+  const { getFolderRecord, folderPathIds } = AppLibrary;
+  const { clearSelection } = AppSelection;
+  const { notify, requestConfirmation } = AppNotify;
 
   async function deleteFolderById(folderId) {
     const folder = getFolderRecord(folderId);
@@ -103,8 +104,8 @@
     }
   }
 
-  global.AppDeletion = {
+  return {
     deleteFolderById,
     deleteFiles
   };
-})(typeof window === "undefined" ? globalThis : window);
+})();
