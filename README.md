@@ -1593,7 +1593,37 @@ one filename — several of them assert things a human cannot check by looking,
 like WCAG contrast ratios and rendered diagram box sizes.
 
 Run one at a time with `npm test theme`, or a file directly with
-`node test/theme.test.js`.
+`node test/theme.test.js`. The runner starts several at once — they are
+separate processes that share nothing, and each one that needs a server starts
+its own on a free port against its own temporary directory — holding each
+suite's output until it finishes so the log reads the same as it would have
+one at a time. That took the whole run from about 225s to about 85s.
+`npm test -- --serial` turns it off.
+
+`npm test dom -- --only "recycle bin"` prints only the checks whose label
+matches. Everything still runs: most of these suites are one long session
+rather than a set of independent cases — a check three hundred lines in stands
+on what the ones before it left on the page — so running a third of one would
+be running something else. What the flag does is hide the passing lines that
+are not the one being worked on; a failure always prints.
+
+Because several suites run at once, every wait in them has a ceiling that
+means *this is never going to happen* rather than *this machine is slow*: a
+page that boots in 200ms on an idle machine can take a few seconds with three
+other jsdom suites between it and a core, and a tight deadline there catches
+nothing a loose one misses.
+
+Every suite gets its `check()` from `test/helpers/check.js` rather than
+declaring one. The line it prints is the same as it always was; what it does
+behind that line is a structural comparison rather than `JSON.stringify` on
+both sides, because that equality was wrong in four ways worth naming: key
+order counted, `undefined` disappeared (so `{parent: undefined}` equalled `{}`,
+in a file format where `delete node.parent` and `node.parent = null` mean
+different things), every `Map` and `Set` flattened to `{}`, and `NaN` became
+`null`. It also compares across realms, which the plain `assert.deepStrictEqual`
+would not: the DOM suites hold arrays built inside a jsdom window against
+arrays built outside one, and those have different prototypes for the same
+shape.
 
 ### What the suite never reaches
 

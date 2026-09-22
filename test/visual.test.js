@@ -16,6 +16,7 @@ const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
 const { modelScriptPaths, drawScriptPaths, styleSource } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 
 // The modules are plain scripts whose top-level `var` is the namespace, the
 // same way the browser loads them. require() would wrap each in a function
@@ -41,12 +42,7 @@ for (const file of drawScriptPaths(ROOT)) {
 }
 const DD = globalThis.DiagramDraw;
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("VISUAL");
 
 function roundTrips(markdown) {
   return VE.joinBlocks(VE.splitBlocks(markdown)) === markdown;
@@ -93,5 +89,4 @@ require("./visual/boxes.js")(ctx);
 require("./visual/measuring.js")(ctx);
 
 
-console.log(failures === 0 ? "\nALL VISUAL CHECKS PASSED" : `\n${failures} VISUAL CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

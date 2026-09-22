@@ -18,13 +18,9 @@ const preview = require("../lib/link-preview");
 const { LinkStore, canonicalKey, normalizeGroups, normalizeIcon, MAX_GROUPS_PER_LINK, MAX_GROUP_LENGTH } = require("../lib/links");
 const { makeClient } = require("./helpers/client");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("LINK");
 
 function refuses(label, url) {
   let message = null;
@@ -456,8 +452,7 @@ function refuses(label, url) {
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL LINK CHECKS PASSED" : `\n${failures} LINK CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -13,6 +13,7 @@
 const fs = require("fs");
 const path = require("path");
 const { appSource, coreSource, styleSource } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const index = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
@@ -21,12 +22,7 @@ const core = coreSource(PUBLIC_DIR);
 const css = styleSource(PUBLIC_DIR);
 const app = appSource(PUBLIC_DIR);
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("LOADING");
 
 // Comments in these files name the very libraries being checked for, so tags
 // have to be read as tags rather than by searching for the string.
@@ -68,7 +64,7 @@ const DEFERRED = ["mermaid", "katex", "highlight.js/", "svg-pan-zoom"];
 for (const [name, html] of [["index.html", index], ["share.html", share]]) {
   for (const library of DEFERRED) {
     const eager = remoteTags(html).some((entry) => entry.url.includes(library));
-    if (eager) failures++;
+    if (eager) fail();
     console.log(`  ${eager ? "FAIL" : "PASS"}  ${name} does not load ${library} in the head`);
   }
 }
@@ -83,7 +79,7 @@ const lazyAssets = [...core.matchAll(/(?:js|css): "(https:\/\/[^"]+)",\s*\n\s*in
 
 for (const library of DEFERRED) {
   const declared = lazyAssets.some((asset) => asset.url.includes(library));
-  if (!declared) failures++;
+  if (!declared) fail();
   console.log(`  ${declared ? "PASS" : "FAIL"}  ${library} is declared as a lazy asset`);
 }
 
@@ -254,5 +250,4 @@ console.log("=== the app's own assets go out compressed ===");
     MIN_COMPRESS_BYTES, 512);
 }
 
-console.log(failures === 0 ? "\nALL LOADING CHECKS PASSED" : `\n${failures} LOADING CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

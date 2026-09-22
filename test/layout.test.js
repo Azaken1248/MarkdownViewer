@@ -3,17 +3,13 @@
 const fs = require("fs");
 const path = require("path");
 const { appSource, styleSource } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
 const css = styleSource(PUBLIC_DIR);
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("LAYOUT");
 
 // Pull a rule body out by selector, from the base sheet or a media block.
 function rule(selector, source = css) {
@@ -145,7 +141,7 @@ console.log("=== the hidden attribute actually hides ===");
     el.hidden = true;
     const hidden = probe.window.getComputedStyle(el).display;
     const ok = shown !== "none" && hidden === "none";
-    if (!ok) failures++;
+    if (!ok) fail();
     console.log(`  ${ok ? "PASS" : "FAIL"}  .${el.className}: ${shown} -> ${hidden}`);
   }
 
@@ -312,5 +308,4 @@ console.log("=== editing the document does not move the document ===");
     /top:\s*var\(--page-edit-top/.test(bar), true);
 }
 
-console.log(failures === 0 ? "\nALL LAYOUT CHECKS PASSED" : `\n${failures} LAYOUT CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

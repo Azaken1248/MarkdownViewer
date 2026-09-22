@@ -109,7 +109,7 @@ module.exports = async (ctx) => {
     const { window, problems, sent } = view;
     const doc = window.document;
 
-    await waitUntil(() => doc.getElementById("shareContent").classList.contains("visible"), 8000);
+    await waitUntil(() => doc.getElementById("shareContent").classList.contains("visible"));
 
     check("the content is shown", doc.getElementById("shareContent").classList.contains("visible"), true);
     check("...and the spinner is not", doc.getElementById("shareLoading").hidden, true);
@@ -146,7 +146,7 @@ module.exports = async (ctx) => {
     check("(the page starts on a theme)", ["dark", "light", "auto"].includes(before), true);
 
     toggle.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await waitUntil(() => root.dataset.themePreference !== before, 4000);
+    await waitUntil(() => root.dataset.themePreference !== before);
     const after = root.dataset.themePreference;
     check("a click moves it along the cycle", after !== before, true);
     check("...and the resolved theme is one of the two real ones",
@@ -164,7 +164,7 @@ module.exports = async (ctx) => {
 
     const { window, problems } = shareWindow(`${ORIGIN}/s/${token}`);
     const doc = window.document;
-    await waitUntil(() => !doc.getElementById("shareError").hidden, 8000);
+    await waitUntil(() => !doc.getElementById("shareError").hidden);
 
     check("the error panel is shown", doc.getElementById("shareError").hidden, false);
     check("...saying the link is not valid", doc.getElementById("shareErrorTitle").textContent,
@@ -179,7 +179,7 @@ module.exports = async (ctx) => {
   {
     const { window, sent } = shareWindow(`${ORIGIN}/s/`);
     const doc = window.document;
-    await waitUntil(() => !doc.getElementById("shareError").hidden, 8000);
+    await waitUntil(() => !doc.getElementById("shareError").hidden);
 
     check("it says what is wrong with the address",
       doc.getElementById("shareErrorMessage").textContent, "The address is missing its share token.");

@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { appSource, styleSource } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 
@@ -10,12 +11,7 @@ const css = styleSource(PUBLIC_DIR);
 const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const js = appSource(PUBLIC_DIR);
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("MOBILE + PALETTE");
 
 // Brace-match a media block out of the stylesheet, so each tier can be read
 // on its own rather than by hoping a regex stops in the right place.
@@ -570,7 +566,7 @@ const pairs = [
 for (const [label, fg, bg, min] of pairs) {
   const r = ratio(vars[fg], vars[bg]);
   const ok = r >= min;
-  if (!ok) failures++;
+  if (!ok) fail();
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}: ${r.toFixed(2)}:1 (min ${min})`);
 }
 
@@ -580,5 +576,4 @@ console.log(`  canvas ${vars["--canvas"]} luminance ${canvasLum.toFixed(4)}`);
 check("canvas is darker than the previous #0b0f12", canvasLum < luminance(hex("#0b0f12")), true);
 check("accent is a light pastel, not a mid teal", luminance(hex(vars["--accent"])) > luminance(hex("#4fa8a0")), true);
 
-console.log(failures === 0 ? "\nALL MOBILE + PALETTE CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

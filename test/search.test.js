@@ -18,13 +18,9 @@ const path = require("path");
 const db = require("../lib/db");
 const { createDocumentCache } = require("../lib/docs/content");
 const { createSearch, ftsMatchExpression, FTS_MIN_QUERY } = require("../lib/docs/search");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("SEARCH");
 
 const LIBRARY = {
   "deploy.md": { title: "Deployment", folderName: "Ops", body: "# Deployment\n\nWe deploy with Kubernetes on Fridays.\nRollback is one command.\n" },
@@ -155,8 +151,7 @@ const order = (result) => result.matches.map((match) => match.file);
   }
 
   fs.rmSync(dir, { recursive: true, force: true });
-  console.log(failures === 0 ? "\nALL SEARCH CHECKS PASSED" : `\n${failures} SEARCH CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -11,13 +11,9 @@
 
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD } = require("./helpers/server");
 const { CSP_DIRECTIVES, PERMISSIONS_POLICY, HSTS } = require("../lib/http/headers");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("HEADER");
 
 const EXPECTED = {
   "content-security-policy": CSP_DIRECTIVES,
@@ -123,8 +119,7 @@ function carried(headers) {
     await plain.stop();
   }
 
-  console.log(failures === 0 ? "\nALL HEADER CHECKS PASSED" : `\n${failures} HEADER CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

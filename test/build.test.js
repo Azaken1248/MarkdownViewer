@@ -20,16 +20,12 @@ const { TextEncoder, TextDecoder } = require("util");
 const { clientScriptPaths, loadScript } = require("./app-source.js");
 const { build, deferredScripts, ownStylesheets, MIN_SCRIPTS } = require("../tools/build.js");
 const { createBundles } = require("../lib/http/bundles.js");
+const { createChecker } = require("./helpers/check.js");
 
 const ROOT = path.join(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT, "public");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("BUILD");
 
 // A window with just enough of a browser for these scripts to load into. They
 // only reach for the DOM at load; what they do afterwards is the DOM suite's
@@ -169,8 +165,7 @@ function surfaceOf(window) {
     }
   }
 
-  console.log(failures === 0 ? "\nALL BUILD CHECKS PASSED" : `\n${failures} BUILD CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

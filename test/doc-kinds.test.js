@@ -10,16 +10,12 @@
 const fs = require("fs");
 const path = require("path");
 const { appScriptPaths, coreScriptPaths } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 
 const ROOT = path.join(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT, "public");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("DOC-KINDS");
 
 const DocKinds = require("../public/js/doc-kinds.js");
 const paths = require("../lib/docs/paths.js");
@@ -103,5 +99,4 @@ console.log("=== nobody spells the list out a second time ===");
   check("...and no route types it out", typed, []);
 }
 
-console.log(failures === 0 ? "\nALL DOC-KINDS CHECKS PASSED" : `\n${failures} DOC-KINDS CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

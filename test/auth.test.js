@@ -11,16 +11,9 @@ const { makeClient } = require("./helpers/client");
 const { startTestServer } = require("./helpers/server");
 const passwords = require("../lib/passwords");
 const excerpt = require("../lib/excerpt");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) {
-    failures++;
-  }
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("AUTH");
 
 // A tiny cookie-aware HTTP client, so the tests exercise the same flow a
 // browser would: the session arrives as Set-Cookie and is echoed back.
@@ -36,8 +29,7 @@ function check(label, actual, expected) {
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL AUTH CHECKS PASSED" : `\n${failures} AUTH CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -62,7 +54,7 @@ async function run(server) {
     check, server, anon, admin, ALPHA, fsp, path, makeClient, passwords, excerpt,
     // A few checks below print their own line for each case in a loop, so they
     // need to say a failure happened without going through check().
-    fail: () => { failures += 1; }
+    fail
   };
 
   await require("./auth/sessions.js")(ctx);

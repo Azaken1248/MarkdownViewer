@@ -3,6 +3,7 @@
 // zero. Also checks the diagram palette is actually distinguishable.
 const fs = require("fs");
 const path = require("path");
+const { createChecker } = require("./helpers/check.js");
 const {
   appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths, styleSource, loadScript
 } = require("./app-source.js");
@@ -22,12 +23,7 @@ const shareJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "share.js"), "utf8")
 const indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("DIAGRAM");
 
 function rule(selector) {
   const re = new RegExp(`(^|[},])\\s*${selector.replace(/[.#*:()\-[\]]/g, "\\$&")}\\s*\\{([^}]*)\\}`, "m");
@@ -81,7 +77,7 @@ for (const [label, w, h] of shapes) {
   const scale = boxW / (w + chrome);
   // It must be visible, fit the window, and not be blown up absurdly.
   const ok = boxH > 0 && boxH <= maxH && boxW <= paneWidth && scale <= 3;
-  if (!ok) failures++;
+  if (!ok) fail();
   const note = natural > maxH ? "  (clamped, pan/zoom to explore)"
     : scale > 1.05 ? `  (scaled up ${scale.toFixed(1)}x)`
       : scale < 0.95 ? `  (scaled down ${scale.toFixed(2)}x)` : "";
@@ -162,7 +158,7 @@ for (const themeName of ["dark", "light"]) {
   for (const [label, fg, bg, min] of pairs) {
     const r = ratio(fg, bg);
     const ok = r >= min;
-    if (!ok) failures++;
+    if (!ok) fail();
     console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}: ${r.toFixed(2)}:1 (min ${min})`);
   }
 }
@@ -501,8 +497,7 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
     check("a laid-out diagram we cannot read is handed to the engine",
       drawn.slice(beforeHandover), [beyond]);
 
-    console.log(failures === 0 ? "\nALL DIAGRAM CHECKS PASSED" : `\n${failures} DIAGRAM CHECK(S) FAILED`);
-    process.exit(failures === 0 ? 0 : 1);
+    process.exit(finish());
   })().catch((error) => {
     // Without this a throw in here would end the process quietly with a zero
     // status, which is a suite that passes by not running.

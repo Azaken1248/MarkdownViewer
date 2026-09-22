@@ -366,7 +366,7 @@ module.exports = async (ctx) => {
 
     // The whole point of the address: the browser's own back button undoes it.
     window.history.back();
-    await waitUntil(() => where() === "docs", 8000);
+    await waitUntil(() => where() === "docs");
     check("back comes out of the links", where(), "docs");
     check("...and the pane goes with it", doc.getElementById("linksPane").hidden, true);
 
@@ -460,11 +460,11 @@ module.exports = async (ctx) => {
     // memory — restoring what the links pane left would put deleted documents
     // under a heading that says Files.
     await window.eval('window.__t.switchViewMode("recycle")');
-    await waitUntil(() => where() === "recycle", 8000);
+    await waitUntil(() => where() === "recycle");
     check("(the recycle bin is open)", where(), "recycle");
 
     await window.eval('window.__t.goToPlace("docs")');
-    await waitUntil(() => where() === "docs" && window.eval("window.__t.state.filteredDocs.length") > 0, 8000);
+    await waitUntil(() => where() === "docs" && window.eval("window.__t.state.filteredDocs.length") > 0);
     check("pressing Files from the recycle bin reloads the library", where(), "docs");
     check("...with live documents in the list, not deleted ones",
       window.eval(`window.__t.state.filteredDocs.every((entry) =>

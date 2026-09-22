@@ -12,13 +12,9 @@
  */
 
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("GRAPHQL");
 
 (async () => {
   const server = await startTestServer();
@@ -133,8 +129,7 @@ function check(label, actual, expected) {
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL GRAPHQL CHECKS PASSED" : `\n${failures} GRAPHQL CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

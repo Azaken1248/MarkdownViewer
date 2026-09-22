@@ -14,15 +14,11 @@ const {
   appSource, coreSource, coreScriptPaths, styleSource, loadScript
 } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
+const { createChecker } = require("./helpers/check.js");
 
 const ROOT = path.join(__dirname, "..", "public");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("CODE");
 
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 const css = styleSource(ROOT);
@@ -234,8 +230,7 @@ console.log("=== clicking one puts the code on the clipboard ===");
   runLiveHighlightChecks();
   runSourceChecks();
 
-  console.log(failures === 0 ? "\nALL CODE CHECKS PASSED" : `\n${failures} CODE CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

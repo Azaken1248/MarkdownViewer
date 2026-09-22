@@ -13,25 +13,22 @@ const {
 const http = require("http");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
 const ROOT = path.join(__dirname, "..", "public");
 
 // The whole client, for the checks that read it as text rather than run it.
 const clientSource = appSource(ROOT);
 
-let failures = 0;
+const { check, finish } = createChecker("DOM");
 const consoleErrors = [];
-
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
 
 // A fixed sleep long enough for a slow machine is a slow suite everywhere else,
 // and a fixed sleep short enough to be quick is a flake. Wait for the thing
 // itself, and let the check that follows say what it found if it never happens.
-async function waitUntil(condition, timeout = 5000) {
+// The same reasoning as the diagram page's waitFor: the ceiling is for
+// "never", not for "slow", and suites now run several at a time.
+async function waitUntil(condition, timeout = 15000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (condition()) return true;
@@ -72,8 +69,7 @@ function get(pathname) {
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL DOM CHECKS PASSED" : `\n${failures} DOM CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

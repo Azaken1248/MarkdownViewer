@@ -16,18 +16,14 @@ const {
 } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
 const ROOT = path.join(__dirname, "..", "public");
 const pageHtml = fs.readFileSync(path.join(ROOT, "diagram.html"), "utf8");
 // The shell routes, which is where the reserved prefixes live.
 const pagesSource = fs.readFileSync(path.join(__dirname, "..", "lib", "routes", "pages.js"), "utf8");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("DIAGRAM PAGE");
 
 const DIAGRAM_DOC = [
   "# Deployment",
@@ -133,7 +129,17 @@ async function saveAndWait(page) {
     `the save never finished: the page says "${page.document.getElementById("diagramStatus").textContent}"`);
 }
 
-async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 4000) {
+/* Wait for something to have happened, with a ceiling that means "this is
+ * never going to happen" rather than "this machine is slow".
+ *
+ * Fifteen seconds is far longer than any of these take (the whole suite is
+ * about twenty), and it has to be: the runner starts several suites at once,
+ * so a page that boots in 200ms on an idle machine can take a few seconds when
+ * three other jsdom suites are between it and a core. A tight ceiling here
+ * does not catch anything a loose one misses — the loop returns the moment the
+ * condition holds — it only turns a busy machine into a failing run.
+ */
+async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 15000) {
   const started = Date.now();
   while (!done()) {
     if (Date.now() - started > timeoutMs) {
@@ -175,8 +181,7 @@ async function waitFor(window, done, what = "the page never finished starting up
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL DIAGRAM PAGE CHECKS PASSED" : `\n${failures} DIAGRAM PAGE CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

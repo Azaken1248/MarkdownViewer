@@ -4,6 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const { appSource, styleSource } = require("./app-source.js");
+const { createChecker } = require("./helpers/check.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const css = styleSource(PUBLIC_DIR);
@@ -14,12 +15,7 @@ const diagramHtml = fs.readFileSync(path.join(PUBLIC_DIR, "diagram.html"), "utf8
 const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 const errorHtml = fs.readFileSync(path.join(PUBLIC_DIR, "error.html"), "utf8");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, fail, finish } = createChecker("THEME");
 
 function tokens(selector) {
   const re = new RegExp(`${selector.replace(/[[\]"=:.]/g, "\\$&")}\\s*\\{([\\s\\S]*?)\\n\\}`);
@@ -114,7 +110,7 @@ for (const [name, T] of [["dark", dark], ["light", light]]) {
   for (const [label, fg, bg, min] of PAIRS) {
     const r = ratio(fg, bg, T);
     const ok = r >= min;
-    if (!ok) failures++;
+    if (!ok) fail();
     console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}: ${r.toFixed(2)}:1 (min ${min})`);
   }
 }
@@ -184,13 +180,13 @@ for (const sel of [".tree-action", ".icon-btn", ".icon-btn.icon-btn-sm", ".searc
   // A rule that has been renamed or deleted is a target that no longer meets
   // anything, and should read as a failed check rather than as a crashed suite.
   if (!s) {
-    failures++;
+    fail();
     console.log(`  FAIL  ${sel}: no rule found`);
     continue;
   }
   const smallest = Math.min(s.w ?? 999, s.h ?? 999);
   const ok = smallest >= 24;
-  if (!ok) failures++;
+  if (!ok) fail();
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${sel}: ${s.w ?? "auto"}x${s.h ?? "auto"}px`);
 }
 
@@ -199,7 +195,7 @@ const print = css.slice(css.indexOf("@media print"));
 check("a print block exists", css.includes("@media print"), true);
 for (const chrome of [".app-header", ".sidebar", ".viewer-toolbar", ".mobile-dock", ".supersearch-panel", ".toast-region", ".tooltip", ".match-nav", ".modal", ".context-menu"]) {
   const hidden = new RegExp(`\\${chrome.replace(".", ".")}[,\\s]`).test(print.split("display: none")[0]);
-  if (!hidden) failures++;
+  if (!hidden) fail();
   console.log(`  ${hidden ? "PASS" : "FAIL"}  ${chrome} is not printed`);
 }
 // The fixed shell is what would otherwise print exactly one sheet.
@@ -215,5 +211,4 @@ check("diagrams drop their screen aspect box", /aspect-ratio: auto !important/.t
 check("pan/zoom chrome is not printed", /\.svg-pan-zoom-control \{\s*display: none/.test(print), true);
 check("page margins are set", /@page \{/.test(print), true);
 
-console.log(failures === 0 ? "\nALL THEME CHECKS PASSED" : `\n${failures} THEME CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(finish());

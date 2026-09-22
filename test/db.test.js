@@ -17,13 +17,9 @@ const { ShareStore } = require("../lib/shares");
 const { LinkStore } = require("../lib/links");
 const { AuthStore } = require("../lib/auth");
 const { createOrganizerFile } = require("../lib/docs/organizer");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("DB");
 
 const PER_PROCESS = 60;
 const TAGS = ["alpha", "beta", "gamma"];
@@ -218,8 +214,7 @@ function runChild(dataDir, tag) {
     }
   }
 
-  console.log(failures === 0 ? "\nALL DB CHECKS PASSED" : `\n${failures} DB CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -17,13 +17,9 @@ const path = require("path");
 const fs = require("fs");
 const { makeClient } = require("./helpers/client");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("ASSET");
 
 // A real PNG, small enough to write out by hand: an 8-byte signature and an
 // IHDR. Nothing parses it, but "actual image bytes" beats "the word png".
@@ -254,6 +250,5 @@ const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("he
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL ASSET CHECKS PASSED" : `\n${failures} ASSET CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })();

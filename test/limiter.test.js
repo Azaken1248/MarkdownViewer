@@ -10,13 +10,9 @@
 
 const { createLimiter, bySession, byAddress, isRead } = require("../lib/http/limiter");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
+const { createChecker } = require("./helpers/check.js");
 
-let failures = 0;
-function check(label, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
-}
+const { check, finish } = createChecker("LIMITER");
 
 console.log("=== a window is a window ===");
 {
@@ -125,8 +121,7 @@ console.log("=== who is who ===");
     await server.stop();
   }
 
-  console.log(failures === 0 ? "\nALL LIMITER CHECKS PASSED" : `\n${failures} LIMITER CHECK(S) FAILED`);
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(finish());
 })().catch((error) => {
   console.error(error);
   process.exit(1);

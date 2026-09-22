@@ -1,13 +1,29 @@
-// Test runner. Each suite is a standalone script that prints its own checks and
-// exits non-zero on failure, so any one of them can be run directly:
-//
-//   node test/theme.test.js
-//
-// This runs them all and reports which failed.
+/* Test runner. Each suite is a standalone script that prints its own checks and
+ * exits non-zero on failure, so any one of them can be run directly:
+ *
+ *   node test/theme.test.js
+ *
+ * This runs them all and reports which failed.
+ *
+ *   npm test                       every suite
+ *   npm test dom                   one of them
+ *   npm test dom -- --only "bin"   print only the checks whose label matches
+ *   npm test -- --serial           one at a time, in the order listed below
+ *
+ * Several at once, because they are separate processes that share nothing: a
+ * suite that needs a server starts its own on a free port, against its own
+ * temporary state directory. The two longest take about a minute each, and run
+ * one after another that was most of the wall clock. Each suite's output is
+ * held until it finishes and then printed whole, so the log reads the same as
+ * it always did rather than as several suites interleaved.
+ */
 
 const path = require("path");
-const { spawnSync } = require("child_process");
+const os = require("os");
+const { spawn } = require("child_process");
 
+/** @type {[string, string, string][]} Each suite: what to call it, the file it
+ * is, and the line the runner prints above its output. */
 const SUITES = [
   ["layout", "layout.test.js", "Shell geometry, scroll ownership and the z-index scale"],
   ["mobile", "mobile.test.js", "Drawer behaviour, touch targets and the dark palette"],
@@ -32,7 +48,18 @@ const SUITES = [
   ["diagram-page", "diagram-page.test.js", "The diagram editor page, its address and the document handoff"]
 ];
 
-const only = process.argv[2];
+const args = process.argv.slice(2);
+const serial = args.includes("--serial");
+const only = args.find((arg) => !arg.startsWith("-"));
+
+/* `npm test dom -- --only "the bin"` narrows what is printed to the checks
+ * whose label matches, which is what to reach for when a suite prints five
+ * hundred lines and one of them is the one being worked on. Everything still
+ * runs: these suites are sessions, not independent cases, and a check three
+ * hundred lines in stands on what the ones before it left behind.
+ */
+const onlyAt = args.indexOf("--only");
+const onlyChecks = onlyAt >= 0 ? args[onlyAt + 1] : "";
 const selected = only ? SUITES.filter(([name]) => name === only) : SUITES;
 
 if (selected.length === 0) {
@@ -40,51 +67,103 @@ if (selected.length === 0) {
   process.exit(1);
 }
 
-const failed = [];
-const started = Date.now();
+/* How many at once.
+ *
+ * Most of these suites are waiting on a server they started rather than on a
+ * core, so one per core is a floor and not a ceiling — but a machine with two
+ * cores running six jsdom suites at once is a machine where a suite waiting on
+ * a real timeout starts to look flaky. So: cores, within reason.
+ */
+const LANES = serial ? 1 : Math.max(2, Math.min(6, os.cpus().length));
 
-for (const [name, file, description] of selected) {
-  console.log(`\n${"=".repeat(72)}`);
-  console.log(`${name}  —  ${description}`);
-  console.log("=".repeat(72));
+/* A suite killed by this clock looks exactly like a suite whose checks failed
+ * — no status, no output of its own, and a runner that says only which it was.
+ * So it says which it was, below.
+ *
+ * Generously long, because an hour was once spent looking for a broken check
+ * that was only a slow machine. The two longest suites take about a minute
+ * here, so this is a runner five times slower than this one before anything is
+ * cut off.
+ */
+const SUITE_TIMEOUT_MS = 300000;
 
-  const began = Date.now();
-  const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
-    stdio: "inherit",
-    /* The DOM suite spawns a server; give it room on a cold CI runner.
-     *
-     * Generously, because a suite killed by this clock reports as a failing
-     * suite and there is nothing in the output to say which it was — an hour
-     * was spent looking for a broken check that was only a slow machine. The
-     * two longest suites take about a minute here, so this is a runner five
-     * times slower than this one before anything is cut off.
-     */
-    timeout: 300000
+function runSuite([name, file, description]) {
+  return new Promise((resolve) => {
+    const began = Date.now();
+    const chunks = [];
+    const child = spawn(process.execPath, [path.join(__dirname, file)], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: onlyChecks ? { ...process.env, TEST_ONLY: onlyChecks } : process.env
+    });
+
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => chunks.push(chunk));
+
+    const timer = setTimeout(() => child.kill("SIGKILL"), SUITE_TIMEOUT_MS);
+    let failure = null;
+
+    child.on("error", (error) => {
+      failure = `could not be started: ${error.message}`;
+    });
+
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      const seconds = ((Date.now() - began) / 1000).toFixed(1);
+      const cutOff = status === null || signal !== null;
+
+      const lines = [
+        `\n${"=".repeat(72)}`,
+        `${name}  —  ${description}  (${seconds}s)`,
+        "=".repeat(72),
+        Buffer.concat(chunks).toString().replace(/\n$/, "")
+      ];
+
+      if (cutOff) {
+        lines.push(`\n${name} was cut off after ${seconds}s — ${signal || "no exit status"}. `
+          + "This is the runner's own clock, not a failing check.");
+      } else if (failure) {
+        lines.push(`\n${name} ${failure}`);
+      }
+
+      console.log(lines.join("\n"));
+      resolve(status === 0 && !failure);
+    });
+  });
+}
+
+(async () => {
+  const started = Date.now();
+  const queue = [...selected];
+  const failed = [];
+
+  // One worker per lane, each taking the next suite off the queue. The longest
+  // suites are last in the list, which is the wrong order for this, so the
+  // queue is walked from both ends: a lane that frees up early picks up a long
+  // one rather than leaving it until there is nothing to overlap it with.
+  const lanes = Array.from({ length: Math.min(LANES, queue.length) }, async (_, lane) => {
+    while (queue.length > 0) {
+      const suite = lane % 2 === 0 ? queue.pop() : queue.shift();
+      if (!(await runSuite(suite))) {
+        failed.push(suite[0]);
+      }
+    }
   });
 
-  if (result.status !== 0) {
-    /* A suite killed by the clock above looks exactly like a suite whose
-     * checks failed — no status, no output of its own, and a runner that says
-     * only which one it was. So it says which it was.
-     */
-    if (result.status === null) {
-      console.log(`\n${name} was cut off after `
-        + `${((Date.now() - began) / 1000).toFixed(1)}s — `
-        + `${result.signal || /** @type {NodeJS.ErrnoException} */ (result.error)?.code || "no exit status"}. `
-        + "This is the runner's own clock, not a failing check.");
-    }
+  await Promise.all(lanes);
 
-    failed.push(name);
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  console.log(`\n${"=".repeat(72)}`);
+
+  if (failed.length === 0) {
+    console.log(`All ${selected.length} suite(s) passed in ${seconds}s.`);
+    process.exit(0);
   }
-}
 
-const seconds = ((Date.now() - started) / 1000).toFixed(1);
-console.log(`\n${"=".repeat(72)}`);
+  // In the order they are listed, not the order they finished, so a failing
+  // run reads the same however the lanes happened to fall.
+  const order = SUITES.map(([name]) => name);
+  failed.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 
-if (failed.length === 0) {
-  console.log(`All ${selected.length} suite(s) passed in ${seconds}s.`);
-  process.exit(0);
-}
-
-console.log(`${failed.length} of ${selected.length} suite(s) FAILED in ${seconds}s: ${failed.join(", ")}`);
-process.exit(1);
+  console.log(`${failed.length} of ${selected.length} suite(s) FAILED in ${seconds}s: ${failed.join(", ")}`);
+  process.exit(1);
+})();
