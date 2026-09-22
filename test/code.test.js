@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appSource, coreSource, coreScriptPaths, styleSource
+  appSource, coreSource, coreScriptPaths, styleSource, loadScript
 } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 
@@ -67,7 +67,7 @@ window.hljs = {
 };
 
 for (const file of coreScriptPaths(ROOT)) {
-  window.eval(fs.readFileSync(file, "utf8"));
+  loadScript(window, file);
 }
 const Core = window.MarkdownCore;
 

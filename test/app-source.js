@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { pathToFileURL } = require("url");
 
 const DEFAULT_PUBLIC_DIR = path.join(__dirname, "..", "public");
 
@@ -101,7 +102,22 @@ function styleSource(publicDir = DEFAULT_PUBLIC_DIR) {
     .join("");
 }
 
+/* Evaluate one of the page's scripts in a jsdom window, as the file it is.
+ *
+ * window.eval of a string is a script with no name, and a script with no name
+ * is one the coverage map (`npm run coverage`) cannot put anywhere: V8 records
+ * what ran in it under an empty URL and c8 drops it. The sourceURL comment is
+ * the one thing a script can say about where it came from, so with it, what
+ * the DOM suites exercise in the client counts as exercised — which is most of
+ * what they do.
+ */
+function loadScript(window, file) {
+  const source = fs.readFileSync(file, "utf8");
+  window.eval(`${source}\n//# sourceURL=${pathToFileURL(file).href}`);
+}
+
 module.exports = {
+  loadScript,
   clientScriptPaths, appScriptPaths, appSource,
   coreScriptPaths, coreSource, modelScriptPaths, modelSource,
   drawScriptPaths, drawSource, styleSheetPaths, styleSource

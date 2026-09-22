@@ -17,7 +17,7 @@ const os = require("os");
 const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { TextEncoder, TextDecoder } = require("util");
-const { clientScriptPaths } = require("./app-source.js");
+const { clientScriptPaths, loadScript } = require("./app-source.js");
 const { build, deferredScripts, ownStylesheets, MIN_SCRIPTS } = require("../tools/build.js");
 const { createBundles } = require("../lib/http/bundles.js");
 
@@ -64,7 +64,7 @@ function emptyWindow() {
    * the build leaves out for that reason. It puts ThemeSwitch on the window,
    * and several of the modules below reach for it at load.
    */
-  dom.window.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "theme-boot.js"), "utf8"));
+  loadScript(dom.window, path.join(PUBLIC_DIR, "js", "theme-boot.js"));
 
   return { window: dom.window, problems };
 }
@@ -111,12 +111,12 @@ function surfaceOf(window) {
     // Loaded one at a time, the way the page loads them.
     const separate = emptyWindow();
     for (const file of manifest.index.replaces) {
-      separate.window.eval(fs.readFileSync(path.join(PUBLIC_DIR, file.slice(1)), "utf8"));
+      loadScript(separate.window, path.join(PUBLIC_DIR, file.slice(1)));
     }
 
     // And all at once, the way a visitor gets them.
     const bundled = emptyWindow();
-    bundled.window.eval(fs.readFileSync(path.join(scratch, "index.js"), "utf8"));
+    loadScript(bundled.window, path.join(scratch, "index.js"));
 
     check("the individual scripts load without error", separate.problems, []);
     check("the bundle loads without error", bundled.problems, []);

@@ -124,6 +124,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm start` | Run the server |
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
+| `npm run coverage` | The same suite under c8; the report of what it never reaches lands in `coverage/` |
 | `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
@@ -1592,6 +1593,36 @@ like WCAG contrast ratios and rendered diagram box sizes.
 
 Run one at a time with `npm test theme`, or a file directly with
 `node test/theme.test.js`.
+
+### What the suite never reaches
+
+```bash
+npm run coverage
+```
+
+The same suite under [c8](https://github.com/bcoe/c8), which reads the
+coverage V8 already collects — nothing is instrumented or rewritten, and the
+server the DOM suite spawns is counted too, because `NODE_V8_COVERAGE` is
+inherited by child processes. The report is `coverage/index.html`; CI runs it
+as its own job and attaches the report to the run.
+
+It is a map, not a target. There is no threshold and there will not be one: a
+percentage that has to go up is a percentage people write tests to raise, and
+the value here is the other thing — the list of what a suite this thorough
+still does not touch, which is where confidence exceeds evidence. On its first
+run the map said: every route under `/api/recycle-bin/*` and `/api/archive/*`
+that restores or erases (`lib/routes/recycle.js`), the single-file
+`/api/docs/upload` route, `restoreFromBin` in the store, and the whole of the
+share page's client (`public/js/share.js`, which no suite evaluates). The
+security-adjacent code — guards, sessions, the limiter, headers, the CSRF
+check — is in the nineties.
+
+Two things make the client's numbers mean something. `test/app-source.js`
+evaluates each script in jsdom with a `//# sourceURL` naming the file, so V8
+attributes what ran to `public/js/…` rather than to an anonymous eval. And the
+`all` option lists every file under `lib/`, `public/js/` and `server.js`
+whether or not anything loaded it, so a module nothing exercises shows as 0%
+instead of not showing.
 
 ---
 

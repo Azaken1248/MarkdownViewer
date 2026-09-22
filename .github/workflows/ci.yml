@@ -111,3 +111,51 @@ jobs:
           done
           echo "Server never became healthy"
           exit 1
+
+  # The same suite once more, under c8, for the map of what it never reaches.
+  # Its own job so the run above keeps its timings — instrumentation slows the
+  # pointer-gesture suites — and so a report is never the reason a build is
+  # red: there is no threshold, on purpose. The value is the list of unreached
+  # branches, not the percentage, and a percentage that must go up is a
+  # percentage people write tests to raise rather than tests that find things.
+  coverage:
+    runs-on: ubuntu-latest
+    needs: check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test under c8
+        run: |
+          set -o pipefail
+          npm run coverage 2>&1 | tee /tmp/coverage.log
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Coverage'
+            echo
+            echo 'A map, not a target: the files the suite never reaches are the'
+            echo 'places confidence exceeds evidence. The full report is the'
+            echo '`coverage-report` artifact on this run.'
+            echo
+            echo '```'
+            sed -n '/^=* Coverage summary/,/^=*$/p' /tmp/coverage.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14

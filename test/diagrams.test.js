@@ -4,7 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths, styleSource
+  appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths, styleSource, loadScript
 } = require("./app-source.js");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
@@ -285,14 +285,14 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
   // The model and the renderer are loaded the way the page loads them: plain
   // scripts, before markdown-core, hanging themselves off the window.
   for (const file of modelScriptPaths(PUBLIC_DIR)) {
-    win.eval(fs.readFileSync(file, "utf8"));
+    loadScript(win, file);
   }
-  win.eval(fs.readFileSync(path.join(PUBLIC_DIR, "js", "diagram-icons.js"), "utf8"));
+  loadScript(win, path.join(PUBLIC_DIR, "js", "diagram-icons.js"));
   for (const file of drawScriptPaths(PUBLIC_DIR)) {
-    win.eval(fs.readFileSync(file, "utf8"));
+    loadScript(win, file);
   }
   for (const file of coreScriptPaths(PUBLIC_DIR)) {
-    win.eval(fs.readFileSync(file, "utf8"));
+    loadScript(win, file);
   }
 
   const root = win.document.createElement("div");

@@ -7,7 +7,8 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appScriptPaths, appSource, coreSource, modelScriptPaths, drawScriptPaths, styleSource
+  appScriptPaths, appSource, coreSource, coreScriptPaths, modelScriptPaths, drawScriptPaths,
+  styleSource, loadScript
 } = require("./app-source.js");
 const http = require("http");
 const { JSDOM, VirtualConsole } = require("jsdom");
@@ -387,42 +388,43 @@ async function run(server) {
   // appended, so it has to stay separate from the rest.
   const appScripts = appScriptPaths(ROOT);
   const appModules = appScripts.slice(0, -1);
-  const appEntrySource = fs.readFileSync(appScripts[appScripts.length - 1], "utf8");
-  const engineSource = coreSource(ROOT);
+  const appEntry = appScripts[appScripts.length - 1];
   // markdown-core defines the render engine app.js delegates to; it has to be
   // in scope before app.js runs, exactly as the script tags on the page arrange.
-  window.eval(engineSource);
+  for (const file of coreScriptPaths(ROOT)) {
+    loadScript(window, file);
+  }
 
   // The theme, settled before anything paints — and the cycle app.js switches
   // it with, which lives here because the diagram page needs it too and loads
   // none of app.js.
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "theme-boot.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "theme-boot.js"));
 
   // Block splitting for the visual editor, loaded before app.js as the page
   // loads it.
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "visual-editor.js"));
 
   // And the flowchart model the diagram builder is made of, and the drawing it
   // puts on the screen, the same way.
   for (const file of modelScriptPaths(ROOT)) {
-    window.eval(fs.readFileSync(file, "utf8"));
+    loadScript(window, file);
   }
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-icons.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "diagram-icons.js"));
   for (const file of drawScriptPaths(ROOT)) {
-    window.eval(fs.readFileSync(file, "utf8"));
+    loadScript(window, file);
   }
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-editor.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "diagram-editor.js"));
 
   // The notebook Python controller, loaded before app.js the same way the page
   // loads it. jsdom has no Worker, but nothing here constructs one until a Run
   // button is pressed.
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "notebook-runtime.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "notebook-runtime.js"));
 
-  for (const file of appModules) window.eval(fs.readFileSync(file, "utf8"));
+  for (const file of appModules) loadScript(window, file);
 
   console.log("=== app.js evaluates against the real DOM ===");
   try {
-    window.eval(appEntrySource);
+    loadScript(window, appEntry);
 
     window.eval(`
       /* The handle the checks below drive the app through.

@@ -234,7 +234,9 @@ module.exports = [
       "node_modules/**",
       "public/docs/**",
       "deleted_markdowns/**",
-      "data/**"
+      "data/**",
+      // What `npm run coverage` writes: a report, with its own scripts in it.
+      "coverage/**"
     ]
   },
   {

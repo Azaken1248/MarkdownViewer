@@ -12,7 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appSource: readAppSource, modelScriptPaths, drawScriptPaths
+  appSource: readAppSource, modelScriptPaths, drawScriptPaths, loadScript
 } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
@@ -88,17 +88,17 @@ async function boot(dom, { cookie, origin }) {
   // theme-boot.js first, and for the same reason the page loads it in <head>:
   // it settles the theme before anything paints, and it is where the switch the
   // bar wires up lives.
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "theme-boot.js"), "utf8"));
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "theme-boot.js"));
+  loadScript(window, path.join(ROOT, "js", "visual-editor.js"));
   for (const file of modelScriptPaths(ROOT)) {
-    window.eval(fs.readFileSync(file, "utf8"));
+    loadScript(window, file);
   }
-  window.eval(fs.readFileSync(path.join(ROOT, "js", "diagram-icons.js"), "utf8"));
+  loadScript(window, path.join(ROOT, "js", "diagram-icons.js"));
   for (const file of drawScriptPaths(ROOT)) {
-    window.eval(fs.readFileSync(file, "utf8"));
+    loadScript(window, file);
   }
   for (const file of ["diagram-editor.js", "diagram-page.js"]) {
-    window.eval(fs.readFileSync(path.join(ROOT, "js", file), "utf8"));
+    loadScript(window, path.join(ROOT, "js", file));
   }
 
   // The page fetches before it draws, so waiting a fixed moment is waiting on a
@@ -219,7 +219,7 @@ async function csrfFor(server, cookie) {
 // computes it — through the module that owns the format, not by hand.
 function addressOf(markdown, which) {
   const dom = new JSDOM("", { runScripts: "outside-only" });
-  dom.window.eval(fs.readFileSync(path.join(ROOT, "js", "visual-editor.js"), "utf8"));
+  loadScript(dom.window, path.join(ROOT, "js", "visual-editor.js"));
   const VE = dom.window.VisualEditor;
   return VE.diagramAddress(VE.diagramFences(markdown)[which]);
 }

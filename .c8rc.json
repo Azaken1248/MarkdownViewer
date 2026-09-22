@@ -1,0 +1,8 @@
+{
+  "all": true,
+  "include": ["server.js", "lib/**/*.js", "public/js/**/*.js"],
+  "exclude": ["public/build/**"],
+  "reporter": ["text-summary", "html", "lcov"],
+  "reports-dir": "coverage",
+  "clean": true
+}
