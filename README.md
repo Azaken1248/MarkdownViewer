@@ -89,6 +89,32 @@ proof, and the error count had to be something a person could finish.
 The names that arrive from outside the source — the CDN libraries, the worker's
 own scope, `req.auth` — are declared in `types/globals.d.ts`.
 
+### How complicated a function may get
+
+ESLint warns — not errors — about a function that is too branchy (`complexity`
+15), too long (120 lines), too deeply nested (4) or takes too many arguments
+(5). That severity is deliberate: a long function is sometimes exactly right,
+and an error there is a rule to be argued with rather than advice to be read.
+
+What keeps advice from being ignored is that the number of warnings is written
+down, in the `limits` suite. A function that grows a branch shows up as a
+budget somebody has to raise on purpose; tidying one up is how the number goes
+down. The list stays a decision rather than a drift.
+
+Six functions were taken apart when the limits went in, all of them the kind
+where the next person's change is the risk: the diagram editor's keyboard
+dispatcher (complexity 62) and its pointer handler (53), the two halves of the
+diagram file format — `parseFlowchart` (59) and `serializeFlowchart` (67) —
+the tree's keyboard handler (55), and the markdown block splitter (51). Each
+became a named piece per thing it handles: a table of commands, one scanner
+per kind of block, one reader per kind of line. Nothing in those files is over
+30 now, and the suite keeps it that way.
+
+What is left is mostly two shapes that are long for a reason: a module written
+as a closure (`mount` in the diagram editor, the `create…Routes` factories),
+and a test suite, which is a script rather than a function and is exempt from
+the length rule for that reason.
+
 ### Markup built as strings
 
 There are about a hundred assignments to `innerHTML` in the client — a button
@@ -151,7 +177,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm run build` | Optional: bundle each page's scripts and stylesheets into one of each |
 | `npm test` | Run every test suite |
 | `npm run coverage` | The same suite under c8; the report of what it never reaches lands in `coverage/` |
-| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `recycle`, `build`, `visual`, `dom`, `diagram-page` |
+| `npm test <suite>` | Run one suite: `layout`, `mobile`, `theme`, `diagrams`, `loading`, `auth`, `links`, `assets`, `code`, `audit`, `headers`, `graphql`, `limiter`, `doc-kinds`, `search`, `db`, `recycle`, `limits`, `build`, `visual`, `dom`, `diagram-page` |
 | `npm run images` | Redraw the PNGs that link previews use |
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
@@ -1592,7 +1618,7 @@ cap. Accents, CJK, parentheses, ampersands and plus signs are all fine:
 npm test
 ```
 
-Twenty-one suites, ~3,500 checks, about four minutes. No browser required, and
+Twenty-two suites, ~3,500 checks, about a minute and a half. No browser required, and
 no network: the suite is deterministic on a runner with no egress.
 
 | Suite | What it covers |
@@ -1608,6 +1634,7 @@ no network: the suite is deterministic on a runner with no egress.
 | `code` | Copy buttons, both clipboard paths, and the live-highlighting policy |
 | `visual` | The block round trip, over fixtures and over every real document |
 | `recycle` | The recycle bin and the archive: delete, restore, erase, and who may do which |
+| `limits` | How complicated the code is allowed to get, and the budget that keeps it a decision |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server, and the share view in a window of its own |
 | `diagram-page` | The diagram editor page, its address, and the document handoff |
 

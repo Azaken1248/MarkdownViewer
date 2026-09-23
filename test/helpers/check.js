@@ -65,6 +65,86 @@ function joinPath(path, step) {
   return `${path}${step}`;
 }
 
+/* How each kind of value is compared, once the two have been found to be the
+ * same kind. Each answers where inside itself the difference is, or null.
+ *
+ * Everything not in here is a primitive, and two primitives that are not `===`
+ * differ — which the caller has already established by the time it looks.
+ */
+const COMPARE = {
+  // NaN is equal to NaN here: a measurement that failed twice is the same
+  // answer twice, and a check that wanted NaN wanted NaN. (-0 and 0 are the
+  // same number, which is the arithmetic every caller means.)
+  number: (actual, expected, path) =>
+    (Number.isNaN(actual) && Number.isNaN(expected) ? null : path),
+
+  date: (actual, expected, path) => (actual.getTime() === expected.getTime() ? null : path),
+
+  regexp: (actual, expected, path) => (String(actual) === String(expected) ? null : path),
+
+  error: (actual, expected, path) =>
+    (actual.message === expected.message ? null : joinPath(path, ".message")),
+
+  bytes: (actual, expected, path) => {
+    if (actual.byteLength !== expected.byteLength) {
+      return joinPath(path, ".byteLength");
+    }
+
+    const left = Buffer.from(actual.buffer, actual.byteOffset, actual.byteLength);
+    const right = Buffer.from(expected.buffer, expected.byteOffset, expected.byteLength);
+    return left.equals(right) ? null : path;
+  },
+
+  array: (actual, expected, path, seen) => {
+    if (actual.length !== expected.length) {
+      return joinPath(path, ".length");
+    }
+
+    for (let index = 0; index < actual.length; index += 1) {
+      const where = firstDifference(actual[index], expected[index],
+        joinPath(path, `[${index}]`), seen);
+      if (where) {
+        return where;
+      }
+    }
+
+    return null;
+  },
+
+  set: (actual, expected, path, seen) => sameCollection(
+    [...actual].map((one) => [one]), [...expected].map((one) => [one]), path, seen, "set"),
+
+  map: (actual, expected, path, seen) =>
+    sameCollection([...actual], [...expected], path, seen, "map"),
+
+  object: (actual, expected, path, seen) => {
+    const actualKeys = keysOf(actual);
+    const expectedKeys = keysOf(expected);
+
+    if (actualKeys.length !== expectedKeys.length
+      || actualKeys.some((key, i) => key !== expectedKeys[i])) {
+      // Name the key that is on one side and not the other; that is almost
+      // always what the difference is about.
+      const odd = actualKeys.find((key) => !expectedKeys.includes(key))
+        || expectedKeys.find((key) => !actualKeys.includes(key));
+      return joinPath(path, odd === undefined ? "" : `.${odd}`) || ".";
+    }
+
+    for (const key of actualKeys) {
+      const where = firstDifference(actual[key], expected[key], joinPath(path, `.${key}`), seen);
+      if (where) {
+        return where;
+      }
+    }
+
+    return null;
+  }
+};
+
+// Which kinds hold other values, and so can be walked into — and can refer to
+// each other, which is what the cycle guard below is for.
+const NESTED = new Set(["object", "array", "map", "set"]);
+
 /* Where two values first differ, or null if they do not.
  *
  * Returns a path like `.docs[0].title` — what to look at, rather than two
@@ -75,24 +155,20 @@ function firstDifference(actual, expected, path = "", seen = new Set()) {
     return null;
   }
 
-  const actualTag = tagOf(actual);
-  const expectedTag = tagOf(expected);
+  const tag = tagOf(actual);
+  const here = path || ".";
 
-  if (actualTag !== expectedTag) {
-    return path || ".";
+  if (tag !== tagOf(expected)) {
+    return here;
   }
 
-  if (actualTag === "number") {
-    // NaN is equal to NaN here: a measurement that failed twice is the same
-    // answer twice, and a check that wanted NaN wanted NaN. (-0 and 0 are the
-    // same number, which is the arithmetic every caller means.)
-    return Number.isNaN(actual) && Number.isNaN(expected) ? null : (path || ".");
+  const compare = COMPARE[tag];
+  if (!compare) {
+    return here;
   }
 
-  if (actualTag !== "object" && actualTag !== "array" && actualTag !== "map"
-    && actualTag !== "set" && actualTag !== "date" && actualTag !== "regexp"
-    && actualTag !== "error" && actualTag !== "bytes") {
-    return path || ".";
+  if (!NESTED.has(tag)) {
+    return compare(actual, expected, here, seen);
   }
 
   // A pair already being compared higher up the stack: two values that refer
@@ -101,70 +177,9 @@ function firstDifference(actual, expected, path = "", seen = new Set()) {
   if (seen.has(pair)) {
     return null;
   }
+
   seen.add(pair);
-
-  if (actualTag === "date") {
-    return actual.getTime() === expected.getTime() ? null : (path || ".");
-  }
-
-  if (actualTag === "regexp") {
-    return String(actual) === String(expected) ? null : (path || ".");
-  }
-
-  if (actualTag === "error") {
-    return actual.message === expected.message ? null : joinPath(path, ".message");
-  }
-
-  if (actualTag === "bytes") {
-    if (actual.byteLength !== expected.byteLength) {
-      return joinPath(path, ".byteLength");
-    }
-    const left = Buffer.from(actual.buffer, actual.byteOffset, actual.byteLength);
-    const right = Buffer.from(expected.buffer, expected.byteOffset, expected.byteLength);
-    return left.equals(right) ? null : (path || ".");
-  }
-
-  if (actualTag === "array") {
-    if (actual.length !== expected.length) {
-      return joinPath(path, ".length");
-    }
-
-    for (let index = 0; index < actual.length; index += 1) {
-      const where = firstDifference(actual[index], expected[index], joinPath(path, `[${index}]`), seen);
-      if (where) {
-        return where;
-      }
-    }
-
-    return null;
-  }
-
-  if (actualTag === "set") {
-    return sameCollection([...actual].map((one) => [one]), [...expected].map((one) => [one]), path, seen, "set");
-  }
-
-  if (actualTag === "map") {
-    return sameCollection([...actual], [...expected], path, seen, "map");
-  }
-
-  const actualKeys = keysOf(actual);
-  const expectedKeys = keysOf(expected);
-  if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, i) => key !== expectedKeys[i])) {
-    // Name the key that is on one side and not the other; that is almost
-    // always what the difference is about.
-    const odd = actualKeys.find((key) => !expectedKeys.includes(key))
-      || expectedKeys.find((key) => !actualKeys.includes(key));
-    return joinPath(path, odd === undefined ? "" : `.${odd}`) || ".";
-  }
-
-  for (const key of actualKeys) {
-    const where = firstDifference(actual[key], expected[key], joinPath(path, `.${key}`), seen);
-    if (where) {
-      return where;
-    }
-  }
-
-  return null;
+  return compare(actual, expected, path, seen);
 }
 
 /* Maps and sets: unordered, so each entry on one side has to find an unused

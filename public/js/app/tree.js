@@ -502,64 +502,102 @@ var AppTree = (function () {
     }
   }
 
-  function handleTreeKeydown(event) {
-    // An inline rename owns every key while it is open.
-    if (event.target.classList?.contains("tree-rename-input")) {
-      return;
-    }
-
+  /* A row of the tree is a button, so the keyboard has to do what the mouse
+   * does: the file manager's own keys for cut, paste, rename and delete, and
+   * the arrow keys for walking and for opening and closing a folder.
+   *
+   * Two families, asked in this order. The commands take Ctrl or a function
+   * key and act on the selection; the navigation keys act on the row that has
+   * the focus, so they need a row and the commands do not.
+   */
+  function whereTheFocusIs(event) {
     const button = event.target.closest(".tree-row-btn");
-    const group = button?.closest(".tree-group");
-    const docRow = button?.closest(".tree-row-doc");
-    const folderRow = button?.closest(".tree-row-folder");
+    return {
+      button,
+      group: button?.closest(".tree-group"),
+      docRow: button?.closest(".tree-row-doc"),
+      folderRow: button?.closest(".tree-row-folder")
+    };
+  }
 
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-      event.preventDefault();
-      setSelection(state.visibleFileOrder);
-      return;
-    }
-
-    // Cut, paste, rename and delete are writes. Select-all and arrow navigation
-    // are not, so they stay available to a reader.
-    const writable = can("doc:write");
-
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x" && writable) {
-      event.preventDefault();
-      cutFiles([...state.selection]);
-      return;
-    }
-
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && writable) {
-      event.preventDefault();
+  /* The commands, as a list rather than as a run of guards.
+   *
+   * `write` marks the ones that change something, which is what a reader may
+   * not do: select-all and the arrow keys stay available to everybody, and
+   * cut, paste, rename and delete do not.
+   */
+  const TREE_COMMANDS = [
+    { chord: true, key: "a", write: false, run: () => setSelection(state.visibleFileOrder) },
+    { chord: true, key: "x", write: true, run: () => cutFiles([...state.selection]) },
+    { chord: true, key: "v", write: true, run: (event, { group, folderRow }) => {
       const targetFolderId = folderRow?.dataset.folderId
         || (group?.dataset.folderKey !== "__root__" ? group?.dataset.folderKey : null)
         || null;
       void pasteIntoFolder(targetFolderId);
-      return;
-    }
-
-    if (event.key === "F2" && writable) {
-      event.preventDefault();
+    } },
+    { chord: false, key: "f2", write: true, run: (event, { docRow, folderRow }) => {
       if (docRow) {
         beginInlineRename(docRow.dataset.file);
       } else if (folderRow?.dataset.folderId) {
         beginInlineFolderRename(folderRow.dataset.folderId);
       }
+    } },
+    { chord: false, key: "delete", write: true, when: () => !state.isRecycleBinMode,
+      run: (event, { docRow }) => {
+        const targets = docRow ? resolveTargetFiles(docRow.dataset.file) : [...state.selection];
+        if (targets.length) {
+          void deleteFiles(targets, event.shiftKey ? "hard" : "soft");
+        }
+      } }
+  ];
+
+  function answeredByTreeCommand(event, at) {
+    const key = String(event.key).toLowerCase();
+    const chord = Boolean(event.ctrlKey || event.metaKey);
+
+    const command = TREE_COMMANDS.find((one) => one.key === key
+      && one.chord === chord
+      && (!one.when || one.when()));
+
+    if (!command || (command.write && !can("doc:write"))) {
+      return false;
+    }
+
+    event.preventDefault();
+    command.run(event, at);
+    return true;
+  }
+
+  // Right opens a closed folder and otherwise walks on; left closes an open
+  // one and otherwise goes up to the folder this row is in. Which is what the
+  // arrow keys do in every tree anybody has used.
+  function moveAcross(event, at, forward) {
+    const { button, group, folderRow } = at;
+    const collapsed = group?.classList.contains("is-collapsed");
+
+    if (folderRow && collapsed === forward) {
+      event.preventDefault();
+      toggleFolderCollapse(group.dataset.folderKey);
       return;
     }
 
-    if (event.key === "Delete" && !state.isRecycleBinMode && writable) {
-      event.preventDefault();
-      const targets = docRow ? resolveTargetFiles(docRow.dataset.file) : [...state.selection];
-      if (targets.length) {
-        void deleteFiles(targets, event.shiftKey ? "hard" : "soft");
+    if (forward) {
+      if (folderRow) {
+        event.preventDefault();
+        moveTreeFocus(button, 1);
       }
       return;
     }
 
-    if (!button) {
-      return;
-    }
+    event.preventDefault();
+    const parentGroup = group?.parentElement?.closest(".tree-group");
+    const targetGroup = folderRow ? parentGroup : group;
+    targetGroup?.querySelector(".tree-row-folder .tree-row-btn")?.focus();
+  }
+
+  function answeredByTreeNavigation(event, at) {
+    const { button } = at;
+    const buttons = () => getVisibleTreeButtons();
 
     switch (event.key) {
       case "ArrowDown":
@@ -572,38 +610,42 @@ var AppTree = (function () {
         break;
       case "Home": {
         event.preventDefault();
-        const [first] = getVisibleTreeButtons();
+        const [first] = buttons();
         if (first) first.focus();
         break;
       }
       case "End": {
         event.preventDefault();
-        const buttons = getVisibleTreeButtons();
-        if (buttons.length) buttons[buttons.length - 1].focus();
+        const all = buttons();
+        if (all.length) all[all.length - 1].focus();
         break;
       }
       case "ArrowRight":
-        if (folderRow && group?.classList.contains("is-collapsed")) {
-          event.preventDefault();
-          toggleFolderCollapse(group.dataset.folderKey);
-        } else if (folderRow) {
-          event.preventDefault();
-          moveTreeFocus(button, 1);
-        }
+        moveAcross(event, at, true);
         break;
       case "ArrowLeft":
-        if (folderRow && !group?.classList.contains("is-collapsed")) {
-          event.preventDefault();
-          toggleFolderCollapse(group.dataset.folderKey);
-        } else {
-          event.preventDefault();
-          const parentGroup = group?.parentElement?.closest(".tree-group");
-          const targetGroup = folderRow ? parentGroup : group;
-          targetGroup?.querySelector(".tree-row-folder .tree-row-btn")?.focus();
-        }
+        moveAcross(event, at, false);
         break;
       default:
         break;
+    }
+  }
+
+  function handleTreeKeydown(event) {
+    // An inline rename owns every key while it is open.
+    if (event.target.classList?.contains("tree-rename-input")) {
+      return;
+    }
+
+    const at = whereTheFocusIs(event);
+    if (answeredByTreeCommand(event, at)) {
+      return;
+    }
+
+    // Everything below moves the focus from one row to another, so there has
+    // to be a row it is moving from.
+    if (at.button) {
+      answeredByTreeNavigation(event, at);
     }
   }
 

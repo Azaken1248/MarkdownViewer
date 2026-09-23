@@ -206,6 +206,21 @@ const SHARED_RULES = {
   "no-return-await": "error",
   "no-await-in-loop": "off",
 
+  /* Complexity, as advice rather than as a gate.
+   *
+   * The rules above are about mistakes; these are about whether the next
+   * person can change a function without breaking it, which is a different
+   * question and a softer one — a long function is sometimes exactly right,
+   * and a warning that says "look at this" is worth more than an error that
+   * has to be argued with. What keeps them from being ignored is that the
+   * count is pinned by a test (test/code.test.js), so the list stays a
+   * decision somebody made rather than a number that drifted.
+   */
+  complexity: ["warn", 15],
+  "max-depth": ["warn", 4],
+  "max-lines-per-function": ["warn", { max: 120, skipComments: true, skipBlankLines: true }],
+  "max-params": ["warn", 5],
+
   "no-fallthrough": "error",
   "no-constant-condition": ["error", { checkLoops: false }],
   "no-empty": ["error", { allowEmptyCatch: true }]
@@ -280,6 +295,18 @@ module.exports = [
       globals: NODE_GLOBALS
     },
     rules: SHARED_RULES
+  },
+  {
+    /* A suite is a script, not a function.
+     *
+     * Each of these is one `module.exports = async (ctx) => { ... }` holding a
+     * few hundred checks in the order somebody would do them by hand, and
+     * cutting that into hundred-line pieces would only make the order harder
+     * to follow. How complicated a single check is still counts, so
+     * `complexity` stays on.
+     */
+    files: ["test/**/*.js"],
+    rules: { "max-lines-per-function": "off" }
   },
   {
     // Web Workers have no window and no document, which is the entire point of

@@ -1462,6 +1462,198 @@ var DiagramEditor = (function () {
       showPlacing();
     }
 
+    /* A press on the paper, in the order the parts of it have to be asked.
+     *
+     * Each of these answers whether it took the press. The order is the whole
+     * of how this behaves: a tool that is armed takes it before anything that
+     * would select, a second tap takes it before anything that would move, and
+     * the handles take it before the line underneath them.
+     */
+    function pressedWithTool(event, point) {
+    // The middle button is a pan and nothing else, on every diagram tool
+    // anyone has used, and it is the one gesture that never means select.
+    if (viewport && (event.button === 1 || spaceHeld || handTool)) {
+      event.preventDefault?.();
+      beginPan(event);
+      return true;
+    }
+
+    if (typeof event.button === "number" && event.button > 0) {
+      return true;
+    }
+
+    /* Armed with a shape, a press on the paper is where that shape goes.
+     *
+     * Asked before anything that selects or moves, because the whole reason
+     * to arm the tool is to say where the next thing goes — a press that
+     * first picked up whatever was already under it would drop the new one
+     * on top of the old one and start dragging both.
+     */
+    if (placing) {
+      event.preventDefault?.();
+      // Putting something else down settles the words being typed, the same
+      // as pressing anywhere else on the paper does.
+      stopEditing(true);
+      const choice = placing;
+      usePlaceTool(null);
+      placeChoice(choice, point);
+      return true;
+    }
+
+    /* Armed, a drag from a box is an arrow out of it and nothing else.
+     *
+     * Asked before the handles and before the line, because both of those are
+     * ways of doing something to a box that has already been chosen — and the
+     * whole point of the tool is the boxes that have not. Selecting the one
+     * being dragged from would put its own arrows under the next drag, so
+     * drawing the second arrow bent the first.
+     */
+    if (arrowTool) {
+      const from = pickable(/** @type {Element} */ (event.target).closest?.(".dd-node")?.getAttribute("data-id"))
+        || boxAt(point);
+
+      if (from) {
+        beginGesture("connect", from, point, event);
+        gesture.tool = true;
+        return true;
+      }
+    }
+
+      return false;
+    }
+
+    function pressedOnHandle(event, point) {
+    const handle = /** @type {Element} */ (event.target).closest?.("[data-role]");
+
+    if (handle && selectedId) {
+      const role = handle.getAttribute("data-role");
+
+      if (role === "via" || role === "pin") {
+        gesture = {
+          kind: role,
+          index: Number(handle.getAttribute("data-edge")),
+          at: Number(handle.getAttribute("data-at")),
+          end: Number(handle.getAttribute("data-end")),
+          origin: point,
+          moved: false
+        };
+
+        hold(event);
+        return true;
+      }
+
+      beginGesture(role === "resize" ? "resize" : "connect", selectedId, point, event);
+      if (gesture) {
+        gesture.grip = handle.getAttribute("data-grip") || "se";
+      }
+
+      return true;
+    }
+
+    /* Pressing the line itself bends it: a new corner where the finger went
+     * down, dragged from there. Which is how it works everywhere that has
+     * ever let anyone bend an arrow, and needs nothing explaining.
+     */
+    const bendable = /** @type {Element} */ (event.target).closest?.(".dd-edge");
+    const bending = bendable
+      && (bendable.getAttribute("data-from") === selectedId
+        || bendable.getAttribute("data-to") === selectedId);
+
+    if (bending) {
+      const index = Number(bendable.getAttribute("data-edge"));
+      const at = addCorner(index, point);
+
+      if (at >= 0) {
+        drawAtOnce();
+        gesture = { kind: "via", index, at, origin: point, moved: false };
+        hold(event);
+        return true;
+      }
+    }
+
+      return false;
+    }
+
+    /* Nothing under the press but paper — or a group's name, which is the one
+     * part of a frame that is not background.
+     */
+    function pressedOnPaper(event, point, adding) {
+
+      /* A group is taken hold of by its name.
+       *
+       * The frame itself is background — a press anywhere inside one lands on
+       * the paper — so a rubber band can still be pulled across the boxes in
+       * a group, and a box in a group is still just a box to press. Taking
+       * hold of the name takes hold of everything inside, which is what makes
+       * dragging a group move its contents: there is nothing else to move.
+       */
+      const onName = groupNameAt(point);
+
+      if (onName) {
+        const members = groupMembers(onName);
+        // Held from outside, so pressing it again goes into it, the same as
+        // pressing one of the boxes it holds.
+        inside = groupById(onName)?.parent || null;
+        choose(adding ? [...new Set([...selection, ...members])] : members);
+
+        if (members.length > 0) {
+          beginGesture("move", members[0], point, event);
+        }
+
+        return true;
+      }
+
+      /* Empty paper. With a finger it is how you go somewhere else, because a
+       * finger has no space bar and no middle button to pan with. With a
+       * pointer it is how you draw a rubber band round several boxes, which
+       * is what dragging empty space means everywhere else.
+       */
+      if (!adding) {
+        // Out of whatever group we were in, too: pressing the paper is how
+        // you say "none of this", and standing inside a group you can no
+        // longer see anything selected in is not none of it.
+        inside = null;
+        select(null);
+      }
+
+      if (viewport && event.pointerType === "touch") {
+        beginPan(event);
+      } else if (viewport) {
+        beginMarquee(point, event);
+      }
+
+      return true;
+    }
+
+    function pressedOnBox(event, point, id, adding) {
+      if (armedFrom && armedFrom !== id) {
+        join(armedFrom, id);
+        return true;
+      }
+
+      if (adding) {
+        toggleInSelection(id);
+        return true;
+      }
+
+      /* A box in a group is the group, until we have gone inside it.
+       *
+       * Which is what makes a group one thing rather than a heap of boxes that
+       * happen to move together — the frame's name is a way in, not the only
+       * way in.
+       *
+       * A box already in a selection of several is not a new selection — it is
+       * the handle you drag the whole lot by. Narrowing to it on the way down
+       * would make a multiple selection impossible to move.
+       */
+      if (!isSelected(id)) {
+        choose(reachedBy(id));
+      }
+
+      beginGesture("move", id, point, event);
+      return true;
+    }
+
     canvas.addEventListener("pointerdown", (event) => {
       /* Keys only reach a canvas that has focus, and clicking one inside a
        * document leaves focus on the document — so Ctrl+Z went to the page
@@ -1478,56 +1670,11 @@ var DiagramEditor = (function () {
         return;
       }
 
-      // The middle button is a pan and nothing else, on every diagram tool
-      // anyone has used, and it is the one gesture that never means select.
-      if (viewport && (event.button === 1 || spaceHeld || handTool)) {
-        event.preventDefault?.();
-        beginPan(event);
-        return;
-      }
-
-      if (typeof event.button === "number" && event.button > 0) {
+      if (pressedWithTool(event, pointIn(event.clientX, event.clientY))) {
         return;
       }
 
       const point = pointIn(event.clientX, event.clientY);
-
-      /* Armed with a shape, a press on the paper is where that shape goes.
-       *
-       * Asked before anything that selects or moves, because the whole reason
-       * to arm the tool is to say where the next thing goes — a press that
-       * first picked up whatever was already under it would drop the new one
-       * on top of the old one and start dragging both.
-       */
-      if (placing) {
-        event.preventDefault?.();
-        // Putting something else down settles the words being typed, the same
-        // as pressing anywhere else on the paper does.
-        stopEditing(true);
-        const choice = placing;
-        usePlaceTool(null);
-        placeChoice(choice, point);
-        return;
-      }
-
-      /* Armed, a drag from a box is an arrow out of it and nothing else.
-       *
-       * Asked before the handles and before the line, because both of those are
-       * ways of doing something to a box that has already been chosen — and the
-       * whole point of the tool is the boxes that have not. Selecting the one
-       * being dragged from would put its own arrows under the next drag, so
-       * drawing the second arrow bent the first.
-       */
-      if (arrowTool) {
-        const from = pickable(/** @type {Element} */ (event.target).closest?.(".dd-node")?.getAttribute("data-id"))
-          || boxAt(point);
-
-        if (from) {
-          beginGesture("connect", from, point, event);
-          gesture.tool = true;
-          return;
-        }
-      }
 
       /* Two taps on a thing, noted before anything that would move it.
        *
@@ -1563,52 +1710,8 @@ var DiagramEditor = (function () {
         return;
       }
 
-      const handle = /** @type {Element} */ (event.target).closest?.("[data-role]");
-
-      if (handle && selectedId) {
-        const role = handle.getAttribute("data-role");
-
-        if (role === "via" || role === "pin") {
-          gesture = {
-            kind: role,
-            index: Number(handle.getAttribute("data-edge")),
-            at: Number(handle.getAttribute("data-at")),
-            end: Number(handle.getAttribute("data-end")),
-            origin: point,
-            moved: false
-          };
-
-          hold(event);
-          return;
-        }
-
-        beginGesture(role === "resize" ? "resize" : "connect", selectedId, point, event);
-        if (gesture) {
-          gesture.grip = handle.getAttribute("data-grip") || "se";
-        }
-
+      if (pressedOnHandle(event, point)) {
         return;
-      }
-
-      /* Pressing the line itself bends it: a new corner where the finger went
-       * down, dragged from there. Which is how it works everywhere that has
-       * ever let anyone bend an arrow, and needs nothing explaining.
-       */
-      const bendable = /** @type {Element} */ (event.target).closest?.(".dd-edge");
-      const bending = bendable
-        && (bendable.getAttribute("data-from") === selectedId
-          || bendable.getAttribute("data-to") === selectedId);
-
-      if (bending) {
-        const index = Number(bendable.getAttribute("data-edge"));
-        const at = addCorner(index, point);
-
-        if (at >= 0) {
-          drawAtOnce();
-          gesture = { kind: "via", index, at, origin: point, moved: false };
-          hold(event);
-          return;
-        }
       }
 
       const id = pickable(/** @type {Element} */ (event.target).closest?.(".dd-node")?.getAttribute("data-id"))
@@ -1617,76 +1720,11 @@ var DiagramEditor = (function () {
       const adding = Boolean(event.shiftKey);
 
       if (!id) {
-        /* A group is taken hold of by its name.
-         *
-         * The frame itself is background — a press anywhere inside one lands on
-         * the paper — so a rubber band can still be pulled across the boxes in
-         * a group, and a box in a group is still just a box to press. Taking
-         * hold of the name takes hold of everything inside, which is what makes
-         * dragging a group move its contents: there is nothing else to move.
-         */
-        const onName = groupNameAt(point);
-
-        if (onName) {
-          const members = groupMembers(onName);
-          // Held from outside, so pressing it again goes into it, the same as
-          // pressing one of the boxes it holds.
-          inside = groupById(onName)?.parent || null;
-          choose(adding ? [...new Set([...selection, ...members])] : members);
-
-          if (members.length > 0) {
-            beginGesture("move", members[0], point, event);
-          }
-
-          return;
-        }
-
-        /* Empty paper. With a finger it is how you go somewhere else, because a
-         * finger has no space bar and no middle button to pan with. With a
-         * pointer it is how you draw a rubber band round several boxes, which
-         * is what dragging empty space means everywhere else.
-         */
-        if (!adding) {
-          // Out of whatever group we were in, too: pressing the paper is how
-          // you say "none of this", and standing inside a group you can no
-          // longer see anything selected in is not none of it.
-          inside = null;
-          select(null);
-        }
-
-        if (viewport && event.pointerType === "touch") {
-          beginPan(event);
-        } else if (viewport) {
-          beginMarquee(point, event);
-        }
-
+        pressedOnPaper(event, point, adding);
         return;
       }
 
-      if (armedFrom && armedFrom !== id) {
-        join(armedFrom, id);
-        return;
-      }
-
-      if (adding) {
-        toggleInSelection(id);
-        return;
-      }
-
-      /* A box in a group is the group, until we have gone inside it.
-       *
-       * Which is what makes a group one thing rather than a heap of boxes that
-       * happen to move together — the frame's name is a way in, not the only
-       * way in.
-       */
-      // A box already in a selection of several is not a new selection — it is
-      // the handle you drag the whole lot by. Narrowing to it on the way down
-      // would make a multiple selection impossible to move.
-      if (!isSelected(id)) {
-        choose(reachedBy(id));
-      }
-
-      beginGesture("move", id, point, event);
+      pressedOnBox(event, point, id, adding);
     });
 
     canvas.addEventListener("pointermove", (event) => {
@@ -2981,24 +3019,21 @@ var DiagramEditor = (function () {
       }
     }
 
-    function onKey(event) {
-      /* Something nearer the keystroke has already answered it: the field being
-       * typed into, or the grip being widened with the arrow keys.
-       */
-      if (event.defaultPrevented || typingIn(event.target)) {
-        return;
-      }
-
-      if (ACTIVATED_BY_KEY.test(event.target?.tagName || "")
-        && (event.key === "Enter" || event.key === " " || event.code === "Space")) {
-        return;
-      }
-
+    /* The keyboard, in four families.
+     *
+     * One handler used to answer all of them in one run of guards, which made
+     * the question "what does this key do here" a question about where in a
+     * hundred and fifty lines the answer happened to sit. Each family now says
+     * whether it answered the keystroke, and onKey asks them in order — which
+     * is also the order that matters, because the tools take a plain letter
+     * and the commands take the same letter with Ctrl on it.
+     */
+    function answeredByTools(event) {
       if (viewport && (event.key === " " || event.code === "Space")) {
         answered(event);
         spaceHeld = true;
         canvas.classList.add("is-panning-armed");
-        return;
+        return true;
       }
 
       /* The hand and the pointer, on the keys they have in every editor that
@@ -3014,7 +3049,7 @@ var DiagramEditor = (function () {
           useArrowTool(false);
         }
 
-        return;
+        return true;
       }
 
       /* A for arrow. V puts it away with the hand, because V is the pointer in
@@ -3027,125 +3062,98 @@ var DiagramEditor = (function () {
         && /^[av]$/i.test(event.key)) {
         answered(event);
         useArrowTool(event.key.toLowerCase() === "a");
-        return;
+        return true;
       }
 
-      /* Back and forward. Both spellings of redo, because half the world
-       * learned Ctrl+Y and the other half Ctrl+Shift+Z, and neither half is
-       * going to be talked out of it.
-       */
-      if (event.ctrlKey || event.metaKey) {
-        const key = String(event.key).toLowerCase();
+      return false;
+    }
 
-        if (key === "c" && selection.length > 0) {
-          answered(event);
-          copySelection();
-          return;
-        }
-
-        if (key === "x" && selection.length > 0) {
-          answered(event);
-          cutSelection();
-          return;
-        }
-
-        if (key === "v") {
-          answered(event);
-          pasteClipboard();
-          return;
-        }
-
-        if (key === "d" && selection.length > 0) {
-          answered(event);
-          duplicateSelection();
-          return;
-        }
-
-        /* Grouping and ungrouping, on the keys every canvas uses for them.
-         * Ungrouping is asked for first because Ctrl+Shift+G is also Ctrl+G,
-         * and the shift is the whole difference between the two.
-         */
-        if (key === "g" && event.shiftKey) {
-          answered(event);
-          ungroupSelection();
-          return;
-        }
-
-        if (key === "g" && selection.length > 1) {
-          answered(event);
-          groupSelection();
-          return;
-        }
-
-        if (key === "z" && !event.shiftKey) {
-          answered(event);
-          undo();
-          return;
-        }
-
-        if ((key === "z" && event.shiftKey) || key === "y") {
-          answered(event);
-          redo();
-          return;
-        }
-      }
-
+    /* Ctrl and Cmd, which are the same key for everything here.
+     *
+     * Both spellings of redo, because half the world learned Ctrl+Y and the
+     * other half Ctrl+Shift+Z, and neither half is going to be talked out of
+     * it. Ungrouping is asked for before grouping because Ctrl+Shift+G is also
+     * Ctrl+G, and the shift is the whole difference between the two.
+     */
+    /** @type {[string, (event: KeyboardEvent) => boolean, () => void][]} */
+    const COMMAND_KEYS = [
+      ["c", (event) => selection.length > 0 && !event.shiftKey, () => copySelection()],
+      ["x", (event) => selection.length > 0 && !event.shiftKey, () => cutSelection()],
+      ["v", () => true, () => pasteClipboard()],
+      ["d", () => selection.length > 0, () => duplicateSelection()],
+      ["g", (event) => event.shiftKey, () => ungroupSelection()],
+      ["g", () => selection.length > 1, () => groupSelection()],
+      ["z", (event) => !event.shiftKey, () => undo()],
+      ["z", (event) => event.shiftKey, () => redo()],
+      ["y", () => true, () => redo()],
       // The one keystroke that does not need anything selected already.
-      if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
-        answered(event);
-        choose(model.nodes.map((item) => item.id));
-        return;
+      ["a", () => true, () => choose(model.nodes.map((item) => item.id))]
+    ];
+
+    function answeredByCommands(event) {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return false;
       }
 
-      /* Escape dismisses one thing at a time. The list first, then the
-       * selection — and only then is it allowed out to whatever is around the
-       * builder, so a press with nothing to dismiss can still leave. */
-      if (event.key === "Escape") {
-        if (menu) {
-          event.stopPropagation();
-          closeMenu();
-          return;
-        }
+      const key = String(event.key).toLowerCase();
+      const command = COMMAND_KEYS.find(([letter, when]) => letter === key && when(event));
+      if (!command) {
+        return false;
+      }
 
+      answered(event);
+      command[2]();
+      return true;
+    }
+
+    /* Escape dismisses one thing at a time. The list first, then the modes,
+     * then the group we are inside, then the selection — and only then is it
+     * allowed out to whatever is around the builder, so a press with nothing
+     * to dismiss can still leave.
+     */
+    function answeredByEscape(event) {
+      /** @type {[() => boolean, () => void][]} */
+      const ladder = [
+        [() => Boolean(menu), () => closeMenu()],
         // A mode is a mode, and a mode wants a way out that does not involve
         // finding the button that turned it on.
-        if (placing) {
-          event.stopPropagation();
-          usePlaceTool(null);
-          return;
-        }
-
-        if (arrowTool) {
-          event.stopPropagation();
-          useArrowTool(false);
-          return;
-        }
-
-        if (handTool) {
-          event.stopPropagation();
-          useHand(false);
-          return;
-        }
-
+        [() => Boolean(placing), () => usePlaceTool(null)],
+        [() => Boolean(arrowTool), () => useArrowTool(false)],
+        [() => Boolean(handTool), () => useHand(false)],
         // Up one level first, to the group we went into. Only when we are back
         // at the top of the diagram does Escape mean "nothing".
-        if (stepOutside()) {
-          event.stopPropagation();
-          return;
-        }
+        [() => stepOutside(), () => {}],
+        [() => selection.length > 0, () => select(null)]
+      ];
 
-        if (selection.length > 0) {
+      for (const [when, dismiss] of ladder) {
+        if (when()) {
           event.stopPropagation();
-          select(null);
+          dismiss();
+          return true;
         }
-
-        return;
       }
 
-      if (selection.length === 0) {
-        return;
-      }
+      return true;
+    }
 
+    const NUDGES = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1]
+    };
+
+    /* What the keys do to whatever is selected: open it, remove it, move it.
+     *
+     * Two different kinds of moving, and they were the same kind until now.
+     * Dragging snaps, because a box put down by hand should line up with the
+     * ones already there. An arrow key does not, because the reason to reach
+     * for one is that the grid has put something two pixels from where you
+     * want it. Shift is the coarse one: a whole grid step, landing on the grid
+     * rather than a step away from wherever the box happens to be.
+     */
+    function answeredBySelection(event) {
       /* The way into a box that does not need a pointing device, and the one
        * every other editor already has. F2 as well as Enter, because that is
        * the key in a file manager and in StarUML, and one of the two is what
@@ -3166,25 +3174,11 @@ var DiagramEditor = (function () {
         return;
       }
 
-      const nudge = {
-        ArrowLeft: [-1, 0],
-        ArrowRight: [1, 0],
-        ArrowUp: [0, -1],
-        ArrowDown: [0, 1]
-      }[event.key];
-
+      const nudge = NUDGES[event.key];
       if (!nudge) {
         return;
       }
 
-      /* Two different things, and they were the same thing until now.
-       *
-       * Dragging snaps, because a box put down by hand should line up with the
-       * ones already there. An arrow key does not, because the reason to reach
-       * for one is that the grid has put something two pixels from where you
-       * want it. Shift is the coarse one: a whole grid step, landing on the
-       * grid rather than a step away from wherever the box happens to be.
-       */
       answered(event);
       for (const id of selection) {
         const at = boxOf(id);
@@ -3202,6 +3196,35 @@ var DiagramEditor = (function () {
 
       write({ atOnce: false });
       drawSoon();
+    }
+
+    function onKey(event) {
+      /* Something nearer the keystroke has already answered it: the field being
+       * typed into, or the grip being widened with the arrow keys.
+       */
+      if (event.defaultPrevented || typingIn(event.target)) {
+        return;
+      }
+
+      if (ACTIVATED_BY_KEY.test(event.target?.tagName || "")
+        && (event.key === "Enter" || event.key === " " || event.code === "Space")) {
+        return;
+      }
+
+      if (answeredByTools(event) || answeredByCommands(event)) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        answeredByEscape(event);
+        return;
+      }
+
+      if (selection.length === 0) {
+        return;
+      }
+
+      answeredBySelection(event);
     }
 
     /* --- Making things ------------------------------------------------------ */

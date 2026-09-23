@@ -57,6 +57,185 @@ var VisualEditor = (function () {
    * for any input at all. Blank runs are blocks too, which is what makes that
    * true without anyone having to reason about where the newlines went.
    */
+  /* Where each kind of block ends.
+   *
+   * One scanner per kind, asked in this order about the line the walk has
+   * reached: it answers where its block ends, or null when the line is not the
+   * start of one of its kind. Which makes "what is a table" a question with
+   * one answer in one place, rather than a branch in the middle of a hundred
+   * and thirty line loop.
+   *
+   * Each takes the lines with their terminators still attached and an index
+   * into them, and `raw` is that line without its newline.
+   */
+  const rawAt = (lines, index) => lines[index].replace(/\n$/, "");
+
+  // Blank runs are their own blocks so no other rule has to preserve them.
+  function scanBlank(lines, index) {
+    if (!isBlank(rawAt(lines, index))) {
+      return null;
+    }
+
+    let end = index;
+    while (end < lines.length && isBlank(rawAt(lines, end))) {
+      end += 1;
+    }
+
+    return { type: "blank", end };
+  }
+
+  function scanFence(lines, index) {
+    const fence = rawAt(lines, index).match(FENCE_RE);
+    if (!fence) {
+      return null;
+    }
+
+    const marker = fence[2][0];
+    const length = fence[2].length;
+    let end = index + 1;
+    while (end < lines.length) {
+      const closing = rawAt(lines, end).match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
+      if (closing && closing[1][0] === marker && closing[1].length >= length) {
+        end += 1;
+        break;
+      }
+      end += 1;
+    }
+
+    return { type: "fence", end, extra: { info: fence[3].trim() } };
+  }
+
+  function scanMath(lines, index) {
+    if (!MATH_FENCE_RE.test(rawAt(lines, index))) {
+      return null;
+    }
+
+    let end = index + 1;
+    while (end < lines.length && !MATH_FENCE_RE.test(rawAt(lines, end))) {
+      end += 1;
+    }
+
+    return { type: "math", end: Math.min(end + 1, lines.length) };
+  }
+
+  // A rule and a heading are one line each, and that is the whole of them.
+  function scanOneLiner(lines, index) {
+    const line = rawAt(lines, index);
+
+    if (HR_RE.test(line)) {
+      return { type: "hr", end: index + 1 };
+    }
+
+    return HEADING_RE.test(line) ? { type: "heading", end: index + 1 } : null;
+  }
+
+  // A table is a row followed by a delimiter row; without the delimiter it is
+  // just a paragraph containing pipes.
+  function scanTable(lines, index) {
+    const line = rawAt(lines, index);
+    const delimiter = index + 1 < lines.length ? rawAt(lines, index + 1) : "";
+    if (!line.includes("|") || !TABLE_DELIMITER_RE.test(delimiter) || !delimiter.includes("-")) {
+      return null;
+    }
+
+    let end = index + 2;
+    while (end < lines.length && !isBlank(rawAt(lines, end)) && rawAt(lines, end).includes("|")) {
+      end += 1;
+    }
+
+    return { type: "table", end };
+  }
+
+  // A quote and a block of raw HTML both run to the next blank line.
+  function toBlankLine(lines, index, type) {
+    let end = index;
+    while (end < lines.length && !isBlank(rawAt(lines, end))) {
+      end += 1;
+    }
+
+    return { type, end };
+  }
+
+  function scanBlockquote(lines, index) {
+    return BLOCKQUOTE_RE.test(rawAt(lines, index)) ? toBlankLine(lines, index, "blockquote") : null;
+  }
+
+  function scanHtml(lines, index) {
+    return HTML_BLOCK_RE.test(rawAt(lines, index)) ? toBlankLine(lines, index, "html") : null;
+  }
+
+  /* A list runs until a blank line that is not followed by more list content,
+   * so a list with paragraphs inside it stays one block.
+   */
+  function scanList(lines, index) {
+    if (!LIST_ITEM_RE.test(rawAt(lines, index))) {
+      return null;
+    }
+
+    let end = index + 1;
+    while (end < lines.length) {
+      if (!isBlank(rawAt(lines, end))) {
+        // An indented line continues the item; a new marker continues the
+        // list; anything else at the left margin ends it.
+        if (LIST_ITEM_RE.test(rawAt(lines, end)) || /^\s+\S/.test(rawAt(lines, end))) {
+          end += 1;
+          continue;
+        }
+        break;
+      }
+
+      let look = end;
+      while (look < lines.length && isBlank(rawAt(lines, look))) {
+        look += 1;
+      }
+
+      if (look < lines.length
+        && (LIST_ITEM_RE.test(rawAt(lines, look)) || /^\s{2,}\S/.test(rawAt(lines, look)))) {
+        end = look + 1;
+        continue;
+      }
+
+      break;
+    }
+
+    return { type: "list", end };
+  }
+
+  /* A paragraph runs to the next blank line, but a heading, fence, hr or list
+   * starting mid-paragraph ends it — markdown treats those as interrupting,
+   * and so must this or the block would swallow them.
+   */
+  function scanParagraph(lines, index) {
+    let end = index + 1;
+    while (end < lines.length && !isBlank(rawAt(lines, end))) {
+      const next = rawAt(lines, end);
+      if (HEADING_RE.test(next) || FENCE_RE.test(next) || HR_RE.test(next) || LIST_ITEM_RE.test(next)) {
+        break;
+      }
+      end += 1;
+    }
+
+    return { type: "paragraph", end };
+  }
+
+  const SCANNERS = [scanBlank, scanFence, scanMath, scanOneLiner, scanTable,
+    scanBlockquote, scanList, scanHtml];
+
+  // Front matter, and only at the very start, which is the only place it means
+  // anything.
+  function scanFrontMatter(lines) {
+    if (lines.length === 0 || !/^---\s*$/.test(rawAt(lines, 0))) {
+      return null;
+    }
+
+    let end = 1;
+    while (end < lines.length && !/^(---|\.\.\.)\s*$/.test(rawAt(lines, end))) {
+      end += 1;
+    }
+
+    return end < lines.length ? { type: "frontmatter", end: end + 1 } : null;
+  }
+
   function splitBlocks(markdown) {
     const text = String(markdown == null ? "" : markdown);
     // Keeping the terminators attached to their lines means a document with no
@@ -65,9 +244,6 @@ var VisualEditor = (function () {
       (index === all.length - 1 ? line : `${line}\n`));
 
     const blocks = [];
-    let index = 0;
-
-    const raw = (i) => lines[i].replace(/\n$/, "");
     const push = (type, from, to, extra = {}) => {
       const source = lines.slice(from, to).join("");
       // A document ending in a newline leaves an empty final line. Keeping it
@@ -79,151 +255,25 @@ var VisualEditor = (function () {
       blocks.push({ type, source, ...extra });
     };
 
-    // Front matter, and only at the very start, which is the only place it
-    // means anything.
-    if (lines.length > 0 && /^---\s*$/.test(raw(0))) {
-      let end = 1;
-      while (end < lines.length && !/^(---|\.\.\.)\s*$/.test(raw(end))) {
-        end += 1;
-      }
-      if (end < lines.length) {
-        push("frontmatter", 0, end + 1);
-        index = end + 1;
-      }
+    let index = 0;
+    const front = scanFrontMatter(lines);
+    if (front) {
+      push(front.type, 0, front.end);
+      index = front.end;
     }
 
     while (index < lines.length) {
-      // Blank runs are their own blocks so no other rule has to preserve them.
-      if (isBlank(raw(index))) {
-        let end = index;
-        while (end < lines.length && isBlank(raw(end))) {
-          end += 1;
-        }
-        push("blank", index, end);
-        index = end;
-        continue;
-      }
-
-      const line = raw(index);
-
-      const fence = line.match(FENCE_RE);
-      if (fence) {
-        const marker = fence[2][0];
-        const length = fence[2].length;
-        let end = index + 1;
-        while (end < lines.length) {
-          const closing = raw(end).match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
-          if (closing && closing[1][0] === marker && closing[1].length >= length) {
-            end += 1;
-            break;
-          }
-          end += 1;
-        }
-        push("fence", index, end, { info: fence[3].trim() });
-        index = end;
-        continue;
-      }
-
-      if (MATH_FENCE_RE.test(line)) {
-        let end = index + 1;
-        while (end < lines.length && !MATH_FENCE_RE.test(raw(end))) {
-          end += 1;
-        }
-        push("math", index, Math.min(end + 1, lines.length));
-        index = Math.min(end + 1, lines.length);
-        continue;
-      }
-
-      if (HR_RE.test(line)) {
-        push("hr", index, index + 1);
-        index += 1;
-        continue;
-      }
-
-      if (HEADING_RE.test(line)) {
-        push("heading", index, index + 1);
-        index += 1;
-        continue;
-      }
-
-      // A table is a row followed by a delimiter row; without the delimiter it
-      // is just a paragraph containing pipes.
-      if (line.includes("|") && index + 1 < lines.length && TABLE_DELIMITER_RE.test(raw(index + 1))
-        && raw(index + 1).includes("-")) {
-        let end = index + 2;
-        while (end < lines.length && !isBlank(raw(end)) && raw(end).includes("|")) {
-          end += 1;
-        }
-        push("table", index, end);
-        index = end;
-        continue;
-      }
-
-      if (BLOCKQUOTE_RE.test(line)) {
-        let end = index;
-        while (end < lines.length && !isBlank(raw(end))) {
-          end += 1;
-        }
-        push("blockquote", index, end);
-        index = end;
-        continue;
-      }
-
-      if (LIST_ITEM_RE.test(line)) {
-        // A list runs until a blank line that is not followed by more list
-        // content, so a list with paragraphs inside it stays one block.
-        let end = index + 1;
-        while (end < lines.length) {
-          if (!isBlank(raw(end))) {
-            // An indented line continues the item; a new marker continues the
-            // list; anything else at the left margin ends it.
-            if (LIST_ITEM_RE.test(raw(end)) || /^\s+\S/.test(raw(end))) {
-              end += 1;
-              continue;
-            }
-            break;
-          }
-
-          let look = end;
-          while (look < lines.length && isBlank(raw(look))) {
-            look += 1;
-          }
-
-          if (look < lines.length && (LIST_ITEM_RE.test(raw(look)) || /^\s{2,}\S/.test(raw(look)))) {
-            end = look + 1;
-            continue;
-          }
-
+      let found = null;
+      for (const scan of SCANNERS) {
+        found = scan(lines, index);
+        if (found) {
           break;
         }
-        push("list", index, end);
-        index = end;
-        continue;
       }
 
-      if (HTML_BLOCK_RE.test(line)) {
-        let end = index;
-        while (end < lines.length && !isBlank(raw(end))) {
-          end += 1;
-        }
-        push("html", index, end);
-        index = end;
-        continue;
-      }
-
-      // A paragraph runs to the next blank line, but a heading, fence, hr or
-      // list starting mid-paragraph ends it — markdown treats those as
-      // interrupting, and so must this or the block would swallow them.
-      let end = index + 1;
-      while (end < lines.length && !isBlank(raw(end))) {
-        const next = raw(end);
-        if (HEADING_RE.test(next) || FENCE_RE.test(next) || HR_RE.test(next) || LIST_ITEM_RE.test(next)) {
-          break;
-        }
-        end += 1;
-      }
-      push("paragraph", index, end);
-      index = end;
+      found = found || scanParagraph(lines, index);
+      push(found.type, index, found.end, found.extra);
+      index = found.end;
     }
 
     return blocks;

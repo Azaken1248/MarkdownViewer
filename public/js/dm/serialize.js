@@ -31,101 +31,132 @@ var DmSerialize = (function () {
    * bolted on — a flowchart, which GitHub renders, with its arrangement and its
    * icons written where Mermaid will not look.
    */
-  /** @param {FlowchartModel} model @returns {string} */
-  function serializeFlowchart(model) {
-    const direction = DIRECTIONS.includes(model?.direction) ? model.direction : "TD";
-    const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
-    const edges = Array.isArray(model?.edges) ? model.edges : [];
-    const groups = Array.isArray(model?.groups) ? model.groups : [];
-    const layers = Array.isArray(model?.layers) ? model.layers : [];
-    const classes = model?.classes && typeof model.classes === "object" ? model.classes : {};
-    const layout = model?.layout && typeof model.layout === "object" ? model.layout : null;
-    const lines = [`flowchart ${direction}`];
+  // A number that was chosen, as a string — and "" for one that was not, or
+  // for one that is the standard, because the file says what somebody picked
+  // rather than what everything happens to be. One place decides that, rather
+  // than two that have to agree.
+  const chosen = (value, standard = null) =>
+    (Number.isFinite(value) && value !== standard ? String(value) : "");
 
-    /* --- What Mermaid cannot say ---------------------------------------- */
+  // Everything about a box that Mermaid has nowhere to put: what kind of thing
+  // it is, the icon on it, the layer it is on, the styling of a table's cells.
+  function nodeAttributes(node) {
+    return {
+      kind: node.kind && node.kind !== "box" ? node.kind : "",
+      icon: node.icon || "",
+      image: node.image || "",
+      layer: chosen(node.layer),
+      z: chosen(node.z),
+      frame: node.frame === "none" ? "none" : "",
+      shape: DRAWN_BY_NAME.has(node.shape) ? node.shape : "",
+      pad: chosen(node.pad, TABLE_PAD.standard),
+      gap: chosen(node.gap, TABLE_GAP.standard),
+      cells: writeCellStyles(node.cells, textCells(node.text ?? node.id ?? "")),
+      ...(node.extra || {})
+    };
+  }
 
-    const hasGroupExtras = (group) => Boolean(group.lock)
-      || Object.keys(group.extra || {}).length > 0;
-
-    if (layout || layers.length > 0 || edges.some(hasEdgeExtras)
-      || groups.some(hasGroupExtras)) {
-      lines.push(`    %% ${LAYOUT_MARK}`);
+  // A box that has been put somewhere, with that line's attributes beside it.
+  function nodeLayoutLines(nodes, layout) {
+    const lines = [];
+    if (!layout) {
+      return lines;
     }
 
-    if (layout) {
-      for (const node of nodes) {
-        const at = layout[node.id];
-        if (!at) {
-          continue;
-        }
-
-        const attributes = writeAttributes({
-          kind: node.kind && node.kind !== "box" ? node.kind : "",
-          icon: node.icon || "",
-          image: node.image || "",
-          layer: Number.isFinite(node.layer) ? String(node.layer) : "",
-          z: Number.isFinite(node.z) ? String(node.z) : "",
-          /* Written only when it is not the standard. The file says what was
-           * chosen rather than what everything happens to be, and there is one
-           * place that decides so rather than two that have to agree.
-           */
-          frame: node.frame === "none" ? "none" : "",
-          shape: DRAWN_BY_NAME.has(node.shape) ? node.shape : "",
-          pad: Number.isFinite(node.pad) && node.pad !== TABLE_PAD.standard
-            ? String(node.pad) : "",
-          gap: Number.isFinite(node.gap) && node.gap !== TABLE_GAP.standard
-            ? String(node.gap) : "",
-          cells: writeCellStyles(node.cells,
-            textCells(node.text ?? node.id ?? "")),
-          ...(node.extra || {})
-        });
-
-        // Whole numbers, because the format has no room for anything else and
-        // because half a pixel is not a position anyone chose.
-        const size = `${Math.max(1, Math.round(at.w))}x${Math.max(1, Math.round(at.h))}`;
-        const where = `${Math.round(at.x)},${Math.round(at.y)} ${size}`;
-        lines.push(`    %% @ ${node.id} ${where}${attributes ? ` ${attributes}` : ""}`);
-      }
-    }
-
-    for (const [index, edge] of edges.entries()) {
-      if (!hasEdgeExtras(edge)) {
+    for (const node of nodes) {
+      const at = layout[node.id];
+      if (!at) {
         continue;
       }
 
-      const attributes = writeAttributes({
-        sides: pinnedAnywhere(edge) ? edge.sides.join(",") : "",
-        via: edge.waypoints ? writePoints(edge.waypoints) : "",
-        ends: edge.ends ? edge.ends.join(",") : "",
-        route: edge.route && edge.route !== ROUTE_DEFAULT ? edge.route : "",
-        class: edge.class || "",
-        ...(edge.extra || {})
-      });
+      const attributes = writeAttributes(nodeAttributes(node));
 
-      lines.push(`    %% edge ${index} ${attributes}`);
+      // Whole numbers, because the format has no room for anything else and
+      // because half a pixel is not a position anyone chose.
+      const size = `${Math.max(1, Math.round(at.w))}x${Math.max(1, Math.round(at.h))}`;
+      const where = `${Math.round(at.x)},${Math.round(at.y)} ${size}`;
+      lines.push(`    %% @ ${node.id} ${where}${attributes ? ` ${attributes}` : ""}`);
     }
 
-    for (const group of groups) {
-      if (!hasGroupExtras(group)) {
-        continue;
-      }
+    return lines;
+  }
 
-      lines.push(`    %% group ${group.id} ${writeAttributes({
-        lock: group.lock ? "1" : "",
-        ...(group.extra || {})
-      })}`);
+  // Which sides an arrow leaves from, the corners it goes round, the markers
+  // on its ends — none of which a Mermaid link has room for.
+  function edgeLayoutLines(edges) {
+    const lines = [];
+
+  for (const [index, edge] of edges.entries()) {
+    if (!hasEdgeExtras(edge)) {
+      continue;
     }
 
-    for (const layer of layers) {
-      // Always quoted, even when the name has no space in it: a layer's name is
-      // a name rather than a value, and the line is read back by a shape that
-      // expects the quotes to be there.
-      const name = String(layer.name).replace(/[\\"]/g, "\\$&");
-      const flags = `${layer.locked ? " locked" : ""}${layer.hidden ? " hidden" : ""}`;
-      lines.push(`    %% layer ${layer.id} "${name}"${flags}`);
+    const attributes = writeAttributes({
+      sides: pinnedAnywhere(edge) ? edge.sides.join(",") : "",
+      via: edge.waypoints ? writePoints(edge.waypoints) : "",
+      ends: edge.ends ? edge.ends.join(",") : "",
+      route: edge.route && edge.route !== ROUTE_DEFAULT ? edge.route : "",
+      class: edge.class || "",
+      ...(edge.extra || {})
+    });
+
+    lines.push(`    %% edge ${index} ${attributes}`);
+  }
+
+    return lines;
+  }
+
+  function groupLayoutLines(groups) {
+    const lines = [];
+
+  for (const group of groups) {
+    if (!hasGroupExtras(group)) {
+      continue;
     }
 
-    /* --- The diagram ----------------------------------------------------- */
+    lines.push(`    %% group ${group.id} ${writeAttributes({
+      lock: group.lock ? "1" : "",
+      ...(group.extra || {})
+    })}`);
+  }
+
+    return lines;
+  }
+
+  function layerLines(layers) {
+    const lines = [];
+
+  for (const layer of layers) {
+    // Always quoted, even when the name has no space in it: a layer's name is
+    // a name rather than a value, and the line is read back by a shape that
+    // expects the quotes to be there.
+    const name = String(layer.name).replace(/[\\"]/g, "\\$&");
+    const flags = `${layer.locked ? " locked" : ""}${layer.hidden ? " hidden" : ""}`;
+    lines.push(`    %% layer ${layer.id} "${name}"${flags}`);
+  }
+
+    return lines;
+  }
+
+  /* What Mermaid cannot say: the arrangement, written in comments it throws
+   * away. One comment per box that has a position, then the edges, the groups
+   * and the layers that carry anything of their own.
+   */
+  function layoutLines(parts) {
+    return [
+      ...nodeLayoutLines(parts.nodes, parts.layout),
+      ...edgeLayoutLines(parts.edges),
+      ...groupLayoutLines(parts.groups),
+      ...layerLines(parts.layers)
+    ];
+  }
+
+  /* The flowchart itself: the declarations, the subgraphs they sit in, and the
+   * arrows between them. This is the part any other Mermaid renderer reads.
+   */
+  function diagramLines(parts) {
+    const { nodes, edges, groups } = parts;
+    const lines = [];
 
     const declare = (node, depth) => {
       // One of ours is written as the nearest real shape; the layout comment
@@ -182,7 +213,15 @@ var DmSerialize = (function () {
       lines.push(`    ${edge.from} ${kind.token}${middle} ${edge.to}`);
     }
 
-    /* --- The colours, which are real Mermaid ----------------------------- */
+    return lines;
+  }
+
+  /* The colours, which are real Mermaid — classDef, style, and the class line
+   * that says which boxes wear which.
+   */
+  function colourLines(parts, model) {
+    const { nodes, classes } = parts;
+    const lines = [];
 
     for (const [name, declarations] of Object.entries(classes)) {
       const written = Object.entries(declarations)
@@ -211,6 +250,52 @@ var DmSerialize = (function () {
         lines.push(`    class ${wearing.map((node) => node.id).join(",")} ${name}`);
       }
     }
+
+    return lines;
+  }
+
+  /* The model as this file needs it: every list a list, every map a map, and
+   * `layout` either a map of positions or null. A model built by hand is as
+   * welcome here as one that came from the parser, so nothing below has to ask
+   * whether a field is there.
+   */
+  const listOf = (value) => (Array.isArray(value) ? value : []);
+  const mapOf = (value) => (value && typeof value === "object" ? value : null);
+
+  function normalized(model) {
+    return {
+      direction: DIRECTIONS.includes(model?.direction) ? model.direction : "TD",
+      nodes: listOf(model?.nodes),
+      edges: listOf(model?.edges),
+      groups: listOf(model?.groups),
+      layers: listOf(model?.layers),
+      classes: mapOf(model?.classes) || {},
+      layout: mapOf(model?.layout)
+    };
+  }
+
+  const hasGroupExtras = (group) => Boolean(group.lock)
+    || Object.keys(group.extra || {}).length > 0;
+
+  /** @param {FlowchartModel} model @returns {string} */
+  /** @param {FlowchartModel} model @returns {string} */
+  function serializeFlowchart(model) {
+    const parts = normalized(model);
+    const { edges, groups, layers, layout } = parts;
+
+    // The marker that says this file carries an arrangement. Written only when
+    // there is one to carry, so a diagram nobody has arranged stays a diagram
+    // anybody's Mermaid can read without a comment block in front of it.
+    const carries = layout || layers.length > 0 || edges.some(hasEdgeExtras)
+      || groups.some(hasGroupExtras);
+
+    const lines = [
+      `flowchart ${parts.direction}`,
+      ...(carries ? [`    %% ${LAYOUT_MARK}`] : []),
+      ...layoutLines(parts),
+      ...diagramLines(parts),
+      ...colourLines(parts, model)
+    ];
 
     return `${lines.join("\n")}\n`;
   }
