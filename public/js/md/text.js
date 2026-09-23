@@ -49,14 +49,9 @@ var MdText = (function () {
     });
   }
 
-  function escapeHtml(value) {
-    return String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
+  // One escape in the app, in js/dom-html.js, because an escape that exists
+  // twice is an escape that can be fixed once.
+  const { escapeHtml } = DomHtml;
 
   // What a name means is decided once, in doc-kinds.js, for the server and
   // the client alike. These are the engine's names for the same answers.

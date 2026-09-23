@@ -11,10 +11,11 @@
 
 /* exported AppDocs */
 var AppDocs = (function () {
+  const { html } = DomHtml;
   const { elements } = AppDom;
   const { state } = AppState;
   const { requestJson, can } = AppApi;
-  const { docUrl, escapeHtml, filenameToTitle, inferIcon } = AppText;
+  const { docUrl, filenameToTitle, inferIcon } = AppText;
   const { getDocByFile, getDocCacheVersion, getFolderOrder } = AppLibrary;
   const { showDocumentInUrl } = AppLocation;
   const { updateActiveDocUI } = AppViewerHeader;
@@ -271,10 +272,10 @@ var AppDocs = (function () {
     elements.docContent.classList.remove("notebook-viewer");
     MarkdownCore.destroyPanZoomInstances(elements.docContent);
     elements.docContent.innerHTML = "";
-    elements.emptyState.innerHTML = `
+    elements.emptyState.innerHTML = html`
       <i class="ph ${icon}"></i>
-      <h3>${escapeHtml(title)}</h3>
-      <p>${escapeHtml(message)}</p>
+      <h3>${title}</h3>
+      <p>${message}</p>
     `;
   }
 

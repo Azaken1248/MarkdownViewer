@@ -12,6 +12,7 @@
 
 /* exported AppPageTables */
 var AppPageTables = (function () {
+  const { html } = DomHtml;
   const { markPageEditDirty } = AppPageBlocks;
   function renderTableBlock(block, index) {
     const node = document.createElement("div");
@@ -22,6 +23,8 @@ var AppPageTables = (function () {
     // the serializer writes back. Read from the source rather than from the
     // rendered table: the renderer expresses it in a way sanitizing may drop.
     block.align = VisualEditor.tableAlignments(block.source);
+    // Sanitized on the way out of renderMarkdown; see md/text.js.
+    // eslint-disable-next-line no-unsanitized/property
     node.innerHTML = MarkdownCore.renderMarkdown(block.source);
 
     const table = node.querySelector("table");
@@ -109,7 +112,7 @@ var AppPageTables = (function () {
       control.className = "ve-table-tool";
       control.title = label;
       control.setAttribute("aria-label", label);
-      control.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+      control.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i>`;
       // The cell has to keep the focus, because every one of these acts on the
       // cell the cursor is in.
       control.addEventListener("mousedown", (event) => event.preventDefault());

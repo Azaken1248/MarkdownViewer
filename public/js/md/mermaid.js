@@ -7,9 +7,9 @@
 /* exported MdMermaid */
 var MdMermaid = (function () {
   "use strict";
+  const { html } = DomHtml;
 
   const { mermaidState } = MdLazy;
-  const { escapeHtml } = MdText;
 
   function normalizeMermaidSource(source) {
     return String(source || "")
@@ -153,6 +153,9 @@ var MdMermaid = (function () {
         mermaidState.panZoomCounter += 1;
         const renderId = `mermaid-svg-${mermaidState.panZoomCounter}`;
         const { svg, bindFunctions } = await window.mermaid.render(renderId, candidate);
+        // Mermaid's own render, configured securityLevel: "antiscript" where
+        // it is initialized (md/diagram-theme.js).
+        // eslint-disable-next-line no-unsanitized/property
         node.innerHTML = svg;
         if (typeof bindFunctions === "function") {
           bindFunctions(node);
@@ -164,9 +167,9 @@ var MdMermaid = (function () {
     }
 
     const errText = String(lastError?.str || lastError?.message || "Unknown parser error");
-    node.innerHTML = `
-      <pre class="mermaid-fallback-code">${escapeHtml(raw)}</pre>
-      <p class="mermaid-fallback-error">Mermaid parse failed: ${escapeHtml(errText)}</p>
+    node.innerHTML = html`
+      <pre class="mermaid-fallback-code">${raw}</pre>
+      <p class="mermaid-fallback-error">Mermaid parse failed: ${errText}</p>
     `;
     return false;
   }

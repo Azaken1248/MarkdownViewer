@@ -40,6 +40,8 @@ var AppPageCode = (function () {
     node.className = "ve-block ve-code";
     node.dataset.index = String(index);
     node.setAttribute("contenteditable", "false");
+    // Sanitized on the way out of renderMarkdown; see md/text.js.
+    // eslint-disable-next-line no-unsanitized/property
     node.innerHTML = MarkdownCore.renderMarkdown(block.source);
 
     const code = /** @type {HTMLElement} */ (node.querySelector("pre code"));

@@ -11,9 +11,10 @@
 
 /* exported AppSearchPanel */
 var AppSearchPanel = (function () {
+  const { html, trusted } = DomHtml;
   const { elements } = AppDom;
   const { state } = AppState;
-  const { escapeHtml, normalize } = AppText;
+  const { normalize } = AppText;
   const { SUPERSEARCH_LIMIT, SUPERSEARCH_PAGE_SIZE, highlightMatches } = AppSearch;
   const { closeSidebarOnMobile } = AppShell;
 
@@ -40,9 +41,15 @@ var AppSearchPanel = (function () {
       && state.jumpQuery.trim().length > 0
       && normalize(query) === normalize(state.jumpQuery);
 
-    elements.superSearchHint.innerHTML = traversing
-      ? '<kbd>Enter</kbd> next match <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> previous <span>·</span> <kbd>Esc</kbd> exit search'
-      : '<kbd>Enter</kbd> open top result <span>·</span> <kbd>Esc</kbd> exit search';
+    // Two whole templates rather than one with a hole in it: a piece of
+    // markup chosen inside ${} would be escaped like the text it is not.
+    if (traversing) {
+      elements.superSearchHint.innerHTML = html`<kbd>Enter</kbd> next match <span>·</span>
+        <kbd>Shift</kbd>+<kbd>Enter</kbd> previous <span>·</span> <kbd>Esc</kbd> exit search`;
+    } else {
+      elements.superSearchHint.innerHTML = html`<kbd>Enter</kbd> open top result
+        <span>·</span> <kbd>Esc</kbd> exit search`;
+    }
   }
 
   function renderSuperSearchPanel(query, matches, searchTerms) {
@@ -85,19 +92,21 @@ var AppSearchPanel = (function () {
       return;
     }
 
-    elements.superSearchList.innerHTML = topResults.map((doc) => `
+    // highlightMatches escapes what it wraps and wraps it in <mark>, so what
+    // comes back is markup this app made rather than text to escape again.
+    elements.superSearchList.innerHTML = html`${topResults.map((doc) => html`
       <li>
-        <button class="supersearch-item" type="button" data-file="${escapeHtml(doc.file)}">
-          <span class="supersearch-item-title"><i class="ph ${escapeHtml(doc.icon)}"></i>${highlightMatches(doc.title, searchTerms)}</span>
-          <span class="supersearch-item-file">${highlightMatches(doc.originalFile || doc.file, searchTerms)}</span>
-          <span class="supersearch-item-snippet">${highlightMatches(doc.snippet, searchTerms)}</span>
+        <button class="supersearch-item" type="button" data-file="${doc.file}">
+          <span class="supersearch-item-title"><i class="ph ${doc.icon}"></i>${trusted(highlightMatches(doc.title, searchTerms))}</span>
+          <span class="supersearch-item-file">${trusted(highlightMatches(doc.originalFile || doc.file, searchTerms))}</span>
+          <span class="supersearch-item-snippet">${trusted(highlightMatches(doc.snippet, searchTerms))}</span>
         </button>
       </li>
-    `).join("");
+    `)}`;
 
     if (remaining > 0) {
       const more = document.createElement("li");
-      more.innerHTML = `
+      more.innerHTML = html`
         <button class="supersearch-more" type="button">
           <i class="ph ph-caret-down" aria-hidden="true"></i>
           <span>Show ${remaining} more</span>

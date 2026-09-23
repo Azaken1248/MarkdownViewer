@@ -12,7 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  appSource: readAppSource, modelScriptPaths, drawScriptPaths, loadScript
+  appSource: readAppSource, pageScriptPaths, loadScript
 } = require("./app-source.js");
 const { JSDOM } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
@@ -81,20 +81,15 @@ async function boot(dom, { cookie, origin }) {
     };
   };
 
-  // theme-boot.js first, and for the same reason the page loads it in <head>:
-  // it settles the theme before anything paints, and it is where the switch the
-  // bar wires up lives.
-  loadScript(window, path.join(ROOT, "js", "theme-boot.js"));
-  loadScript(window, path.join(ROOT, "js", "visual-editor.js"));
-  for (const file of modelScriptPaths(ROOT)) {
+  /* Every script diagram.html loads, in the order it loads them.
+   *
+   * Read off the page rather than listed here, for the reason the rest of the
+   * suite reads index.html: a script added to the page and not to a list in a
+   * test is a script no test ever evaluates — which is exactly what happened
+   * when js/dom-html.js was added and this list was not.
+   */
+  for (const file of pageScriptPaths("diagram.html", ROOT)) {
     loadScript(window, file);
-  }
-  loadScript(window, path.join(ROOT, "js", "diagram-icons.js"));
-  for (const file of drawScriptPaths(ROOT)) {
-    loadScript(window, file);
-  }
-  for (const file of ["diagram-editor.js", "diagram-page.js"]) {
-    loadScript(window, path.join(ROOT, "js", file));
   }
 
   // The page fetches before it draws, so waiting a fixed moment is waiting on a

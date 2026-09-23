@@ -104,6 +104,10 @@
 
     document.title = `${payload.title} | AzaDocs`;
 
+    // The one page a stranger is served, so this is the assignment that
+    // matters most: renderDocumentContent runs marked and then DOMPurify with
+    // this app's allowlist (md/text.js), and nothing else here touches markup.
+    // eslint-disable-next-line no-unsanitized/property
     elements.content.innerHTML = MarkdownCore.renderDocumentContent(
       payload.file,
       payload.content,

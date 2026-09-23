@@ -132,6 +132,8 @@ var AppPageBlocks = (function () {
     // see, and not every DOM implementation reflects the property back to it.
     node.setAttribute("contenteditable", "true");
     node.spellcheck = true;
+    // Sanitized on the way out of renderMarkdown; see md/text.js.
+    // eslint-disable-next-line no-unsanitized/property
     node.innerHTML = MarkdownCore.renderMarkdown(block.source + pageModel.linkReferences);
     makeEditorTasksLive(node, block);
 

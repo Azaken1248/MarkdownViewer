@@ -15,6 +15,7 @@
 
 /* exported AppTree */
 var AppTree = (function () {
+  const { html } = DomHtml;
   // How many document rows each folder group renders before offering
   // "show more".
   const DOC_LIST_PAGE_SIZE = 50;
@@ -40,7 +41,7 @@ var AppTree = (function () {
     button.title = label;
     button.setAttribute("aria-label", label);
     button.disabled = disabled;
-    button.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i>`;
+    button.innerHTML = html`<i class="ph ${iconClass}" aria-hidden="true"></i>`;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -207,7 +208,7 @@ var AppTree = (function () {
     button.setAttribute("aria-expanded", String(!isCollapsed));
 
     const totalDocs = countNodeDocs(node);
-    button.innerHTML = `
+    button.innerHTML = html`
       <i class="ph ph-caret-down tree-caret" aria-hidden="true"></i>
       <i class="ph ${folder ? "ph-folder" : "ph-stack"} tree-icon" aria-hidden="true"></i>
       <span class="tree-label"></span>
@@ -294,7 +295,7 @@ var AppTree = (function () {
       : `updated ${formatDate(doc.updatedAt)}`;
     button.title = `${displayName}\n${formatBytes(doc.size)} · ${timeLabel}`;
 
-    button.innerHTML = `
+    button.innerHTML = html`
       <i class="ph ${doc.icon} tree-icon" aria-hidden="true"></i>
       <span class="tree-label"></span>
     `;

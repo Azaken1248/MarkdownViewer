@@ -27,6 +27,7 @@
 /* exported DiagramEditor */
 var DiagramEditor = (function () {
   "use strict";
+  const { html, trusted } = DomHtml;
 
   const DIAGRAM_PREVIEW_DELAY = 250;
 
@@ -376,6 +377,9 @@ var DiagramEditor = (function () {
       const typing = editing?.field || null;
       typing?.remove();
 
+      // An SVG this app drew: DiagramDraw builds it from the model and every
+      // label goes through escapeText (dd/base.js) on the way out.
+      // eslint-disable-next-line no-unsanitized/property
       canvas.innerHTML = DiagramDraw.render(model, {
         layout: model.layout,
         // A window onto the diagram, or — in a document — the diagram at its own
@@ -973,6 +977,8 @@ var DiagramEditor = (function () {
         (svg.querySelector(".dd-view") || svg).appendChild(holder);
       }
 
+      // Lines at coordinates this file computed; no text in it at all.
+      // eslint-disable-next-line no-unsanitized/property
       holder.innerHTML = DiagramDraw.guidesMarkup(guides);
     }
 
@@ -2024,7 +2030,7 @@ var DiagramEditor = (function () {
         button.type = "button";
         button.className = item.danger ? "context-item danger" : "context-item";
         button.setAttribute("role", "menuitem");
-        button.innerHTML = `<i class="ph ${item.icon || "ph-dot"}" aria-hidden="true"></i><span></span>`;
+        button.innerHTML = html`<i class="ph ${item.icon || "ph-dot"}" aria-hidden="true"></i><span></span>`;
         button.querySelector("span").textContent = item.label;
 
         if (item.keys) {
@@ -3703,7 +3709,9 @@ var DiagramEditor = (function () {
       button.className = "ve-diagram-tool";
       button.dataset.shape = choice.shape;
       button.dataset.kind = choice.kind;
-      button.innerHTML = `${shapeGlyph(choice.glyph)}<span></span>`;
+      // shapeGlyph wraps one of the SVG paths in the table above — markup
+      // this file wrote, not anything that came from a document.
+      button.innerHTML = html`${trusted(shapeGlyph(choice.glyph))}<span></span>`;
       button.querySelector("span").textContent = choice.label;
       button.title = `Add a ${choice.label.toLowerCase()}`
         + " — drag it onto the diagram, or tap and then tap where it goes";
@@ -4278,7 +4286,7 @@ var DiagramEditor = (function () {
         button.className = "ve-diagram-step";
         button.title = label;
         button.setAttribute("aria-label", label);
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i>`;
         button.disabled = to < least || to > most;
         button.addEventListener("click", () => set(to));
         return button;
@@ -5011,7 +5019,7 @@ var DiagramEditor = (function () {
       const add = document.createElement("button");
       add.type = "button";
       add.className = "ve-diagram-add";
-      add.innerHTML = `<i class="ph ph-image" aria-hidden="true"></i><span>${
+      add.innerHTML = html`<i class="ph ph-image" aria-hidden="true"></i><span>${
         item.image ? "Replace the picture" : "Add a picture"}</span>`;
       add.addEventListener("click", () => askForPicture({ id: item.id }));
       row.append(add);
@@ -5113,10 +5121,12 @@ var DiagramEditor = (function () {
             button.title = name.replace(/-/g, " ");
             button.setAttribute("aria-label", button.title);
             button.setAttribute("aria-pressed", name === worn ? "true" : "false");
-            button.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18"`
-              + ` fill="none" stroke="currentColor" stroke-width="2"`
-              + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
-              + `${DiagramIcons.bodyOf(name)}</svg>`;
+            // bodyOf is a lookup in the icon table in js/diagram-icons.js:
+            // markup this app ships, and "" for a name that is not in it.
+            button.innerHTML = html`<svg viewBox="0 0 24 24" width="18" height="18"
+              fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"
+              aria-hidden="true">${trusted(DiagramIcons.bodyOf(name))}</svg>`;
             // Wearing it already, pressing it takes it off — which is the only
             // way a grid of switches can also be a way to say "none of these".
             button.addEventListener("click", () =>
@@ -5257,7 +5267,7 @@ var DiagramEditor = (function () {
         button.title = name;
         button.setAttribute("aria-label", name);
         button.setAttribute("aria-pressed", on ? "true" : "false");
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i>`;
         button.addEventListener("click", () => restyle(ids, { [key]: on ? null : value }));
         marks.append(button);
       }
@@ -5402,7 +5412,7 @@ var DiagramEditor = (function () {
         button.className = "ve-diagram-mark";
         button.title = label;
         button.setAttribute("aria-label", `${label} cell`);
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i>`;
 
         button.addEventListener("click", () => change((token) => {
           const letters = CELL_LETTERS(token).split("");
@@ -5901,6 +5911,8 @@ var DiagramEditor = (function () {
 
       const glyph = document.createElement("span");
       glyph.className = "ve-diagram-leaf-glyph";
+      // As above: one of this file's own SVG paths, wrapped.
+      // eslint-disable-next-line no-unsanitized/property
       glyph.innerHTML = shapeGlyph(glyphFor(item));
 
       row.append(glyph, leafName(stepLabel(item)));
@@ -5978,8 +5990,8 @@ var DiagramEditor = (function () {
       twist.className = "ve-diagram-twist";
       twist.setAttribute("aria-expanded", String(!folded));
       named(twist, `${folded ? "Show" : "Hide"} what is in ${name}`);
-      twist.innerHTML = `<i class="ph ${folded ? "ph-caret-right" : "ph-caret-down"}"`
-        + ` aria-hidden="true"></i>`;
+      twist.innerHTML = html`<i class="ph ${folded ? "ph-caret-right" : "ph-caret-down"}"
+        aria-hidden="true"></i>`;
       twist.addEventListener("click", () => {
         if (folded) {
           shutGroups.delete(group.id);
@@ -5995,8 +6007,8 @@ var DiagramEditor = (function () {
       lock.className = "ve-diagram-lock";
       lock.setAttribute("aria-pressed", String(Boolean(group.lock)));
       named(lock, group.lock ? `Unlock ${name}` : `Lock ${name}`);
-      lock.innerHTML = `<i class="ph ${group.lock ? "ph-lock-simple" : "ph-lock-simple-open"}"`
-        + ` aria-hidden="true"></i>`;
+      lock.innerHTML = html`<i class="ph ${group.lock ? "ph-lock-simple" : "ph-lock-simple-open"}"
+        aria-hidden="true"></i>`;
       lock.addEventListener("click", () => {
         if (group.lock) {
           delete group.lock;
@@ -6201,7 +6213,7 @@ var DiagramEditor = (function () {
         button.className = "ve-diagram-icon";
         button.title = label;
         button.setAttribute("aria-label", label);
-        button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i>`;
+        button.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i>`;
         button.addEventListener("click", run);
         return button;
       };

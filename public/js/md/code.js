@@ -62,6 +62,9 @@ var MdCode = (function () {
             ignoreIllegals: true
           });
 
+          // highlight.js escapes the source it is given and returns its own
+          // spans around it; that is the whole of what a highlighter does.
+          // eslint-disable-next-line no-unsanitized/property
           codeNode.innerHTML = highlighted.value;
           codeNode.classList.add("hljs", `language-${requestedLanguage}`);
           codeNode.dataset.highlighted = "true";
@@ -69,6 +72,8 @@ var MdCode = (function () {
         }
 
         const autoHighlighted = window.hljs.highlightAuto(source);
+        // As above: highlight.js escapes what it wraps.
+        // eslint-disable-next-line no-unsanitized/property
         codeNode.innerHTML = autoHighlighted.value;
         codeNode.classList.add("hljs");
         if (autoHighlighted.language) {
@@ -431,6 +436,9 @@ var MdCode = (function () {
 
     const caret = selectionOffsetsWithin(codeNode);
 
+    // markup is highlight.js's output for the text in this block, which it
+    // escaped on the way through. See the two above.
+    // eslint-disable-next-line no-unsanitized/property
     codeNode.innerHTML = markup;
     // A block whose fence was renamed would otherwise accumulate one
     // language- class per language it has ever been called.

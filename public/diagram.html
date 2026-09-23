@@ -48,6 +48,9 @@
   <!-- Nothing here renders markdown, so none of the rendering libraries are
        loaded: no marked, no DOMPurify, no Mermaid. The page splits a document
        into blocks to find one fence, and draws a diagram itself. -->
+    <!-- Escaping for the markup this app builds as strings. Before everything
+       that builds any, which is nearly everything. -->
+  <script src="/js/dom-html.js" defer></script>
   <script src="/js/visual-editor.js" defer></script>
   <script src="/js/dm/shapes.js" defer></script>
   <script src="/js/dm/grammar.js" defer></script>

@@ -262,6 +262,9 @@ var MdDiagramTheme = (function () {
 
       block.dataset.mermaidSource = source;
       block.dataset.diagramDrawn = "1";
+      // An SVG this app drew: DiagramDraw builds it from the model and puts
+      // every label through escapeText (dd/base.js) on the way.
+      // eslint-disable-next-line no-unsanitized/property
       block.innerHTML = svg;
       drawn += 1;
     }

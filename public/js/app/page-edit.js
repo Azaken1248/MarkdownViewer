@@ -100,6 +100,8 @@ var AppPageEdit = (function () {
    */
   async function restorePageView(file, markdown, title) {
     destroyPanZoomInstances(elements.docContent);
+    // Sanitized on the way out of renderMarkdown; see md/text.js.
+    // eslint-disable-next-line no-unsanitized/property
     elements.docContent.innerHTML = renderDocumentContent(file, markdown, title || file);
     elements.docContent.classList.add("visible");
     await renderMermaidBlocks(elements.docContent);

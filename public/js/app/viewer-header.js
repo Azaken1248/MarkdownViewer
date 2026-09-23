@@ -12,6 +12,7 @@
 
 /* exported AppViewerHeader */
 var AppViewerHeader = (function () {
+  const { html } = DomHtml;
   const { elements } = AppDom;
   const { MOBILE_BREAKPOINT, setNavOpen } = AppShell;
   const { state } = AppState;
@@ -62,7 +63,13 @@ var AppViewerHeader = (function () {
     button.type = "button";
     button.className = "crumb";
     button.title = title || label;
-    button.innerHTML = icon ? `<i class="ph ${icon}" aria-hidden="true"></i><span></span>` : "<span></span>";
+    // Whole templates, not a piece chosen inside ${}: markup interpolated
+    // into a template is text, and would be escaped.
+    if (icon) {
+      button.innerHTML = html`<i class="ph ${icon}" aria-hidden="true"></i><span></span>`;
+    } else {
+      button.innerHTML = html`<span></span>`;
+    }
     button.querySelector("span").textContent = label;
     button.addEventListener("click", onClick);
     return button;
@@ -155,7 +162,7 @@ var AppViewerHeader = (function () {
     const current = document.createElement("span");
     current.className = "crumb crumb-current";
     current.setAttribute("aria-current", "page");
-    current.innerHTML = `<i class="ph ${iconClass}" aria-hidden="true"></i><span></span>`;
+    current.innerHTML = html`<i class="ph ${iconClass}" aria-hidden="true"></i><span></span>`;
     current.querySelector("span").textContent = label;
     nav.appendChild(current);
   }

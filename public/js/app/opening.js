@@ -99,6 +99,10 @@ var AppOpening = (function () {
       elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
 
       destroyPanZoomInstances(elements.docContent);
+      // renderDocumentContent runs marked and then DOMPurify (md/text.js);
+      // what comes back has been through the sanitizer with this app's
+      // allowlist, which is the whole reason it is called safeHtml.
+      // eslint-disable-next-line no-unsanitized/property
       elements.docContent.innerHTML = safeHtml;
       elements.docContent.classList.add("visible");
       elements.emptyState.style.display = "none";
@@ -174,6 +178,10 @@ var AppOpening = (function () {
       elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(originalFile));
 
       destroyPanZoomInstances(elements.docContent);
+      // renderDocumentContent runs marked and then DOMPurify (md/text.js);
+      // what comes back has been through the sanitizer with this app's
+      // allowlist, which is the whole reason it is called safeHtml.
+      // eslint-disable-next-line no-unsanitized/property
       elements.docContent.innerHTML = safeHtml;
       elements.docContent.classList.add("visible");
       elements.emptyState.style.display = "none";

@@ -4,6 +4,7 @@
 // read consistently already.
 
 const js = require("@eslint/js");
+const noUnsanitized = require("eslint-plugin-no-unsanitized");
 
 const BROWSER_GLOBALS = {
   window: "readonly",
@@ -121,6 +122,7 @@ const BROWSER_GLOBALS = {
   // Our own shared render engine, loaded as a plain script before app.js:
   // the modules under /js/md, then markdown-core.js, which is made of them.
   DocKinds: "readonly",
+  DomHtml: "readonly",
   MdLazy: "readonly",
   MdText: "readonly",
   MdCode: "readonly",
@@ -220,6 +222,27 @@ const SHARED_RULES = {
 // namespace the globals list already names is not a redeclaration.
 const BROWSER_RULES = {
   ...SHARED_RULES,
+
+  /* Every assignment to innerHTML that builds its string out of a value.
+   *
+   * Most of the hundred-odd in this app are static markup, and the ones that
+   * interpolate mostly interpolate something the code itself produced — an
+   * icon name from a fixed list, a caret direction. Rendered markdown goes
+   * through DOMPurify and a diagram's SVG is escaped where it is built, so
+   * there was no hole here. What there was not was anything stopping the next
+   * one: "we are careful" does not survive a codebase this size, and a rule
+   * does. This one permits a static string and refuses interpolation, which is
+   * exactly the line that matters; where interpolation is right, the `html`
+   * tagged template in js/dom-html.js escapes it, and the handful of places
+   * that pass markup through on purpose say so in a disable comment with the
+   * reason.
+   */
+  "no-unsanitized/property": ["error", {
+    escape: { taggedTemplates: ["html"] }
+  }],
+  "no-unsanitized/method": ["error", {
+    escape: { taggedTemplates: ["html"] }
+  }],
   "no-var": "off",
   "no-restricted-syntax": ["error", {
     selector: "VariableDeclaration[kind='var']:not(Program > VariableDeclaration)",
@@ -284,6 +307,7 @@ module.exports = [
     // Browser code. No bundler, no modules — these are plain scripts.
     files: ["public/js/**/*.js"],
     ignores: ["public/js/pyodide-worker.js", "public/js/doc-kinds.js"],
+    plugins: { "no-unsanitized": noUnsanitized },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",
@@ -297,6 +321,7 @@ module.exports = [
     // CommonJS module on the server, so it may say `module` as well as
     // `window`. Kept to that one file on purpose.
     files: ["public/js/doc-kinds.js"],
+    plugins: { "no-unsanitized": noUnsanitized },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",

@@ -13,9 +13,10 @@
 
 /* exported AppFolderModal */
 var AppFolderModal = (function () {
+  const { html } = DomHtml;
   const { elements } = AppDom;
   const { state } = AppState;
-  const { escapeHtml, compareNames } = AppText;
+  const { compareNames } = AppText;
   const { getDocByFile, getFolderRecord } = AppLibrary;
   const { enterModalLayer, exitModalLayer } = AppModal;
   const { syncBodyLock } = AppShell;
@@ -114,13 +115,13 @@ var AppFolderModal = (function () {
       return;
     }
 
-    elements.folderPickerList.innerHTML = folders.map(({ folder, depth }) => `
-      <button class="folder-choice" type="button" data-folder-id="${escapeHtml(folder.id)}"
-        style="--depth: ${depth}" title="${escapeHtml(folder.path)}" ${moveMode ? "" : "disabled"}>
-        <span class="folder-choice-title"><i class="ph ph-folder"></i>${escapeHtml(folder.name)}</span>
-        <span class="folder-choice-meta">${escapeHtml(String(counts.get(folder.id) || 0))} doc(s)</span>
+    elements.folderPickerList.innerHTML = html`${folders.map(({ folder, depth }) => html`
+      <button class="folder-choice" type="button" data-folder-id="${folder.id}"
+        style="--depth: ${depth}" title="${folder.path}" ${moveMode ? "" : "disabled"}>
+        <span class="folder-choice-title"><i class="ph ph-folder"></i>${folder.name}</span>
+        <span class="folder-choice-meta">${counts.get(folder.id) || 0} doc(s)</span>
       </button>
-    `).join("");
+    `)}`;
 
     elements.folderPickerList.querySelectorAll(".folder-choice").forEach((button) => {
       if (!moveMode) {

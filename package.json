@@ -35,6 +35,7 @@
     "c8": "^12.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.15.0",
+    "eslint-plugin-no-unsanitized": "^4.1.5",
     "jsdom": "^25.0.1",
     "lucide-static": "^1.34.0",
     "typescript": "^7.0.2"

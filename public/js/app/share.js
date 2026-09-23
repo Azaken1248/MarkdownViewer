@@ -7,10 +7,11 @@
 
 /* exported AppShare */
 var AppShare = (function () {
+  const { html } = DomHtml;
   const { elements } = AppDom;
   const { state } = AppState;
   const { requestJson, can } = AppApi;
-  const { escapeHtml, docUrl } = AppText;
+  const { docUrl } = AppText;
   const { syncBodyLock } = AppShell;
   const { notify, requestConfirmation } = AppNotify;
   const { enterModalLayer, exitModalLayer } = AppModal;
@@ -61,18 +62,18 @@ var AppShare = (function () {
       const viewed = share.views > 0
         ? `Opened ${share.views} time${share.views === 1 ? "" : " s"}.`.replace(" s", "s")
         : "Not opened yet.";
-      elements.shareStatus.innerHTML = `
+      elements.shareStatus.innerHTML = html`
         <p class="share-live"><i class="ph ph-globe-simple" aria-hidden="true"></i>
-          <span><strong>${escapeHtml(state.shareFile)}</strong> is shared publicly.</span></p>
-        <p class="share-sub">Created ${escapeHtml(new Date(share.createdAt).toLocaleDateString())} by
-          ${escapeHtml(share.createdBy || "unknown")}. ${escapeHtml(viewed)}</p>
+          <span><strong>${state.shareFile}</strong> is shared publicly.</span></p>
+        <p class="share-sub">Created ${new Date(share.createdAt).toLocaleDateString()} by
+          ${share.createdBy || "unknown"}. ${viewed}</p>
       `;
       elements.revokeShareBtn.hidden = false;
       elements.createShareBtn.textContent = "Replace link";
     } else {
-      elements.shareStatus.innerHTML = `
+      elements.shareStatus.innerHTML = html`
         <p class="share-live"><i class="ph ph-lock-simple" aria-hidden="true"></i>
-          <span><strong>${escapeHtml(state.shareFile)}</strong> is private.</span></p>
+          <span><strong>${state.shareFile}</strong> is private.</span></p>
         <p class="share-sub">Only signed-in accounts can read it.</p>
       `;
       elements.revokeShareBtn.hidden = true;

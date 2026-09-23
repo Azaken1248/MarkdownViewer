@@ -89,6 +89,32 @@ proof, and the error count had to be something a person could finish.
 The names that arrive from outside the source — the CDN libraries, the worker's
 own scope, `req.auth` — are declared in `types/globals.d.ts`.
 
+### Markup built as strings
+
+There are about a hundred assignments to `innerHTML` in the client — a button
+with an icon in it, a row with a filename on it — and there is no framework
+here to hide them. Rendered markdown goes through DOMPurify and a diagram's
+SVG escapes its own labels, so the interesting question was never whether
+today's hundred are safe; it was what stops the hundred-and-first.
+
+`eslint-plugin-no-unsanitized` stops it. `no-unsanitized/property` permits a
+static string and refuses one built out of a value, which is exactly the line
+that matters, and the one way past it is `html` in
+[`public/js/dom-html.js`](public/js/dom-html.js):
+
+```js
+node.innerHTML = html`<i class="ph ${icon}"></i><span>${label}</span>`;
+```
+
+Every interpolation is escaped; an array is joined as markup, which is how a
+list is built from `.map(one => html`…`)`; and `trusted(value)` is the one way
+to put markup inside markup, so `grep trusted public/js` lists every place
+something other than that file did the escaping. Markup that was sanitized
+elsewhere — DOMPurify's output, highlight.js's spans, a diagram this app drew
+— assigns directly with an `eslint-disable-next-line` naming the reason. The
+`headers` suite checks that the rule is on, that the helper escapes what it
+promises to, and that every opt-out has a sentence above it.
+
 ### Dependencies, and the ones `npm audit` cannot see
 
 The runtime surface is four packages — `express`, `multer`, `better-sqlite3`,
@@ -297,6 +323,7 @@ affected.
 │   │   │   ├── share.js      # Share links
 │   │   │   └── pasted-images.js  # A screenshot becomes an image link
 │   │   ├── doc-kinds.js          # What a document is, by its name — loaded by the server too
+│   │   ├── dom-html.js           # The html`` tag: escaping for markup built as strings
 │   ├── markdown-core.js  # Render engine shared by both pages
 │   │   ├── visual-editor.js  # Block splitting + markdown serialization
 │   │   ├── diagram-model.js  # Mermaid flowcharts as steps, arrows and positions

@@ -16,6 +16,7 @@
 
 /* exported AppPageEmbeds */
 var AppPageEmbeds = (function () {
+  const { html } = DomHtml;
   const { state } = AppState;
   const { docUrl } = AppText;
   const { renderMermaidBlocks, destroyPanZoomInstances } = AppRender;
@@ -52,8 +53,10 @@ var AppPageEmbeds = (function () {
       // Neither of these appears in the document as it reads, so showing them as
       // a rendered anything would be an invention. They get a marker instead —
       // visible enough to find, small enough not to be part of the prose.
-      view.innerHTML = `<span class="ve-embed-note">${MarkdownCore.escapeHtml(embedLabel(block))}</span>`;
+      view.innerHTML = html`<span class="ve-embed-note">${embedLabel(block)}</span>`;
     } else {
+      // Sanitized on the way out of renderMarkdown; see md/text.js.
+      // eslint-disable-next-line no-unsanitized/property
       view.innerHTML = MarkdownCore.renderMarkdown(blockSource(block) + pageModel.linkReferences);
     }
 
@@ -90,9 +93,8 @@ var AppPageEmbeds = (function () {
     // Next to a Build button the long form is redundant twice over: the corner
     // already says which block this is, and the word that matters is the one
     // that tells the two buttons apart.
-    open.innerHTML = buildable
-      ? '<i class="ph ph-code" aria-hidden="true"></i><span>Markdown</span>'
-      : `<i class="ph ph-code" aria-hidden="true"></i><span>Edit ${embedLabel(block)}</span>`;
+    open.innerHTML = html`<i class="ph ph-code" aria-hidden="true"></i>
+      <span>${buildable ? "Markdown" : `Edit ${embedLabel(block)}`}</span>`;
     open.addEventListener("click", () => openEmbedSource(node, block));
 
     tools.appendChild(open);
@@ -127,6 +129,8 @@ var AppPageEmbeds = (function () {
     // the thing that makes source editing feel like a punishment.
     const drawPreview = () => {
       destroyPanZoomInstances(preview);
+      // Sanitized on the way out of renderMarkdown; see md/text.js.
+      // eslint-disable-next-line no-unsanitized/property
       preview.innerHTML = MarkdownCore.renderMarkdown(blockSource(block) + pageModel.linkReferences);
       void renderMermaidBlocks(preview);
     };

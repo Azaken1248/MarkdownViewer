@@ -12,6 +12,11 @@
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD } = require("./helpers/server");
 const { CSP_DIRECTIVES, PERMISSIONS_POLICY, HSTS } = require("../lib/http/headers");
 const { createChecker } = require("./helpers/check.js");
+const path = require("path");
+const fs = require("fs");
+const { clientScriptPaths, coreScriptPaths, drawScriptPaths } = require("./app-source.js");
+
+const publicDir = path.join(__dirname, "..", "public");
 
 const { check, finish } = createChecker("HEADER");
 
@@ -75,11 +80,6 @@ function carried(headers) {
      * none of them holds this fails and says to take it out. A comment alone
      * is read once; this is read every run.
      */
-    const path = require("path");
-    const fs = require("fs");
-    const { clientScriptPaths, coreScriptPaths, drawScriptPaths } = require("./app-source.js");
-    const publicDir = path.join(__dirname, "..", "public");
-
     check("style-src allows inline styles", /style-src [^;]*'unsafe-inline'/.test(CSP_DIRECTIVES), true);
     check("...and script-src does not, which is the one that would matter",
       /script-src [^;]*'unsafe-inline'/.test(CSP_DIRECTIVES), false);
@@ -103,6 +103,76 @@ function carried(headers) {
     // would have no reason left, and this is the check that would say so.
     check("so the allowance still has a reason; when this fails, take it out",
       withStyleAttributes.length > 0 || /katex/i.test(lazy) || /mermaid/i.test(lazy), true);
+  }
+
+  console.log("=== the markup this app builds is escaped, and the rule says so ===");
+  {
+    /* The other half of the CSP bargain. script-src has no 'unsafe-inline',
+     * so an injected <script> would not run — but an injected onerror= or a
+     * javascript: href would, and those come in through the same hole: a
+     * value interpolated into a string that is assigned to innerHTML.
+     *
+     * There are a hundred of those assignments in this app. What keeps them
+     * honest is not care, it is eslint-plugin-no-unsanitized, so this checks
+     * that the rule is on, that the escaping helper it points people at
+     * actually escapes, and that every place that opts out of the rule says
+     * why on the line above.
+     */
+    const vm = require("vm");
+
+    const config = fs.readFileSync(path.join(__dirname, "..", "eslint.config.js"), "utf8");
+    check("the rule is on for the browser's code",
+      /"no-unsanitized\/property": \["error"/.test(config), true);
+    check("...and for the methods that take markup too",
+      /"no-unsanitized\/method": \["error"/.test(config), true);
+    check("...with the html tag as the one way past it",
+      /taggedTemplates: \["html"\]/.test(config), true);
+
+    // The helper itself, loaded the way the page loads it.
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(publicDir, "js", "dom-html.js"), "utf8"), sandbox);
+    const { html, trusted, escapeHtml } = sandbox.DomHtml;
+
+    const attack = '"><script>alert(1)</script>';
+    check("an interpolated value cannot close the attribute it is in",
+      html`<i class="ph ${attack}"></i>`,
+      '<i class="ph &quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"></i>');
+    check("...nor open a tag of its own in text",
+      html`<p>${"<img src=x onerror=alert(1)>"}</p>`,
+      "<p>&lt;img src=x onerror=alert(1)&gt;</p>");
+    check("...and a list is built from pieces, each of them escaped",
+      html`<ul>${["a<b", "c&d"].map((one) => html`<li>${one}</li>`)}</ul>`,
+      "<ul><li>a&lt;b</li><li>c&amp;d</li></ul>");
+    check("a conditional that chose nothing writes nothing",
+      html`<p>${null}${undefined}${false}</p>`, "<p></p>");
+    check("...but zero is a number somebody meant", html`<p>${0}</p>`, "<p>0</p>");
+    check("trusted() is the one way to put markup inside markup",
+      html`<p>${trusted("<mark>x</mark>")}</p>`, "<p><mark>x</mark></p>");
+    check("the escape covers the five characters that matter",
+      escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
+
+    /* Every opt-out is a sentence somebody wrote. The rule can be turned off
+     * for a line, which is right for markup that was sanitized somewhere else
+     * — but an opt-out with no reason on it is the thing this was meant to
+     * stop, so each one has to be preceded by a comment.
+     */
+    const unexplained = [];
+    for (const file of [...new Set(clientScriptPaths(publicDir))]) {
+      const lines = fs.readFileSync(file, "utf8").split("\n");
+      lines.forEach((line, index) => {
+        if (!line.includes("eslint-disable-next-line no-unsanitized")) {
+          return;
+        }
+
+        const before = (lines[index - 1] || "").trim();
+        if (!before.startsWith("//") && !before.startsWith("*")) {
+          unexplained.push(`${path.relative(publicDir, file)}:${index + 1}`);
+        }
+      });
+    }
+
+    check("every line that turns the rule off says why", unexplained, []);
   }
 
   console.log("=== and not on a deployment that is plain HTTP ===");

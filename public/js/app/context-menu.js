@@ -12,6 +12,7 @@
 
 /* exported AppContextMenu */
 var AppContextMenu = (function () {
+  const { html } = DomHtml;
   const { elements } = AppDom;
   const { state } = AppState;
   const { can } = AppApi;
@@ -64,7 +65,7 @@ var AppContextMenu = (function () {
       button.type = "button";
       button.className = item.danger ? "context-item danger" : "context-item";
       button.disabled = Boolean(item.disabled);
-      button.innerHTML = `<i class="ph ${item.icon}" aria-hidden="true"></i><span></span>`;
+      button.innerHTML = html`<i class="ph ${item.icon}" aria-hidden="true"></i><span></span>`;
       button.querySelector("span").textContent = item.label;
 
       if (item.shortcut) {

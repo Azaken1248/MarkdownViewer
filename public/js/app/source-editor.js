@@ -8,6 +8,7 @@
  */
 /* exported AppSourceEditor */
 var AppSourceEditor = (function () {
+  const { html } = DomHtml;
 
 const { docName, compareNames, isDiagramFile, toMermaidMarkdown } = AppText;
 const { elements } = AppDom;
@@ -50,6 +51,8 @@ async function renderEditorPreview() {
 
   // Markdown alone is cheap and synchronous, so the text updates immediately.
   destroyPanZoomInstances(elements.editorPreview);
+  // Sanitized on the way out of renderMarkdown; see md/text.js.
+  // eslint-disable-next-line no-unsanitized/property
   elements.editorPreview.innerHTML = renderMarkdown(source);
   void highlightCodeBlocks(elements.editorPreview);
 
@@ -102,6 +105,8 @@ function renderEditorPreviewText() {
     : elements.editorInput.value;
 
   destroyPanZoomInstances(elements.editorPreview);
+  // Sanitized on the way out of renderMarkdown; see md/text.js.
+  // eslint-disable-next-line no-unsanitized/property
   elements.editorPreview.innerHTML = renderMarkdown(source);
   void highlightCodeBlocks(elements.editorPreview);
   return generation;
@@ -239,9 +244,8 @@ function openEditor({ mode, fileName, content, folderId = null }) {
   state.editorScrollSyncLock = false;
   void renderEditorPreview();
 
-  elements.saveDocBtn.innerHTML = mode === "edit"
-    ? '<i class="ph ph-floppy-disk"></i> Save Changes'
-    : '<i class="ph ph-floppy-disk"></i> Save New';
+  elements.saveDocBtn.innerHTML =
+    html`<i class="ph ph-floppy-disk"></i> ${mode === "edit" ? "Save Changes" : "Save New"}`;
 
   elements.editorModal.classList.add("open");
   elements.editorModal.setAttribute("aria-hidden", "false");
