@@ -28,10 +28,14 @@ const RULES = ["complexity", "max-lines-per-function", "max-depth", "max-params"
 /* The budget: none of them.
  *
  * The rules went in as warnings with seventy-four of them outstanding, and
- * then the seventy-four were dealt with — mostly by taking a function apart,
- * and four times by saying in the file why a module is written as a closure.
- * Zero is the number that keeps it that way: a function that grows past a
- * limit now shows up here rather than in a list nobody reads.
+ * then the seventy-four were dealt with by taking the functions apart. Four
+ * of them were answered for a while by saying in the file why a module was
+ * written as one long closure, which was true and still left four functions
+ * nobody could read; those four were taken apart too, so the number below is
+ * the whole story rather than the part that was easy.
+ *
+ * Zero is what keeps it that way: a function that grows past a limit shows up
+ * here rather than in a list nobody reads.
  *
  * Raising one of these is a decision, not a mistake. Make it in a commit that
  * says why.
@@ -43,20 +47,19 @@ const BUDGET = {
   "max-params": 0
 };
 
-/* The four places that answer the rules rather than satisfy them.
+/* The places that answer the rules rather than satisfy them: none.
  *
- * Each is a module written as a closure — the diagram editor, the guards, the
- * document store, the search index — where what the rule can see is a long
- * function and what is actually there is a module. They say so on the line
- * above the disable, and this is the list, so a fifth one is a change to this
- * file rather than a quiet addition.
+ * There were four — the diagram editor, the guards, the document store, the
+ * search index — each a module written as one long closure, where what the
+ * rule could see was a huge function and what was actually there was a module.
+ * Saying so above a disable was honest and did not help anybody read them, so
+ * each is now what it claimed to be: a state object with a name and functions
+ * that take it.
+ *
+ * An empty list is the point. Adding to it is allowed, and it is a change to
+ * this file and a reason written above the disable rather than a quiet one.
  */
-const CLOSED_OVER = [
-  "lib/docs/search.js",
-  "lib/docs/store.js",
-  "lib/guards.js",
-  "public/js/diagram-editor.js"
-];
+const CLOSED_OVER = [];
 
 (async () => {
   const root = path.join(__dirname, "..");
@@ -78,7 +81,7 @@ const CLOSED_OVER = [
       counts[rule] <= BUDGET[rule], true);
   }
 
-  console.log("=== and the few that answer them say why ===");
+  console.log("=== and nothing answers them instead of satisfying them ===");
   const fs = require("fs");
   const found = [];
   const unexplained = [];
@@ -106,7 +109,7 @@ const CLOSED_OVER = [
     });
   }
 
-  check("the modules written as closures are the ones on the list",
+  check("the functions that switch a limit off are the ones on the list",
     [...new Set(found)].sort(), CLOSED_OVER);
   check("...and each says why on the line above", unexplained, []);
 

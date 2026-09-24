@@ -114,13 +114,20 @@ the list of addresses and who may use them. Then two dozen smaller ones, most
 of which became a table: what a shape costs to draw, what a search match is
 worth, what each kind of notebook output looks like.
 
-Four places answer the rules rather than satisfy them, and say so on the line
-above the disable: the diagram editor's `mount`, the guards, the document
-store and the search index. Each is a module written as a closure — what the
-rule sees is a long function, and what is there is a module — and the `limits`
-suite holds the list of the four, so a fifth is a change to that file rather
-than a quiet addition. A test suite is exempt for the same kind of reason: it
-is a script, and its branches are its checks.
+Four places answered the rules instead of satisfying them, with a disable and
+a reason above it: the diagram editor's `mount`, the guards, the document
+store and the search index. Each was a module written as one long closure —
+what the rule saw was a huge function, and what was there was a module — which
+was true, and still left four functions nobody could read. So each is now the
+thing it said it was. The three on the server keep their state in an object
+the module builds and their functions take it, and the factory returns the few
+of them the rest of the app calls. The diagram editor does the same with `ed`:
+one editor is one `ed`, every function takes it first, and `mount` is six named
+steps — start the state, bind the canvas, build the rail, build the bar, put it
+together, hand back the handle. The `limits` suite holds the list of places
+that switch a limit off, and the list is now empty, so the first one is a
+change to that file rather than a quiet addition. A test suite is exempt for a
+different reason: it is a script, and its branches are its checks.
 
 ### Markup built as strings
 
