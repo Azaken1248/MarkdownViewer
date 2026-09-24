@@ -26,157 +26,183 @@ const { refreshDocs } = AppRefresh;
 const { uploadMarkdown } = AppUploads;
 const { moveDocumentToFolder, handleFolderModalAction } = AppFolderOps;
 
+/* What the tree itself listens for: the keyboard, a click on the empty space
+ * below the rows, and a right-click there. Delegated, so they survive every
+ * rebuild of the tree.
+ */
+function bindTree() {
+// Delegated so they survive every rebuild of the tree.
+elements.docList.addEventListener("keydown", handleTreeKeydown);
+
+// Clicking the empty space below the rows clears the selection, as it does in
+// Explorer. Clicks that landed on a row are handled by the row itself.
+elements.docList.addEventListener("mousedown", (event) => {
+  if (event.target === elements.docList) {
+    clearSelection();
+  }
+});
+
+// Right-clicking the empty area offers the paste target for the top level.
+elements.docList.addEventListener("contextmenu", (event) => {
+  if (event.target !== elements.docList) {
+    return;
+  }
+
+  event.preventDefault();
+
+  // Creating is a write, so a viewer is left with the one entry that is not.
+  const items = [];
+
+  if (can("doc:write")) {
+    items.push(
+      {
+        label: "New file",
+        icon: "ph-file-plus",
+        action: () => startNewDocument(null)
+      },
+      {
+        label: "New folder",
+        icon: "ph-folder-plus",
+        action: () => openFolderModal({ mode: "create" })
+      },
+      {
+        label: state.clipboard.files.length
+          ? `Paste ${state.clipboard.files.length} file(s) into Ungrouped`
+          : "Paste",
+        icon: "ph-clipboard-text",
+        disabled: state.clipboard.files.length === 0,
+        action: () => void pasteIntoFolder(null)
+      },
+      { separator: true }
+    );
+  }
+
+  items.push({
+    label: "Select all",
+    icon: "ph-check-square",
+    action: () => setSelection(state.visibleFileOrder)
+  });
+
+  openContextMenu(event.clientX, event.clientY, items);
+});
+}
+
+
+// A context menu must not survive the next interaction anywhere on the page.
+function bindContextMenuDismissal() {
+// A context menu must not survive the next interaction anywhere on the page.
+window.addEventListener("mousedown", (event) => {
+  if (elements.contextMenu && !elements.contextMenu.contains(/** @type {Node} */ (event.target))) {
+    closeContextMenu();
+  }
+});
+
+window.addEventListener("blur", closeContextMenu);
+window.addEventListener("resize", closeContextMenu);
+document.addEventListener("scroll", closeContextMenu, true);
+}
+
+
+// Collapse-all is a toggle: if anything is open it closes everything, and if
+// nothing is open it opens everything.
+function bindCollapseAll() {
+elements.collapseAllBtn?.addEventListener("click", () => {
+  const groups = [.../** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-group"))];
+  const anyExpanded = groups.some((group) => !group.classList.contains("is-collapsed"));
+
+  if (anyExpanded) {
+    for (const group of groups) {
+      state.collapsedFolderIds.add(group.dataset.folderKey);
+    }
+  } else {
+    state.collapsedFolderIds.clear();
+  }
+
+  persistCollapsedFolders();
+  elements.collapseAllBtn.setAttribute("aria-label", anyExpanded ? "Expand all folders" : "Collapse all folders");
+  elements.collapseAllBtn.title = anyExpanded ? "Expand all folders" : "Collapse all folders";
+  renderDocList();
+});
+}
+
+
+// The folder dialog and the rest of the sidebar's own buttons.
+function bindFolderModal() {
+elements.createFolderConfirmBtn.addEventListener("click", async () => {
+  await handleFolderModalAction();
+});
+
+elements.closeFolderModalBtn.addEventListener("click", () => {
+  closeFolderModal();
+});
+
+elements.folderBackdrop.addEventListener("click", () => {
+  closeFolderModal();
+});
+
+elements.moveToRootBtn.addEventListener("click", async () => {
+  if (state.folderModalMode === "upload") {
+    const pending = state.pendingUploadFile;
+    closeFolderModal();
+    await uploadMarkdown(pending, null);
+    return;
+  }
+
+  if (!state.folderModalTargetFile) {
+    return;
+  }
+
+  try {
+    await moveDocumentToFolder(state.folderModalTargetFile, null);
+    closeFolderModal();
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+
+elements.folderNameInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  event.preventDefault();
+  await handleFolderModalAction();
+});
+
+elements.refreshDocs.addEventListener("click", async () => {
+  try {
+    if (state.viewMode === "links") {
+      await refreshLinks();
+      setStatus("Saved links refreshed.", "success");
+    } else if (state.isRecycleBinMode) {
+      await refreshDeletedDocs({ preserveSearch: true });
+      setStatus(state.viewMode === "archive" ? "Archive refreshed." : "Recycle bin refreshed.", "success");
+    } else {
+      await refreshDocs({ preserveSearch: true });
+      setStatus("Document list refreshed.", "success");
+    }
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+}
+
+
 function bindSidebar() {
   elements.createFolderBtn.addEventListener("click", () => {
     openFolderModal({ mode: "create" });
   });
 
-  // Delegated so they survive every rebuild of the tree.
-  elements.docList.addEventListener("keydown", handleTreeKeydown);
-
-  // Clicking the empty space below the rows clears the selection, as it does in
-  // Explorer. Clicks that landed on a row are handled by the row itself.
-  elements.docList.addEventListener("mousedown", (event) => {
-    if (event.target === elements.docList) {
-      clearSelection();
-    }
-  });
-
-  // Right-clicking the empty area offers the paste target for the top level.
-  elements.docList.addEventListener("contextmenu", (event) => {
-    if (event.target !== elements.docList) {
-      return;
-    }
-
-    event.preventDefault();
-
-    // Creating is a write, so a viewer is left with the one entry that is not.
-    const items = [];
-
-    if (can("doc:write")) {
-      items.push(
-        {
-          label: "New file",
-          icon: "ph-file-plus",
-          action: () => startNewDocument(null)
-        },
-        {
-          label: "New folder",
-          icon: "ph-folder-plus",
-          action: () => openFolderModal({ mode: "create" })
-        },
-        {
-          label: state.clipboard.files.length
-            ? `Paste ${state.clipboard.files.length} file(s) into Ungrouped`
-            : "Paste",
-          icon: "ph-clipboard-text",
-          disabled: state.clipboard.files.length === 0,
-          action: () => void pasteIntoFolder(null)
-        },
-        { separator: true }
-      );
-    }
-
-    items.push({
-      label: "Select all",
-      icon: "ph-check-square",
-      action: () => setSelection(state.visibleFileOrder)
-    });
-
-    openContextMenu(event.clientX, event.clientY, items);
-  });
-
-  // A context menu must not survive the next interaction anywhere on the page.
-  window.addEventListener("mousedown", (event) => {
-    if (elements.contextMenu && !elements.contextMenu.contains(/** @type {Node} */ (event.target))) {
-      closeContextMenu();
-    }
-  });
-
-  window.addEventListener("blur", closeContextMenu);
-  window.addEventListener("resize", closeContextMenu);
-  document.addEventListener("scroll", closeContextMenu, true);
+  bindTree();
+  bindContextMenuDismissal();
 
   // The mobile drawer covers the header, so it needs its own way out.
   elements.closeSidebarBtn?.addEventListener("click", () => {
     setNavOpen(false);
   });
 
-  elements.collapseAllBtn?.addEventListener("click", () => {
-    const groups = [.../** @type {NodeListOf<HTMLElement>} */ (elements.docList.querySelectorAll(".tree-group"))];
-    const anyExpanded = groups.some((group) => !group.classList.contains("is-collapsed"));
-
-    if (anyExpanded) {
-      for (const group of groups) {
-        state.collapsedFolderIds.add(group.dataset.folderKey);
-      }
-    } else {
-      state.collapsedFolderIds.clear();
-    }
-
-    persistCollapsedFolders();
-    elements.collapseAllBtn.setAttribute("aria-label", anyExpanded ? "Expand all folders" : "Collapse all folders");
-    elements.collapseAllBtn.title = anyExpanded ? "Expand all folders" : "Collapse all folders";
-    renderDocList();
-  });
-
-  elements.createFolderConfirmBtn.addEventListener("click", async () => {
-    await handleFolderModalAction();
-  });
-
-  elements.closeFolderModalBtn.addEventListener("click", () => {
-    closeFolderModal();
-  });
-
-  elements.folderBackdrop.addEventListener("click", () => {
-    closeFolderModal();
-  });
-
-  elements.moveToRootBtn.addEventListener("click", async () => {
-    if (state.folderModalMode === "upload") {
-      const pending = state.pendingUploadFile;
-      closeFolderModal();
-      await uploadMarkdown(pending, null);
-      return;
-    }
-
-    if (!state.folderModalTargetFile) {
-      return;
-    }
-
-    try {
-      await moveDocumentToFolder(state.folderModalTargetFile, null);
-      closeFolderModal();
-    } catch (error) {
-      setStatus(error.message, "error");
-    }
-  });
-
-  elements.folderNameInput.addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    event.preventDefault();
-    await handleFolderModalAction();
-  });
-
-  elements.refreshDocs.addEventListener("click", async () => {
-    try {
-      if (state.viewMode === "links") {
-        await refreshLinks();
-        setStatus("Saved links refreshed.", "success");
-      } else if (state.isRecycleBinMode) {
-        await refreshDeletedDocs({ preserveSearch: true });
-        setStatus(state.viewMode === "archive" ? "Archive refreshed." : "Recycle bin refreshed.", "success");
-      } else {
-        await refreshDocs({ preserveSearch: true });
-        setStatus("Document list refreshed.", "success");
-      }
-    } catch (error) {
-      setStatus(error.message, "error");
-    }
-  });
+  bindCollapseAll();
+  bindFolderModal();
 }
 
 return { bindSidebar };

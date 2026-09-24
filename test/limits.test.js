@@ -25,82 +25,90 @@ const { check, finish } = createChecker("LIMITS");
 
 const RULES = ["complexity", "max-lines-per-function", "max-depth", "max-params"];
 
-/* The budget, as of the last time somebody looked.
+/* The budget: none of them.
  *
- * `worstComplexity` is the branchiest single function in the tree. The five
- * worst were taken apart when these limits went in — a keyboard dispatcher, a
- * pointer handler, the parser and the writer of the diagram format, and the
- * markdown block splitter — and this is where the next one would show up.
+ * The rules went in as warnings with seventy-four of them outstanding, and
+ * then the seventy-four were dealt with — mostly by taking a function apart,
+ * and four times by saying in the file why a module is written as a closure.
+ * Zero is the number that keeps it that way: a function that grows past a
+ * limit now shows up here rather than in a list nobody reads.
+ *
+ * Raising one of these is a decision, not a mistake. Make it in a commit that
+ * says why.
  */
 const BUDGET = {
-  complexity: 54,
-  "max-lines-per-function": 15,
+  complexity: 0,
+  "max-lines-per-function": 0,
   "max-depth": 0,
-  "max-params": 5,
-  worstComplexity: 37
+  "max-params": 0
 };
 
+/* The four places that answer the rules rather than satisfy them.
+ *
+ * Each is a module written as a closure — the diagram editor, the guards, the
+ * document store, the search index — where what the rule can see is a long
+ * function and what is actually there is a module. They say so on the line
+ * above the disable, and this is the list, so a fifth one is a change to this
+ * file rather than a quiet addition.
+ */
+const CLOSED_OVER = [
+  "lib/docs/search.js",
+  "lib/docs/store.js",
+  "lib/guards.js",
+  "public/js/diagram-editor.js"
+];
+
 (async () => {
-  const eslint = new ESLint({ cwd: path.join(__dirname, "..") });
+  const root = path.join(__dirname, "..");
+  const eslint = new ESLint({ cwd: root });
   const results = await eslint.lintFiles(["."]);
 
   const counts = Object.fromEntries(RULES.map((rule) => [rule, 0]));
-  const complexities = [];
-
   for (const result of results) {
     for (const message of result.messages) {
-      if (!RULES.includes(message.ruleId)) {
-        continue;
-      }
-
-      counts[message.ruleId] += 1;
-
-      if (message.ruleId === "complexity") {
-        const found = message.message.match(/complexity of (\d+)/);
-        complexities.push({
-          value: Number(found[1]),
-          where: `${path.relative(path.join(__dirname, ".."), result.filePath)}:${message.line}`
-        });
+      if (RULES.includes(message.ruleId)) {
+        counts[message.ruleId] += 1;
       }
     }
   }
 
-  console.log("=== the limits are advice, and the advice is counted ===");
-  check("the rules are on, as warnings rather than as errors",
-    results.every((result) => result.messages
-      .filter((message) => RULES.includes(message.ruleId))
-      .every((message) => message.severity === 1)), true);
-
+  console.log("=== nothing is over the limits ===");
   for (const rule of RULES) {
     check(`${rule}: ${counts[rule]} of at most ${BUDGET[rule]}`,
       counts[rule] <= BUDGET[rule], true);
   }
 
-  complexities.sort((one, two) => two.value - one.value);
-  const worst = complexities[0] || { value: 0, where: "nothing" };
-  check(`the branchiest function is ${worst.value} (at most ${BUDGET.worstComplexity})`,
-    worst.value <= BUDGET.worstComplexity, true);
-  console.log(`  (it is ${worst.where})`);
+  console.log("=== and the few that answer them say why ===");
+  const fs = require("fs");
+  const found = [];
+  const unexplained = [];
 
-  // A budget nobody spends is a budget that should be smaller. This says so
-  // rather than quietly leaving room for the next long function.
-  const slack = Object.entries(counts)
-    .filter(([rule, count]) => count < BUDGET[rule])
-    .map(([rule, count]) => `${rule} ${count} of ${BUDGET[rule]}`);
+  for (const result of results) {
+    const relative = path.relative(root, result.filePath);
+    // This file is skipped because it contains the pattern it looks for.
+    if (relative.startsWith("node_modules") || relative === path.relative(root, __filename)) {
+      continue;
+    }
 
-  if (slack.length > 0) {
-    console.log(`  (room to lower: ${slack.join(", ")})`);
+    const lines = fs.readFileSync(result.filePath, "utf8").split("\n");
+    lines.forEach((line, index) => {
+      if (!/eslint-disable-next-line[^\n]*(max-lines-per-function|complexity)/.test(line)) {
+        return;
+      }
+
+      found.push(relative);
+
+      // The reason goes above it, in the comment that says what the shape is.
+      const before = (lines[index - 1] || "").trim();
+      if (!before.startsWith("*/") && !before.startsWith("//") && !before.startsWith("*")) {
+        unexplained.push(`${relative}:${index + 1}`);
+      }
+    });
   }
 
-  console.log("=== and the five that were taken apart stay apart ===");
-  // Named rather than counted: these are the ones the review pointed at, and
-  // a change that put any of them back together would pass the budget above
-  // by making something else shorter.
-  const byName = new Map(complexities.map((one) => [one.where.split(":")[0], one.value]));
-  for (const file of ["public/js/dm/parse.js", "public/js/dm/serialize.js",
-    "public/js/visual-editor.js", "public/js/app/tree.js"]) {
-    check(`${file} has nothing over 30 in it`, (byName.get(file) || 0) <= 30, true);
-  }
+  check("the modules written as closures are the ones on the list",
+    [...new Set(found)].sort(), CLOSED_OVER);
+  check("...and each says why on the line above", unexplained, []);
 
   process.exit(finish());
 })().catch((error) => {

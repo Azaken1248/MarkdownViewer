@@ -276,6 +276,16 @@ var DiagramEditor = (function () {
    *
    * Returns a handle, or null for a diagram it cannot open.
    */
+  /* This is the module, written as a closure.
+   *
+   * Everything below holds the same diagram, the same selection and the same
+   * view, and they are named functions inside it rather than a bundle of
+   * state passed between files. Splitting it would mean splitting the file,
+   * which is a decision that was taken the other way on purpose — so the two
+   * rules that measure a function are answered here rather than left to warn
+   * about a shape they cannot see.
+   */
+  // eslint-disable-next-line max-lines-per-function, complexity
   function mount(host, options) {
     const settings = options || {};
     const opened = canOpen(settings.source);
@@ -999,25 +1009,24 @@ var DiagramEditor = (function () {
      * else about lining up is the same arithmetic a move uses, and is not
      * written twice.
      */
+    /* Which edges a grip drags, and where they end up.
+     *
+     * `gx` and `gy` are -1, 0 or 1: the left or top edge, neither, or the
+     * right or bottom one. Moving an edge is the same arithmetic in both
+     * directions, so it is written once.
+     */
+    function movedEdges(from, gx, gy, dx, dy) {
+      return {
+        left: gx < 0 ? from.x + dx : from.x,
+        right: gx > 0 ? from.x + from.w + dx : from.x + from.w,
+        top: gy < 0 ? from.y + dy : from.y,
+        bottom: gy > 0 ? from.y + from.h + dy : from.y + from.h
+      };
+    }
+
     function guidedResize(id, from, grip, dx, dy) {
       const [gx, gy] = GRIP_EDGES.get(grip) || [1, 1];
-
-      let left = from.x;
-      let right = from.x + from.w;
-      let top = from.y;
-      let bottom = from.y + from.h;
-
-      if (gx > 0) {
-        right += dx;
-      } else if (gx < 0) {
-        left += dx;
-      }
-
-      if (gy > 0) {
-        bottom += dy;
-      } else if (gy < 0) {
-        top += dy;
-      }
+      const edges = movedEdges(from, gx, gy, dx, dy);
 
       // A box cannot line up with itself: every edge of it is within nothing of
       // where it already is, so one that could would snap back the moment it
@@ -1027,7 +1036,12 @@ var DiagramEditor = (function () {
         .map((item) => boxOf(item.id))
         .filter(Boolean);
 
-      const edge = { x: gx > 0 ? right : left, y: gy > 0 ? bottom : top, w: 0, h: 0 };
+      const edge = {
+        x: gx > 0 ? edges.right : edges.left,
+        y: gy > 0 ? edges.bottom : edges.top,
+        w: 0,
+        h: 0
+      };
       const lined = DiagramModel.alignGuides(edge, others, GUIDE_WITHIN / view.scale);
 
       const held = { x: false, y: false };
@@ -1044,17 +1058,11 @@ var DiagramEditor = (function () {
         y: held.y ? lined.y : snap(edge.y)
       };
 
-      if (gx > 0) {
-        right = put.x;
-      } else if (gx < 0) {
-        left = put.x;
-      }
-
-      if (gy > 0) {
-        bottom = put.y;
-      } else if (gy < 0) {
-        top = put.y;
-      }
+      // The dragged edge lands where the guide put it; the others stay.
+      const left = gx < 0 ? put.x : edges.left;
+      const right = gx > 0 ? put.x : edges.right;
+      const top = gy < 0 ? put.y : edges.top;
+      const bottom = gy > 0 ? put.y : edges.bottom;
 
       /* A box that has hit its smallest must not walk. The edge being dragged is
        * the one that gives way, so the edge that is not being dragged stays
@@ -1814,54 +1822,114 @@ var DiagramEditor = (function () {
       });
     });
 
+    // Letting go of the pointer: the pointer capture goes back whatever the
+    // gesture was, and nothing was captured is not an error.
+    function releasePointer(event) {
+      try {
+        canvas.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Nothing was captured.
+      }
+    }
+
+    /* A rubber band let go: whatever it covers is what is now held.
+     *
+     * A band smaller than a press wobbles is a click on the paper, not a band:
+     * a hand that moves two pixels while letting go should not come away
+     * holding whatever those two pixels happened to touch. The same slop every
+     * other gesture here uses, for the same reason.
+     */
+    function endMarquee(event) {
+      const band = marqueeBox();
+      const held = marquee;
+      marquee = null;
+      frame = 0;
+      drawing()?.querySelector(".dd-marquee")?.remove();
+      releasePointer(event);
+
+      if (band.w > DIAGRAM_DRAG_SLOP || band.h > DIAGRAM_DRAG_SLOP) {
+        const caught = boxesIn(band).filter((id) => !lockedAway(id));
+        choose(held.adding ? [...new Set([...held.was, ...caught])] : caught);
+      }
+    }
+
+    /* A pan that ended before its frame arrived is still a pan. The moves are
+     * coalesced to one update per frame, and letting go used to throw away
+     * whatever had not been drawn yet — so a quick flick was a pan that never
+     * happened.
+     */
+    function endPan(event) {
+      if (typeof event.clientX === "number") {
+        view.x = panning.from.x + (event.clientX - panning.x);
+        view.y = panning.from.y + (event.clientY - panning.y);
+      }
+
+      panning = null;
+      frame = 0;
+      canvas.classList.remove("is-panning");
+      applyView();
+      releasePointer(event);
+    }
+
+    /* A line dragged out of a box, let go.
+     *
+     * Over another box it joins the two. The circle on a box otherwise grows a
+     * new box out of it: clicked, beside it; dragged to empty paper, where it
+     * was let go. The arrow tool does neither — it is armed to draw between
+     * two boxes that are already there, so a drag that reached neither has
+     * drawn nothing, and growing a box out of a tap would be answering a
+     * question nobody asked, over and over, for as long as it is on.
+     */
+    function endConnect(held, point) {
+      const over = held.moved ? boxAt(point) : null;
+
+      if (over && over !== held.id) {
+        join(held.id, over);
+        return;
+      }
+
+      if (held.tool) {
+        return;
+      }
+
+      if (held.moved) {
+        addBox({ joinFrom: held.id, x: point.x, y: point.y });
+      } else {
+        addBox({ joinFrom: held.id });
+      }
+    }
+
+    /* A corner and a pin settle where the pointer was let go, the same way a
+     * move does — the drags are coalesced to one a frame, and a quick one can
+     * be over before its frame arrives.
+     *
+     * Before the "did it move at all" test rather than after it, because a
+     * press on the line that put a corner in it changed the diagram whether
+     * the hand went anywhere afterwards or not.
+     */
+    function endBend(held, point) {
+      if (held.kind === "via") {
+        const corner = model.edges[held.index]?.waypoints?.[held.at];
+        if (corner) {
+          corner.x = snap(point.x);
+          corner.y = snap(point.y);
+        }
+      } else {
+        pinEnd(held.index, held.end, point);
+      }
+
+      write();
+      drawAtOnce();
+    }
+
     const endGesture = (event) => {
       if (marquee) {
-        const band = marqueeBox();
-        const held = marquee;
-        marquee = null;
-        frame = 0;
-        drawing()?.querySelector(".dd-marquee")?.remove();
-
-        try {
-          canvas.releasePointerCapture?.(event.pointerId);
-        } catch {
-          // Nothing was captured.
-        }
-
-        // A band smaller than a press wobbles is a click on the paper, not a
-        // band: a hand that moves two pixels while letting go should not come
-        // away holding whatever those two pixels happened to touch. The same
-        // slop every other gesture here uses, for the same reason.
-        if (band.w > DIAGRAM_DRAG_SLOP || band.h > DIAGRAM_DRAG_SLOP) {
-          const caught = boxesIn(band).filter((id) => !lockedAway(id));
-          choose(held.adding ? [...new Set([...held.was, ...caught])] : caught);
-        }
-
+        endMarquee(event);
         return;
       }
 
       if (panning) {
-        /* A pan that ended before its frame arrived is still a pan. The moves
-         * are coalesced to one update per frame, and letting go used to throw
-         * away whatever had not been drawn yet — so a quick flick was a pan
-         * that never happened.
-         */
-        if (typeof event.clientX === "number") {
-          view.x = panning.from.x + (event.clientX - panning.x);
-          view.y = panning.from.y + (event.clientY - panning.y);
-        }
-
-        panning = null;
-        frame = 0;
-        canvas.classList.remove("is-panning");
-        applyView();
-
-        try {
-          canvas.releasePointerCapture?.(event.pointerId);
-        } catch {
-          // Nothing was captured.
-        }
-
+        endPan(event);
         return;
       }
 
@@ -1880,85 +1948,45 @@ var DiagramEditor = (function () {
         group.classList.remove("is-target");
       }
 
-      try {
-        canvas.releasePointerCapture?.(event.pointerId);
-      } catch {
-        // Nothing was captured.
-      }
+      releasePointer(event);
 
       if (held.kind === "connect") {
-        const over = held.moved ? boxAt(point) : null;
-
-        if (over && over !== held.id) {
-          join(held.id, over);
-          return;
-        }
-
-        /* The circle on a box grows a new box out of it: clicked, beside it;
-         * dragged to empty paper, where it was let go.
-         *
-         * The tool does neither. It is armed to draw an arrow between two boxes
-         * that are already there, so a drag that reached neither has drawn
-         * nothing — and growing a box out of a tap would be answering a
-         * question nobody asked, over and over, for as long as it is on.
-         */
-        if (held.tool) {
-          return;
-        }
-
-        if (!held.moved) {
-          addBox({ joinFrom: held.id });
-          return;
-        }
-
-        addBox({ joinFrom: held.id, x: point.x, y: point.y });
+        endConnect(held, point);
         return;
       }
 
-      /* A corner and a pin settle where the pointer was let go, the same way a
-       * move does — the drags are coalesced to one a frame, and a quick one can
-       * be over before its frame arrives.
-       *
-       * Before the "did it move at all" test rather than after it, because a
-       * press on the line that put a corner in it changed the diagram whether
-       * the hand went anywhere afterwards or not.
-       */
-      if (held.kind === "via") {
-        const corner = model.edges[held.index]?.waypoints?.[held.at];
-        if (corner) {
-          corner.x = snap(point.x);
-          corner.y = snap(point.y);
-        }
+      if (held.kind === "via" || held.kind === "pin") {
+        endBend(held, point);
+        return;
+      }
 
+      // Everything below changed the diagram only if the hand actually went
+      // somewhere.
+      if (held.moved) {
+        endMoveOrResize(held, point);
+      }
+    };
+
+    function endMoveOrResize(held, point) {
+      if (!held.from) {
         write();
         drawAtOnce();
         return;
       }
 
-      if (held.kind === "pin") {
-        pinEnd(held.index, held.end, point);
-        write();
-        drawAtOnce();
-        return;
-      }
+      const dx = point.x - held.origin.x;
+      const dy = point.y - held.origin.y;
 
-      if (!held.moved) {
-        return;
-      }
-
-      if (held.kind === "move" && held.from) {
-        const lined = guidedMove(held.group, point.x - held.origin.x, point.y - held.origin.y);
+      if (held.kind === "move") {
+        const lined = guidedMove(held.group, dx, dy);
         moveSelectionTo(held.group, lined.dx, lined.dy);
-      }
-
-      if (held.kind === "resize" && held.from) {
-        resizeTo(held.id, guidedResize(held.id, held.from, held.grip,
-          point.x - held.origin.x, point.y - held.origin.y).at);
+      } else if (held.kind === "resize") {
+        resizeTo(held.id, guidedResize(held.id, held.from, held.grip, dx, dy).at);
       }
 
       write();
       drawAtOnce();
-    };
+    }
 
     /* A picture dropped on the paper is a picture on the paper, where it was
      * dropped. Which is the gesture everybody tries first, and the one that
@@ -2163,92 +2191,92 @@ var DiagramEditor = (function () {
       }
       : null);
 
-    function menuFor(target, point) {
+    function edgeMenu(index) {
+      const edge = model.edges[index];
+
+      return [
+        { label: "Rename arrow", icon: "ph-text-t", keys: "F2",
+          run: () => editEdge(index) },
+        { label: "Reverse arrow", icon: "ph-arrows-left-right", run: () => {
+          const was = edge.from;
+          edge.from = edge.to;
+          edge.to = was;
+          write();
+          paintLists();
+          drawAtOnce();
+        } },
+        { label: "Straighten arrow", icon: "ph-line-segment", run: () => {
+          delete edge.waypoints;
+          delete edge.sides;
+          write();
+          drawAtOnce();
+        } },
+        "-",
+        { label: "Delete arrow", icon: "ph-trash", keys: "Del", danger: true, run: () => {
+          model.edges = model.edges.filter((other) => other !== edge);
+          write();
+          paintLists();
+          paintInspector();
+          drawAtOnce();
+        } }
+      ];
+    }
+
+    /* One naming rule, so a menu read twice reads the same way both times: the
+     * verb, then what it is being done to, and the same word for the same
+     * thing everywhere. "Copy as Mermaid" and "Copy the diagram as Mermaid"
+     * were the same item written two ways in two menus.
+     */
+    function nodeMenu(target, point) {
       const many = selection.length > 1;
-      const holding = selection.length > 0;
       const held = groupHeld();
+      const them = many ? `${selection.length} boxes` : "box";
 
-      if (target.kind === "edge") {
-        const edge = model.edges[target.index];
-        return [
-          { label: "Rename arrow", icon: "ph-text-t", keys: "F2",
-            run: () => editEdge(target.index) },
-          { label: "Reverse arrow", icon: "ph-arrows-left-right", run: () => {
-            const was = edge.from;
-            edge.from = edge.to;
-            edge.to = was;
-            write();
-            paintLists();
-            drawAtOnce();
-          } },
-          { label: "Straighten arrow", icon: "ph-line-segment", run: () => {
-            delete edge.waypoints;
-            delete edge.sides;
-            write();
-            drawAtOnce();
-          } },
-          "-",
-          { label: "Delete arrow", icon: "ph-trash", keys: "Del", danger: true, run: () => {
-            model.edges = model.edges.filter((other) => other !== edge);
-            write();
-            paintLists();
-            paintInspector();
-            drawAtOnce();
-          } }
-        ];
-      }
+      return [
+        many ? null : {
+          label: nodeById(target.id)?.kind === "table" ? "Type in this cell" : "Rename box",
+          icon: "ph-text-t",
+          keys: "F2",
+          run: () => openText(target.id, point)
+        },
+        many ? null : { label: "Draw arrow from here", icon: "ph-arrow-up-right", run: () => {
+          armedFrom = target.id;
+          say("Tap another box to join it.");
+        } },
+        "-",
+        { label: `Duplicate ${them}`, icon: "ph-copy", keys: "Ctrl+D", run: duplicateSelection },
+        { label: `Cut ${them}`, icon: "ph-scissors", keys: "Ctrl+X", run: cutSelection },
+        { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: copySelection },
+        { label: `Copy ${them} as Mermaid`, icon: "ph-code",
+          run: () => copyOutside(selectionSource()) },
+        "-",
+        held
+          ? { label: "Rename group", icon: "ph-textbox",
+            run: () => paintInspector({ focusName: true }) }
+          : null,
+        held
+          ? { label: `Ungroup ${them}`, icon: "ph-selection-slash",
+            keys: "Ctrl+Shift+G", run: ungroupSelection }
+          : null,
+        many && !held
+          ? { label: `Group ${them}`, icon: "ph-selection-plus",
+            keys: "Ctrl+G", run: groupSelection }
+          : null,
+        "-",
+        barItem(),
+        "-",
+        { label: "Bring to front", icon: "ph-stack-simple",
+          run: () => restack(selection, true) },
+        { label: "Send to back", icon: "ph-stack-simple",
+          run: () => restack(selection, false) },
+        "-",
+        { label: `Delete ${them}`, icon: "ph-trash", keys: "Del", danger: true,
+          run: () => removeSteps(selection) }
+      ];
+    }
 
-      /* One naming rule, so a menu read twice reads the same way both times:
-       * the verb, then what it is being done to, and the same word for the same
-       * thing everywhere. "Copy as Mermaid" and "Copy the diagram as Mermaid"
-       * were the same item written two ways in two menus.
-       */
-      if (target.kind === "node") {
-        const them = many ? `${selection.length} boxes` : "box";
-
-        return [
-          many ? null : {
-            label: nodeById(target.id)?.kind === "table" ? "Type in this cell" : "Rename box",
-            icon: "ph-text-t",
-            keys: "F2",
-            run: () => openText(target.id, point)
-          },
-          many ? null : { label: "Draw arrow from here", icon: "ph-arrow-up-right", run: () => {
-            armedFrom = target.id;
-            say("Tap another box to join it.");
-          } },
-          "-",
-          { label: `Duplicate ${them}`, icon: "ph-copy", keys: "Ctrl+D", run: duplicateSelection },
-          { label: `Cut ${them}`, icon: "ph-scissors", keys: "Ctrl+X", run: cutSelection },
-          { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: copySelection },
-          { label: `Copy ${them} as Mermaid`, icon: "ph-code",
-            run: () => copyOutside(selectionSource()) },
-          "-",
-          held
-            ? { label: "Rename group", icon: "ph-textbox",
-              run: () => paintInspector({ focusName: true }) }
-            : null,
-          held
-            ? { label: `Ungroup ${them}`, icon: "ph-selection-slash",
-              keys: "Ctrl+Shift+G", run: ungroupSelection }
-            : null,
-          many && !held
-            ? { label: `Group ${them}`, icon: "ph-selection-plus",
-              keys: "Ctrl+G", run: groupSelection }
-            : null,
-          "-",
-          barItem(),
-          "-",
-          { label: "Bring to front", icon: "ph-stack-simple",
-            run: () => restack(selection, true) },
-          { label: "Send to back", icon: "ph-stack-simple",
-            run: () => restack(selection, false) },
-          "-",
-          { label: `Delete ${them}`, icon: "ph-trash", keys: "Del", danger: true,
-            run: () => removeSteps(selection) }
-        ];
-      }
-
+    function paperMenu(point) {
+      const holding = selection.length > 0;
       return [
         { label: "Add box here", icon: "ph-plus-square",
           run: () => addBox({ x: point.x, y: point.y }) },
@@ -2281,6 +2309,14 @@ var DiagramEditor = (function () {
         { label: "Copy diagram as Mermaid", icon: "ph-code",
           run: () => copyOutside(sourceNow()) }
       ];
+    }
+
+    function menuFor(target, point) {
+      if (target.kind === "edge") {
+        return edgeMenu(target.index);
+      }
+
+      return target.kind === "node" ? nodeMenu(target, point) : paperMenu(point);
     }
 
     // What is under a point, asked the same way for both ways of asking.
@@ -2734,8 +2770,13 @@ var DiagramEditor = (function () {
       const at = boxOf(id);
 
       if (item?.kind === "table" && at && point) {
-        const found = DiagramDraw.cellAt(DiagramModel.textCells(item.text || ""),
-          at.w, at.h, DiagramModel.tableMetrics(item), point.x - at.x, point.y - at.y);
+        const found = DiagramDraw.cellAt(DiagramModel.textCells(item.text || ""), {
+          w: at.w,
+          h: at.h,
+          spacing: DiagramModel.tableMetrics(item),
+          x: point.x - at.x,
+          y: point.y - at.y
+        });
 
         editCell(id, found ? found.row : 0, found ? found.column : 0);
         return;
@@ -3229,20 +3270,21 @@ var DiagramEditor = (function () {
 
     /* --- Making things ------------------------------------------------------ */
 
-    function addBox(options = {}) {
-      if (model.nodes.length >= DiagramModel.MAX_NODES) {
-        say("That is as many steps as this can hold.");
-        return;
-      }
+    /* A new box, as the rail offered it.
+     *
+     * What the thing is comes from one list, so a new kind is an entry there
+     * rather than another branch here; anything the rail did not name is a
+     * box. What a box is belongs to the box, and where it is belongs to the
+     * layout — so nothing about position is decided in here.
+     *
+     * A picture and an icon are not shapes, so they do not decide what the box
+     * is: they are more things it is carrying, like its colour. Nor is the
+     * frame, which is only whether the shape is drawn at all.
+     */
+    function newBox(id, options) {
+      const kind = DiagramModel.NODE_KINDS.includes(options.kind) ? options.kind : "box";
 
-      // What the thing is, as the rail offered it, and a box for anything the
-      // rail did not name — one list, so a new kind is one entry rather than
-      // another branch here.
-      const kind = DiagramModel.NODE_KINDS.includes(options.kind)
-        ? options.kind
-        : "box";
-      const id = DiagramModel.nextNodeId(model);
-      const item = {
+      return /** @type {ModelNode} */ ({
         id,
         shape: options.shape || "rect",
         // A table arrives as a table: a heading and a grid of empty cells, so
@@ -3250,29 +3292,22 @@ var DiagramEditor = (function () {
         // rail rather than a box with one word in it and a rule underneath.
         text: options.text ?? (kind === "table"
           ? DiagramModel.joinCells([["Table"], ["", ""], ["", ""]])
-          : `Step ${model.nodes.length + 1}`)
-      };
+          : `Step ${model.nodes.length + 1}`),
+        ...(kind === "box" ? {} : { kind }),
+        ...(options.image ? { image: options.image } : {}),
+        ...(options.icon ? { icon: options.icon } : {}),
+        ...(options.frame === "none" ? { frame: "none" } : {})
+      });
+    }
 
-      // What a box is belongs to the box. Where it is belongs to the layout.
-      if (kind !== "box") {
-        item.kind = kind;
+    function addBox(options = {}) {
+      if (model.nodes.length >= DiagramModel.MAX_NODES) {
+        say("That is as many steps as this can hold.");
+        return;
       }
 
-      // A picture and an icon are not shapes, so they do not decide what the box
-      // is — they are more things the box is carrying, like its colour. Nor is
-      // the frame, which is only whether the shape is drawn at all.
-      if (options.image) {
-        item.image = options.image;
-      }
-
-      if (options.icon) {
-        item.icon = options.icon;
-      }
-
-      if (options.frame === "none") {
-        item.frame = "none";
-      }
-
+      const id = DiagramModel.nextNodeId(model);
+      const item = newBox(id, options);
       model.nodes.push(item);
 
       /* How big it starts. A picture wants room to be a picture in — measuring
@@ -4297,7 +4332,7 @@ var DiagramEditor = (function () {
      * is something the panel says rather than something you work out by
      * counting the pipes in the field above.
      */
-    const stepper = (name, value, least, most, set, by = 1) => {
+    const stepper = (name, value, { least, most, set, by = 1 }) => {
       const box = document.createElement("div");
       box.className = "ve-diagram-stepper";
       box.setAttribute("role", "group");
@@ -4402,12 +4437,18 @@ var DiagramEditor = (function () {
       const row = document.createElement("div");
       row.className = "ve-diagram-row ve-diagram-grid-size";
       row.append(
-        captioned("Padding", stepper("Padding", spacing.pad,
-          DiagramModel.TABLE_PAD.least, DiagramModel.TABLE_PAD.most,
-          (to) => respace(item, { pad: to }), 2)),
-        captioned("Spacing", stepper("Spacing", spacing.gap,
-          DiagramModel.TABLE_GAP.least, DiagramModel.TABLE_GAP.most,
-          (to) => respace(item, { gap: to }), 5))
+        captioned("Padding", stepper("Padding", spacing.pad, {
+          least: DiagramModel.TABLE_PAD.least,
+          most: DiagramModel.TABLE_PAD.most,
+          set: (to) => respace(item, { pad: to }),
+          by: 2
+        })),
+        captioned("Spacing", stepper("Spacing", spacing.gap, {
+          least: DiagramModel.TABLE_GAP.least,
+          most: DiagramModel.TABLE_GAP.most,
+          set: (to) => respace(item, { gap: to }),
+          by: 5
+        }))
       );
 
       return row;
@@ -4423,10 +4464,12 @@ var DiagramEditor = (function () {
       const row = document.createElement("div");
       row.className = "ve-diagram-row ve-diagram-grid-size";
       row.append(
-        captioned("Rows", stepper("Rows", rows, 1, TABLE_MAX_ROWS,
-          (to) => resizeTable(item, to, columns))),
-        captioned("Columns", stepper("Columns", columns, 1, TABLE_MAX_COLUMNS,
-          (to) => resizeTable(item, rows, to)))
+        captioned("Rows", stepper("Rows", rows, {
+          least: 1, most: TABLE_MAX_ROWS, set: (to) => resizeTable(item, to, columns)
+        })),
+        captioned("Columns", stepper("Columns", columns, {
+          least: 1, most: TABLE_MAX_COLUMNS, set: (to) => resizeTable(item, rows, to)
+        }))
       );
 
       return row;
@@ -4702,31 +4745,38 @@ var DiagramEditor = (function () {
      * The class is swapped rather than added, or a box changed from red to blue
      * would be wearing both and the file would say so.
      */
+    /* One box's own styling, as the one class it wears for it.
+     *
+     * A declaration set to null or "" is a declaration taken off, and a box
+     * left wearing nothing of ours wears no class of ours at all — which is
+     * what keeps a diagram somebody styled and then unstyled identical to one
+     * nobody ever styled.
+     */
+    function restyleOne(item, patch, ours) {
+      const declarations = { ...styleOf(item), ...patch };
+      for (const [key, value] of Object.entries(declarations)) {
+        if (value === null || value === "") {
+          delete declarations[key];
+        }
+      }
+
+      const wanted = Object.keys(declarations).length > 0 ? classFor(declarations) : null;
+      const kept = (item.classes || []).filter((name) => !ours.has(name));
+      item.classes = wanted ? [...kept, wanted] : kept;
+
+      if (item.classes.length === 0) {
+        delete item.classes;
+      }
+    }
+
     function restyle(ids, patch, options = {}) {
       const ours = new Set(Object.keys(model.classes || {}).filter((name) =>
         DIAGRAM_CLASS_RE.test(name)));
 
       for (const id of ids) {
         const item = nodeById(id);
-        if (!item) {
-          continue;
-        }
-
-        const declarations = { ...styleOf(item), ...patch };
-        for (const [key, value] of Object.entries(declarations)) {
-          if (value === null || value === "") {
-            delete declarations[key];
-          }
-        }
-
-        const wanted = Object.keys(declarations).length > 0
-          ? classFor(declarations)
-          : null;
-        const kept = (item.classes || []).filter((name) => !ours.has(name));
-        item.classes = wanted ? [...kept, wanted] : kept;
-
-        if (item.classes.length === 0) {
-          delete item.classes;
+        if (item) {
+          restyleOne(item, patch, ours);
         }
       }
 
@@ -5614,79 +5664,54 @@ var DiagramEditor = (function () {
       hud.style.top = `${Math.round(y)}px`;
     }
 
-    function paintInspector(options = {}) {
-      paintHud();
-      inspector.replaceChildren();
-      // The cell fields the type controls aimed at are about to be thrown away,
-      // so the aim goes with them rather than outliving them.
-      cellFocus = null;
-      showCellFont = () => {};
-      const item = selectedNode();
-
-      if (!item) {
+    /* What the panel says when there is no one box to talk about.
+     *
+     * A handful has no single name or shape to show, but it has a colour: the
+     * reason to hold four boxes at once is usually to do one thing to all four
+     * of them, and this is that thing.
+     */
+    function paintForSelection(options) {
         /* A handful has no one name or shape to show, but it has a colour: the
-         * reason to hold four boxes at once is usually to do one thing to all
-         * four of them, and this is that thing.
-         */
-        if (selection.length > 1) {
-          const held = groupHeld();
-          const groupField = held ? groupNameField(held) : null;
+       * reason to hold four boxes at once is usually to do one thing to all
+       * four of them, and this is that thing.
+       */
+      if (selection.length > 1) {
+        const held = groupHeld();
+        const groupField = held ? groupNameField(held) : null;
 
-          say(held
-            ? `${DiagramDraw.groupName(held)} held. Drag its name to move it about.`
-            : `${selection.length} boxes held. Colour them, or drag them about.`);
-          inspector.append(heading(held ? "Group" : `${selection.length} boxes`));
+        say(held
+          ? `${DiagramDraw.groupName(held)} held. Drag its name to move it about.`
+          : `${selection.length} boxes held. Colour them, or drag them about.`);
+        inspector.append(heading(held ? "Group" : `${selection.length} boxes`));
 
-          if (groupField) {
-            inspector.append(captioned("Name", groupField));
-          }
-
-          inspector.append(
-            captioned("Fill", colourRow([...selection])),
-            captioned("Colours", inkRow([...selection])),
-            captioned("Border", borderRow([...selection])),
-            captioned("Font", fontRow([...selection]))
-          );
-
-          if (options.focusName && groupField) {
-            groupField.focus();
-            groupField.select();
-          }
-
-          return;
+        if (groupField) {
+          inspector.append(captioned("Name", groupField));
         }
 
-        say(model.nodes.length === 0
-          ? "Drag a shape onto the paper to start."
-          : "Tap a box to work on it, or drag one to move it.");
+        inspector.append(
+          captioned("Fill", colourRow([...selection])),
+          captioned("Colours", inkRow([...selection])),
+          captioned("Border", borderRow([...selection])),
+          captioned("Font", fontRow([...selection]))
+        );
+
+        if (options.focusName && groupField) {
+          groupField.focus();
+          groupField.select();
+        }
+
         return;
       }
 
-      // An editor whose way into a box is a gesture nobody mentions is an editor
-      // where boxes cannot be renamed, whatever the code does.
-      say(armedFrom
-        ? "Now tap the step this one should point at."
-        : "Double-click a box, or press Enter, to type into it.");
+      say(model.nodes.length === 0
+        ? "Drag a shape onto the paper to start."
+        : "Tap a box to work on it, or drag one to move it.");
+      return;
+    }
 
-      /* A box is a label, and a table is a grid of cells. Both are the words
-       * the thing on the paper says, so both go in the same place under the
-       * same caption — it is only that one of them has a shape.
-       */
-      const table = item.kind === "table";
-      /* And words on the paper are only the words. A text element is not a box
-       * with its box turned off any more — it is its own thing — so the panel
-       * for one is not the panel for a box with the shape menu greyed out. It
-       * is the questions that have an answer for words: what they say, what
-       * type they are set in, and their two colours. A shape, a border, a
-       * picture and an icon are all questions about a box, and asking them of
-       * something that has not got one is what made this panel confusing.
-       */
-      const words = item.kind === "text";
-      const cells = table ? cellGrid(item) : null;
-      const name = /** @type {HTMLInputElement} */ (table
-        ? cells.querySelector(".ve-diagram-cell-title")
-        : labelField(item));
-
+    // The buttons under the panel: another step after this one, an arrow to
+    // somewhere, and — for words — the way back to being a box.
+    function inspectorActions(item, words) {
       const drop = dropButton(`Remove ${stepLabel(item)}`);
       drop.addEventListener("click", () => removeStep(item.id));
 
@@ -5737,16 +5762,104 @@ var DiagramEditor = (function () {
 
         actions.append(framed);
       }
+      return { drop, actions };
+    }
 
-      const out = model.edges.filter((edge) => edge.from === item.id);
+    /* How the thing looks, which is a different set of questions for words
+     * than for a box: words have type and two colours, and a box also has a
+     * shape, a fill, a border, a picture and an icon.
+     */
+    function appendLooks(item, words, actions) {
+      if (words) {
+        inspector.append(
+          captioned("Font", fontRow([item.id])),
+          captioned("Colours", inkRow([item.id])),
+          actions
+        );
+        return;
+      }
+
+      inspector.append(
+        captioned("Shape", shapeSelect(item)),
+        captioned("Fill", colourRow([item.id])),
+        captioned("Colours", inkRow([item.id])),
+        captioned("Border", borderRow([item.id])),
+        captioned("Font", fontRow([item.id]))
+      );
+
+      if (canUpload) {
+        inspector.append(captioned("Picture", pictureRow(item)));
+      }
+
+      inspector.append(captioned("Icon", iconRow(item)), actions);
+    }
+
+    // The arrows leaving this box, each one a row that can be renamed. A box
+    // with none gets no heading for none.
+    function appendArrows(out) {
+      if (out.length === 0) {
+        return;
+      }
+
+      const legend = document.createElement("div");
+      legend.className = "ve-diagram-legend";
+      legend.textContent = out.length === 1 ? "Its arrow" : "Its arrows";
+
+      const rows = document.createElement("div");
+      rows.className = "ve-diagram-rows";
+      rows.append(...out.map(arrowRow));
+      inspector.append(legend, rows);
+    }
+
+    function paintInspector(options = {}) {
+      paintHud();
+      inspector.replaceChildren();
+      // The cell fields the type controls aimed at are about to be thrown away,
+      // so the aim goes with them rather than outliving them.
+      cellFocus = null;
+      showCellFont = () => {};
+      const item = selectedNode();
+
+      if (!item) {
+        paintForSelection(options);
+        return;
+      }
+
+      // An editor whose way into a box is a gesture nobody mentions is an editor
+      // where boxes cannot be renamed, whatever the code does.
+      say(armedFrom
+        ? "Now tap the step this one should point at."
+        : "Double-click a box, or press Enter, to type into it.");
+
+      /* A box is a label, and a table is a grid of cells. Both are the words
+       * the thing on the paper says, so both go in the same place under the
+       * same caption — it is only that one of them has a shape.
+       */
+      const table = item.kind === "table";
+      /* And words on the paper are only the words. A text element is not a box
+       * with its box turned off any more — it is its own thing — so the panel
+       * for one is not the panel for a box with the shape menu greyed out. It
+       * is the questions that have an answer for words: what they say, what
+       * type they are set in, and their two colours. A shape, a border, a
+       * picture and an icon are all questions about a box, and asking them of
+       * something that has not got one is what made this panel confusing.
+       */
+      const words = item.kind === "text";
+      const cells = table ? cellGrid(item) : null;
+      const name = /** @type {HTMLInputElement} */ (table
+        ? cells.querySelector(".ve-diagram-cell-title")
+        : labelField(item));
+
+      const { drop, actions } = inspectorActions(item, words);
 
       /* One thing per line, each with its name over it. Three controls crammed
        * across a column narrower than any of them wanted is what made this
        * panel look assembled rather than designed.
        */
+      const what = words ? "Text" : (table ? "Table" : "Box");
       inspector.append(
-        heading(words ? "Text" : table ? "Table" : "Box", drop),
-        captioned(table ? "Cells" : words ? "Words" : "Label", table ? cells : name)
+        heading(what, drop),
+        captioned(table ? "Cells" : (words ? "Words" : "Label"), table ? cells : name)
       );
 
       if (table) {
@@ -5754,38 +5867,8 @@ var DiagramEditor = (function () {
           captioned("Cell text", cellFontRow(item)));
       }
 
-      if (words) {
-        inspector.append(
-          captioned("Font", fontRow([item.id])),
-          captioned("Colours", inkRow([item.id])),
-          actions
-        );
-      } else {
-        inspector.append(
-          captioned("Shape", shapeSelect(item)),
-          captioned("Fill", colourRow([item.id])),
-          captioned("Colours", inkRow([item.id])),
-          captioned("Border", borderRow([item.id])),
-          captioned("Font", fontRow([item.id]))
-        );
-
-        if (canUpload) {
-          inspector.append(captioned("Picture", pictureRow(item)));
-        }
-
-        inspector.append(captioned("Icon", iconRow(item)), actions);
-      }
-
-      if (out.length > 0) {
-        const legend = document.createElement("div");
-        legend.className = "ve-diagram-legend";
-        legend.textContent = out.length === 1 ? "Its arrow" : "Its arrows";
-
-        const rows = document.createElement("div");
-        rows.className = "ve-diagram-rows";
-        rows.append(...out.map(arrowRow));
-        inspector.append(legend, rows);
-      }
+      appendLooks(item, words, actions);
+      appendArrows(model.edges.filter((edge) => edge.from === item.id));
 
       /* A group of one is not something this editor makes — grouping needs two
        * boxes to be a group of — but it is something a file can say, and a name

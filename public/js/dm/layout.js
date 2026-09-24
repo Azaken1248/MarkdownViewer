@@ -16,8 +16,81 @@ var DmLayout = (function () {
   } = DmGrammar;
   const { columnsOf, fontScale, textCells, textRows } = DmCells;
 
+  /* What a shape costs, beyond the room its words need.
+   *
+   * Every one of these is the same question — where in this shape can words
+   * actually go — and the answer is a nudge to the width, the height, or both.
+   * A shape not in here is a rectangle, which is all of it.
+   */
+  const SHAPE_ROOM = {
+    // A diamond only holds text across its middle.
+    diamond: ({ width, height }) => ({ width: width * 1.35, height: height * 1.5 }),
+
+    circle: ({ width, height }) => {
+      const side = Math.max(width, height * 1.4);
+      return { width: side, height: side };
+    },
+
+    // Slanted sides eat into the width at the top or the bottom.
+    hexagon: ({ width, height }) => ({ width: width + 34, height }),
+
+    // The folded corner takes a bite out of the top right.
+    note: ({ width, height }) => ({ width: width + 16, height }),
+
+    // The words sit in the middle band; the bumps are all margin.
+    cloud: ({ width, height }) => ({ width: width * 1.5, height: height * 1.8 }),
+
+    // A cylinder lying down: a rounded cap at each end, neither of which is
+    // anywhere to write.
+    queue: ({ width, height }) => ({ width: width + 44, height }),
+
+    /* A drawing with its name underneath rather than a box with words in it,
+     * so the height is what the figure needs and the words are extra. Below a
+     * certain size a stick figure stops being one.
+     */
+    actor: ({ width, height }) => ({
+      width: Math.max(width, 90),
+      height: Math.max(ACTOR_LEAST, height / (1 - ACTOR_BAND))
+    })
+  };
+
+  // The shapes that are measured the same way as another one.
+  const SHAPE_ALIAS = {
+    "double-circle": "circle",
+    "lean-right": "hexagon",
+    "lean-left": "hexagon",
+    trapezoid: "hexagon",
+    "trapezoid-alt": "hexagon"
+  };
+
+  /* A table is measured by its grid rather than by its longest line.
+   *
+   * Every column needs room to be read in, whatever is in it — a word, and the
+   * padding either side of it — so a table is at least so wide per column.
+   * Which is what makes another column widen the table rather than divide the
+   * width it already had.
+   *
+   * Nothing here adds the cells up. The measure of the longest line already
+   * contains the " | " between each pair of cells: three characters, which is
+   * more than a cell saves by not having them. A sum of the columns is
+   * therefore never the larger of the two and was only ever arithmetic nobody
+   * read.
+   */
+  function measureTable(node, rows, width) {
+    const columns = columnsOf(textCells(node?.text ?? node?.id ?? ""));
+    const spacing = tableMetrics(node);
+
+    return {
+      width: Math.max(width, TABLE_MIN_WIDTH, columns * (TABLE_MIN_TEXT + (spacing.pad * 2))),
+      /* Exactly what the drawing gives it: a title band, which is a heading
+       * rather than a row, and a row's worth of spacing for each row under it.
+       */
+      height: Math.max(MIN_HEIGHT,
+        spacing.title + (Math.max(0, rows.length - 1) * spacing.gap))
+    };
+  }
+
   function measureNode(node, options = {}) {
-    const kind = node?.kind;
     const rows = textRows(node?.text ?? node?.id ?? "");
     const widest = rows.reduce((most, row) => Math.max(most, row.length), 0);
     /* Type twice the size needs twice the room, both ways. A box measured at
@@ -25,63 +98,19 @@ var DmLayout = (function () {
      * fit in — and the measure is the one thing that could have known.
      */
     const type = fontScale(options.font);
-    let width = Math.max(MIN_WIDTH, (widest * CHAR_WIDTH * type) + PAD_X);
-    let height = Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT * type) + PAD_Y);
+    const words = {
+      width: Math.max(MIN_WIDTH, (widest * CHAR_WIDTH * type) + PAD_X),
+      height: Math.max(MIN_HEIGHT, (rows.length * LINE_HEIGHT * type) + PAD_Y)
+    };
 
-    if (kind === "table") {
-      /* Every column needs room to be read in, whatever is in it — a word, and
-       * the padding either side of it — so a table is at least so wide per
-       * column. Which is what makes another column widen the table rather than
-       * divide the width it already had.
-       *
-       * Nothing here adds the cells up. The measure above is of the longest
-       * line, and a line already contains the " | " between each pair of cells:
-       * three characters, which is more than a cell saves by not having them.
-       * A sum of the columns is therefore never the larger of the two and was
-       * only ever arithmetic nobody read.
-       */
-      const columns = columnsOf(textCells(node?.text ?? node?.id ?? ""));
-      const spacing = tableMetrics(node);
-
-      width = Math.max(width, TABLE_MIN_WIDTH,
-        columns * (TABLE_MIN_TEXT + (spacing.pad * 2)));
-      /* Exactly what the drawing gives it: a title band, which is a heading
-       * rather than a row, and a row's worth of spacing for each row under it.
-       */
-      height = Math.max(MIN_HEIGHT,
-        spacing.title + (Math.max(0, rows.length - 1) * spacing.gap));
-    } else if (node?.shape === "diamond") {
-      // A diamond only holds text across its middle.
-      width *= 1.35;
-      height *= 1.5;
-    } else if (node?.shape === "circle" || node?.shape === "double-circle") {
-      const side = Math.max(width, height * 1.4);
-      width = side;
-      height = side;
-    } else if (node?.shape === "hexagon" || node?.shape === "lean-right"
-      || node?.shape === "lean-left" || node?.shape === "trapezoid"
-      || node?.shape === "trapezoid-alt") {
-      // Slanted sides eat into the width at the top or the bottom.
-      width += 34;
-    } else if (node?.shape === "note") {
-      // The folded corner takes a bite out of the top right.
-      width += 16;
-    } else if (node?.shape === "cloud") {
-      // The words sit in the middle band; the bumps are all margin.
-      width *= 1.5;
-      height *= 1.8;
-    } else if (node?.shape === "queue") {
-      // A cylinder lying down: a rounded cap at each end, neither of which is
-      // anywhere to write.
-      width += 44;
-    } else if (node?.shape === "actor") {
-      /* A drawing with its name underneath rather than a box with words in it,
-       * so the height is what the figure needs and the words are extra. Below
-       * a certain size a stick figure stops being one.
-       */
-      width = Math.max(width, 90);
-      height = Math.max(ACTOR_LEAST, height / (1 - ACTOR_BAND));
+    if (node?.kind === "table") {
+      const table = measureTable(node, rows, words.width);
+      return { w: snapUp(table.width), h: snapUp(table.height) };
     }
+
+    const shape = node?.shape;
+    const room = SHAPE_ROOM[SHAPE_ALIAS[shape] || shape];
+    const { width, height } = room ? room(words) : words;
 
     return { w: snapUp(width), h: snapUp(height) };
   }
@@ -172,22 +201,15 @@ var DmLayout = (function () {
    * not dagre and it is not trying to be: it exists so that the first thing you
    * see when you open a diagram is a diagram, not a pile.
    */
-  function autoLayout(model) {
-    const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
-    const edges = Array.isArray(model?.edges) ? model.edges : [];
-    const direction = DIRECTIONS.includes(model?.direction) ? model.direction : "TD";
-    const layout = {};
-
-    if (nodes.length === 0) {
-      return layout;
-    }
-
+  /* How far down the diagram each box sits: the longest path to it over the
+   * edges that go forwards. With the loops taken out there is nothing left to
+   * relax in a circle, so this settles in at most one pass per box and usually
+   * in one or two.
+   */
+  function ranksOf(nodes, edges) {
     const rank = new Map(nodes.map((node) => [node.id, 0]));
     const forward = forwardEdges(nodes, edges);
 
-    // Longest path over the edges that go forwards. With the loops taken out
-    // there is nothing left to relax in a circle, so this settles in at most
-    // one pass per node and usually in one or two.
     for (let pass = 0; pass < nodes.length; pass += 1) {
       let moved = false;
 
@@ -204,6 +226,7 @@ var DmLayout = (function () {
       }
     }
 
+    // The boxes of each rank, in the order they were declared.
     const ranks = new Map();
     for (const node of nodes) {
       const at = rank.get(node.id);
@@ -213,6 +236,56 @@ var DmLayout = (function () {
       ranks.get(at).push(node);
     }
 
+    return ranks;
+  }
+
+  /* One rank laid out across the diagram, centred on the middle line.
+   *
+   * `down` is a diagram that runs top to bottom, where a rank is a row and the
+   * boxes in it are side by side; in a left-to-right diagram the two axes swap
+   * over, which is the whole of the difference between the four directions.
+   */
+  function placeRank(group, { sizes, down, back, along }) {
+    const across = group.reduce((total, node) => {
+      const size = sizes.get(node.id);
+      return total + (down ? size.w : size.h);
+    }, 0) + (SIBLING_GAP * (group.length - 1));
+
+    const placed = [];
+    let cross = -across / 2;
+    let depth = 0;
+
+    for (const node of group) {
+      const size = sizes.get(node.id);
+      const long = down ? size.h : size.w;
+      const wide = down ? size.w : size.h;
+
+      placed.push({
+        id: node.id,
+        x: down ? cross : (back ? -along - size.w : along),
+        y: down ? (back ? -along - size.h : along) : cross,
+        w: size.w,
+        h: size.h
+      });
+
+      cross += wide + SIBLING_GAP;
+      depth = Math.max(depth, long);
+    }
+
+    return { placed, depth };
+  }
+
+  function autoLayout(model) {
+    const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
+    const edges = Array.isArray(model?.edges) ? model.edges : [];
+    const direction = DIRECTIONS.includes(model?.direction) ? model.direction : "TD";
+    const layout = {};
+
+    if (nodes.length === 0) {
+      return layout;
+    }
+
+    const ranks = ranksOf(nodes, edges);
     const down = direction === "TB" || direction === "TD" || direction === "BT";
     const back = direction === "BT" || direction === "RL";
     const sizes = new Map(nodes.map((node) => [node.id, measureNode(node)]));
@@ -220,33 +293,9 @@ var DmLayout = (function () {
     let along = 0;
 
     for (const at of [...ranks.keys()].sort((a, b) => a - b)) {
-      const group = ranks.get(at);
-      const across = group.reduce((total, node) => {
-        const size = sizes.get(node.id);
-        return total + (down ? size.w : size.h);
-      }, 0) + (SIBLING_GAP * (group.length - 1));
-
-      let cross = -across / 2;
-      let depth = 0;
-
-      for (const node of group) {
-        const size = sizes.get(node.id);
-        const long = down ? size.h : size.w;
-        const wide = down ? size.w : size.h;
-
-        placed.push({
-          id: node.id,
-          x: down ? cross : (back ? -along - size.w : along),
-          y: down ? (back ? -along - size.h : along) : cross,
-          w: size.w,
-          h: size.h
-        });
-
-        cross += wide + SIBLING_GAP;
-        depth = Math.max(depth, long);
-      }
-
-      along += depth + RANK_GAP;
+      const rank = placeRank(ranks.get(at), { sizes, down, back, along });
+      placed.push(...rank.placed);
+      along += rank.depth + RANK_GAP;
     }
 
     // Everything is placed around zero and around a middle line; shift it so
@@ -273,6 +322,33 @@ var DmLayout = (function () {
    * has to be drawn somewhere. Somewhere is a row underneath the rest, where it
    * is obviously new and obviously not on top of anything.
    */
+  // A position that says where a box is. A box may carry a position and no
+  // size — a file written by hand — and then it is measured.
+  function placedAt(node, at) {
+    if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) {
+      return null;
+    }
+
+    const sized = (value, measured) => (Number.isFinite(value) && value > 0 ? value : measured);
+    const size = measureNode(node);
+
+    return { x: at.x, y: at.y, w: sized(at.w, size.w), h: sized(at.h, size.h) };
+  }
+
+  // A row underneath everything else, for the boxes that arrived without a
+  // position — obviously new, and obviously not on top of anything.
+  function placeBelow(layout, missing) {
+    const below = Object.values(layout).reduce((most, at) => Math.max(most, at.y + at.h), 0);
+    const y = snap(below === 0 ? MARGIN : below + RANK_GAP);
+    let x = MARGIN;
+
+    for (const node of missing) {
+      const size = measureNode(node);
+      layout[node.id] = { x, y, w: size.w, h: size.h };
+      x = snap(x + size.w + SIBLING_GAP);
+    }
+  }
+
   function ensureLayout(model) {
     const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
     const known = model?.layout && typeof model.layout === "object" ? model.layout : null;
@@ -285,31 +361,17 @@ var DmLayout = (function () {
     const missing = [];
 
     for (const node of nodes) {
-      const at = known[node.id];
+      const at = placedAt(node, known[node.id]);
 
-      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
-        layout[node.id] = {
-          x: at.x,
-          y: at.y,
-          w: Number.isFinite(at.w) && at.w > 0 ? at.w : measureNode(node).w,
-          h: Number.isFinite(at.h) && at.h > 0 ? at.h : measureNode(node).h
-        };
-        continue;
+      if (at) {
+        layout[node.id] = at;
+      } else {
+        missing.push(node);
       }
-
-      missing.push(node);
     }
 
     if (missing.length > 0) {
-      const below = Object.values(layout).reduce((most, at) => Math.max(most, at.y + at.h), 0);
-      let x = MARGIN;
-      const y = snap(below === 0 ? MARGIN : below + RANK_GAP);
-
-      for (const node of missing) {
-        const size = measureNode(node);
-        layout[node.id] = { x, y, w: size.w, h: size.h };
-        x = snap(x + size.w + SIBLING_GAP);
-      }
+      placeBelow(layout, missing);
     }
 
     return layout;

@@ -300,13 +300,18 @@ module.exports = [
     /* A suite is a script, not a function.
      *
      * Each of these is one `module.exports = async (ctx) => { ... }` holding a
-     * few hundred checks in the order somebody would do them by hand, and
-     * cutting that into hundred-line pieces would only make the order harder
-     * to follow. How complicated a single check is still counts, so
-     * `complexity` stays on.
+     * few hundred checks in the order somebody would do them by hand. Cutting
+     * that into hundred-line pieces would only make the order harder to
+     * follow, and its "branches" are the checks themselves — a suite that asks
+     * about twenty cases is twenty branches and is none the worse for it. The
+     * other rules still apply: a helper inside a suite is a function like any
+     * other.
      */
     files: ["test/**/*.js"],
-    rules: { "max-lines-per-function": "off" }
+    rules: {
+      "max-lines-per-function": "off",
+      complexity: "off"
+    }
   },
   {
     // Web Workers have no window and no document, which is the entire point of

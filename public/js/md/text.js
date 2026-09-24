@@ -75,77 +75,104 @@ var MdText = (function () {
     return document.documentElement.dataset.theme === "light" ? "light" : "dark";
   }
 
+  /* Display maths, turned into a marker element the renderer leaves alone.
+   *
+   * Three spellings open a block — `[`, `\[` and `$$` — and each closes with
+   * its own, so a walk over the lines is a small state machine: inside a code
+   * fence nothing is maths, inside a block every line is, and everywhere else
+   * a line is itself.
+   */
+  const MATH_OPENERS = ["[", "\\[", "$$"];
+
+  const closesMath = (mode, trimmed) => (mode === "$$"
+    ? trimmed === "$$"
+    : trimmed === "]" || trimmed === "\\]");
+
+  // Where the walk is: inside a fence, inside a maths block, or in the prose.
+  function mathWalker(push) {
+    let inCodeFence = false;
+    let codeFenceMarker = "";
+    let mode = "";
+    let held = [];
+
+    const flush = () => {
+      const tex = normalizeMatrixEnvironments(held.join("\n").trim());
+      if (tex) {
+        push(`<div class="math-block" data-math-tex="${encodeBase64Utf8(tex)}"></div>`);
+      }
+
+      held = [];
+      mode = "";
+    };
+
+    const fence = (line) => {
+      const found = line.match(/^(\s*)(`{3,}|~{3,})/);
+      if (!found) {
+        return false;
+      }
+
+      const marker = found[2][0];
+      if (!inCodeFence) {
+        inCodeFence = true;
+        codeFenceMarker = marker;
+      } else if (marker === codeFenceMarker) {
+        inCodeFence = false;
+        codeFenceMarker = "";
+      }
+
+      push(line);
+      return true;
+    };
+
+    const maths = (line) => {
+      const trimmed = line.trim();
+
+      if (!mode) {
+        if (!MATH_OPENERS.includes(trimmed)) {
+          return false;
+        }
+
+        mode = trimmed;
+        held = [];
+        return true;
+      }
+
+      if (closesMath(mode, trimmed)) {
+        flush();
+        return true;
+      }
+
+      held.push(line);
+      return true;
+    };
+
+    return {
+      line(line) {
+        if (fence(line) || (!inCodeFence && maths(line))) {
+          return;
+        }
+
+        push(line);
+      },
+      // A block nobody closed is not maths, it is the rest of the document.
+      end: () => held
+    };
+  }
+
   function normalizeMarkdownMath(markdown) {
     const source = String(markdown || "");
     if (!source.includes("[") && !source.includes("]") && !source.includes("\\[") && !source.includes("$$")) {
       return source;
     }
 
-    const lines = source.split(/\r?\n/);
     const normalizedLines = [];
-    let inCodeFence = false;
-    let codeFenceMarker = "";
-    let inDisplayMathBlock = false;
-    let displayMathMode = "";
-    let displayMathLines = [];
+    const walker = mathWalker((line) => normalizedLines.push(line));
 
-    const flushDisplayMathBlock = () => {
-      const tex = normalizeMatrixEnvironments(displayMathLines.join("\n").trim());
-      if (tex) {
-        normalizedLines.push(`<div class="math-block" data-math-tex="${encodeBase64Utf8(tex)}"></div>`);
-      }
-
-      displayMathLines = [];
-      inDisplayMathBlock = false;
-      displayMathMode = "";
-    };
-
-    for (const line of lines) {
-      const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})/);
-      if (fenceMatch) {
-        const marker = fenceMatch[2][0];
-        if (!inCodeFence) {
-          inCodeFence = true;
-          codeFenceMarker = marker;
-        } else if (marker === codeFenceMarker) {
-          inCodeFence = false;
-          codeFenceMarker = "";
-        }
-
-        normalizedLines.push(line);
-        continue;
-      }
-
-      if (!inCodeFence) {
-        const trimmed = line.trim();
-        if (!inDisplayMathBlock && (trimmed === "[" || trimmed === "\\[" || trimmed === "$$")) {
-          inDisplayMathBlock = true;
-          displayMathMode = trimmed;
-          displayMathLines = [];
-          continue;
-        }
-
-        if (inDisplayMathBlock) {
-          const isClosingBracket = (displayMathMode === "[" || displayMathMode === "\\[") && (trimmed === "]" || trimmed === "\\]");
-          const isClosingDollar = displayMathMode === "$$" && trimmed === "$$";
-
-          if (isClosingBracket || isClosingDollar) {
-            flushDisplayMathBlock();
-            continue;
-          }
-
-          displayMathLines.push(line);
-          continue;
-        }
-      }
-
-      normalizedLines.push(line);
+    for (const line of source.split(/\r?\n/)) {
+      walker.line(line);
     }
 
-    if (inDisplayMathBlock && displayMathLines.length > 0) {
-      normalizedLines.push(...displayMathLines);
-    }
-
+    normalizedLines.push(...walker.end());
     return normalizedLines.join("\n");
   }
 

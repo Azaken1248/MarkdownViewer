@@ -90,6 +90,63 @@ var DdRoute = (function () {
     ];
   }
 
+  /* The routes worth trying between two boxes, best first.
+   *
+   * The same four shapes on either axis: straight across the middle, out of
+   * the first box and along, in to the second box and along, and — when
+   * something is in the way — out and round, over the top or under the
+   * bottom. Written once per axis because the two are mirror images, and a
+   * single function that took an axis would read as arithmetic rather than as
+   * a route.
+   */
+  function sidewaysCandidates(a, b, { acy, bcy, dx }) {
+    const start = dx >= 0 ? a.x + a.w : a.x;
+    const end = dx >= 0 ? b.x : b.x + b.w;
+    const mid = (start + end) / 2;
+    const outward = start + (dx >= 0 ? STANDOFF : -STANDOFF);
+    const inward = end - (dx >= 0 ? STANDOFF : -STANDOFF);
+
+    const candidates = [
+      [[start, acy], [mid, acy], [mid, bcy], [end, bcy]],
+      [[start, acy], [outward, acy], [outward, bcy], [end, bcy]],
+      [[start, acy], [inward, acy], [inward, bcy], [end, bcy]]
+    ];
+
+    const over = Math.min(a.y, b.y) - STANDOFF - CLEARANCE;
+    const under = Math.max(a.y + a.h, b.y + b.h) + STANDOFF + CLEARANCE;
+
+    for (const lane of [over, under]) {
+      candidates.push([[start, acy], [outward, acy], [outward, lane],
+        [inward, lane], [inward, bcy], [end, bcy]]);
+    }
+
+    return candidates;
+  }
+
+  function downwardCandidates(a, b, { acx, bcx, dy }) {
+    const start = dy >= 0 ? a.y + a.h : a.y;
+    const end = dy >= 0 ? b.y : b.y + b.h;
+    const mid = (start + end) / 2;
+    const outward = start + (dy >= 0 ? STANDOFF : -STANDOFF);
+    const inward = end - (dy >= 0 ? STANDOFF : -STANDOFF);
+
+    const candidates = [
+      [[acx, start], [acx, mid], [bcx, mid], [bcx, end]],
+      [[acx, start], [acx, outward], [bcx, outward], [bcx, end]],
+      [[acx, start], [acx, inward], [bcx, inward], [bcx, end]]
+    ];
+
+    const left = Math.min(a.x, b.x) - STANDOFF - CLEARANCE;
+    const right = Math.max(a.x + a.w, b.x + b.w) + STANDOFF + CLEARANCE;
+
+    for (const lane of [left, right]) {
+      candidates.push([[acx, start], [acx, outward], [lane, outward],
+        [lane, inward], [bcx, inward], [bcx, end]]);
+    }
+
+    return candidates;
+  }
+
   function routeBetween(a, b, obstacles, spread) {
     if (a === b) {
       return selfLoop(a);
@@ -100,62 +157,23 @@ var DdRoute = (function () {
     // another. Each one leaves and arrives a little to the side of the middle
     // instead, near enough to still read as joining those two boxes.
     const lane = (box, size) => clamp(spread || 0, -(size / 2) + 10, (size / 2) - 10);
-    const acx = a.x + (a.w / 2) + lane(a, a.w);
-    const acy = a.y + (a.h / 2) + lane(a, a.h);
-    const bcx = b.x + (b.w / 2) + lane(b, b.w);
-    const bcy = b.y + (b.h / 2) + lane(b, b.h);
-    const dx = (b.x + (b.w / 2)) - (a.x + (a.w / 2));
-    const dy = (b.y + (b.h / 2)) - (a.y + (a.h / 2));
+    const middles = {
+      acx: a.x + (a.w / 2) + lane(a, a.w),
+      acy: a.y + (a.h / 2) + lane(a, a.h),
+      bcx: b.x + (b.w / 2) + lane(b, b.w),
+      bcy: b.y + (b.h / 2) + lane(b, b.h),
+      dx: (b.x + (b.w / 2)) - (a.x + (a.w / 2)),
+      dy: (b.y + (b.h / 2)) - (a.y + (a.h / 2))
+    };
 
     // The gap between the two boxes on each axis. Whichever they are actually
     // separated on is the one an arrow can leave and arrive at squarely.
     const across = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
     const down = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
-    const horizontal = across >= down;
 
-    const candidates = [];
-
-    if (horizontal) {
-      const start = dx >= 0 ? a.x + a.w : a.x;
-      const end = dx >= 0 ? b.x : b.x + b.w;
-      const mid = (start + end) / 2;
-
-      candidates.push([[start, acy], [mid, acy], [mid, bcy], [end, bcy]]);
-      candidates.push([[start, acy], [start + (dx >= 0 ? STANDOFF : -STANDOFF), acy],
-        [start + (dx >= 0 ? STANDOFF : -STANDOFF), bcy], [end, bcy]]);
-      candidates.push([[start, acy], [end - (dx >= 0 ? STANDOFF : -STANDOFF), acy],
-        [end - (dx >= 0 ? STANDOFF : -STANDOFF), bcy], [end, bcy]]);
-
-      const over = Math.min(a.y, b.y) - STANDOFF - CLEARANCE;
-      const under = Math.max(a.y + a.h, b.y + b.h) + STANDOFF + CLEARANCE;
-      const outward = start + (dx >= 0 ? STANDOFF : -STANDOFF);
-      const inward = end - (dx >= 0 ? STANDOFF : -STANDOFF);
-
-      for (const lane of [over, under]) {
-        candidates.push([[start, acy], [outward, acy], [outward, lane],
-          [inward, lane], [inward, bcy], [end, bcy]]);
-      }
-    } else {
-      const start = dy >= 0 ? a.y + a.h : a.y;
-      const end = dy >= 0 ? b.y : b.y + b.h;
-      const mid = (start + end) / 2;
-
-      candidates.push([[acx, start], [acx, mid], [bcx, mid], [bcx, end]]);
-      candidates.push([[acx, start], [acx, start + (dy >= 0 ? STANDOFF : -STANDOFF)],
-        [bcx, start + (dy >= 0 ? STANDOFF : -STANDOFF)], [bcx, end]]);
-      candidates.push([[acx, start], [acx, end - (dy >= 0 ? STANDOFF : -STANDOFF)],
-        [bcx, end - (dy >= 0 ? STANDOFF : -STANDOFF)], [bcx, end]]);
-
-      const left = Math.min(a.x, b.x) - STANDOFF - CLEARANCE;
-      const right = Math.max(a.x + a.w, b.x + b.w) + STANDOFF + CLEARANCE;
-      const outward = start + (dy >= 0 ? STANDOFF : -STANDOFF);
-      const inward = end - (dy >= 0 ? STANDOFF : -STANDOFF);
-
-      for (const lane of [left, right]) {
-        candidates.push([[acx, start], [acx, outward], [lane, outward],
-          [lane, inward], [bcx, inward], [bcx, end]]);
-      }
-    }
+    const candidates = across >= down
+      ? sidewaysCandidates(a, b, middles)
+      : downwardCandidates(a, b, middles);
 
     for (const candidate of candidates) {
       const points = tidy(candidate);

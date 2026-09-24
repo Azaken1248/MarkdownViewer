@@ -67,6 +67,26 @@ var AppNotify = (function () {
       }
     }
 
+    const toast = buildToast({ text, title, toneClass, preset, duration, isUrgent });
+
+    stack.appendChild(toast);
+    activeToasts.add(toast);
+
+    const timerId = window.setTimeout(() => dismissToast(toast), duration);
+    toast.dataset.timerId = String(timerId);
+
+    // Oldest first, so trimming the overflow drops the stalest message.
+    while (activeToasts.size > TOAST_MAX_VISIBLE) {
+      const [oldest] = activeToasts;
+      dismissToast(oldest);
+    }
+
+    return toast;
+  }
+
+  // The toast itself: an icon, what it says, a way to dismiss it and the bar
+  // that shows how long it has left.
+  function buildToast({ text, title, toneClass, preset, duration, isUrgent }) {
     const toast = document.createElement("div");
     toast.className = `toast toast-${toneClass}`;
     toast.dataset.toastKey = `${toneClass}:${text}`;
@@ -104,18 +124,6 @@ var AppNotify = (function () {
     timer.style.animationDuration = `${duration}ms`;
 
     toast.append(icon, body, closeBtn, timer);
-    stack.appendChild(toast);
-    activeToasts.add(toast);
-
-    const timerId = window.setTimeout(() => dismissToast(toast), duration);
-    toast.dataset.timerId = String(timerId);
-
-    // Oldest first, so trimming the overflow drops the stalest message.
-    while (activeToasts.size > TOAST_MAX_VISIBLE) {
-      const [oldest] = activeToasts;
-      dismissToast(oldest);
-    }
-
     return toast;
   }
 

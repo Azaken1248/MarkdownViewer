@@ -25,6 +25,127 @@ var AppOpening = (function () {
   const { setStatus } = AppNotify;
   const { applySearch } = AppSearching;
 
+  const NO_MATCH = { found: false, index: -1, total: 0 };
+
+  // What the caller asked to find in the document it is opening, if anything.
+  function jumpAsked(options) {
+    const jumpQuery = String(options.jumpQuery || "");
+
+    return {
+      jumpQuery,
+      jumpTerms: Array.isArray(options.jumpTerms) ? options.jumpTerms : [],
+      jumpIndex: Number.isFinite(Number(options.jumpIndex)) ? Number(options.jumpIndex) : 0,
+      scrollBehavior: String(options.scrollBehavior || "auto"),
+      hasJumpQuery: jumpQuery.trim().length > 0
+    };
+  }
+
+  // Mark it, or take the last search's marks off. Both leave the navigation in
+  // step with what is on screen, which is the point of doing either.
+  function lookForTheMatch(file, asked) {
+    if (!asked.hasJumpQuery) {
+      resetJumpNavigation();
+      return NO_MATCH;
+    }
+
+    return jumpToSearchMatch(asked.jumpQuery, asked.jumpTerms, asked.jumpIndex, {
+      sourceFile: file,
+      scrollBehavior: asked.scrollBehavior
+    });
+  }
+
+  // The line at the bottom: what is open, and — when something was being
+  // looked for — whether it was found.
+  function sayWhatIsOpen(doc, jumpQuery, jumpResult) {
+    if (!jumpResult) {
+      setStatus(`Viewing ${docName(doc.file)}`, "neutral");
+      return;
+    }
+
+    setStatus(jumpResult.found
+      ? `Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`
+      : `Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`,
+    jumpResult.found ? "success" : "neutral");
+  }
+
+  /* The document itself, on the screen.
+   *
+   * The app claims the document the moment its content is up. Waiting until
+   * after Mermaid finished left a multi-second window on diagram-heavy files
+   * where the Edit and Delete buttons still pointed at the last one open.
+   */
+  function putDocumentOnScreen(file, doc, rawContent, pushHash) {
+    const safeHtml = renderDocumentContent(file, rawContent, doc.title || file);
+
+    elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
+    destroyPanZoomInstances(elements.docContent);
+
+    // renderDocumentContent runs marked and then DOMPurify (md/text.js); what
+    // comes back has been through the sanitizer with this app's allowlist,
+    // which is the whole reason it is called safeHtml.
+    // eslint-disable-next-line no-unsanitized/property
+    elements.docContent.innerHTML = safeHtml;
+    elements.docContent.classList.add("visible");
+    elements.emptyState.style.display = "none";
+    bindTaskCheckboxes(file, rawContent);
+
+    state.activeFile = file;
+    // Selection-only change: repaint the highlight, don't rebuild the list.
+    updateActiveRowHighlight();
+    updateActiveDocUI(file);
+    document.title = `${doc.title} | AzaDocs`;
+    showDocumentInUrl(file, { replace: !pushHash });
+  }
+
+  /* The document is already up: this is only the search and the address.
+   *
+   * The address is pushed when somebody asked for this document and replaced
+   * when the app simply landed on it, so it always names what is on screen
+   * without inventing history entries nobody navigated to.
+   */
+  function searchWhatIsAlreadyOpen(file, doc, pushHash, requestId, asked) {
+    const jumpResult = lookForTheMatch(file, asked);
+
+    if (requestId !== state.openDocumentRequestId) {
+      return;
+    }
+
+    document.title = `${doc.title} | AzaDocs`;
+    showDocumentInUrl(file, { replace: !pushHash });
+    sayWhatIsOpen(doc, asked.jumpQuery, asked.hasJumpQuery ? jumpResult : null);
+  }
+
+  /* Fetch it, put it up, then look for the match and draw the diagrams.
+   *
+   * Checked against the request id at every await: opening two documents
+   * quickly must leave the second one on screen, and the first one's answer
+   * arriving late must not overwrite it.
+   */
+  async function fetchAndShow(file, doc, { pushHash, forceReload, asked, requestId }) {
+    const stale = () => requestId !== state.openDocumentRequestId;
+
+    const rawContent = await loadDocContent(file, { forceReload });
+    if (stale()) {
+      return;
+    }
+
+    putDocumentOnScreen(file, doc, rawContent, pushHash);
+
+    await waitForNextFrame();
+    if (stale()) {
+      return;
+    }
+
+    const jumpResult = lookForTheMatch(file, asked);
+
+    await renderMermaidBlocks(elements.docContent);
+    if (stale()) {
+      return;
+    }
+
+    sayWhatIsOpen(doc, asked.jumpQuery, asked.hasJumpQuery ? jumpResult : null);
+  }
+
   async function openDocument(file, pushHash, options = {}) {
     // Opening something else while the page is being edited would replace the
     // edits with another document and say nothing about it.
@@ -43,117 +164,21 @@ var AppOpening = (function () {
         return;
       }
 
-      const jumpQuery = String(options.jumpQuery || "");
-      const jumpTerms = Array.isArray(options.jumpTerms) ? options.jumpTerms : [];
-      const jumpIndex = Number.isFinite(Number(options.jumpIndex)) ? Number(options.jumpIndex) : 0;
-      const scrollBehavior = String(options.scrollBehavior || "auto");
-      const hasJumpQuery = jumpQuery.trim().length > 0;
+      const asked = jumpAsked(options);
       const forceReload = Boolean(options.forceReload);
 
-      if (file === state.activeFile && elements.docContent.classList.contains("visible") && !forceReload) {
-        let jumpResult = {
-          found: false,
-          index: -1,
-          total: 0
-        };
+      // Already on screen: nothing to fetch and nothing to render, so this is
+      // only the search and the address.
+      const alreadyOpen = file === state.activeFile
+        && elements.docContent.classList.contains("visible")
+        && !forceReload;
 
-        if (hasJumpQuery) {
-          jumpResult = jumpToSearchMatch(jumpQuery, jumpTerms, jumpIndex, {
-            sourceFile: file,
-            scrollBehavior
-          });
-        } else {
-          resetJumpNavigation();
-        }
-
-        if (requestId !== state.openDocumentRequestId) {
-          return;
-        }
-
-        document.title = `${doc.title} | AzaDocs`;
-        // Push when someone asked for this document, replace when the app
-        // simply landed on it, so the address always names what is on screen
-        // without inventing history entries nobody navigated to.
-        showDocumentInUrl(file, { replace: !pushHash });
-
-        if (hasJumpQuery) {
-          if (jumpResult.found) {
-            setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
-          } else {
-            setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
-          }
-          return;
-        }
-
-        setStatus(`Viewing ${docName(doc.file)}`, "neutral");
+      if (alreadyOpen) {
+        searchWhatIsAlreadyOpen(file, doc, pushHash, requestId, asked);
         return;
       }
 
-      const rawContent = await loadDocContent(file, { forceReload });
-      if (requestId !== state.openDocumentRequestId) {
-        return;
-      }
-
-      const safeHtml = renderDocumentContent(file, rawContent, doc.title || file);
-
-      elements.docContent.classList.toggle("notebook-viewer", isNotebookFile(file));
-
-      destroyPanZoomInstances(elements.docContent);
-      // renderDocumentContent runs marked and then DOMPurify (md/text.js);
-      // what comes back has been through the sanitizer with this app's
-      // allowlist, which is the whole reason it is called safeHtml.
-      // eslint-disable-next-line no-unsanitized/property
-      elements.docContent.innerHTML = safeHtml;
-      elements.docContent.classList.add("visible");
-      elements.emptyState.style.display = "none";
-      bindTaskCheckboxes(file, rawContent);
-
-      // Claim the document the moment its content is on screen. Waiting until after
-      // Mermaid finishes left a multi-second window on diagram-heavy files where the
-      // Edit and Delete buttons still pointed at the previously open document.
-      state.activeFile = file;
-      // Selection-only change: repaint the highlight, don't rebuild the list.
-      updateActiveRowHighlight();
-      updateActiveDocUI(file);
-      document.title = `${doc.title} | AzaDocs`;
-      showDocumentInUrl(file, { replace: !pushHash });
-
-      await waitForNextFrame();
-
-      if (requestId !== state.openDocumentRequestId) {
-        return;
-      }
-
-      let jumpResult = {
-        found: false,
-        index: -1,
-        total: 0
-      };
-
-      if (hasJumpQuery) {
-        jumpResult = jumpToSearchMatch(jumpQuery, jumpTerms, jumpIndex, {
-          sourceFile: file,
-          scrollBehavior
-        });
-      } else {
-        resetJumpNavigation();
-      }
-
-      await renderMermaidBlocks(elements.docContent);
-      if (requestId !== state.openDocumentRequestId) {
-        return;
-      }
-
-      if (hasJumpQuery) {
-        if (jumpResult.found) {
-          setStatus(`Viewing ${docName(doc.file)}. Match ${jumpResult.index + 1} of ${jumpResult.total} for "${jumpQuery.trim()}".`, "success");
-        } else {
-          setStatus(`Viewing ${docName(doc.file)}. Could not find "${jumpQuery.trim()}" in rendered content.`, "neutral");
-        }
-        return;
-      }
-
-      setStatus(`Viewing ${docName(doc.file)}`, "neutral");
+      await fetchAndShow(file, doc, { pushHash, forceReload, asked, requestId });
     } catch (error) {
       if (requestId !== state.openDocumentRequestId) {
         return;

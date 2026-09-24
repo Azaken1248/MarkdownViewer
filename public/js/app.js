@@ -301,80 +301,46 @@ window.addEventListener("keydown", (event) => {
 // Escape dismisses exactly one layer, topmost first. The nav used to be checked
 // without a `return`, so a single press could close the sidebar and a modal and
 // the search panel at once.
+/* Escape closes one thing at a time, from the top of the stack down.
+ *
+ * Written as a ladder rather than as a run of ifs so that the order — which is
+ * the whole behaviour — reads as a list. The context menu floats above
+ * everything, so it goes first; the selection is the last layer, because a
+ * press with nothing open should still put the files down.
+ *
+ * A forced password change and the sign-in wall are not on the ladder at all:
+ * there is nothing usable behind them.
+ */
+const ESCAPE_LADDER = [
+  [() => elements.contextMenu && !elements.contextMenu.hidden, () => closeContextMenu()],
+  [() => state.confirmOpen, () => resolveConfirmDialog(false)],
+  [() => state.usersOpen, () => closeUsersModal()],
+  [() => state.shareOpen, () => closeShareModal()],
+  [() => state.linkModalOpen, () => closeLinkModal()],
+  [() => state.passwordOpen && !state.passwordForced, () => closePasswordModal()],
+  [() => state.folderModalOpen, () => closeFolderModal()],
+  [() => state.editorOpen, () => void requestEditorClose()],
+  [() => state.searchPanelOpen, () => setSuperSearchOpen(false)],
+  [() => elements.appShell.classList.contains("nav-open"), () => setNavOpen(false)],
+  [
+    () => state.selection.size > 0 || state.clipboard.files.length > 0,
+    () => {
+      state.clipboard = { files: [], mode: null };
+      clearSelection();
+      updateSelectionUI();
+    }
+  ]
+];
+
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
     return;
   }
 
-  // The context menu floats above everything, so it closes first.
-  if (elements.contextMenu && !elements.contextMenu.hidden) {
+  const rung = ESCAPE_LADDER.find(([when]) => when());
+  if (rung) {
     event.preventDefault();
-    closeContextMenu();
-    return;
-  }
-
-  if (state.confirmOpen) {
-    event.preventDefault();
-    resolveConfirmDialog(false);
-    return;
-  }
-
-  if (state.usersOpen) {
-    event.preventDefault();
-    closeUsersModal();
-    return;
-  }
-
-  if (state.shareOpen) {
-    event.preventDefault();
-    closeShareModal();
-    return;
-  }
-
-  if (state.linkModalOpen) {
-    event.preventDefault();
-    closeLinkModal();
-    return;
-  }
-
-  // A forced password change and the sign-in wall are not dismissable: there is
-  // nothing usable behind them.
-  if (state.passwordOpen && !state.passwordForced) {
-    event.preventDefault();
-    closePasswordModal();
-    return;
-  }
-
-  if (state.folderModalOpen) {
-    event.preventDefault();
-    closeFolderModal();
-    return;
-  }
-
-  if (state.editorOpen) {
-    event.preventDefault();
-    void requestEditorClose();
-    return;
-  }
-
-  if (state.searchPanelOpen) {
-    event.preventDefault();
-    setSuperSearchOpen(false);
-    return;
-  }
-
-  if (elements.appShell.classList.contains("nav-open")) {
-    event.preventDefault();
-    setNavOpen(false);
-    return;
-  }
-
-  // Last layer: drop the file selection and any pending cut.
-  if (state.selection.size > 0 || state.clipboard.files.length > 0) {
-    event.preventDefault();
-    state.clipboard = { files: [], mode: null };
-    clearSelection();
-    updateSelectionUI();
+    rung[1]();
   }
 });
 

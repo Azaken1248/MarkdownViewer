@@ -132,6 +132,85 @@ function rollbackPlace(mode, query, message) {
  * `push` is false when the browser did the navigating, so going back does not
  * push the entry it just came from.
  */
+/* Into the links pane.
+ *
+ * Already in memory: render and be done. Only a first visit waits, and only a
+ * first visit says it is waiting.
+ */
+async function goToLinks(push) {
+  if (push) {
+    showLinksInUrl();
+  }
+
+  state.linkFilter = elements.searchInput.value;
+
+  if (state.linksLoaded) {
+    renderLinks();
+    return true;
+  }
+
+  setPlaceBusy("links", true);
+  showLinksLoading();
+
+  try {
+    await refreshLinks();
+  } finally {
+    setPlaceBusy("links", false);
+  }
+
+  return true;
+}
+
+/* And back to the documents.
+ *
+ * Coming from the links pane, the library is already loaded and the document
+ * is still rendered underneath it, so there is nothing to fetch and nothing to
+ * draw twice — unless Back landed on a different document than the one that
+ * was open, which is one request at most and usually none, because its content
+ * is already in the cache.
+ *
+ * Only from the links. The recycle bin and the archive replaced the tree and
+ * the filtered list with deleted entries, so coming back from one of those is
+ * a real reload however much is in memory.
+ */
+async function goToDocuments({ push, openFile, previousMode }) {
+  if (push) {
+    // Back where the document was. The address and the screen agree from the
+    // first frame rather than after a round trip.
+    showDocumentInUrl(state.activeFile);
+  }
+
+  const wanted = openFile || state.activeFile;
+
+  if (previousMode === "links" && state.docs.length > 0) {
+    const elsewhere = wanted && wanted !== state.activeFile
+      && state.docs.some((doc) => doc.file === wanted);
+
+    if (elsewhere) {
+      restoreDocumentList();
+      await openDocument(wanted, false);
+    } else {
+      restoreDocumentView();
+    }
+
+    return true;
+  }
+
+  // Nothing loaded: this tab booted straight into /links, or came back to a
+  // document by name. That is a real wait, so it looks like one.
+  setPlaceBusy("docs", true);
+  setMeta("Loading documents...");
+  showLoadingState("Opening the library", "Fetching your documents.");
+
+  try {
+    await refreshDocs({ openFile, preserveSearch: true });
+  } finally {
+    setPlaceBusy("docs", false);
+  }
+
+  return true;
+}
+
 async function goToPlace(place, { push = true, openFile = null } = {}) {
   const target = place === "links" ? "links" : "docs";
 
@@ -166,71 +245,10 @@ async function goToPlace(place, { push = true, openFile = null } = {}) {
     resetJumpNavigation();
 
     if (target === "links") {
-      if (push) {
-        showLinksInUrl();
-      }
-
-      state.linkFilter = elements.searchInput.value;
-
-      // Already in memory: render and be done. Only a first visit waits, and
-      // only a first visit says it is waiting.
-      if (state.linksLoaded) {
-        renderLinks();
-        return true;
-      }
-
-      setPlaceBusy("links", true);
-      showLinksLoading();
-
-      try {
-        await refreshLinks();
-      } finally {
-        setPlaceBusy("links", false);
-      }
-
-      return true;
+      return await goToLinks(push);
     }
 
-    if (push) {
-      // Back where the document was. The address and the screen agree from
-      // the first frame rather than after a round trip.
-      showDocumentInUrl(state.activeFile);
-    }
-
-    // The library is already loaded and the document is still rendered under
-    // the links pane, so there is nothing to fetch and nothing to draw twice.
-    //
-    // Only from the links. The recycle bin and the archive replaced the tree
-    // and the filtered list with deleted entries, so coming back from one of
-    // those is a real reload however much is in memory.
-    const wanted = openFile || state.activeFile;
-    if (previousMode === "links" && state.docs.length > 0) {
-      // Unless Back landed on a different document than the one that was open,
-      // which is one request at most and usually none — its content is already
-      // in the cache.
-      if (wanted && wanted !== state.activeFile && state.docs.some((doc) => doc.file === wanted)) {
-        restoreDocumentList();
-        await openDocument(wanted, false);
-        return true;
-      }
-
-      restoreDocumentView();
-      return true;
-    }
-
-    // Nothing loaded: this tab booted straight into /links, or came back to a
-    // document by name. That is a real wait, so it looks like one.
-    setPlaceBusy("docs", true);
-    setMeta("Loading documents...");
-    showLoadingState("Opening the library", "Fetching your documents.");
-
-    try {
-      await refreshDocs({ openFile, preserveSearch: true });
-    } finally {
-      setPlaceBusy("docs", false);
-    }
-
-    return true;
+    return await goToDocuments({ push, openFile, previousMode });
   } catch (error) {
     rollbackPlace(previousMode, previousQuery, error.message);
     return false;

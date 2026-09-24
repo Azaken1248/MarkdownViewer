@@ -78,6 +78,141 @@ var DmDeclarations = (function () {
     }
   }
 
+  /* What the layout comment said about one box, put on the box.
+   *
+   * Everything here is something Mermaid has no way to write down, so the
+   * comment is the only place it can have come from.
+   */
+  const isWholeNumber = (value) => value !== undefined && /^-?\d+$/.test(value);
+
+  /* What kind of thing this box is, if the line said.
+   *
+   * `table` used to be a bare word on the end of the line rather than a key.
+   * Files written that way are still out there and still open.
+   */
+  function declaredKind(at) {
+    const legacy = /(?:^|\s)table(?:\s|$)/.test(at.rest || "") ? "table" : null;
+    const kind = at.attributes.kind || legacy;
+    return NODE_KINDS.includes(kind) && kind !== "box" ? kind : null;
+  }
+
+  function dressNode(node, at) {
+    const kind = declaredKind(at);
+    if (kind) {
+      node.kind = kind;
+    }
+
+    for (const key of ["icon", "image"]) {
+      if (at.attributes[key]) {
+        node[key] = at.attributes[key];
+      }
+    }
+
+    /* A box drawn without its box.
+     *
+     * Mermaid has no way to say "no shape" — every labelled node is written
+     * with brackets of some kind — so this is written as the rectangle it
+     * nearly is and the missing frame is said beside it. Which is the same
+     * bargain the arrow ends already make: the nearest real syntax in the
+     * diagram, and what was actually meant in the comment.
+     */
+    if (at.attributes.frame === "none") {
+      node.frame = "none";
+    }
+
+    /* Words on the paper, from before there was a kind for them.
+     *
+     * The Text tool used to put down an ordinary box with its frame turned
+     * off, and nothing else ever did: an icon and a picture turn their
+     * frames off too, but each of those carries the thing it is showing and
+     * this carries neither. So a frameless box with nothing in it but words
+     * is words on the paper, and saying so here is what stops one opening a
+     * panel of questions about a shape it has not got.
+     */
+    if (!node.kind && wordsOnly(node)) {
+      node.kind = "text";
+    }
+
+    /* A shape Mermaid has no brackets for. The brackets on the line said
+     * the nearest one it does have — which is what every other renderer
+     * will draw — and this says what was actually meant.
+     */
+    if (DRAWN_BY_NAME.has(at.attributes.shape)) {
+      node.shape = at.attributes.shape;
+    }
+
+    const cells = readCellStyles(at.attributes.cells);
+    if (Object.keys(cells).length > 0) {
+      node.cells = cells;
+    }
+
+    // The numbers, each written only when it is one.
+    for (const key of ["layer", "z", "pad", "gap"]) {
+      if (isWholeNumber(at.attributes[key])) {
+        node[key] = Number(at.attributes[key]);
+      }
+    }
+
+    const rest = restAttributes(at.attributes, NODE_ATTRS);
+    if (Object.keys(rest).length > 0) {
+      node.extra = rest;
+    }
+  }
+
+  // And about one group: whether it is locked, and anything this build does
+  // not know about, kept as it was written.
+  function dressGroup(model, id, attributes) {
+    const group = (model.groups || []).find((one) => one.id === id);
+    if (!group) {
+      return;
+    }
+
+    if (attributes.lock === "1") {
+      group.lock = true;
+    }
+
+    const rest = restAttributes(attributes, GROUP_ATTRS);
+    if (Object.keys(rest).length > 0) {
+      group.extra = rest;
+    }
+  }
+
+  // And about one arrow: which sides it leaves from, the corners it goes
+  // round, the markers on its ends.
+  function dressEdge(edge, attributes) {
+    /* Which side of its box each end of the line leaves from. `a` is auto —
+     * one end pinned and the other left to the router is an ordinary thing to
+     * want, and there has to be a way to write it down.
+     */
+    if (attributes.sides && /^[ltrba],[ltrba]$/.test(attributes.sides)) {
+      edge.sides = attributes.sides.split(",");
+    }
+
+    const via = attributes.via ? readPoints(attributes.via) : null;
+    if (via) {
+      edge.waypoints = via;
+    }
+
+    if (attributes.ends && /^[\w-]+,[\w-]+$/.test(attributes.ends)) {
+      edge.ends = attributes.ends.split(",");
+    }
+
+    // The default is not written down, so a file saying it is a file somebody
+    // wrote by hand, and it still means the same thing.
+    if (ROUTE_NAMES.has(attributes.route)) {
+      edge.route = attributes.route;
+    }
+
+    if (attributes.class) {
+      edge.class = attributes.class;
+    }
+
+    const rest = restAttributes(attributes, EDGE_ATTRS);
+    if (Object.keys(rest).length > 0) {
+      edge.extra = rest;
+    }
+  }
+
   /* What the layout comments said, put where it belongs.
    *
    * A position for a box that is not in the diagram is a position for nothing;
@@ -96,126 +231,20 @@ var DmDeclarations = (function () {
         }
 
         layout[at.id] = { x: at.x, y: at.y, w: at.w, h: at.h };
-
-        // `table` used to be a bare word on the end of the line rather than a
-        // key. Files written that way are still out there and still open.
-        const legacy = /(?:^|\s)table(?:\s|$)/.test(at.rest || "") ? "table" : null;
-        const kind = at.attributes.kind || legacy;
-        if (NODE_KINDS.includes(kind) && kind !== "box") {
-          node.kind = kind;
-        }
-
-        for (const key of ["icon", "image"]) {
-          if (at.attributes[key]) {
-            node[key] = at.attributes[key];
-          }
-        }
-
-        /* A box drawn without its box.
-         *
-         * Mermaid has no way to say "no shape" — every labelled node is written
-         * with brackets of some kind — so this is written as the rectangle it
-         * nearly is and the missing frame is said beside it. Which is the same
-         * bargain the arrow ends already make: the nearest real syntax in the
-         * diagram, and what was actually meant in the comment.
-         */
-        if (at.attributes.frame === "none") {
-          node.frame = "none";
-        }
-
-        /* Words on the paper, from before there was a kind for them.
-         *
-         * The Text tool used to put down an ordinary box with its frame turned
-         * off, and nothing else ever did: an icon and a picture turn their
-         * frames off too, but each of those carries the thing it is showing and
-         * this carries neither. So a frameless box with nothing in it but words
-         * is words on the paper, and saying so here is what stops one opening a
-         * panel of questions about a shape it has not got.
-         */
-        if (!node.kind && wordsOnly(node)) {
-          node.kind = "text";
-        }
-
-        /* A shape Mermaid has no brackets for. The brackets on the line said
-         * the nearest one it does have — which is what every other renderer
-         * will draw — and this says what was actually meant.
-         */
-        if (DRAWN_BY_NAME.has(at.attributes.shape)) {
-          node.shape = at.attributes.shape;
-        }
-
-        const cells = readCellStyles(at.attributes.cells);
-        if (Object.keys(cells).length > 0) {
-          node.cells = cells;
-        }
-
-        for (const key of ["layer", "z", "pad", "gap"]) {
-          if (at.attributes[key] !== undefined && /^-?\d+$/.test(at.attributes[key])) {
-            node[key] = Number(at.attributes[key]);
-          }
-        }
-
-        const rest = restAttributes(at.attributes, NODE_ATTRS);
-        if (Object.keys(rest).length > 0) {
-          node.extra = rest;
-        }
+        dressNode(node, at);
       }
 
       model.layout = layout;
     }
 
     for (const [id, attributes] of groupLines) {
-      const group = (model.groups || []).find((one) => one.id === id);
-      if (!group) {
-        continue;
-      }
-
-      if (attributes.lock === "1") {
-        group.lock = true;
-      }
-
-      const rest = restAttributes(attributes, GROUP_ATTRS);
-      if (Object.keys(rest).length > 0) {
-        group.extra = rest;
-      }
+      dressGroup(model, id, attributes);
     }
 
     for (const [index, attributes] of edgeLines) {
       const edge = model.edges[index];
-      if (!edge) {
-        continue;
-      }
-
-      /* Which side of its box each end of the line leaves from. `a` is auto —
-       * one end pinned and the other left to the router is an ordinary thing to
-       * want, and there has to be a way to write it down.
-       */
-      if (attributes.sides && /^[ltrba],[ltrba]$/.test(attributes.sides)) {
-        edge.sides = attributes.sides.split(",");
-      }
-
-      const via = attributes.via ? readPoints(attributes.via) : null;
-      if (via) {
-        edge.waypoints = via;
-      }
-
-      if (attributes.ends && /^[\w-]+,[\w-]+$/.test(attributes.ends)) {
-        edge.ends = attributes.ends.split(",");
-      }
-
-      // The default is not written down, so a file saying it is a file somebody
-      // wrote by hand, and it still means the same thing.
-      if (ROUTE_NAMES.has(attributes.route)) {
-        edge.route = attributes.route;
-      }
-
-      if (attributes.class) {
-        edge.class = attributes.class;
-      }
-
-      const rest = restAttributes(attributes, EDGE_ATTRS);
-      if (Object.keys(rest).length > 0) {
-        edge.extra = rest;
+      if (edge) {
+        dressEdge(edge, attributes);
       }
     }
   }

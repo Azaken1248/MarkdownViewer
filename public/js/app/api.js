@@ -63,6 +63,17 @@ var AppApi = (function () {
       payload = null;
     }
 
+    refuseBadAnswer(response, payload);
+    return payload;
+  }
+
+  /* What a refusal means, before any caller has to think about it.
+   *
+   * Two of these are about the session rather than about the request, and the
+   * app has somewhere to send the person in each case; the rest is whatever
+   * the server said, or the status if it said nothing.
+   */
+  function refuseBadAnswer(response, payload) {
     if (response.status === 401) {
       // The session expired, was revoked, or never existed.
       sessionSignals.ended();
@@ -77,8 +88,6 @@ var AppApi = (function () {
     if (!response.ok) {
       throw new Error(payload?.error || `Request failed (${response.status})`);
     }
-
-    return payload;
   }
 
   function can(permission) {

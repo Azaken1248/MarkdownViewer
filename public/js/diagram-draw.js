@@ -42,12 +42,114 @@ var DiagramDraw = (function () {
   // A `let`, so it stays with the only thing that moves it. A module that
   // destructured it would get the number it held at load and keep it forever.
   let drawCounter = 0;
+  /* The groups, outermost first, before anything they hold.
+   *
+   * A frame is background: it says what belongs together, and everything it
+   * says that about is drawn on top of it. Nesting order matters for the same
+   * reason it does between boxes — an inner frame painted first would be
+   * painted over by the outer one that surrounds it.
+   */
+  function groupLayers(groups, frames) {
+    const nesting = groupDepths(groups);
+    const outward = groups
+      .filter((group) => frames[group.id])
+      .sort((one, two) => (nesting.get(one.id) || 0) - (nesting.get(two.id) || 0));
+
+    return outward.length === 0
+      ? []
+      : [`<g class="dd-groups">${outward
+        .map((group) => groupMarkup(group, frames[group.id])).join("")}</g>`];
+  }
+
+  /* The arrows and the boxes, one level of nesting at a time.
+   *
+   * A box that holds another is background to it, so it is painted first;
+   * everything inside it, and every arrow reaching inside it, is painted
+   * after. A diagram with nothing inside anything is one layer of arrows and
+   * one of boxes, which is what it always was.
+   */
+  function nodeAndEdgeLayers({ model, nodes, edges, layout, arrowId, spread, editing }) {
+    const depths = nestingDepths(nodes, layout);
+    const depthOf = (id) => depths.get(id) || 0;
+    const deepest = Math.max(0, ...depths.values());
+    const parts = [];
+
+    for (let level = 0; level <= deepest; level += 1) {
+      const lines = edges
+        .map((edge, index) => /** @type {[ModelEdge, number]} */ ([edge, index]))
+        .filter(([edge]) => Math.max(depthOf(edge.from), depthOf(edge.to)) === level);
+
+      // The outermost layer is always written, empty or not, because a drawing
+      // with no arrows in it still has a place arrows go.
+      if (level === 0 || lines.length > 0) {
+        parts.push(`<g class="dd-edges">${lines
+          .map(([edge, index]) =>
+            edgeMarkup(edge, index, { layout, arrowId, spread: spread[index], editing }))
+          .join("")}</g>`);
+      }
+
+      const layer = nodes.filter((node) => layout[node.id] && depthOf(node.id) === level);
+
+      if (level === 0 || layer.length > 0) {
+        parts.push(`<g class="dd-nodes">${layer
+          .map((node) => nodeMarkup(node, layout[node.id], model?.classes)).join("")}</g>`);
+      }
+    }
+
+    return parts;
+  }
+
+  /* What is selected: one id, or a list of them. One box gets the ring and the
+   * handles it has always had; several get a ring each and one frame.
+   */
+  function selectionMarks(selected, { edges, layout, spread }) {
+    const ids = (Array.isArray(selected) ? selected : [selected]).filter((id) => id && layout[id]);
+
+    if (ids.length === 1) {
+      return [marksMarkup(layout[ids[0]]), edgeMarks(edges, layout, ids[0], spread)];
+    }
+
+    return ids.length > 1 ? [frameMarkup(ids.map((id) => layout[id]))] : [];
+  }
+
+  /* The grid, as a pattern the paper is filled with.
+   *
+   * The paper's own colour goes inside the pattern rather than on the rect. A
+   * `fill` in the stylesheet beats a `fill` attribute on the element —
+   * presentation attributes lose to every author rule — so painting the rect
+   * in CSS painted straight over the grid, and the grid was never once seen.
+   */
+  function gridPattern(gridId, moved) {
+    return `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}"`
+      + ` patternUnits="userSpaceOnUse"${moved ? ` patternTransform="${moved}"` : ""}>`
+      + `<rect class="dd-grid-back" width="${GRID_STEP}" height="${GRID_STEP}"/>`
+      + `<path class="dd-grid-line" d="M${GRID_STEP},0 L0,0 L0,${GRID_STEP}"/></pattern>`;
+  }
+
+  /* The paper. Also what a click lands on when it lands on nothing, which is
+   * how a box is put down.
+   *
+   * In a viewport (`sized` is null) it is the whole window and it never moves
+   * — the pattern inside it is what pans and zooms, which is how the grid can
+   * be endless without anything having to decide how endless.
+   */
+  function paperRect(gridId, sized) {
+    if (!sized) {
+      return `<rect class="dd-paper" x="0" y="0" width="100%" height="100%" fill="url(#${gridId})"/>`;
+    }
+
+    return `<rect class="dd-paper" x="${round(sized.from.x)}" y="${round(sized.from.y)}"`
+      + ` width="${round(sized.width)}" height="${round(sized.height)}" fill="url(#${gridId})"/>`;
+  }
+
+  const listOf = (value) => (Array.isArray(value) ? value : []);
+
   /** @param {FlowchartModel} model @param {Record<string, any>} [options] */
   function render(model, options = {}) {
     const layout = options.layout || Model.ensureLayout(model);
-    const nodes = Array.isArray(model?.nodes) ? model.nodes : [];
-    const edges = Array.isArray(model?.edges) ? model.edges : [];
-    const groups = Array.isArray(model?.groups) ? model.groups : [];
+    const nodes = listOf(model?.nodes);
+    const edges = listOf(model?.edges);
+    const groups = listOf(model?.groups);
     const frames = groupBoxes(model, layout);
     /* A frame reaches further than the boxes it holds, so the paper has to be
      * measured with the frames in it — otherwise a group on the edge of a
@@ -73,33 +175,12 @@ var DiagramDraw = (function () {
     const moved = view ? `translate(${round(view.x)},${round(view.y)}) scale(${view.scale})` : "";
 
     const defs = `<defs>${markerDefs(edges, arrowId)}`
-      + (options.grid
-        ? `<pattern id="${gridId}" width="${GRID_STEP}" height="${GRID_STEP}"`
-          + ` patternUnits="userSpaceOnUse"${view ? ` patternTransform="${moved}"` : ""}>`
-          // The paper's own colour goes inside the pattern rather than on the
-          // rect. A `fill` in the stylesheet beats a `fill` attribute on the
-          // element — presentation attributes lose to every author rule — so
-          // painting the rect in CSS painted straight over the grid, and the
-          // grid has never once been seen.
-          + `<rect class="dd-grid-back" width="${GRID_STEP}" height="${GRID_STEP}"/>`
-          + `<path class="dd-grid-line" d="M${GRID_STEP},0 L0,0 L0,${GRID_STEP}"/></pattern>`
-        : "")
+      + (options.grid ? gridPattern(gridId, view ? moved : "") : "")
       + `</defs>`;
 
-    /* The paper. Also what a click lands on when it lands on nothing, which is
-     * how a box is put down.
-     *
-     * In a viewport it is the whole window and it never moves — the pattern
-     * inside it is what pans and zooms, which is how the grid can be endless
-     * without anything having to decide how endless.
-     */
-    let paper = "";
-    if (options.grid) {
-      paper = view
-        ? `<rect class="dd-paper" x="0" y="0" width="100%" height="100%" fill="url(#${gridId})"/>`
-        : `<rect class="dd-paper" x="${round(from.x)}" y="${round(from.y)}"`
-          + ` width="${round(width)}" height="${round(height)}" fill="url(#${gridId})"/>`;
-    }
+    const paper = options.grid
+      ? paperRect(gridId, view ? null : { from, width, height })
+      : "";
 
     const spread = lanes(edges);
     const parts = [];
@@ -119,58 +200,9 @@ var DiagramDraw = (function () {
      * same reason it does between boxes — an inner frame painted first would
      * be painted over by the outer one that surrounds it.
      */
-    const nesting = groupDepths(groups);
-    const outward = groups
-      .filter((group) => frames[group.id])
-      .sort((one, two) => (nesting.get(one.id) || 0) - (nesting.get(two.id) || 0));
-
-    if (outward.length > 0) {
-      parts.push(`<g class="dd-groups">${outward
-        .map((group) => groupMarkup(group, frames[group.id])).join("")}</g>`);
-    }
-
-    const depths = nestingDepths(nodes, layout);
-    const depthOf = (id) => depths.get(id) || 0;
-    const deepest = Math.max(0, ...depths.values());
-
-    for (let level = 0; level <= deepest; level += 1) {
-      const lines = edges
-        .map((edge, index) => /** @type {[ModelEdge, number]} */ ([edge, index]))
-        .filter(([edge]) => Math.max(depthOf(edge.from), depthOf(edge.to)) === level);
-
-      // The outermost layer is always written, empty or not, because a drawing
-      // with no arrows in it still has a place arrows go.
-      if (level === 0 || lines.length > 0) {
-        parts.push(`<g class="dd-edges">${lines
-          .map(([edge, index]) =>
-            edgeMarkup(edge, index, layout, arrowId, spread[index], editing))
-          .join("")}</g>`);
-      }
-
-      const layer = nodes.filter((node) => layout[node.id] && depthOf(node.id) === level);
-
-      if (level === 0 || layer.length > 0) {
-        parts.push(`<g class="dd-nodes">${layer
-          .map((node) => nodeMarkup(node, layout[node.id], model?.classes)).join("")}</g>`);
-      }
-    }
-
-    /* What is selected: one id, or a list of them. One box gets the ring and
-     * the handles it has always had; several get a ring each and one frame.
-     */
-    const chosen = (Array.isArray(options.selected) ? options.selected : [options.selected])
-      .filter((id) => id && layout[id])
-      .map((id) => layout[id]);
-
-    if (chosen.length === 1) {
-      parts.push(marksMarkup(chosen[0]));
-      parts.push(edgeMarks(edges, layout,
-        (Array.isArray(options.selected) ? options.selected : [options.selected])
-          .find((one) => one && layout[one]),
-        spread));
-    } else if (chosen.length > 1) {
-      parts.push(frameMarkup(chosen));
-    }
+    parts.push(...groupLayers(groups, frames));
+    parts.push(...nodeAndEdgeLayers({ model, nodes, edges, layout, arrowId, spread, editing }));
+    parts.push(...selectionMarks(options.selected, { edges, layout, spread }));
 
     // Everything that belongs to the diagram rather than to the window goes in
     // one group, so panning and zooming is one attribute written once.
@@ -178,25 +210,35 @@ var DiagramDraw = (function () {
       ? `<g class="dd-view" transform="${moved}">${parts.join("")}</g>`
       : parts.join("");
 
-    /* Three ways to be sized. In a viewport, the window it was given, with no
-     * viewBox at all so that one unit is one pixel and the transform above is
-     * the only scale there is. On a page, width in percent with a max-width in
-     * pixels, which is what every other diagram there does. In the old
-     * in-document editor, its own size exactly.
-     */
+    return svgAround({ defs, paper, body }, {
+      view, natural: options.natural, label: options.label, from, width, height
+    });
+  }
+
+  /* Three ways to be sized.
+   *
+   * In a viewport, the window it was given, with no viewBox at all so that one
+   * unit is one pixel and the transform on the body is the only scale there
+   * is. On a page, width in percent with a max-width in pixels, which is what
+   * every other diagram there does. In the old in-document editor, its own
+   * size exactly.
+   */
+  function svgAround({ defs, paper, body }, { view, natural, label, from, width, height }) {
+    const named = `aria-label="${escapeText(label || "Diagram")}"`;
+
     if (view) {
       return `<svg class="dd dd-editing dd-viewport" xmlns="http://www.w3.org/2000/svg"`
         + ` width="100%" height="100%" role="application"`
-        + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
+        + ` ${named}>${defs}${paper}${body}</svg>`;
     }
 
-    const size = options.natural
+    const size = natural
       ? ` width="${round(width)}" height="${round(height)}"`
       : ` width="100%" style="max-width: ${round(width)}px"`;
 
-    return `<svg class="dd${options.natural ? " dd-editing" : ""}" xmlns="http://www.w3.org/2000/svg"`
+    return `<svg class="dd${natural ? " dd-editing" : ""}" xmlns="http://www.w3.org/2000/svg"`
       + ` viewBox="${round(from.x)} ${round(from.y)} ${round(width)} ${round(height)}"${size} role="img"`
-      + ` aria-label="${escapeText(options.label || "Diagram")}">${defs}${paper}${body}</svg>`;
+      + ` ${named}>${defs}${paper}${body}</svg>`;
   }
 
   /* --- Saving a picture of it ----------------------------------------------

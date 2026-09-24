@@ -302,6 +302,47 @@ var VisualEditor = (function () {
       .replace(/^(\s*)>/, "$1\\>");
   }
 
+  /* One element, back into the markdown that produced it.
+   *
+   * A table of tags rather than a switch: each takes what is inside it,
+   * already converted, and wraps it. The ones that read attributes rather than
+   * children take the node too.
+   */
+  const WRAPPED = {
+    strong: "**", b: "**",
+    em: "*", i: "*",
+    del: "~~", s: "~~", strike: "~~"
+  };
+
+  const INLINE_TAGS = {
+    code(node) {
+      // Text inside code is literal, so it must not carry the escaping the
+      // text branch adds.
+      const literal = node.textContent;
+      // A backtick in the content needs a longer fence around it.
+      const longest = (literal.match(/`+/g) || []).reduce((max, run) => Math.max(max, run.length), 0);
+      const fence = "`".repeat(longest + 1);
+      const pad = literal.startsWith("`") || literal.endsWith("`") ? " " : "";
+      return `${fence}${pad}${literal}${pad}${fence}`;
+    },
+
+    a(node, inner) {
+      const href = node.getAttribute("href") || "";
+      const title = node.getAttribute("title");
+      const label = inner || href;
+      return title ? `[${label}](${href} "${title}")` : `[${label}](${href})`;
+    },
+
+    img(node) {
+      const src = node.getAttribute("src") || "";
+      const alt = node.getAttribute("alt") || "";
+      return `![${alt}](${src})`;
+    },
+
+    br: () => "  \n",
+    hr: () => "\n---\n"
+  };
+
   function inlineToMarkdown(node) {
     if (node.nodeType === 3) {
       return escapeInline(node.nodeValue.replace(/\n/g, " "));
@@ -314,45 +355,16 @@ var VisualEditor = (function () {
     const tag = node.tagName.toLowerCase();
     const inner = childrenToMarkdown(node);
 
-    switch (tag) {
-      case "strong":
-      case "b":
-        return inner.trim() ? `**${inner}**` : inner;
-      case "em":
-      case "i":
-        return inner.trim() ? `*${inner}*` : inner;
-      case "del":
-      case "s":
-      case "strike":
-        return inner.trim() ? `~~${inner}~~` : inner;
-      case "code": {
-        // Text inside code is literal, so it must not carry the escaping the
-        // text branch adds.
-        const literal = node.textContent;
-        // A backtick in the content needs a longer fence around it.
-        const longest = (literal.match(/`+/g) || []).reduce((max, run) => Math.max(max, run.length), 0);
-        const fence = "`".repeat(longest + 1);
-        const pad = literal.startsWith("`") || literal.endsWith("`") ? " " : "";
-        return `${fence}${pad}${literal}${pad}${fence}`;
-      }
-      case "a": {
-        const href = node.getAttribute("href") || "";
-        const title = node.getAttribute("title");
-        const label = inner || href;
-        return title ? `[${label}](${href} "${title}")` : `[${label}](${href})`;
-      }
-      case "img": {
-        const src = node.getAttribute("src") || "";
-        const alt = node.getAttribute("alt") || "";
-        return `![${alt}](${src})`;
-      }
-      case "br":
-        return "  \n";
-      case "hr":
-        return "\n---\n";
-      default:
-        return inner;
+    const marks = WRAPPED[tag];
+    if (marks) {
+      // Nothing but spaces inside it is not emphasis, it is spaces.
+      return inner.trim() ? `${marks}${inner}${marks}` : inner;
     }
+
+    const write = INLINE_TAGS[tag];
+    // Anything else is a wrapper this app does not spell in markdown — a span,
+    // a mark, the editor's own block div — so what is inside it is the answer.
+    return write ? write(node, inner) : inner;
   }
 
   function childrenToMarkdown(node) {
@@ -677,18 +689,33 @@ var VisualEditor = (function () {
    * shell script is still a line — so the body goes back exactly as given and
    * only the fence itself is rebuilt around it.
    */
-  function serializeFence({
-    indent = "",
-    marker = "```",
-    info = "",
-    body = "",
-    bodyLines = null,
-    closed = true,
-    close = "",
-    open = "",
-    declared = null,
-    trailing = true
-  }) {
+  /* What a fence is, with everything it did not say filled in.
+   *
+   * Kept apart from the writing below because it is the whole of the
+   * defaulting: ?? rather than destructuring defaults so that a caller handing
+   * over a parsed fence with an explicit `undefined` in it — which is what a
+   * fence nobody closed looks like — means the same as leaving it out.
+   */
+  function fenceParts(options) {
+    return {
+      indent: options.indent ?? "",
+      marker: options.marker ?? "```",
+      info: options.info ?? "",
+      body: options.body ?? "",
+      bodyLines: options.bodyLines ?? null,
+      closed: options.closed ?? true,
+      close: options.close ?? "",
+      open: options.open ?? "",
+      declared: options.declared ?? null,
+      trailing: options.trailing ?? true
+    };
+  }
+
+  function serializeFence(options) {
+    const {
+      indent, marker, info, body, bodyLines, closed, close, open, declared, trailing
+    } = fenceParts(options);
+
     const text = String(body);
     // The parsed lines are used only while they still say the same thing as the
     // body — which is how an edit that emptied the block is told from a block

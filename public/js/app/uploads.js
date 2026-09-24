@@ -73,6 +73,33 @@ function relativePathFor(file) {
   return file.webkitRelativePath || file.name;
 }
 
+/* What the upload did, as the clauses of one sentence.
+ *
+ * Everything that happened and is worth knowing: what landed, what was made
+ * to put it in, and everything that did not go in as it was — a file this app
+ * does not hold, one the server refused, a name that had to change to avoid a
+ * clash, and a folder name this app had to adjust to accept, which is named
+ * so that a folder appearing under a different name is explained rather than
+ * mysterious.
+ */
+function whatArrived(payload, ignored) {
+  const renamed = payload.uploaded.filter((entry) => entry.renamedFrom).length;
+  const adjusted = payload.renamedFolders || [];
+
+  const clauses = [
+    [true, `Uploaded ${payload.counts.uploaded} document(s)`],
+    [payload.counts.foldersCreated > 0, `created ${payload.counts.foldersCreated} folder(s)`],
+    [ignored > 0, `skipped ${ignored} unsupported file(s)`],
+    [payload.counts.skipped > 0, `${payload.counts.skipped} rejected`],
+    [renamed > 0, `${renamed} renamed to avoid a clash`],
+    [adjusted.length > 0, `${adjusted.length} folder name(s) adjusted (${
+      adjusted.slice(0, 2).map((one) => `"${one.to}"`).join(", ")
+    })`]
+  ];
+
+  return clauses.filter(([worth]) => worth).map(([, said]) => said);
+}
+
 async function uploadFolder(picked, folderId = null) {
   const documents = picked.filter(isUploadableFile);
   const ignored = picked.length - documents.length;
@@ -114,31 +141,7 @@ async function uploadFolder(picked, folderId = null) {
 
     await refreshDocs({ preserveSearch: false });
 
-    const parts = [`Uploaded ${payload.counts.uploaded} document(s)`];
-    if (payload.counts.foldersCreated > 0) {
-      parts.push(`created ${payload.counts.foldersCreated} folder(s)`);
-    }
-    if (ignored > 0) {
-      parts.push(`skipped ${ignored} unsupported file(s)`);
-    }
-    if (payload.counts.skipped > 0) {
-      parts.push(`${payload.counts.skipped} rejected`);
-    }
-
-    const renamed = payload.uploaded.filter((entry) => entry.renamedFrom);
-    if (renamed.length > 0) {
-      parts.push(`${renamed.length} renamed to avoid a clash`);
-    }
-
-    const adjustedFolders = payload.renamedFolders || [];
-    if (adjustedFolders.length > 0) {
-      // Say which, so a folder appearing under a different name is explained.
-      parts.push(`${adjustedFolders.length} folder name(s) adjusted (${
-        adjustedFolders.slice(0, 2).map((r) => `"${r.to}"`).join(", ")
-      })`);
-    }
-
-    notify(`${parts.join(", ")}.`, "success");
+    notify(`${whatArrived(payload, ignored).join(", ")}.`, "success");
 
     // Open the uploaded tree rather than leaving it collapsed out of sight.
     for (const folder of state.folders) {

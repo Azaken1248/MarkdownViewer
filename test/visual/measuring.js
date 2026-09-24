@@ -53,7 +53,7 @@ console.log("=== a table's cells are in one place, read twice ===");
   // And which cell a point is in, asked of the same run: a table dragged taller
   // than its rows has somewhere in it that is no cell at all.
   const found = (x, y) => {
-    const at = DD.cellAt(cells, 200, 120, spacing, x, y);
+    const at = DD.cellAt(cells, { w: 200, h: 120, spacing, x, y });
     return at && `${at.row}.${at.column}`;
   };
 

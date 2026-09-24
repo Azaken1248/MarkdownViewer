@@ -107,28 +107,33 @@ var AppPageEdit = (function () {
     await renderMermaidBlocks(elements.docContent);
   }
 
+  /* Why this document cannot be edited here, if it cannot. Null when it can.
+   *
+   * One list rather than a run of guards, so the reasons read as the list of
+   * reasons — and so a new one is an entry rather than another early return in
+   * the middle of a long function.
+   */
+  function whyNotEditable() {
+    const reasons = [
+      [state.isRecycleBinMode, "Restore this document before editing it.", "error"],
+      [!state.activeFile, "Open a document first, then choose Edit.", "error"],
+      [state.activeFile && isNotebookFile(state.activeFile),
+        "Notebook files are view-only in this viewer.", "neutral"],
+      [!can("doc:write"), "Your account cannot edit documents.", "error"]
+    ];
+
+    const found = reasons.find(([stops]) => stops);
+    return found ? { message: found[1], tone: found[2] } : null;
+  }
+
   async function startPageEdit() {
     if (pageEditActive()) {
       return;
     }
 
-    if (state.isRecycleBinMode) {
-      setStatus("Restore this document before editing it.", "error");
-      return;
-    }
-
-    if (!state.activeFile) {
-      setStatus("Open a document first, then choose Edit.", "error");
-      return;
-    }
-
-    if (isNotebookFile(state.activeFile)) {
-      setStatus("Notebook files are view-only in this viewer.", "neutral");
-      return;
-    }
-
-    if (!can("doc:write")) {
-      setStatus("Your account cannot edit documents.", "error");
+    const refusal = whyNotEditable();
+    if (refusal) {
+      setStatus(refusal.message, refusal.tone);
       return;
     }
 

@@ -22,6 +22,52 @@ var AppFolderModal = (function () {
   const { syncBodyLock } = AppShell;
   const { setStatus } = AppNotify;
 
+  /* What the folder dialog says, per thing it is being used for.
+   *
+   * One dialog does four jobs — upload, move, rename, create — and what
+   * changes between them is only the words and whether the picker is shown.
+   * Each answers a title, a line under it, the word on the button, and what
+   * the Ungrouped button says when there is one.
+   */
+  const FOLDER_MODAL_WORDS = {
+    upload: () => ({
+      title: `Upload ${state.pendingUploadFile?.name || "this file"}`,
+      description: "Pick the folder it should land in, or create a new one.",
+      confirm: html`<i class="ph ph-folder-plus"></i> Create And Upload`,
+      root: html`<i class="ph ph-stack"></i> Upload To Ungrouped`
+    }),
+
+    move: (targetFile) => ({
+      title: targetFile
+        ? `Move ${targetFile.title || targetFile.file} to a folder`
+        : "Move document to a folder",
+      description: targetFile
+        ? `Choose an existing folder or create a new one for ${targetFile.file}.`
+        : "Choose an existing folder or create a new one.",
+      confirm: html`<i class="ph ph-folder-plus"></i> Create And Move`,
+      root: html`<i class="ph ph-stack"></i> Move To Ungrouped`
+    }),
+
+    rename: (targetFile, targetFolder) => ({
+      title: targetFolder ? `Rename ${targetFolder.name}` : "Rename folder",
+      description: "Update the logical folder name without moving any files.",
+      confirm: html`<i class="ph ph-pencil-simple"></i> Rename Folder`,
+      root: null
+    }),
+
+    create: () => {
+      const parent = state.folderModalParentId ? getFolderRecord(state.folderModalParentId) : null;
+      return {
+        title: parent ? `New folder in ${parent.name}` : "Create folder",
+        description: parent
+          ? `The new folder will be nested inside ${parent.path}. Files on disk are not moved.`
+          : "Create a logical folder to group documents without changing the physical layout.",
+        confirm: html`<i class="ph ph-folder-plus"></i> Create Folder`,
+        root: null
+      };
+    }
+  };
+
   function syncFolderModalUI() {
     if (!elements.folderModal) {
       return;
@@ -31,42 +77,20 @@ var AppFolderModal = (function () {
     const targetFile = state.folderModalTargetFile ? getDocByFile(state.folderModalTargetFile, true) : null;
     const targetFolder = state.folderModalTargetFolderId ? getFolderRecord(state.folderModalTargetFolderId) : null;
 
-    if (mode === "upload") {
-      const pendingName = state.pendingUploadFile?.name || "this file";
-      elements.folderTitle.textContent = `Upload ${pendingName}`;
-      elements.folderDescription.textContent = "Pick the folder it should land in, or create a new one.";
-      elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create And Upload';
-      elements.moveToRootBtn.innerHTML = '<i class="ph ph-stack"></i> Upload To Ungrouped';
-      elements.moveToRootBtn.hidden = false;
-      elements.folderPicker.hidden = false;
-    } else if (mode === "move") {
-      elements.folderTitle.textContent = targetFile
-        ? `Move ${targetFile.title || targetFile.file} to a folder`
-        : "Move document to a folder";
-      elements.folderDescription.textContent = targetFile
-        ? `Choose an existing folder or create a new one for ${targetFile.file}.`
-        : "Choose an existing folder or create a new one.";
-      elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create And Move';
-      elements.moveToRootBtn.innerHTML = '<i class="ph ph-stack"></i> Move To Ungrouped';
-      elements.moveToRootBtn.hidden = false;
-      elements.folderPicker.hidden = false;
-    } else if (mode === "rename") {
-      elements.folderTitle.textContent = targetFolder ? `Rename ${targetFolder.name}` : "Rename folder";
-      elements.folderDescription.textContent = targetFolder
-        ? "Update the logical folder name without moving any files."
-        : "Update the logical folder name without moving any files.";
-      elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-pencil-simple"></i> Rename Folder';
-      elements.moveToRootBtn.hidden = true;
-      elements.folderPicker.hidden = true;
-    } else {
-      const parent = state.folderModalParentId ? getFolderRecord(state.folderModalParentId) : null;
-      elements.folderTitle.textContent = parent ? `New folder in ${parent.name}` : "Create folder";
-      elements.folderDescription.textContent = parent
-        ? `The new folder will be nested inside ${parent.path}. Files on disk are not moved.`
-        : "Create a logical folder to group documents without changing the physical layout.";
-      elements.createFolderConfirmBtn.innerHTML = '<i class="ph ph-folder-plus"></i> Create Folder';
-      elements.moveToRootBtn.hidden = true;
-      elements.folderPicker.hidden = true;
+    const words = (FOLDER_MODAL_WORDS[mode] || FOLDER_MODAL_WORDS.create)(targetFile, targetFolder);
+
+    elements.folderTitle.textContent = words.title;
+    elements.folderDescription.textContent = words.description;
+    // Already escaped: these come from the table above, not from a document.
+    // eslint-disable-next-line no-unsanitized/property
+    elements.createFolderConfirmBtn.innerHTML = words.confirm;
+    elements.moveToRootBtn.hidden = !words.root;
+    elements.folderPicker.hidden = !words.root;
+
+    if (words.root) {
+      // As above: markup from the table, built with html`` and escaped there.
+      // eslint-disable-next-line no-unsanitized/property
+      elements.moveToRootBtn.innerHTML = words.root;
     }
 
     elements.folderNameInput.value = targetFolder ? targetFolder.name : "";

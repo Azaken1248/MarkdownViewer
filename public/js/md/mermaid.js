@@ -22,27 +22,60 @@ var MdMermaid = (function () {
       .trim();
   }
 
+  // Type names Mermaid's ER parser does not take, and what to say instead.
+  const ER_TYPE_ALIAS = { timestamp: "datetime", text: "string", enum: "string" };
+
+  const ER_ATTRIBUTE_RE = /^([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)(?:\s+(PK|FK|UK))?/i;
+  const ER_RELATION_RE = /^([A-Za-z][A-Za-z0-9_]*)\s+(\|\|--\|\{|\|\|--o\{|o\|--\|\{|o\|--o\{|\|o--\|\{|\|o--o\{|\}\|--\|\{|\}\|--o\{|\|\|--\|\||\|\|--o\||o\|--\|\||o\|--o\|)\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.+)$/;
+
+  // One attribute inside an entity: a type, a name, and maybe a key marker.
+  function erAttributeLine(trimmed) {
+    const found = trimmed.match(ER_ATTRIBUTE_RE);
+    if (!found) {
+      return null;
+    }
+
+    const type = found[1].toLowerCase();
+    const key = found[3] ? found[3].toUpperCase() : "";
+    return `    ${ER_TYPE_ALIAS[type] || type} ${found[2]}${key ? ` ${key}` : ""}`;
+  }
+
+  /* One relationship between two entities.
+   *
+   * The label has to be a single word Mermaid will take, so anything else in
+   * it becomes an underscore — and a label that was only punctuation becomes
+   * the one word that is always true of a relationship.
+   */
+  function erRelationLine(trimmed) {
+    const found = trimmed.match(ER_RELATION_RE);
+    if (!found) {
+      return null;
+    }
+
+    const label = found[4]
+      .replace(/^"|"$/g, "")
+      .replace(/[^A-Za-z0-9_ ]/g, " ")
+      .replace(/\s+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+
+    return `  ${found[1]} ${found[2]} ${found[3]} : ${label || "relates_to"}`;
+  }
+
   function simplifyErDiagramSource(source) {
     const raw = normalizeMermaidSource(source);
     if (!/^erDiagram\b/.test(raw)) {
       return raw;
     }
 
-    const lines = raw.split("\n");
-    let inEntity = false;
     const output = [];
+    let inEntity = false;
 
-    for (const originalLine of lines) {
-      const line = originalLine.replace(/\t/g, "  ");
-      const trimmed = line.trim();
+    for (const originalLine of raw.split("\n")) {
+      const trimmed = originalLine.replace(/\t/g, "  ").trim();
 
-      if (!trimmed) {
-        output.push("");
-        continue;
-      }
-
-      if (trimmed === "erDiagram") {
-        output.push("erDiagram");
+      if (!trimmed || trimmed === "erDiagram") {
+        output.push(trimmed);
         continue;
       }
 
@@ -59,46 +92,18 @@ var MdMermaid = (function () {
       }
 
       if (inEntity) {
-        const match = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)(?:\s+(PK|FK|UK))?/i);
-        if (!match) {
-          continue;
+        // An attribute line this cannot read is left out rather than passed
+        // through: inside an entity block, Mermaid refuses the whole diagram
+        // for one line it does not understand.
+        const attribute = erAttributeLine(trimmed);
+        if (attribute) {
+          output.push(attribute);
         }
 
-        let type = match[1].toLowerCase();
-        const name = match[2];
-        const key = match[3] ? match[3].toUpperCase() : "";
-
-        if (type === "timestamp") {
-          type = "datetime";
-        }
-        if (type === "text") {
-          type = "string";
-        }
-        if (type === "enum") {
-          type = "string";
-        }
-
-        output.push(`    ${type} ${name}${key ? ` ${key}` : ""}`);
         continue;
       }
 
-      const relMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*)\s+(\|\|--\|\{|\|\|--o\{|o\|--\|\{|o\|--o\{|\|o--\|\{|\|o--o\{|\}\|--\|\{|\}\|--o\{|\|\|--\|\||\|\|--o\||o\|--\|\||o\|--o\|)\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.+)$/);
-      if (relMatch) {
-        const left = relMatch[1];
-        const connector = relMatch[2];
-        const right = relMatch[3];
-        const rawLabel = relMatch[4]
-          .replace(/^"|"$/g, "")
-          .replace(/[^A-Za-z0-9_ ]/g, " ")
-          .replace(/\s+/g, "_")
-          .replace(/^_+|_+$/g, "")
-          .toLowerCase();
-        const label = rawLabel || "relates_to";
-        output.push(`  ${left} ${connector} ${right} : ${label}`);
-        continue;
-      }
-
-      output.push(`  ${trimmed}`);
+      output.push(erRelationLine(trimmed) || `  ${trimmed}`);
     }
 
     return output.join("\n");

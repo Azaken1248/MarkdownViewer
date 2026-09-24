@@ -55,26 +55,55 @@ var AppClipboard = (function () {
 
   // One refresh for the whole batch rather than one per file, which is what made
   // a multi-file move feel like the UI was fighting itself.
+  /* What happened, in one line. Nothing to say when nothing moved and nothing
+   * failed, which is what dropping a file into the folder it is already in
+   * looks like.
+   */
+  function sayWhatMoved(moved, failed, folderId) {
+    const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
+
+    if (moved > 0) {
+      notify(`Moved ${moved} file${moved === 1 ? "" : "s"} to ${targetLabel}.`, "success");
+    }
+
+    if (failed.length) {
+      notify(failed[0], "error");
+    }
+  }
+
+  // One file into one folder. Answers null, or what went wrong with it — so a
+  // batch that fails halfway still reports what it did manage.
+  async function moveOneFile(file, folderId) {
+    try {
+      await requestJson(`/api/docs/${docUrl(file)}/folder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId: folderId || null })
+      });
+
+      state.contentCache.delete(file);
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  }
+
   async function moveFilesToFolder(files, folderId, { silent = false } = {}) {
     const failed = [];
     let moved = 0;
 
     for (const file of files) {
       const doc = getDocByFile(file);
+      // Already there: not a move, and not a failure either.
       if (doc && (doc.folderId || null) === (folderId || null)) {
         continue;
       }
 
-      try {
-        await requestJson(`/api/docs/${docUrl(file)}/folder`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ folderId: folderId || null })
-        });
-        state.contentCache.delete(file);
+      const problem = await moveOneFile(file, folderId);
+      if (problem) {
+        failed.push(problem);
+      } else {
         moved += 1;
-      } catch (error) {
-        failed.push(error.message);
       }
     }
 
@@ -83,15 +112,7 @@ var AppClipboard = (function () {
     }
 
     if (!silent) {
-      const targetLabel = folderId ? getFolderLabel(folderId) : (state.rootFolderLabel || "Ungrouped");
-      if (moved === 1) {
-        notify(`Moved 1 file to ${targetLabel}.`, "success");
-      } else if (moved > 1) {
-        notify(`Moved ${moved} files to ${targetLabel}.`, "success");
-      }
-      if (failed.length) {
-        notify(failed[0], "error");
-      }
+      sayWhatMoved(moved, failed, folderId);
     }
 
     return { moved, failed };

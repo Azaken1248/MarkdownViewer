@@ -99,12 +99,18 @@ var AppDocs = (function () {
     });
 
     if (doc) {
-      doc.updatedAt = payload.updatedAt || doc.updatedAt || version;
-      doc.folderId = payload.folderId || doc.folderId || null;
-      doc.folderName = payload.folderName || doc.folderName || null;
+      rememberWhatTheServerSaid(doc, payload, version);
     }
 
     return content;
+  }
+
+  // The answer carries fresher facts about the document than the list does —
+  // it was read from disk just now — so the list takes them.
+  function rememberWhatTheServerSaid(doc, payload, version) {
+    doc.updatedAt = payload.updatedAt || doc.updatedAt || version;
+    doc.folderId = payload.folderId || doc.folderId || null;
+    doc.folderName = payload.folderName || doc.folderName || null;
   }
 
   async function loadDeletedDocContent(entryFile, { forceReload = false } = {}) {
@@ -128,29 +134,74 @@ var AppDocs = (function () {
     return content;
   }
 
+  /* What each of the three bins is called, and what the button that leads out
+   * of it says while you are in it.
+   */
+  const PLACES = {
+    links: { title: "Links", search: "Filter saved links" },
+    archive: { title: "Archive", search: "Search files and contents" },
+    recycle: { title: "Recycle bin", search: "Search files and contents" },
+    docs: { title: "Files", search: "Search files and contents" }
+  };
+
+  // The two bin buttons, which are toggles: pressed while you are inside, and
+  // labelled with the way out.
+  function syncBinButton(button, inside, { name, out, back }) {
+    button.classList.toggle("active", inside);
+    button.setAttribute("aria-pressed", String(inside));
+    button.setAttribute("aria-label", inside ? out : back);
+    button.title = inside ? out : name;
+  }
+
+  /* The archive button keeps its slot in all three modes and means something
+   * different in each: archive from the viewer, archive from the recycle bin,
+   * erase from the archive.
+   */
+  const HARD_DELETE_WORDS = {
+    archive: { icon: "ph ph-trash", label: "Permanently delete archived markdown", title: "Delete forever" },
+    recycle: { icon: "ph ph-archive-box", label: "Move recycle bin markdown to archive", title: "Archive" },
+    docs: { icon: "ph ph-archive-box", label: "Archive current markdown", title: "Archive" }
+  };
+
+  function syncHardDeleteButton(mode) {
+    const words = HARD_DELETE_WORDS[mode] || HARD_DELETE_WORDS.docs;
+    const icon = elements.hardDeleteDocBtn.querySelector("i");
+
+    if (icon) {
+      icon.className = words.icon;
+    }
+
+    elements.hardDeleteDocBtn.setAttribute("aria-label", words.label);
+    elements.hardDeleteDocBtn.title = words.title;
+  }
+
+  // The switcher says which half of the library you are in. The archive and
+  // the recycle bin are still documents, so Files stays lit in both of them.
+  function syncPlaceSwitcher(inLinks) {
+    if (!elements.placeDocsBtn || !elements.placeLinksBtn) {
+      return;
+    }
+
+    const here = inLinks ? elements.placeLinksBtn : elements.placeDocsBtn;
+    const there = inLinks ? elements.placeDocsBtn : elements.placeLinksBtn;
+    here.setAttribute("aria-current", "page");
+    there.removeAttribute("aria-current");
+  }
+
   function syncModeUI() {
     const inRecycleBin = state.viewMode === "recycle";
     const inArchive = state.viewMode === "archive";
     const inLinks = state.viewMode === "links";
     const inTrashView = inRecycleBin || inArchive;
+    const place = PLACES[state.viewMode] || PLACES.docs;
 
-    elements.sidebarTitle.textContent = inLinks
-      ? "Links"
-      : inArchive ? "Archive" : inRecycleBin ? "Recycle bin" : "Files";
-
-    // The switcher says which half of the library you are in. The archive and
-    // the recycle bin are still documents, so Files stays lit in both of them.
-    if (elements.placeDocsBtn && elements.placeLinksBtn) {
-      const here = inLinks ? elements.placeLinksBtn : elements.placeDocsBtn;
-      const there = inLinks ? elements.placeDocsBtn : elements.placeLinksBtn;
-      here.setAttribute("aria-current", "page");
-      there.removeAttribute("aria-current");
-    }
+    elements.sidebarTitle.textContent = place.title;
+    syncPlaceSwitcher(inLinks);
 
     // The one search box is about whatever is on screen. Saying so in the
     // placeholder is the difference between a filter and a search that seems to
     // have stopped finding anything.
-    elements.searchInput.placeholder = inLinks ? "Filter saved links" : "Search files and contents";
+    elements.searchInput.placeholder = place.search;
 
     // The links pane replaces the document viewer rather than sitting beside it:
     // there is no open document in this mode, so the toolbar, the empty state and
@@ -185,15 +236,10 @@ var AppDocs = (function () {
       }
     }
 
-    elements.toggleRecycleBinBtn.classList.toggle("active", inRecycleBin);
-    elements.toggleRecycleBinBtn.setAttribute("aria-pressed", String(inRecycleBin));
-    elements.toggleRecycleBinBtn.setAttribute("aria-label", inRecycleBin ? "Exit recycle bin" : "Show recycle bin");
-    elements.toggleRecycleBinBtn.title = inRecycleBin ? "Exit recycle bin" : "Recycle bin";
-
-    elements.toggleArchiveBtn.classList.toggle("active", inArchive);
-    elements.toggleArchiveBtn.setAttribute("aria-pressed", String(inArchive));
-    elements.toggleArchiveBtn.setAttribute("aria-label", inArchive ? "Exit archive" : "Show archive");
-    elements.toggleArchiveBtn.title = inArchive ? "Exit archive" : "Archive";
+    syncBinButton(elements.toggleRecycleBinBtn, inRecycleBin,
+      { name: "Recycle bin", out: "Exit recycle bin", back: "Show recycle bin" });
+    syncBinButton(elements.toggleArchiveBtn, inArchive,
+      { name: "Archive", out: "Exit archive", back: "Show archive" });
 
     elements.softDeleteDocBtn.hidden = inTrashView;
     elements.hardDeleteDocBtn.hidden = false;
@@ -204,22 +250,7 @@ var AppDocs = (function () {
       elements.collapseAllBtn.hidden = inTrashView || inLinks;
     }
 
-    // The button keeps its slot in all three modes but means something different in each:
-    // archive from the viewer, archive from the recycle bin, erase from the archive.
-    const hardDeleteIcon = elements.hardDeleteDocBtn.querySelector("i");
-    if (inArchive) {
-      if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-trash";
-      elements.hardDeleteDocBtn.setAttribute("aria-label", "Permanently delete archived markdown");
-      elements.hardDeleteDocBtn.title = "Delete forever";
-    } else if (inRecycleBin) {
-      if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-archive-box";
-      elements.hardDeleteDocBtn.setAttribute("aria-label", "Move recycle bin markdown to archive");
-      elements.hardDeleteDocBtn.title = "Archive";
-    } else {
-      if (hardDeleteIcon) hardDeleteIcon.className = "ph ph-archive-box";
-      elements.hardDeleteDocBtn.setAttribute("aria-label", "Archive current markdown");
-      elements.hardDeleteDocBtn.title = "Archive";
-    }
+    syncHardDeleteButton(state.viewMode);
   }
 
   /* Warm the content cache so the offline search fallback can match on document

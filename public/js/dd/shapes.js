@@ -15,54 +15,61 @@ var DdShapes = (function () {
   } = DdBase;
   const { cellChar, cellPaint, sizeOf, wornBy, paintOf } = DdPaint;
 
-  function shapeMarkup(shape, w, h) {
-    const slant = Math.min(SLANT, w / 3);
+  /* Every shape this app draws, as the markup for one.
+   *
+   * A table rather than a switch, because that is what it is: the list of
+   * shapes, each with the one expression that draws it. `slant` is how far a
+   * sloped side cuts in, computed once for the shapes that have one.
+   */
+  const SHAPE_MARKUP = {
+    round: (w, h) => rect(w, h, ROUND_RADIUS),
 
-    switch (shape) {
-      case "round":
-        return rect(w, h, ROUND_RADIUS);
-      case "stadium":
-        return rect(w, h, h / 2);
-      case "subroutine":
-        return `${rect(w, h, RADIUS)}`
-          + `<line class="dd-rule" x1="8" y1="0" x2="8" y2="${round(h)}"/>`
-          + `<line class="dd-rule" x1="${round(w - 8)}" y1="0" x2="${round(w - 8)}" y2="${round(h)}"/>`;
-      case "cylinder": {
-        const lip = Math.min(12, h / 4);
-        return `<path class="dd-shape" d="M0,${round(lip)} A ${round(w / 2)},${round(lip)} 0 0 1 ${round(w)},${round(lip)}`
-          + ` L${round(w)},${round(h - lip)} A ${round(w / 2)},${round(lip)} 0 0 1 0,${round(h - lip)} Z"/>`
-          + `<path class="dd-rule" fill="none" d="M0,${round(lip)} A ${round(w / 2)},${round(lip)} 0 0 0 ${round(w)},${round(lip)}"/>`;
-      }
-      case "circle":
-        return `<ellipse class="dd-shape" cx="${round(w / 2)}" cy="${round(h / 2)}" rx="${round(w / 2)}" ry="${round(h / 2)}"/>`;
-      case "double-circle":
-        return `<ellipse class="dd-shape" cx="${round(w / 2)}" cy="${round(h / 2)}" rx="${round(w / 2)}" ry="${round(h / 2)}"/>`
-          + `<ellipse class="dd-rule" fill="none" cx="${round(w / 2)}" cy="${round(h / 2)}" rx="${round((w / 2) - 5)}" ry="${round((h / 2) - 5)}"/>`;
-      case "diamond":
-        return polygon([[w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]]);
-      case "hexagon":
-        return polygon([[slant, 0], [w - slant, 0], [w, h / 2], [w - slant, h], [slant, h], [0, h / 2]]);
-      case "lean-right":
-        return polygon([[slant, 0], [w, 0], [w - slant, h], [0, h]]);
-      case "lean-left":
-        return polygon([[0, 0], [w - slant, 0], [w, h], [slant, h]]);
-      case "trapezoid":
-        return polygon([[slant, 0], [w - slant, 0], [w, h], [0, h]]);
-      case "trapezoid-alt":
-        return polygon([[0, 0], [w, 0], [w - slant, h], [slant, h]]);
-      case "asymmetric":
-        return polygon([[0, 0], [w, 0], [w, h], [0, h], [slant, h / 2]]);
-      case "note":
-        return noteMarkup(w, h);
-      case "cloud":
-        return cloudMarkup(w, h);
-      case "queue":
-        return queueMarkup(w, h);
-      case "actor":
-        return actorMarkup(w, h);
-      default:
-        return rect(w, h, RADIUS);
-    }
+    stadium: (w, h) => rect(w, h, h / 2),
+
+    subroutine: (w, h) => `${rect(w, h, RADIUS)}`
+      + `<line class="dd-rule" x1="8" y1="0" x2="8" y2="${round(h)}"/>`
+      + `<line class="dd-rule" x1="${round(w - 8)}" y1="0" x2="${round(w - 8)}" y2="${round(h)}"/>`,
+
+    cylinder: (w, h) => {
+      const lip = Math.min(12, h / 4);
+      return `<path class="dd-shape" d="M0,${round(lip)} A ${round(w / 2)},${round(lip)} 0 0 1 ${round(w)},${round(lip)}`
+        + ` L${round(w)},${round(h - lip)} A ${round(w / 2)},${round(lip)} 0 0 1 0,${round(h - lip)} Z"/>`
+        + `<path class="dd-rule" fill="none" d="M0,${round(lip)} A ${round(w / 2)},${round(lip)} 0 0 0 ${round(w)},${round(lip)}"/>`;
+    },
+
+    circle: (w, h) => `<ellipse class="dd-shape" cx="${round(w / 2)}" cy="${round(h / 2)}"`
+      + ` rx="${round(w / 2)}" ry="${round(h / 2)}"/>`,
+
+    "double-circle": (w, h) => SHAPE_MARKUP.circle(w, h)
+      + `<ellipse class="dd-rule" fill="none" cx="${round(w / 2)}" cy="${round(h / 2)}"`
+      + ` rx="${round((w / 2) - 5)}" ry="${round((h / 2) - 5)}"/>`,
+
+    diamond: (w, h) => polygon([[w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]]),
+
+    hexagon: (w, h, slant) =>
+      polygon([[slant, 0], [w - slant, 0], [w, h / 2], [w - slant, h], [slant, h], [0, h / 2]]),
+
+    "lean-right": (w, h, slant) => polygon([[slant, 0], [w, 0], [w - slant, h], [0, h]]),
+
+    "lean-left": (w, h, slant) => polygon([[0, 0], [w - slant, 0], [w, h], [slant, h]]),
+
+    trapezoid: (w, h, slant) => polygon([[slant, 0], [w - slant, 0], [w, h], [0, h]]),
+
+    "trapezoid-alt": (w, h, slant) => polygon([[0, 0], [w, 0], [w - slant, h], [slant, h]]),
+
+    asymmetric: (w, h, slant) => polygon([[0, 0], [w, 0], [w, h], [0, h], [slant, h / 2]]),
+
+    note: (w, h) => noteMarkup(w, h),
+    cloud: (w, h) => cloudMarkup(w, h),
+    queue: (w, h) => queueMarkup(w, h),
+    actor: (w, h) => actorMarkup(w, h)
+  };
+
+  function shapeMarkup(shape, w, h) {
+    const draw = SHAPE_MARKUP[shape];
+    // Anything this app has never heard of is a rectangle, which is what
+    // Mermaid draws for a shape it does not know either.
+    return draw ? draw(w, h, Math.min(SLANT, w / 3)) : rect(w, h, RADIUS);
   }
 
   /* --- The shapes Mermaid has no brackets for ------------------------------
@@ -195,7 +202,7 @@ var DdShapes = (function () {
 
   // One cell, written where it goes. Its own <text> rather than a tspan in a
   // shared one, because a <title> belongs to the element it describes.
-  function cellText(kind, x, y, anchor, cut, paint) {
+  function cellText(kind, { x, y, anchor, cut, paint }) {
     return `<text class="dd-text ${kind}" x="${round(x)}" y="${round(y)}"`
       + ` text-anchor="${anchor}" dominant-baseline="middle"`
       + (paint ? ` style="${escapeText(paint)}"` : "")
@@ -248,12 +255,12 @@ var DdShapes = (function () {
   // Which cell of a table a point is in, in the box's own coordinates. Nothing
   // at all for a point past the last row, which is a table dragged taller than
   // its rows.
-  function cellAt(grid, w, h, spacing, x, y) {
+  function cellAt(grid, { w, h, spacing, x, y }) {
     return cellBoxes(grid, w, h, spacing).find((at) =>
       x >= at.x && x < at.x + at.w && y >= at.y && y < at.y + at.h) || null;
   }
 
-  function tableMarkup(grid, w, h, spacing, size, styles) {
+  function tableMarkup(grid, { w, h, spacing, size, styles }) {
     const boxes = cellBoxes(grid, w, h, spacing);
     const title = (grid[0] || [])[0] || "";
     const titleToken = (styles || {})[Model.cellKey(0, 0)] || "";
@@ -270,8 +277,13 @@ var DdShapes = (function () {
 
       const token = (styles || {})[Model.cellKey(at.row, at.column)] || "";
       // What a cell has to write in, once the padding either side is taken off.
-      return cellText("dd-row", at.x + spacing.pad, at.y + (at.h / 2), "start",
-        clip(words, at.w - (spacing.pad * 2), cellChar(token, size)), cellPaint(token));
+      return cellText("dd-row", {
+        x: at.x + spacing.pad,
+        y: at.y + (at.h / 2),
+        anchor: "start",
+        cut: clip(words, at.w - (spacing.pad * 2), cellChar(token, size)),
+        paint: cellPaint(token)
+      });
     });
 
     /* The rules of the grid: down between the columns, across between the rows.
@@ -290,9 +302,13 @@ var DdShapes = (function () {
     return `${rect(w, h, RADIUS)}`
       + `<line class="dd-rule" x1="0" y1="${spacing.title}" x2="${round(w)}" y2="${spacing.title}"/>`
       + down + across
-      + cellText("dd-title", boxes[0].w / 2, boxes[0].h / 2, "middle",
-        clip(title, w - (spacing.pad * 2), cellChar(titleToken, size)),
-        cellPaint(titleToken))
+      + cellText("dd-title", {
+        x: boxes[0].w / 2,
+        y: boxes[0].h / 2,
+        anchor: "middle",
+        cut: clip(title, w - (spacing.pad * 2), cellChar(titleToken, size)),
+        paint: cellPaint(titleToken)
+      })
       + cells.join("");
   }
 
@@ -410,8 +426,13 @@ var DdShapes = (function () {
     const words = node.text || node.id;
 
     if (node.kind === "table") {
-      return tableMarkup(Model.textCells(words), at.w, at.h, Model.tableMetrics(node),
-        sizeOf(node, classes), node.cells);
+      return tableMarkup(Model.textCells(words), {
+        w: at.w,
+        h: at.h,
+        spacing: Model.tableMetrics(node),
+        size: sizeOf(node, classes),
+        styles: node.cells
+      });
     }
 
     /* What is in the box: a picture, an icon, or its words. A picture beats an

@@ -98,43 +98,42 @@ var AppSearch = (function () {
     return `${prefix}${raw.slice(start, end)}${suffix}`;
   }
 
+  /* What a whole-query match is worth, per field. The same idea as the
+   * server's scorer (lib/docs/search.js) and deliberately the same shape, so
+   * the offline fallback ranks a library the way the server would.
+   */
+  /** @type {[string, "startsWith" | "includes", number][]} */
+  const QUERY_SCORES = [
+    ["title", "startsWith", 1200],
+    ["file", "startsWith", 1000],
+    ["title", "includes", 850],
+    ["file", "includes", 760],
+    ["folderName", "startsWith", 680],
+    ["folderName", "includes", 560]
+  ];
+
+  // And what one word of it is worth, best field first: a word counts once,
+  // wherever it is found.
+  /** @type {[string, number][]} */
+  const TOKEN_SCORES = [["title", 220], ["file", 190], ["folderName", 150], ["content", 110]];
+
   function scoreDocForQuery(doc, normalizedQuery, tokens) {
-    const title = normalize(doc.title);
-    const file = normalize(doc.originalFile || doc.file);
-    const folderName = normalize(doc.folderName || "");
-    const content = normalize(state.contentCache.get(doc.file)?.content || "");
+    const fields = {
+      title: normalize(doc.title),
+      file: normalize(doc.originalFile || doc.file),
+      folderName: normalize(doc.folderName || ""),
+      content: normalize(state.contentCache.get(doc.file)?.content || "")
+    };
+    const { title, file, content } = fields;
 
     let score = 0;
     let matched = false;
 
-    if (title.startsWith(normalizedQuery)) {
-      score += 1200;
-      matched = true;
-    }
-
-    if (file.startsWith(normalizedQuery)) {
-      score += 1000;
-      matched = true;
-    }
-
-    if (title.includes(normalizedQuery)) {
-      score += 850;
-      matched = true;
-    }
-
-    if (file.includes(normalizedQuery)) {
-      score += 760;
-      matched = true;
-    }
-
-    if (folderName.startsWith(normalizedQuery)) {
-      score += 680;
-      matched = true;
-    }
-
-    if (folderName.includes(normalizedQuery)) {
-      score += 560;
-      matched = true;
+    for (const [field, how, worth] of QUERY_SCORES) {
+      if (fields[field][how](normalizedQuery)) {
+        score += worth;
+        matched = true;
+      }
     }
 
     const contentIndex = content.indexOf(normalizedQuery);
@@ -150,26 +149,9 @@ var AppSearch = (function () {
 
     let tokenHits = 0;
     for (const token of tokens) {
-      if (title.includes(token)) {
-        score += 220;
-        tokenHits += 1;
-        continue;
-      }
-
-      if (file.includes(token)) {
-        score += 190;
-        tokenHits += 1;
-        continue;
-      }
-
-      if (folderName.includes(token)) {
-        score += 150;
-        tokenHits += 1;
-        continue;
-      }
-
-      if (content.includes(token)) {
-        score += 110;
+      const where = TOKEN_SCORES.find(([field]) => fields[field].includes(token));
+      if (where) {
+        score += where[1];
         tokenHits += 1;
         continue;
       }

@@ -96,24 +96,31 @@ ESLint warns — not errors — about a function that is too branchy (`complexit
 (5). That severity is deliberate: a long function is sometimes exactly right,
 and an error there is a rule to be argued with rather than advice to be read.
 
-What keeps advice from being ignored is that the number of warnings is written
-down, in the `limits` suite. A function that grows a branch shows up as a
-budget somebody has to raise on purpose; tidying one up is how the number goes
-down. The list stays a decision rather than a drift.
+The rules went in with seventy-four warnings outstanding. There are none now,
+and the `limits` suite keeps it that way: it runs ESLint and fails if the
+count is above zero, so a function that grows past a limit shows up as a
+failing check rather than in a list nobody reads. Raising one of those numbers
+is a decision, to be made in a commit that says why.
 
-Six functions were taken apart when the limits went in, all of them the kind
-where the next person's change is the risk: the diagram editor's keyboard
-dispatcher (complexity 62) and its pointer handler (53), the two halves of the
-diagram file format — `parseFlowchart` (59) and `serializeFlowchart` (67) —
-the tree's keyboard handler (55), and the markdown block splitter (51). Each
-became a named piece per thing it handles: a table of commands, one scanner
-per kind of block, one reader per kind of line. Nothing in those files is over
-30 now, and the suite keeps it that way.
+What they bought, in order of how much the next person would have thanked us:
+the diagram editor's keyboard dispatcher (complexity 62) and its pointer
+handler (53), the two halves of the diagram file format — `parseFlowchart`
+(59) and `serializeFlowchart` (67) — the tree's keyboard handler (55) and the
+markdown block splitter (51), each now a named piece per thing it handles: a
+table of commands, one scanner per kind of block, one reader per kind of line.
+Then the seven route modules, where every handler moved out of its factory and
+takes the same injected dependencies, so what is left in `create…Routes` is
+the list of addresses and who may use them. Then two dozen smaller ones, most
+of which became a table: what a shape costs to draw, what a search match is
+worth, what each kind of notebook output looks like.
 
-What is left is mostly two shapes that are long for a reason: a module written
-as a closure (`mount` in the diagram editor, the `create…Routes` factories),
-and a test suite, which is a script rather than a function and is exempt from
-the length rule for that reason.
+Four places answer the rules rather than satisfy them, and say so on the line
+above the disable: the diagram editor's `mount`, the guards, the document
+store and the search index. Each is a module written as a closure — what the
+rule sees is a long function, and what is there is a module — and the `limits`
+suite holds the list of the four, so a fifth is a change to that file rather
+than a quiet addition. A test suite is exempt for the same kind of reason: it
+is a script, and its branches are its checks.
 
 ### Markup built as strings
 

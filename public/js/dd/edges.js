@@ -72,7 +72,7 @@ var DdEdges = (function () {
       .join("");
   }
 
-  function edgeMarkup(edge, index, layout, arrowId, spread, editing) {
+  function edgeMarkup(edge, index, { layout, arrowId, spread, editing }) {
     const route = routeEdge(layout, edge, spread);
     if (!route) {
       return "";

@@ -387,6 +387,32 @@ var MdCode = (function () {
    * A caller can therefore use the answer to decide whether a full pass with
    * the auto-detector is still owed, which is what happens on blur.
    */
+  /* Which language this block is being typed in.
+   *
+   * The fence's own word if it names one highlight.js knows. Otherwise the
+   * detector, but only once there is enough to go on and only every so many
+   * characters — guessing on every keystroke is both slow and unstable, and a
+   * block that changed language under the caret every third word would be
+   * worse than one that was never coloured.
+   */
+  function settleLanguage(live, declared, source) {
+    const named = CODE_LANGUAGE_ALIAS[declared] || declared;
+
+    if (named && window.hljs.getLanguage(named)) {
+      live.language = named;
+      return;
+    }
+
+    const worthGuessing = !live.language
+      && source.length >= LIVE_DETECT_MINIMUM
+      && source.length - live.detectedAt >= LIVE_DETECT_STEP;
+
+    if (worthGuessing) {
+      live.detectedAt = source.length;
+      live.language = detectCodeLanguage(source);
+    }
+  }
+
   function liveHighlightCode(codeNode, declaredLanguage) {
     if (!codeNode || !window.hljs) {
       return false;
@@ -410,17 +436,7 @@ var MdCode = (function () {
       return true;
     }
 
-    const named = CODE_LANGUAGE_ALIAS[declared] || declared;
-
-    if (named && window.hljs.getLanguage(named)) {
-      live.language = named;
-    } else if (!live.language
-      && source.length >= LIVE_DETECT_MINIMUM
-      && source.length - live.detectedAt >= LIVE_DETECT_STEP) {
-      live.detectedAt = source.length;
-      live.language = detectCodeLanguage(source);
-    }
-
+    settleLanguage(live, declared, source);
     if (!live.language) {
       return false;
     }

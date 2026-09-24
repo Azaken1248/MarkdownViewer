@@ -207,30 +207,24 @@ var AppViewerHeader = (function () {
 
     // Erasing from the archive is admin-only; the same button is "Archive" for
     // everyone else, so it follows doc:write outside the archive view.
-    if (elements.hardDeleteDocBtn) {
-      elements.hardDeleteDocBtn.hidden = state.viewMode === "archive"
-        ? !can("doc:erase")
-        : !writable;
+    // A viewer can read the saved links but not add, refresh or remove one:
+    // adding makes the server fetch a URL, which is a write in every sense
+    // that matters here.
+    /** @type {[HTMLElement, boolean][]} */
+    const gated = [
+      [elements.hardDeleteDocBtn, state.viewMode === "archive" ? can("doc:erase") : writable],
+      [elements.restoreDocBtn, Boolean(writable && state.isRecycleBinMode)],
+      [elements.manageUsersItem, can("user:manage")],
+      [elements.addLinkBtn, writable]
+    ];
+
+    for (const [control, shown] of gated) {
+      if (control) {
+        control.hidden = !shown;
+      }
     }
 
-    if (elements.restoreDocBtn) {
-      elements.restoreDocBtn.hidden = !writable || !state.isRecycleBinMode;
-    }
-
-    if (elements.manageUsersItem) {
-      elements.manageUsersItem.hidden = !can("user:manage");
-    }
-
-    // A viewer can read the saved links but not add, refresh or remove one.
-    // Adding makes the server fetch a URL, which is a write in every sense that
-    // matters here.
-    if (elements.addLinkBtn) {
-      elements.addLinkBtn.hidden = !writable;
-    }
-
-    if (!writable && state.linkModalOpen) {
-      closeLinkModal();
-    }
+    closeWhatIsNoLongerAllowed(writable);
 
     // The per-card buttons are built at render time, so the cards have to be
     // rebuilt for a role change to reach them.
@@ -238,12 +232,58 @@ var AppViewerHeader = (function () {
       renderLinks();
     }
 
-    // A menu left open over a control that has just been hidden.
-    if (!writable && elements.uploadMenu && !elements.uploadMenu.hidden) {
-      App.setUploadMenuOpen(false);
+    updateShareButton();
+  }
+
+  // A dialog or a menu left open over a control that has just been taken away.
+  function closeWhatIsNoLongerAllowed(writable) {
+    if (writable) {
+      return;
     }
 
-    updateShareButton();
+    if (state.linkModalOpen) {
+      closeLinkModal();
+    }
+
+    if (elements.uploadMenu && !elements.uploadMenu.hidden) {
+      App.setUploadMenuOpen(false);
+    }
+  }
+
+  /* Which of the toolbar's buttons can be pressed for what is open.
+   *
+   * Three answers, one per kind of thing that can be on screen: nothing, a
+   * deleted document, and a document. Written as one set each rather than as
+   * assignments in three branches, so that reading one line tells you the
+   * whole state of the toolbar.
+   */
+  const DOC_BUTTONS = {
+    nothing: { edit: true, delete: true, erase: true, restore: true },
+    deleted: { edit: true, delete: true, erase: false, restore: false },
+    open: { delete: false, erase: false, restore: true }
+  };
+
+  function enableDocButtons({ edit, delete: soft, erase, restore }) {
+    elements.editDocBtn.disabled = edit;
+    elements.editCurrentDocBtn.disabled = edit;
+    elements.dockEdit.disabled = edit;
+    elements.softDeleteDocBtn.disabled = soft;
+    elements.hardDeleteDocBtn.disabled = erase;
+    elements.restoreDocBtn.disabled = restore;
+  }
+
+  // A deleted document, in the bin or in the archive: what it was called, how
+  // big it was, and when it stopped being a document.
+  function headingForDeleted(fileName) {
+    const deletedDoc = state.deletedDocs.find((doc) => doc.file === fileName);
+    const inArchive = state.viewMode === "archive";
+
+    setViewerHeading(inArchive ? "ph-archive-box" : "ph-trash",
+      deletedDoc?.originalFile || fileName, [
+        inArchive ? "Archived" : "In recycle bin",
+        deletedDoc ? formatBytes(deletedDoc.size) : "",
+        deletedDoc?.deletedAt ? `deleted ${formatDate(deletedDoc.deletedAt)}` : ""
+      ], deletedDoc?.folderId || null);
   }
 
   function updateActiveDocUI(fileName) {
@@ -254,31 +294,14 @@ var AppViewerHeader = (function () {
 
     if (!fileName) {
       setViewerHeading("ph-file-text", "No file selected", []);
-      elements.editDocBtn.disabled = true;
-      elements.editCurrentDocBtn.disabled = true;
-      elements.dockEdit.disabled = true;
-      elements.softDeleteDocBtn.disabled = true;
-      elements.hardDeleteDocBtn.disabled = true;
-      elements.restoreDocBtn.disabled = true;
+      enableDocButtons(DOC_BUTTONS.nothing);
       applyPermissionGating();
       return;
     }
 
     if (state.isRecycleBinMode) {
-      const deletedDoc = state.deletedDocs.find((doc) => doc.file === fileName);
-      const label = deletedDoc?.originalFile || fileName;
-      const inArchive = state.viewMode === "archive";
-      setViewerHeading(inArchive ? "ph-archive-box" : "ph-trash", label, [
-        inArchive ? "Archived" : "In recycle bin",
-        deletedDoc ? formatBytes(deletedDoc.size) : "",
-        deletedDoc?.deletedAt ? `deleted ${formatDate(deletedDoc.deletedAt)}` : ""
-      ], deletedDoc?.folderId || null);
-      elements.editDocBtn.disabled = true;
-      elements.editCurrentDocBtn.disabled = true;
-      elements.dockEdit.disabled = true;
-      elements.softDeleteDocBtn.disabled = true;
-      elements.hardDeleteDocBtn.disabled = false;
-      elements.restoreDocBtn.disabled = false;
+      headingForDeleted(fileName);
+      enableDocButtons(DOC_BUTTONS.deleted);
       applyPermissionGating();
       return;
     }
@@ -292,13 +315,10 @@ var AppViewerHeader = (function () {
       doc ? formatBytes(doc.size) : "",
       doc?.updatedAt ? `updated ${formatDate(doc.updatedAt)}` : ""
     ], doc?.folderId || null);
-    elements.editDocBtn.disabled = notebookFile;
+
+    // A notebook is read here and edited in Jupyter; everything else opens.
+    enableDocButtons({ ...DOC_BUTTONS.open, edit: notebookFile });
     updateShareButton();
-    elements.editCurrentDocBtn.disabled = notebookFile;
-    elements.dockEdit.disabled = notebookFile;
-    elements.softDeleteDocBtn.disabled = false;
-    elements.hardDeleteDocBtn.disabled = false;
-    elements.restoreDocBtn.disabled = true;
     applyPermissionGating();
   }
 

@@ -22,6 +22,29 @@ var AppSearching = (function () {
   const { renderLinks } = AppLinks;
   const { setStatus } = AppNotify;
 
+  /* Which library is being searched, and what to call it in a message. The
+   * bins are searched by the same route as the documents are, with a scope on
+   * it, so the two answers travel together.
+   */
+  const WHERE = {
+    archive: { scope: "archive", label: "archive", counted: "archived document(s)" },
+    recycle: { scope: "recycle-bin", label: "recycle bin", counted: "deleted document(s)" },
+    docs: { scope: "docs", label: "documents", counted: "document(s)" }
+  };
+
+  // An empty box is not a search: it is the whole library again.
+  function showEverything(rawQuery, currentDocs) {
+    state.searchRequestId += 1;
+    state.groupRevealCounts.clear();
+    state.filteredDocs = [...currentDocs];
+
+    const { counted } = WHERE[state.viewMode] || WHERE.docs;
+    setMeta(`${state.filteredDocs.length} ${counted}`);
+
+    renderSuperSearchPanel(rawQuery, [], []);
+    renderDocList();
+  }
+
   async function applySearch(query) {
     const rawQuery = String(query || "");
 
@@ -43,30 +66,12 @@ var AppSearching = (function () {
     }
 
     if (!q) {
-      state.searchRequestId += 1;
-      state.groupRevealCounts.clear();
-      state.filteredDocs = [...currentDocs];
-      setMeta(state.viewMode === "archive"
-        ? `${state.filteredDocs.length} archived document(s)`
-        : state.viewMode === "recycle"
-          ? `${state.filteredDocs.length} deleted document(s)`
-          : `${state.filteredDocs.length} document(s)`);
-      renderSuperSearchPanel(rawQuery, [], []);
-      renderDocList();
+      showEverything(rawQuery, currentDocs);
       return;
     }
 
     const requestId = ++state.searchRequestId;
-    const searchScope = state.viewMode === "archive"
-      ? "archive"
-      : state.viewMode === "recycle"
-        ? "recycle-bin"
-        : "docs";
-    const contextLabel = searchScope === "archive"
-      ? "archive"
-      : searchScope === "recycle-bin"
-        ? "recycle bin"
-        : "documents";
+    const { scope: searchScope, label: contextLabel } = WHERE[state.viewMode] || WHERE.docs;
     setMeta(`Searching ${contextLabel}...`);
 
     try {

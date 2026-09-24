@@ -226,42 +226,60 @@ function idOf(value) {
  * Close to JSON, but it shows the things JSON hides — undefined, NaN, a Map's
  * contents — because those are exactly the failures this exists to explain.
  */
-function print(value, depth = 0) {
-  const tag = tagOf(value);
+/* The one-line form of a value that holds nothing else. */
+const PRINT_FLAT = {
+  undefined: () => "undefined",
+  null: () => "null",
+  number: (value) => (Object.is(value, -0) ? "-0" : String(value)),
+  bigint: (value) => `${value}n`,
+  string: (value) => JSON.stringify(value),
+  boolean: (value) => String(value),
+  symbol: (value) => String(value),
+  function: (value) => `[function ${value.name || "anonymous"}]`,
+  date: (value) => `Date(${value.toISOString()})`,
+  regexp: (value) => String(value),
+  error: (value) => `Error(${JSON.stringify(value.message)})`,
+  bytes: (value) => `bytes(${value.byteLength})`
+};
 
-  switch (tag) {
-    case "undefined": return "undefined";
-    case "null": return "null";
-    case "number": return Object.is(value, -0) ? "-0" : String(value);
-    case "bigint": return `${value}n`;
-    case "string": return JSON.stringify(value);
-    case "boolean": return String(value);
-    case "symbol": return String(value);
-    case "function": return `[function ${value.name || "anonymous"}]`;
-    case "date": return `Date(${value.toISOString()})`;
-    case "regexp": return String(value);
-    case "error": return `Error(${JSON.stringify(value.message)})`;
-    case "bytes": return `bytes(${value.byteLength})`;
-    default: break;
+// And of one that does, once its contents have been printed.
+const PRINT_NESTED = {
+  array: (parts) => `[${parts.join(", ")}]`,
+  set: (parts) => `Set{${parts.join(", ")}}`,
+  map: (parts) => `Map{${parts.join(", ")}}`,
+  object: (parts) => `{${parts.join(", ")}}`
+};
+
+// The pieces of a value that holds others, each already printed.
+function printedParts(tag, value, depth) {
+  const deeper = (one) => print(one, depth + 1);
+
+  if (tag === "map") {
+    return [...value].map(([key, held]) => `${deeper(key)} => ${deeper(held)}`);
   }
 
+  if (tag === "object") {
+    return keysOf(value).map((key) => `${key}: ${deeper(value[key])}`);
+  }
+
+  return [...value].map(deeper);
+}
+
+function print(value, depth = 0) {
+  const tag = tagOf(value);
+  const flat = PRINT_FLAT[tag];
+
+  if (flat) {
+    return flat(value);
+  }
+
+  // Deep enough. A failure line is meant to be read, and four levels of
+  // nesting is already past the point where one more helps.
   if (depth > 4) {
     return tag === "array" ? "[...]" : "{...}";
   }
 
-  if (tag === "array") {
-    return `[${value.map((one) => print(one, depth + 1)).join(", ")}]`;
-  }
-
-  if (tag === "set") {
-    return `Set{${[...value].map((one) => print(one, depth + 1)).join(", ")}}`;
-  }
-
-  if (tag === "map") {
-    return `Map{${[...value].map(([k, v]) => `${print(k, depth + 1)} => ${print(v, depth + 1)}`).join(", ")}}`;
-  }
-
-  return `{${keysOf(value).map((key) => `${key}: ${print(value[key], depth + 1)}`).join(", ")}}`;
+  return PRINT_NESTED[tag](printedParts(tag, value, depth));
 }
 
 function clip(text) {

@@ -24,13 +24,20 @@ var MdNotebook = (function () {
     return String(value);
   }
 
+  /* What the notebook says it is written in, in the three places it might say
+   * so. Python when it says nothing, because that is what a notebook is
+   * unless it says otherwise.
+   */
+  function declaredLanguage(notebook) {
+    const metadata = notebook?.metadata;
+    return metadata?.language_info?.name
+      || metadata?.language_info?.codemirror_mode?.name
+      || metadata?.kernelspec?.language
+      || "python";
+  }
+
   function inferNotebookLanguage(notebook) {
-    const rawLanguage = normalize(
-      notebook?.metadata?.language_info?.name
-        || notebook?.metadata?.language_info?.codemirror_mode?.name
-        || notebook?.metadata?.kernelspec?.language
-        || "python"
-    ).trim();
+    const rawLanguage = normalize(declaredLanguage(notebook)).trim();
 
     if (!rawLanguage) {
       return "python";
@@ -90,10 +97,8 @@ var MdNotebook = (function () {
     }
   }
 
-  function renderNotebookOutput(output) {
-    const outputType = String(output?.output_type || "").toLowerCase();
-
-    if (outputType === "stream") {
+  // What a notebook says while it runs: text on stdout or stderr.
+  function streamOutput(output) {
       const streamName = escapeHtml(String(output?.name || "stream"));
       const streamText = escapeHtml(normalizeNotebookText(output?.text));
       return `
@@ -102,9 +107,10 @@ var MdNotebook = (function () {
           <pre class="notebook-output-text">${streamText}</pre>
         </section>
       `;
-    }
+  }
 
-    if (outputType === "error") {
+  // And what it says when it stops.
+  function errorOutput(output) {
       const errorName = escapeHtml(String(output?.ename || "Error"));
       const errorValue = escapeHtml(String(output?.evalue || ""));
       const traceback = Array.isArray(output?.traceback)
@@ -119,38 +125,45 @@ var MdNotebook = (function () {
           <pre class="notebook-output-text">${escapeHtml(traceback)}</pre>
         </section>
       `;
+  }
+
+  /* What a result is shown as, best first. A notebook may offer the same
+   * result several ways — a chart as HTML and as a PNG and as the words "a
+   * chart" — and the first of these it has is the one worth showing.
+   */
+  const MIME_ORDER = [
+    "text/html",
+    "image/svg+xml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "text/markdown",
+    "application/json",
+    "text/plain"
+  ];
+
+  const OUTPUT_KINDS = { stream: streamOutput, error: errorOutput };
+
+  function renderNotebookOutput(output) {
+    const kind = OUTPUT_KINDS[String(output?.output_type || "").toLowerCase()];
+    if (kind) {
+      return kind(output);
     }
 
     const data = output?.data || {};
-    const mimeOrder = [
-      "text/html",
-      "image/svg+xml",
-      "image/png",
-      "image/jpeg",
-      "image/gif",
-      "image/webp",
-      "image/avif",
-      "text/markdown",
-      "application/json",
-      "text/plain"
-    ];
-
-    for (const mimeType of mimeOrder) {
-      if (data[mimeType] != null) {
-        const mimeClass = mimeType.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
-        return `<section class="notebook-output notebook-output-${mimeClass}">${renderNotebookMimePayload(mimeType, data[mimeType])}</section>`;
-      }
+    const mimeType = MIME_ORDER.find((type) => data[type] != null);
+    if (!mimeType) {
+      return "";
     }
 
-    return "";
+    const mimeClass = mimeType.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+    return `<section class="notebook-output notebook-output-${mimeClass}">`
+      + `${renderNotebookMimePayload(mimeType, data[mimeType])}</section>`;
   }
 
-  function renderNotebookCell(cell, index, notebookLanguage) {
-    const cellType = normalize(cell?.cell_type || "").trim();
-    const cellNumber = index + 1;
-    const source = normalizeNotebookText(cell?.source);
-
-    if (cellType === "markdown") {
+  function markdownCell(source, cellNumber) {
       return `
         <section class="notebook-cell notebook-cell-markdown">
           <div class="notebook-cell-head">
@@ -162,9 +175,9 @@ var MdNotebook = (function () {
           </div>
         </section>
       `;
-    }
+  }
 
-    if (cellType === "code") {
+  function codeCell(cell, source, cellNumber, notebookLanguage) {
       const executionCount = Number.isFinite(Number(cell?.execution_count))
         ? Number(cell.execution_count)
         : null;
@@ -199,8 +212,9 @@ var MdNotebook = (function () {
           </div>
         </section>
       `;
-    }
+  }
 
+  function rawCell(source, cellNumber) {
     return `
       <section class="notebook-cell notebook-cell-raw">
         <div class="notebook-cell-head">
@@ -212,6 +226,22 @@ var MdNotebook = (function () {
         </div>
       </section>
     `;
+  }
+
+  function renderNotebookCell(cell, index, notebookLanguage) {
+    const cellType = normalize(cell?.cell_type || "").trim();
+    const cellNumber = index + 1;
+    const source = normalizeNotebookText(cell?.source);
+
+    if (cellType === "markdown") {
+      return markdownCell(source, cellNumber);
+    }
+
+    // Anything that is not markdown and not code is raw: shown as it is, which
+    // is what a raw cell means.
+    return cellType === "code"
+      ? codeCell(cell, source, cellNumber, notebookLanguage)
+      : rawCell(source, cellNumber);
   }
 
   // Cell sources, keyed by cell number, so a Run handler gets the original text

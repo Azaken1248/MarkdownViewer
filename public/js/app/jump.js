@@ -221,74 +221,78 @@ var AppJump = (function () {
     };
   }
 
+  const NO_MATCH = { found: false, index: -1, total: 0 };
+
+  // Nothing found, or nothing to find: the marks come off and the counter goes
+  // back to saying nothing.
+  function forgetJumpMatches(sourceFile) {
+    state.jumpMatchIndex = -1;
+    state.jumpMatchCount = 0;
+    state.jumpMarkedNodes = [];
+    state.jumpMatchFile = sourceFile;
+    updateJumpNavigationUI();
+    return NO_MATCH;
+  }
+
+  /* Whether the marks already on the page are the marks this search wants.
+   *
+   * Re-marking a long document on every press of Enter is the slowest thing
+   * this app does, and the answer is usually yes: the same query, in the same
+   * document, whose marks are still attached to it.
+   */
+  function marksStillFit(sourceFile, query, terms) {
+    return Boolean(
+      sourceFile
+      && state.jumpMatchFile === sourceFile
+      && state.jumpMarkedNodes.length > 0
+      && state.jumpMarkedNodes.every((node) => node?.isConnected)
+      && state.jumpQuery === query
+      && areSameJumpTerms(state.jumpTerms, terms)
+    );
+  }
+
+  // Mark every match in the document. Answers false when there was nothing to
+  // mark, which the caller reports as "not found".
+  function markDocumentMatches(searchTerms, targetIndex, sourceFile) {
+    clearDocumentJumpDecorations();
+
+    const matches = findDocumentTextMatches(elements.docContent, searchTerms);
+    state.jumpMatchCount = matches.length;
+
+    if (matches.length === 0) {
+      return false;
+    }
+
+    state.jumpMarkedNodes = highlightDocumentMatches(matches, Number(targetIndex));
+    state.jumpMatchCount = state.jumpMarkedNodes.length;
+    state.jumpMatchFile = sourceFile || state.activeFile || null;
+
+    if (state.jumpMarkedNodes.length === 0) {
+      return false;
+    }
+
+    state.jumpMatchIndex = -1;
+    return true;
+  }
+
   function jumpToSearchMatch(query, terms = [], targetIndex = 0, options = {}) {
     const sourceFile = String(options.sourceFile || state.activeFile || "").trim();
     const scrollBehavior = String(options.scrollBehavior || "auto");
 
     const searchTerms = buildJumpSearchTerms(query, terms);
     const normalizedQuery = String(query || "").trim();
-    const normalizedTerms = [...searchTerms];
-    const previousQuery = state.jumpQuery;
-    const canReuseExistingMarks = Boolean(
-      sourceFile
-      && state.jumpMatchFile === sourceFile
-      && state.jumpMarkedNodes.length > 0
-      && state.jumpMarkedNodes.every((node) => node?.isConnected)
-      && previousQuery === normalizedQuery
-      && areSameJumpTerms(state.jumpTerms, normalizedTerms)
-    );
+    const reusable = marksStillFit(sourceFile, normalizedQuery, searchTerms);
 
     state.jumpQuery = normalizedQuery;
-    state.jumpTerms = [...normalizedTerms];
+    state.jumpTerms = [...searchTerms];
 
     if (searchTerms.length === 0) {
       clearDocumentJumpDecorations();
-      state.jumpMatchIndex = -1;
-      state.jumpMatchCount = 0;
-      state.jumpMarkedNodes = [];
-      state.jumpMatchFile = null;
-      updateJumpNavigationUI();
-      return {
-        found: false,
-        index: -1,
-        total: 0
-      };
+      return forgetJumpMatches(null);
     }
 
-    if (!canReuseExistingMarks) {
-      clearDocumentJumpDecorations();
-
-      const matches = findDocumentTextMatches(elements.docContent, searchTerms);
-      state.jumpMatchCount = matches.length;
-
-      if (matches.length === 0) {
-        state.jumpMatchIndex = -1;
-        state.jumpMarkedNodes = [];
-        state.jumpMatchFile = sourceFile || null;
-        updateJumpNavigationUI();
-        return {
-          found: false,
-          index: -1,
-          total: 0
-        };
-      }
-
-      state.jumpMarkedNodes = highlightDocumentMatches(matches, Number(targetIndex));
-      state.jumpMatchCount = state.jumpMarkedNodes.length;
-      state.jumpMatchFile = sourceFile || state.activeFile || null;
-
-      if (state.jumpMarkedNodes.length === 0) {
-        state.jumpMatchIndex = -1;
-        state.jumpMatchCount = 0;
-        updateJumpNavigationUI();
-        return {
-          found: false,
-          index: -1,
-          total: 0
-        };
-      }
-
-      state.jumpMatchIndex = -1;
+    if (!reusable && !markDocumentMatches(searchTerms, targetIndex, sourceFile)) {
+      return forgetJumpMatches(sourceFile || null);
     }
 
     return setActiveJumpMatch(targetIndex, { scrollBehavior });
@@ -326,44 +330,43 @@ var AppJump = (function () {
     return orderedFiles;
   }
 
-  async function moveToAdjacentJumpMatch(direction) {
-    if (!state.jumpQuery.trim()) {
-      return {
-        found: false,
-        index: -1,
-        total: 0
-      };
+  /* The next match in this document, if there is one.
+   *
+   * Answers null when the walk has run off either end of it, which is the
+   * signal to go looking in the next document.
+   */
+  function nextMatchHere(step) {
+    if (state.jumpMatchCount === 0) {
+      return null;
     }
 
-    const step = direction >= 0 ? 1 : -1;
+    const targetIndex = state.jumpMatchIndex >= 0
+      ? state.jumpMatchIndex + step
+      : (step > 0 ? 0 : -1);
 
-    if (state.jumpMatchCount > 0) {
-      const targetIndex = state.jumpMatchIndex >= 0
-        ? state.jumpMatchIndex + step
-        : step > 0 ? 0 : -1;
+    return targetIndex >= 0 && targetIndex < state.jumpMatchCount
+      ? setActiveJumpMatch(targetIndex, { scrollBehavior: "smooth" })
+      : null;
+  }
 
-      if (targetIndex >= 0 && targetIndex < state.jumpMatchCount) {
-        return setActiveJumpMatch(targetIndex, { scrollBehavior: "smooth" });
-      }
-    }
-
+  /* On through the other documents, in the order the list is in, until one of
+   * them has a match in it or they have all been tried.
+   *
+   * Opening a document is what searches it — the marks are made on the way in
+   * — so this is a walk of openings rather than of searches.
+   */
+  async function nextMatchElsewhere(step) {
     const navigationFiles = getNavigationDocFilesForJump();
     if (navigationFiles.length === 0) {
-      return {
-        found: false,
-        index: -1,
-        total: 0
-      };
+      return NO_MATCH;
     }
 
-    let currentFileIndex = navigationFiles.indexOf(state.activeFile || state.jumpMatchFile || "");
-    if (currentFileIndex < 0) {
-      currentFileIndex = 0;
-    }
+    const from = navigationFiles.indexOf(state.activeFile || state.jumpMatchFile || "");
+    let at = from < 0 ? 0 : from;
 
     for (let attempt = 0; attempt < navigationFiles.length; attempt += 1) {
-      currentFileIndex = (currentFileIndex + step + navigationFiles.length) % navigationFiles.length;
-      const targetFile = navigationFiles[currentFileIndex];
+      at = (at + step + navigationFiles.length) % navigationFiles.length;
+      const targetFile = navigationFiles[at];
 
       await App.openDocument(targetFile, true, {
         jumpQuery: state.jumpQuery,
@@ -383,11 +386,16 @@ var AppJump = (function () {
       }
     }
 
-    return {
-      found: false,
-      index: -1,
-      total: 0
-    };
+    return NO_MATCH;
+  }
+
+  async function moveToAdjacentJumpMatch(direction) {
+    if (!state.jumpQuery.trim()) {
+      return NO_MATCH;
+    }
+
+    const step = direction >= 0 ? 1 : -1;
+    return nextMatchHere(step) || nextMatchElsewhere(step);
   }
 
   return {

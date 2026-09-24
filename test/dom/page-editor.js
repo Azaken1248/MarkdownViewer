@@ -10,6 +10,16 @@ module.exports = async (ctx) => {
     check, waitUntil, get, window, doc, clipboardWrites, clientSource
   } = ctx;
 
+  /* The editor is open when the document itself is editable.
+   *
+   * startPageEdit fetches before it renders, so what follows has to wait for
+   * the thing it is about to reach for rather than for a length of time. A
+   * fixed sleep here was long enough on an idle machine and not long enough
+   * with three other suites between this one and a core.
+   */
+  const editing = () => waitUntil(() =>
+    Boolean(doc.querySelector('#docContent .ve-block[contenteditable="true"]')));
+
   console.log("=== editing happens on the document itself ===");
   {
     // Prose, a table, a fence and a reference-style link that resolves from a
@@ -44,7 +54,7 @@ module.exports = async (ctx) => {
       window.eval("window.__t.state.activeFile"), "in-place.md");
 
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     check("the pencil edits in place rather than opening a dialog",
       doc.getElementById("editorModal").classList.contains("open"), false);
@@ -223,7 +233,7 @@ module.exports = async (ctx) => {
 
     // Cancelling with edits asks first, and restores what is on disk.
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
     const heading = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
     heading.innerHTML = "<h1>Renamed</h1>";
     heading.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -256,7 +266,7 @@ module.exports = async (ctx) => {
     // have finished". Closing the editor on it throws away the caret, the
     // scroll and the undo history of somebody who only wanted their work safe.
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const inPlace = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
     inPlace.innerHTML = "<h1>Saved In Place</h1>";
@@ -305,7 +315,7 @@ module.exports = async (ctx) => {
 
     console.log("=== leaving with unsaved work offers to keep it ===");
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
     const kept = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
     kept.innerHTML = "<h1>Kept On The Way Out</h1>";
     kept.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -328,7 +338,7 @@ module.exports = async (ctx) => {
 
     // Handing off to the source editor carries the edits with it.
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
     const para2 = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')][1];
     para2.innerHTML = "<p>Carried across.</p>";
     para2.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -380,7 +390,7 @@ module.exports = async (ctx) => {
     check("the maths document is open", window.eval("window.__t.state.activeFile"), "sums.md");
 
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const embed = doc.querySelector("#docContent .ve-embed");
     check("maths is a block that keeps its source", Boolean(embed), true);
@@ -471,7 +481,7 @@ module.exports = async (ctx) => {
     check("the diagram document is open", window.eval("window.__t.state.activeFile"), "flow.md");
 
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const embeds = [...doc.querySelectorAll("#docContent .ve-embed")];
     check("every diagram is a block that keeps its source", embeds.length, 3);
@@ -526,7 +536,7 @@ module.exports = async (ctx) => {
      * that the document editor owns: leaving it, and picking it back up.
      */
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const embed = doc.querySelector("#docContent .ve-embed");
     check("a buildable diagram offers a page of its own",
@@ -566,7 +576,7 @@ module.exports = async (ctx) => {
     await window.eval("window.__t.cancelPageEdit({ confirm: false })");
     await new Promise((r) => setTimeout(r, 200));
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
     check("...so opening the document again is the document, not the diagram session",
       window.eval("window.__t.collectPageMarkdown()").includes("Edited and not saved."), false);
     await window.eval("window.__t.cancelPageEdit({ confirm: false })");
@@ -650,7 +660,7 @@ module.exports = async (ctx) => {
 
     console.log("=== code being typed into is left to be typed into ===");
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const editable = doc.querySelector("#docContent .ve-code pre code");
     check("the fence is a code block the caret goes into", Boolean(editable), true);
@@ -692,7 +702,7 @@ module.exports = async (ctx) => {
     await window.eval('window.__t.openDocument("undo.md", false, { forceReload: true })');
     await new Promise((r) => setTimeout(r, 600));
     await window.eval("window.__t.startPageEdit()");
-    await new Promise((r) => setTimeout(r, 300));
+    await editing();
 
     const markdown = () => window.eval("window.__t.collectPageMarkdown()");
     const paragraph = () => [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')]
