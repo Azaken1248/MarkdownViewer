@@ -48,6 +48,7 @@ const SUITES = [
   ["limits", "limits.test.js", "How complicated the code is allowed to get, and the budget for it"],
   ["operations", "operations.test.js", "The Dockerfile and the deployment notes, against what the server does"],
   ["build", "build.test.js", "The optional bundles, and that they are the same app unbundled"],
+  ["production", "production.test.js", "A NODE_ENV=production boot, and every asset its pages name"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"],
   ["diagram-page", "diagram-page.test.js", "The diagram editor page, its address and the document handoff"]

@@ -262,6 +262,22 @@ rate-limited per address like anything else that does not.
 That is the useful check: the process being up is not the failure that happens,
 a volume that did not mount is.
 
+It does not, however, say whether the pages work. The app stamps a hash of each
+asset into the URL that names it, so a page and its assets cannot disagree
+about a version — and a stamped URL that does not resolve is a page that loads
+and then does nothing, which `/healthz` cannot see. After a deploy:
+
+```bash
+npm run smoke https://example.com
+```
+
+It fetches the app shell and the error page, pulls every asset out of the HTML
+as served, and fetches each one at the stamped address it was named at. It also
+checks the security headers are on the response and that a 404 is the app's own
+error page rather than a stack trace. CI runs the same checks against a
+`NODE_ENV=production` boot on every run, and the `production` suite runs them
+against a server it starts itself.
+
 ### The log
 
 One line per request on stdout, written when the response finishes so the

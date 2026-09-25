@@ -178,6 +178,43 @@ check("...and the escaping helper it points at is where it says",
 check("...and the history really has no attribution trailers, as it claims",
   contributing.includes("No attribution trailers"), true);
 
+console.log("=== the pipeline is pinned, bounded, and boots what gets deployed ===");
+
+/* The workflow is the one file here that nothing else runs, so a claim in it
+ * is checked by being merged rather than by being true. These are the parts
+ * that can be read without a runner.
+ */
+const workflow = read(".github", "workflows", "ci.yml");
+
+// A tag is mutable: actions/checkout@v4 is whatever that tag points at today,
+// and "pin your actions" means pin to something that cannot move.
+const uses = [...workflow.matchAll(/uses:\s*(\S+)/g)].map(([, one]) => one);
+check("(the workflow uses some actions)", uses.length > 0, true);
+check("every action is pinned to a commit, not to a tag",
+  uses.filter((one) => !/@[0-9a-f]{40}$/.test(one)), []);
+check("...each with the version it is, in a comment beside it",
+  uses.every((one) => new RegExp(`${one}\\s*#\\s*v\\d`).test(workflow)), true);
+
+check("a second push does not run a second pipeline against the same branch",
+  /concurrency:[\s\S]{0,200}cancel-in-progress:\s*true/.test(workflow), true);
+check("...and a hung run cannot burn the six-hour default",
+  (workflow.match(/timeout-minutes:/g) || []).length >= 2, true);
+check("...and the token is not granted more than is used",
+  /permissions:\s*\n\s*contents:\s*read/.test(workflow), true);
+
+/* The boot check exists to catch "it passes its tests and will not start".
+ * Under NODE_ENV=production, because that is the mode a deployment runs in
+ * and Express does not behave the same way under it.
+ */
+check("CI boots the server the way a deployment runs it",
+  /NODE_ENV=production/.test(workflow), true);
+check("...and asks it for more than a health check",
+  workflow.includes("tools/smoke.js"), true);
+check("...which is a tool that exists and a script that names it",
+  fs.existsSync(path.join(ROOT, "tools", "smoke.js")) && Boolean(scripts.smoke), true);
+check("...and the same checks run in the suite, not a second copy of them",
+  read("test", "production.test.js").includes('require("../tools/smoke.js")'), true);
+
 console.log("=== and every document it points at exists ===");
 
 // A README full of links to pages that were renamed is worse than a long

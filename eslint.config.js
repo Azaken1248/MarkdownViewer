@@ -203,9 +203,9 @@ const NODE_GLOBALS = {
  * and the rule counts nested quantifiers without asking whether they overlap.
  * That is also why the other twelve are reported: each was given an input
  * built to make it blow up — sixty thousand characters down the path that has
- * to fail — and the worst of them took two milliseconds. The list of them is
- * pinned in test/limits.test.js, so a new one is a regex somebody has to look
- * at rather than a number that grew.
+ * to fail — and the worst of them took two milliseconds. They are pinned in
+ * test/limits.test.js by file and count, so a new one is a regex somebody has
+ * to look at rather than a number that grew.
  *
  * Off, with the reason rather than without:
  *

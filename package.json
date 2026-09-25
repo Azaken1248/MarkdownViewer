@@ -25,6 +25,7 @@
     "coverage": "c8 node test/run.js",
     "lint": "eslint .",
     "audit:cdn": "node tools/audit-cdn.js --level=moderate",
+    "smoke": "node tools/smoke.js",
     "backup": "node tools/backup.js",
     "restore": "node tools/restore.js",
     "typecheck": "tsc -p jsconfig.json",

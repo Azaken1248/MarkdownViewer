@@ -43,23 +43,26 @@ const RULES = ["complexity", "max-lines-per-function", "max-depth", "max-params"
  */
 const UNSAFE_REGEX_RULE = "security/detect-unsafe-regex";
 
-const PROBED_REGEXES = [
-  "lib/http/asset-versions.js:44",
-  "lib/link-preview.js:672",
-  "public/js/dd/paint.js:23",
-  "public/js/dm/cells.js:216",
-  "public/js/dm/grammar.js:12",
-  "public/js/dm/grammar.js:13",
-  "public/js/dm/grammar.js:89",
-  "public/js/dm/grammar.js:141",
-  "public/js/md/lazy.js:28",
-  "public/js/md/mermaid.js:28",
-  "public/js/visual-editor.js:40",
-  "public/js/visual-editor.js:749",
-  "test/operations.test.js:197",
-  "test/visual/model.js:346",
-  "tools/cdn-pins.js:25"
-];
+/* By file and count, not by line.
+ *
+ * This was a list of file:line, which meant that inserting a paragraph above
+ * one of them failed this check while saying a regex had appeared — and that
+ * is exactly what happened, twice. A file and how many it holds is stable
+ * against edits elsewhere in it and still catches a new one.
+ */
+const PROBED_REGEXES = {
+  "lib/http/asset-versions.js": 1,
+  "lib/link-preview.js": 1,
+  "public/js/dd/paint.js": 1,
+  "public/js/dm/cells.js": 1,
+  "public/js/dm/grammar.js": 4,
+  "public/js/md/lazy.js": 1,
+  "public/js/md/mermaid.js": 1,
+  "public/js/visual-editor.js": 2,
+  "test/operations.test.js": 1,
+  "test/visual/model.js": 1,
+  "tools/cdn-pins.js": 1
+};
 
 /* The budget: none of them.
  *
@@ -150,18 +153,18 @@ const CLOSED_OVER = [];
   check("...and each says why on the line above", unexplained, []);
 
   console.log("=== and the regexes called unsafe are the ones that were probed ===");
-  const flagged = [];
+  const flagged = {};
   for (const result of results) {
     const relative = path.relative(root, result.filePath);
     for (const message of result.messages) {
       if (message.ruleId === UNSAFE_REGEX_RULE) {
-        flagged.push(`${relative}:${message.line}`);
+        flagged[relative] = (flagged[relative] || 0) + 1;
       }
     }
   }
 
   check("every regex the plugin calls unsafe has been looked at",
-    flagged.sort(), [...PROBED_REGEXES].sort());
+    flagged, PROBED_REGEXES);
 
   process.exit(finish());
 })().catch((error) => {
