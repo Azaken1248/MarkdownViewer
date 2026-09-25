@@ -102,16 +102,16 @@ var MdLazy = (function () {
       loaded: () => Boolean(window.katex && window.renderMathInElement),
       assets: [
         {
-          css: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
-          integrity: "sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
+          css: "https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css",
+          integrity: "sha384-nH0MfJ44wi1dd7w6jinlyBgljjS8EJAh2JBoRad8a3VDw2K69vfaaqm4WnR+gXtA"
         },
         {
-          js: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
-          integrity: "sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
+          js: "https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.js",
+          integrity: "sha384-CwjPRVHTvLiMBFjEoij+QZViMV5rhTOIp7CJzl24JEqpRDA1sJFHVXXLURktbYYp"
         },
         {
-          js: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js",
-          integrity: "sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk"
+          js: "https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/contrib/auto-render.min.js",
+          integrity: "sha384-bjyGPfbij8/NDKJhSGZNP/khQVgtHUE5exjm4Ydllo42FwIgYsdLO2lXGmRBf5Mz"
         }
       ]
     }

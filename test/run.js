@@ -39,6 +39,7 @@ const SUITES = [
   ["graphql", "graphql.test.js", "The graph: behind the read policy, says what /api says, and has limits"],
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
+  ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
   ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],

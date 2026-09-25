@@ -243,6 +243,63 @@ The runtime surface is four packages — `express`, `multer`, `better-sqlite3`,
 and a lower one shows in the log; Dependabot opens a weekly pull request for
 anything behind.
 
+That covers `package.json` and nothing else. Eight more libraries arrive in the
+browser as `<script>` tags or lazily fetched URLs, and `npm audit` had never
+looked at one of them:
+
+| | version | loaded by | when |
+| --- | --- | --- | --- |
+| marked | 15.0.12 | index, share | eagerly — nothing renders without it |
+| DOMPurify | 3.4.16 | index, share | eagerly — same |
+| @phosphor-icons/web | 2.1.2 | every page | eagerly, as CSS |
+| mermaid | 11.16.1 | `md/lazy.js` | first diagram |
+| KaTeX | 0.16.47 | `md/lazy.js` | first equation |
+| highlight.js | 11.11.1 | `md/lazy.js` | first code block |
+| svg-pan-zoom | 3.6.1 | `md/lazy.js` | first diagram |
+| pyodide | 314.0.3 | `pyodide-worker.js` | first Python cell |
+
+Every one is pinned to an exact version and checked with subresource
+integrity, which stops a compromised CDN serving different bytes — and does
+nothing at all about a vulnerability in the library itself.
+
+`npm run audit:cdn` closes that. It reads the versions back out of the source
+rather than from a list beside it, writes them into a manifest nobody installs,
+and asks the same advisory database the real audit uses. It also fetches each
+pinned asset and checks the bytes against the hash beside it, because bumping
+a version means editing a URL and an opaque string next to it, and getting the
+second one wrong is a script the browser silently refuses to run. CI runs it
+after `npm audit`, at `--level=moderate` rather than high: this is eight
+packages, all of them running in a reader's browser over somebody else's
+document, so the noise is bounded and the blast radius is not.
+
+The first run was not academic. DOMPurify was pinned at 3.1.6 with **twenty
+XSS advisories** outstanding against it — in the one library whose entire job
+here is refusing a document's script — and KaTeX at 0.16.11, where `\htmlData`
+did not validate attribute names. Both are now on the fixed versions.
+
+### The sanitizer, actually run
+
+Six suites render markdown and all six stub DOMPurify with
+`{ sanitize: (html) => html }`, which is right for what each of them is testing
+and meant the app's real defence against a document carrying a script was never
+once exercised. DOMPurify is now a devDependency, pinned to the same version
+the pages load — the `sanitizer` suite checks that those two agree first, then
+takes the options out of `md/lazy.js` and runs the real thing.
+
+Thirteen payloads go in and nothing executable comes out. The more useful half
+is what the suite writes down about the things that *do* survive, each of which
+looks wrong until you find the layer that actually stops it:
+
+- A `<form>` is on DOMPurify's default allow-list, so a shared document can
+  render something that looks like a sign-in box. `form-action 'self'` in the
+  CSP is what stops it posting anywhere.
+- `ADD_DATA_URI_TAGS: ["img"]` is what makes a pasted image work, and it allows
+  any `data:` type on an `<img>` — the image-type list in
+  `ALLOWED_URI_REGEXP` does not gate that tag. A browser will not run HTML it
+  was handed as an image, so this is a thing to know rather than a hole.
+- A `data:` image is allowed on an `<a>`, where every current browser refuses
+  a top-level navigation to `data:`.
+
 The libraries the browser loads from a CDN are not in `package.json`, so
 `npm audit` never sees them. They are pinned to exact versions and checked by
 SRI hash, which defends against a compromised CDN but not against a
@@ -276,6 +333,7 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm run lint` | ESLint over the server, the client and the tests |
 | `npm run lint:fix` | The same, applying the fixes it can |
 | `npm run typecheck` | Check the JSDoc types with `tsc --checkJs`. No TypeScript, no build |
+| `npm run audit:cdn` | Advisories and integrity for the eight libraries loaded from a CDN, which `npm audit` cannot see |
 
 ---
 

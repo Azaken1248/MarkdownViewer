@@ -48,6 +48,17 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      # ...and the seven libraries npm audit cannot see, because they are
+      # <script> tags rather than entries in package.json. SRI pins their
+      # bytes, which stops a compromised CDN and does nothing about a
+      # vulnerability in the library itself — and the library doing the most
+      # security-relevant work here is the HTML sanitizer. The threshold is
+      # moderate rather than high: this is eight packages, all of them running
+      # in a reader's browser over somebody else's document, so the noise is
+      # bounded and the blast radius is not.
+      - name: Audit the libraries loaded from a CDN
+        run: npm run audit:cdn
+
       # Optional at runtime — with no build the pages serve the scripts they
       # name — but built here so the bundles are what the suite compares
       # against, and so a change that breaks the build fails now rather than
