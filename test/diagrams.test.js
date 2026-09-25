@@ -170,14 +170,32 @@ check("darkMode is derived, not hardcoded", js.includes('darkMode: theme === "da
 check("the engine keeps the source needed to redraw", js.includes("block.dataset.mermaidSource"), true);
 check("...and exposes a way to invalidate the baked-in palette",
   js.includes("resetMermaidForThemeChange"), true);
-check("the app redraws its diagrams on a theme change",
-  appJs.includes("async function repaintDiagramsForTheme("), true);
+/* The redraw is the engine's, and both pages ask it for the same one.
+ *
+ * It used to be written out twice — once in app/theme.js, once in share.js —
+ * and these checks asserted that both copies existed, which is the wrong thing
+ * to hold onto: four steps in an order that matters, written down twice, is
+ * two chances to get the order wrong and one place a fix would land. So what
+ * is checked now is that there is one of them and that the pages call it.
+ */
+check("the engine redraws diagrams on a theme change",
+  js.includes("async function repaintMermaidForTheme("), true);
+// Inside that function, not anywhere in the engine: destroyPanZoomInstances
+// is called and defined in several places, and what matters is the order of
+// the four steps in the one that redraws.
+const repaint = js.slice(js.indexOf("async function repaintMermaidForTheme("));
 check("...after releasing pan/zoom on the old SVGs",
-  appJs.indexOf("destroyPanZoomInstances();") < appJs.indexOf("block.dataset.mermaidSource"), true);
+  repaint.indexOf("destroyPanZoomInstances();") < repaint.indexOf("block.dataset.mermaidSource"), true);
+check("...and after forgetting the palette it was drawn with",
+  repaint.indexOf("mermaidState.ready = false;") < repaint.indexOf("destroyPanZoomInstances();"), true);
+check("the app asks it to, naming the panels it has",
+  /repaintMermaidForTheme\(\[elements\.docContent/.test(appJs), true);
 // The share page renders the same diagrams and has the same theme toggle, so
 // it needs the same repaint or its diagrams keep the old palette.
-check("the share page does the same", shareJs.includes("resetMermaidForThemeChange"), true);
-check("...and redraws from the stored source", shareJs.includes("block.dataset.mermaidSource"), true);
+check("the share page asks for the same one",
+  shareJs.includes("MarkdownCore.repaintMermaidForTheme("), true);
+check("...and neither page writes its own",
+  [appJs, shareJs].some((source) => source.includes("block.dataset.mermaidSource")), false);
 
 // A diagram carrying its own layout is drawn by us rather than by Mermaid. A
 // page that does not load the drawing still renders that diagram — Mermaid

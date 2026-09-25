@@ -14,6 +14,7 @@ const boot = fs.readFileSync(path.join(PUBLIC_DIR, "js", "theme-boot.js"), "utf8
 const diagramHtml = fs.readFileSync(path.join(PUBLIC_DIR, "diagram.html"), "utf8");
 const shareHtml = fs.readFileSync(path.join(PUBLIC_DIR, "share.html"), "utf8");
 const errorHtml = fs.readFileSync(path.join(PUBLIC_DIR, "error.html"), "utf8");
+const shareJs = fs.readFileSync(path.join(PUBLIC_DIR, "js", "share.js"), "utf8");
 
 const { check, fail, finish } = createChecker("THEME");
 
@@ -158,6 +159,23 @@ check("its label says both the state and the next state",
 check("theme-color meta follows the theme", boot.includes('meta[name="theme-color"]'), true);
 check("...and app.js does not keep a second copy of any of it",
   /THEME_CYCLE|THEME_COLORS|THEME_STORAGE_KEY/.test(js), false);
+
+/* Nor the share page, which is where the second copy actually was.
+ *
+ * It had its own key, its own cycle, its own META and its own apply — and the
+ * copy had already fallen behind: ThemeSwitch.apply moves the
+ * <meta name="theme-color">, and share.html has one, so switching the theme
+ * there left the browser chrome on the colour it had before. That is the
+ * whole argument for one owner, and it is worth a check rather than a memory.
+ */
+check("the share page keeps no copy of the key, the cycle or the labels",
+  /THEME_CYCLE|THEME_STORAGE_KEY|THEME_META = \{|mdviewer\.theme/.test(shareJs), false);
+check("...it asks ThemeSwitch to apply a choice",
+  shareJs.includes("ThemeSwitch.apply("), true);
+check("...and never writes the preference down itself",
+  /localStorage\.setItem/.test(shareJs), false);
+check("...so the theme-color meta follows there too, from the one place",
+  shareHtml.includes('name="theme-color"') && boot.includes('meta[name="theme-color"]'), true);
 check("every page with a theme loads the script that holds the cycle",
   [html, diagramHtml, shareHtml, errorHtml].every((one) => one.includes("theme-boot.js")), true);
 check("...and the diagram page has a switch of its own",

@@ -71,6 +71,15 @@ var MdText = (function () {
     return new TextDecoder().decode(bytes);
   }
 
+  /* Which theme is showing, read off <html>.
+   *
+   * `data-theme` is the contract between theme-boot.js, which writes it before
+   * the page paints and is the only thing that changes it, and the stylesheet,
+   * which is all custom properties hanging off it. Reading the attribute is
+   * how the engine joins that without knowing ThemeSwitch exists — it renders
+   * the same documents on the share page, and a renderer that needs one of the
+   * app's globals is a renderer that only works on one page.
+   */
   function activeThemeName() {
     return document.documentElement.dataset.theme === "light" ? "light" : "dark";
   }

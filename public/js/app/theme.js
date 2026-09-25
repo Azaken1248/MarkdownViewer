@@ -1,12 +1,14 @@
 /* Theme.
  *
  * Every colour in the stylesheet is a custom property, so switching themes is
- * a single attribute on <html>. Two things do not follow automatically and are
- * handled here: the browser-chrome theme-color meta, and Mermaid, which bakes
- * hex into the SVG it emits and has to redraw.
+ * a single attribute on <html>, and theme-boot.js owns that attribute, the key
+ * it is remembered under, the cycle and the browser-chrome theme-color meta —
+ * on every page, including the two this file is not loaded on.
  *
- * theme-boot.js has already applied the stored preference before first paint;
- * this only takes over once the user touches the toggle.
+ * So what is left here is what only the app has to do about a theme change:
+ * say so out loud, and hand the engine the panels whose diagrams have to be
+ * drawn again. theme-boot.js has already applied the stored preference before
+ * first paint; this takes over once somebody touches the toggle.
  */
 
 /* exported AppTheme */
@@ -40,44 +42,10 @@ var AppTheme = (function () {
     }
 
     if (resolved !== resolvedBefore) {
-      await repaintDiagramsForTheme();
-    }
-  }
-
-  // Mermaid renders to a static SVG with the palette inlined, so the only way to
-  // recolour a diagram is to draw it again from its source.
-  async function repaintDiagramsForTheme() {
-    const roots = [elements.docContent, elements.editorPreview].filter(Boolean);
-    const blocks = roots.flatMap((root) => [.../** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(".mermaid-block"))]);
-    if (blocks.length === 0) {
-      // Nothing on screen to redraw, but the next render must not reuse the old
-      // palette.
-      MarkdownCore.resetMermaidForThemeChange();
-      return;
-    }
-
-    // Their SVGs are about to be replaced; leaving the instances bound would leak
-    // handlers onto detached nodes.
-    MarkdownCore.destroyPanZoomInstances();
-
-    for (const block of blocks) {
-      const source = block.dataset.mermaidSource;
-      if (!source) {
-        continue;
-      }
-
-      block.removeAttribute("data-processed");
-      // Sizing is derived from the rendered viewBox and has to be measured again.
-      block.style.aspectRatio = "";
-      block.style.maxWidth = "";
-      block.textContent = source;
-      block.classList.add("mermaid");
-    }
-
-    MarkdownCore.resetMermaidForThemeChange();
-
-    for (const root of roots) {
-      await MarkdownCore.renderMermaidBlocks(root);
+      // The redraw is the engine's, because the share page needs the same one
+      // and the order the four steps happen in is easy to get wrong. What is
+      // this page's to know is which panels hold diagrams.
+      await MarkdownCore.repaintMermaidForTheme([elements.docContent, elements.editorPreview]);
     }
   }
 

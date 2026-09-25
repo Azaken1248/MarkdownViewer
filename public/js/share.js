@@ -10,14 +10,6 @@
 (function () {
   "use strict";
 
-  const THEME_STORAGE_KEY = "mdviewer.theme";
-  const THEME_CYCLE = ["dark", "light", "auto"];
-  const THEME_META = {
-    dark: { icon: "ph-moon", label: "Dark theme", next: "light" },
-    light: { icon: "ph-sun", label: "Light theme", next: "auto" },
-    auto: { icon: "ph-circle-half", label: "Theme follows your system", next: "dark" }
-  };
-
   const elements = {
     loading: document.getElementById("shareLoading"),
     error: document.getElementById("shareError"),
@@ -137,76 +129,34 @@
     await MarkdownCore.renderMermaidBlocks(elements.content);
   }
 
-  // -- theme ----------------------------------------------------------------
-
-  function themePreference() {
-    const stored = document.documentElement.dataset.themePreference;
-    return THEME_CYCLE.includes(stored) ? stored : "dark";
-  }
-
-  function resolveTheme(preference) {
-    if (preference !== "auto") {
-      return preference;
-    }
-
-    return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  }
-
-  function syncThemeToggle() {
-    const preference = themePreference();
-    const meta = THEME_META[preference];
-    const icon = elements.themeToggle.querySelector("i");
-    if (icon) {
-      icon.className = `ph ${meta.icon}`;
-    }
-
-    const label = `${meta.label}. Switch to ${THEME_META[meta.next].label.toLowerCase()}`;
-    elements.themeToggle.setAttribute("aria-label", label);
-    elements.themeToggle.title = label;
-  }
-
+  /* -- theme ---------------------------------------------------------------
+   *
+   * The cycle, the icons, the key it is written under and the resolving of
+   * "auto" all live in theme-boot.js, which this page already loads in <head>
+   * to get the colours right before first paint. This file used to carry its
+   * own copy of all four, and they had already drifted: ThemeSwitch.apply
+   * also moves the <meta name="theme-color">, which this page has and which
+   * therefore stayed on the old colour every time somebody switched.
+   *
+   * What is left here is the part only this page knows: which panel holds the
+   * diagrams that have to be drawn again.
+   */
   async function applyTheme(preference) {
-    const before = document.documentElement.dataset.theme;
-    const resolved = resolveTheme(preference);
+    const before = ThemeSwitch.active();
+    const resolved = ThemeSwitch.apply(preference);
 
-    document.documentElement.dataset.themePreference = preference;
-    document.documentElement.dataset.theme = resolved;
-
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, preference);
-    } catch {
-      // Private mode; the choice still holds for this page.
-    }
-
-    syncThemeToggle();
+    ThemeSwitch.dress(elements.themeToggle);
 
     if (resolved !== before) {
-      // Mermaid inlines its palette, so a theme change means redrawing.
-      MarkdownCore.resetMermaidForThemeChange();
-      MarkdownCore.destroyPanZoomInstances();
-
-      for (const block of /** @type {NodeListOf<HTMLElement>} */ (elements.content.querySelectorAll(".mermaid-block"))) {
-        const source = block.dataset.mermaidSource;
-        if (!source) {
-          continue;
-        }
-
-        block.removeAttribute("data-processed");
-        block.style.aspectRatio = "";
-        block.style.maxWidth = "";
-        block.textContent = source;
-        block.classList.add("mermaid");
-      }
-
-      await MarkdownCore.renderMermaidBlocks(elements.content);
+      await MarkdownCore.repaintMermaidForTheme([elements.content]);
     }
   }
 
   elements.themeToggle.addEventListener("click", () => {
-    void applyTheme(THEME_META[themePreference()].next);
+    void applyTheme(ThemeSwitch.META[ThemeSwitch.preference()].next);
   });
 
-  syncThemeToggle();
+  ThemeSwitch.dress(elements.themeToggle);
   MarkdownCore.bindWheelZoomModifier();
   void loadSharedDocument();
 })();

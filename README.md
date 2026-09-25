@@ -155,6 +155,42 @@ elsewhere — DOMPurify's output, highlight.js's spans, a diagram this app drew
 `headers` suite checks that the rule is on, that the helper escapes what it
 promises to, and that every opt-out has a sentence above it.
 
+### One owner for a rule two pages apply
+
+Four pages have a theme and only two of them load `app.js`, so the cycle, the
+key it is remembered under, the resolving of `auto` and the
+`<meta name="theme-color">` all live in
+[`theme-boot.js`](public/js/theme-boot.js) — the script that already runs in
+`<head>` on every one of them. `app/theme.js` and `share.js` call it.
+
+That was not free advice. `share.js` had carried its own copy of all four, and
+the copy had fallen behind: `ThemeSwitch.apply` moves the `theme-color` meta
+and `share.html` has one, so switching the theme on a shared document left the
+browser chrome on the colour it had before. Consolidating fixed it, which is
+the argument for consolidating. The `theme` suite now checks that neither page
+keeps a second copy.
+
+The same shape twice more:
+
+- The Mermaid repaint. A theme change means drawing every diagram again — four
+  steps in an order that matters — and it was written out in both
+  `app/theme.js` and `share.js`. It is now `repaintMermaidForTheme` in the
+  render engine, which both pages hand their own panels to.
+- `escapeHtml`. The server filled its four HTML templates with its own six
+  lines of it, and the two had drifted: the server wrote `String(value || "")`,
+  so a substitution of `0` or `false` escaped to nothing at all, while the
+  client wrote `?? ""` and escaped it to `"0"`. `lib/http/html.js` now requires
+  [`public/js/dom-html.js`](public/js/dom-html.js), the way `lib/docs/paths.js`
+  already requires `doc-kinds.js` — a plain script in the browser and a
+  CommonJS module on the server, which is the seam for the two rules about text
+  that both sides have to apply the same way. The `headers` suite runs both
+  through the same inputs.
+
+The render engine deliberately does **not** join in: it reads `data-theme` off
+`<html>` rather than calling `ThemeSwitch`, because it renders the same
+documents on the share page, where most of the app's globals are not loaded. A
+renderer that needs one of them is a renderer that works on one page.
+
 ### What the linter is asked to catch
 
 `@eslint/js` recommended, plus the rules that catch a class of bug rather than

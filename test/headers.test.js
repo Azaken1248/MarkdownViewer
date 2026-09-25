@@ -152,6 +152,23 @@ function carried(headers) {
     check("the escape covers the five characters that matter",
       escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
 
+    /* And the server escapes with the same one, not a copy of it.
+     *
+     * lib/http/html.js fills the four templates this app serves — the error
+     * page, the share page's unfurl tags, the embed tags — and it used to do
+     * that with its own six lines. They had drifted: that copy wrote
+     * `String(value || "")`, so 0 and false escaped to nothing, while this one
+     * writes `?? ""` and escapes them to their text. It now requires this
+     * file, the way lib/docs/paths.js requires doc-kinds.js, and these are the
+     * inputs the two used to disagree about.
+     */
+    const serverEscape = require("../lib/http/html.js").escapeHtml;
+    const bothSides = ["<>&\"'", "", "a<b", 0, false, NaN, null, undefined, 42, "0"];
+    check("the server escapes with the client's function, not a copy",
+      bothSides.map(serverEscape), bothSides.map(escapeHtml));
+    check("...so a zero is a zero on both sides of the wire",
+      [serverEscape(0), escapeHtml(0)], ["0", "0"]);
+
     /* Every opt-out is a sentence somebody wrote. The rule can be turned off
      * for a line, which is right for markup that was sanitized somewhere else
      * — but an opt-out with no reason on it is the thing this was meant to

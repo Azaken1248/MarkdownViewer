@@ -443,7 +443,7 @@ module.exports = [
   {
     // Browser code. No bundler, no modules — these are plain scripts.
     files: ["public/js/**/*.js"],
-    ignores: ["public/js/pyodide-worker.js", "public/js/doc-kinds.js"],
+    ignores: ["public/js/pyodide-worker.js", "public/js/doc-kinds.js", "public/js/dom-html.js"],
     plugins: { "no-unsanitized": noUnsanitized, security },
     languageOptions: {
       ecmaVersion: 2023,
@@ -454,10 +454,16 @@ module.exports = [
   },
 
   {
-    // The one file both sides load: a plain script in the browser and a
-    // CommonJS module on the server, so it may say `module` as well as
-    // `window`. Kept to that one file on purpose.
-    files: ["public/js/doc-kinds.js"],
+    /* The two files both sides load: a plain script in the browser and a
+     * CommonJS module on the server, so they may say `module` as well as
+     * `window`.
+     *
+     * doc-kinds.js is what a document filename means, and dom-html.js is how
+     * text is escaped — both are rules the server and the client have to
+     * apply the same way, which is why they are shared rather than copied.
+     * Kept to those two on purpose: this is the seam, not a convention.
+     */
+    files: ["public/js/doc-kinds.js", "public/js/dom-html.js"],
     plugins: { "no-unsanitized": noUnsanitized, security },
     languageOptions: {
       ecmaVersion: 2023,

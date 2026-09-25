@@ -31,9 +31,11 @@ interface Window {
   loadPyodide?: any;
 }
 
-// doc-kinds.js is required by lib/docs/paths.js and loaded by every page, so
-// the checker sees it as the module and needs telling about the global.
+// The two files both sides use: required by lib/ and loaded by every page, so
+// the checker sees each as the module it also is and needs telling about the
+// global the page knows it by.
 declare const DocKinds: typeof import("../public/js/doc-kinds.js");
+declare const DomHtml: typeof import("../public/js/dom-html.js");
 
 // The Python worker's own scope (pyodide-worker.js). The DOM lib and the
 // worker lib cannot both be loaded, so the two names it uses are declared here.

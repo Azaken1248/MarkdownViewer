@@ -282,7 +282,59 @@ var MdPanZoom = (function () {
   }
 
 
+  /* Draw every diagram on the page again, because the theme moved.
+   *
+   * Mermaid renders to a static SVG with the palette written into it, so the
+   * only way to recolour a diagram is to render it from its source again.
+   * That makes this four steps that have to happen in this order — forget the
+   * old palette, unbind the pan-zoom instances before their SVGs are replaced,
+   * put each block back to its source, render — and getting the order wrong
+   * leaks handlers onto detached nodes or redraws in the colours it just left.
+   *
+   * It was written twice, once in app/theme.js and once in share.js, which is
+   * two chances to get that order wrong and one page where a fix would land.
+   * `roots` is what differs between them: the app has a document and an editor
+   * preview, the share page has one panel.
+   */
+  async function repaintMermaidForTheme(roots) {
+    const targets = roots.filter(Boolean);
+    const blocks = targets.flatMap((root) =>
+      [.../** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(".mermaid-block"))]);
+
+    // Nothing on screen to redraw, but the next render must not reuse the old
+    // palette either.
+    mermaidState.ready = false;
+
+    if (blocks.length === 0) {
+      return;
+    }
+
+    // Their SVGs are about to be replaced; leaving the instances bound would
+    // leak handlers onto detached nodes.
+    destroyPanZoomInstances();
+
+    for (const block of blocks) {
+      const source = block.dataset.mermaidSource;
+      if (!source) {
+        continue;
+      }
+
+      block.removeAttribute("data-processed");
+      // Sizing is derived from the rendered viewBox and has to be measured
+      // again.
+      block.style.aspectRatio = "";
+      block.style.maxWidth = "";
+      block.textContent = source;
+      block.classList.add("mermaid");
+    }
+
+    for (const root of targets) {
+      await renderMermaidBlocks(root);
+    }
+  }
+
   return {
-    sizeDiagramContainer, applyPanZoom, destroyPanZoomInstances, setWheelZoomArmed, bindWheelZoomModifier, renderMermaidBlocks
+    sizeDiagramContainer, applyPanZoom, destroyPanZoomInstances, setWheelZoomArmed, bindWheelZoomModifier, renderMermaidBlocks,
+    repaintMermaidForTheme
   };
 })();

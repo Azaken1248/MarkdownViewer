@@ -12,8 +12,11 @@
 //
 // They are plain scripts, not modules — the rest of this app is too — so they
 // hang their namespaces off window and touch nothing else. The engine owns its
-// own Mermaid/pan-zoom state and asks the host page for the two things it
-// cannot know: which theme is showing, and where to report a render failure.
+// own Mermaid and pan-zoom state, is told by the host page where to report a
+// render failure (`configure`), and reads which theme is showing off <html>'s
+// data-theme — the attribute theme-boot.js writes before first paint. It does
+// not reach for ThemeSwitch or for any of the app's other globals: it renders
+// the same documents on the share page, where most of them are not loaded.
 
 /* exported MarkdownCore */
 var MarkdownCore = (function () {
@@ -38,7 +41,7 @@ var MarkdownCore = (function () {
   } = MdCode;
   const {
     sizeDiagramContainer, applyPanZoom, destroyPanZoomInstances,
-    bindWheelZoomModifier, renderMermaidBlocks
+    bindWheelZoomModifier, renderMermaidBlocks, repaintMermaidForTheme
   } = MdPanZoom;
 
   return {
@@ -87,6 +90,9 @@ var MarkdownCore = (function () {
       // next render has to re-initialize with the other palette.
       mermaidState.ready = false;
     },
+    // ...and this is that, plus drawing again what is already on the page.
+    // Both pages that have a theme toggle call it.
+    repaintMermaidForTheme,
     activeThemeName,
     DIAGRAM_PALETTES
   };

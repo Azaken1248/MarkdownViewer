@@ -99,5 +99,25 @@ var DomHtml = (function () {
     return strings.reduce((out, text, index) => out + piece(values[index - 1]) + text);
   }
 
-  return { html, trusted, escapeHtml };
+  const DomHtml = { html, trusted, escapeHtml };
+
+  /* The server takes escapeHtml from here too.
+   *
+   * It fills the four HTML templates it serves — the error page, the share
+   * page's unfurl tags, the embed tags — and it was doing that with its own
+   * six-line copy in lib/http/html.js. The two had already drifted: that one
+   * wrote `String(value || "")`, so a substitution of 0 or false escaped to
+   * nothing at all, while this one writes `?? ""` and escapes it to "0". A
+   * width of 0 would have rendered as an empty attribute on one side of the
+   * wire and as "0" on the other.
+   *
+   * So there is one of them, and this is it. Same arrangement as doc-kinds.js
+   * next door, and for the same reason: a rule about text that both sides
+   * apply is a rule that has to be the same rule.
+   */
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = DomHtml;
+  }
+
+  return DomHtml;
 })();
