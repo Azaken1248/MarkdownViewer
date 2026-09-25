@@ -199,8 +199,81 @@ rate-limited per address like anything else that does not.
 That is the useful check: the process being up is not the failure that happens,
 a volume that did not mount is.
 
-Request logging is one line per request on stdout (`LOG_REQUESTS`, on by
-default; `LOG_STATIC` adds the asset requests, off by default because they
-drown out everything else). The security events — sign-ins, failures, lockouts,
-permission refusals — are a separate JSON-lines stream controlled by
-`AUDIT_LOG`.
+### The log
+
+One line per request on stdout, written when the response finishes so the
+status and the duration are real (`LOG_REQUESTS`, on by default; `LOG_STATIC`
+adds the asset requests, off by default because they drown out everything
+else).
+
+```
+2026-09-25T09:45:02.684Z GET /api/docs status=200 ms=1.7 id=00f2d3ea user=aza
+```
+
+`LOG_FORMAT=json` makes each line an object instead, which is what to set when
+something is collecting them:
+
+```json
+{"ts":"2026-09-25T09:45:02.684Z","level":"info","msg":"GET /api/docs",
+ "status":200,"ms":"1.7","id":"00f2d3eaad3449f2","user":"aza","userId":"user_7451…"}
+```
+
+`LOG_LEVEL` is `debug`, `info`, `warn` or `error`, and is how the volume comes
+down without a deploy. Warnings and errors go to stderr either way, so a
+pipeline that separates the two keeps working.
+
+**The id is the useful part.** Every request gets one, it is echoed as
+`X-Request-Id`, and it is on both the access line and the stack trace of a 500
+— so a user reporting "it broke" has a number in their response headers that
+finds the exact failure. Behind a proxy that already sets `X-Request-Id`, that
+one is kept instead, so a request is one id across the chain; with
+`TRUST_PROXY` off the header is ignored, because otherwise a client chooses
+what its own log line says.
+
+**What a line never carries:** the query string (search terms are the contents
+of somebody's documents), the body, or any header. Who made the request is on
+it, because that is the question being asked of a log.
+
+The security events — sign-ins, failures, lockouts, permission refusals — are a
+separate JSON-lines stream controlled by `AUDIT_LOG`.
+
+### Metrics
+
+`GET /metrics` is Prometheus text. It is a 404 unless `METRICS_TOKEN` is set,
+and then it wants that token as a bearer:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: mdviewer
+    authorization:
+      credentials: the-value-of-METRICS_TOKEN
+    static_configs:
+      - targets: ["127.0.0.1:4321"]
+```
+
+A scrape says how many requests failed and how long they took, which is more
+than an anonymous caller should learn about a private library — hence the
+token rather than an "allow from this network" rule there is no good way to
+get right here. The comparison is timing-safe and the route is rate-limited
+per address like `/healthz`.
+
+What is in it:
+
+| | |
+| --- | --- |
+| `mdviewer_requests_total{method,status}` | request rate and error rate, by status class |
+| `mdviewer_request_duration_seconds` | a histogram, so p50/p95/p99 are queryable |
+| `mdviewer_cache_{entries,bytes,bytes_max}` | how full each of the three in-memory caches is |
+| `mdviewer_cache_{hits,misses,evictions}_total` | whether its budget is the right budget |
+| `mdviewer_uptime_seconds` | how long since this process started |
+
+Nothing is labelled by path. A label with a request path in it has one value
+per document, and a scraper keeps every series it ever saw — that is how a
+metrics endpoint ends up holding every document title the app has served.
+
+The cache numbers are there for a specific question. Those three budgets —
+32MB, 48MB, 16MB — are constants somebody picked once with no data, and
+whether they are right is not answerable from the source. A cache that never
+evicts is bigger than it needs to be; one that misses constantly is smaller.
+Now there is a number.

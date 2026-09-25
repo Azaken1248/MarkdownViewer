@@ -34,7 +34,8 @@ const {
   sanitizeDocPath
 } = require("./lib/docs/paths");
 const { securityHeaders } = require("./lib/http/headers");
-const { requestLogger } = require("./lib/http/logging");
+const { requestLogger, requestIds, createLog } = require("./lib/http/logging");
+const { createMetrics } = require("./lib/metrics");
 const { templateReader } = require("./lib/http/html");
 const { createBaseUrlResolver } = require("./lib/http/urls");
 const { createErrorPages } = require("./lib/http/errors");
@@ -188,9 +189,33 @@ app.use(securityHeaders({ secure: COOKIES_SECURE }));
 const LOG_REQUESTS = String(process.env.LOG_REQUESTS || "true").toLowerCase() !== "false";
 const LOG_STATIC = String(process.env.LOG_STATIC || "").toLowerCase() === "true";
 
-if (LOG_REQUESTS) {
-  app.use(requestLogger({ logStatic: LOG_STATIC }));
-}
+/* One logger, made here and handed to whatever writes a line.
+ *
+ * text for a person reading `docker compose logs`, json for something
+ * collecting it; LOG_LEVEL is how the volume comes down without a deploy.
+ */
+const log = createLog({
+  level: String(process.env.LOG_LEVEL || "info").toLowerCase(),
+  format: String(process.env.LOG_FORMAT || "text").toLowerCase()
+});
+
+/* Every request gets a name, before anything else can fail.
+ *
+ * First in the stack on purpose: a request that is refused by the rate limiter
+ * or the body parser is exactly the one somebody will ask about, and it needs
+ * the same id in the log as it got in its X-Request-Id header.
+ */
+app.use(requestIds({ trustProxy: Boolean(TRUST_PROXY) }));
+
+// Counted whether or not it is logged: a static asset is not worth a line and
+// is still worth a number. Scraped at /metrics below.
+const metrics = createMetrics();
+
+app.use(requestLogger({
+  logStatic: LOG_STATIC,
+  log: LOG_REQUESTS ? log : undefined,
+  onFinished: (finished) => metrics.observe(finished)
+}));
 
 // The envelope limit has to sit above MAX_DOC_BYTES, not equal it: JSON escaping
 // inflates the payload, so a legal 2MB document arrives as a larger body. When the
@@ -287,7 +312,9 @@ app.post(["/api/docs/upload", "/api/upload/folder", "/api/assets"], limitUploads
 app.post("/api/docs", limitWrites);
 app.put("/api/docs/*file", limitWrites);
 app.get("/api/docs/search", limitSearch);
-app.use(["/healthz", "/graphql"], limitPublic);
+// /metrics is here too: it wants a token, and a ceiling per address is what
+// keeps somebody from guessing at that token as fast as the network allows.
+app.use(["/healthz", "/graphql", "/metrics"], limitPublic);
 
 // ---------------------------------------------------------------------------
 // What the app is built out of
@@ -307,7 +334,8 @@ const {
   readCachedTextFile,
   readSearchIndexEntry,
   readSnippetSource,
-  invalidateCachedContent
+  invalidateCachedContent,
+  cacheStats
 } = createDocumentCache({
   contentMaxBytes: CONTENT_CACHE_MAX_BYTES,
   indexMaxBytes: SEARCH_INDEX_MAX_BYTES,
@@ -401,6 +429,7 @@ const {
  */
 
 const { sendError, notFound, errorHandler } = createErrorPages({
+  log,
   templatePath: ERROR_TEMPLATE_PATH,
   stampAssetVersions: served("error"),
   siteName: SITE_NAME,
@@ -470,7 +499,12 @@ app.use(createMetaRoutes({
     return { file: fileName, content };
   },
   listLinks: () => linkStore.list().map(publicLink),
-  enableIntrospection: process.env.ENABLE_GRAPHQL_INTROSPECTION === "true"
+  enableIntrospection: process.env.ENABLE_GRAPHQL_INTROSPECTION === "true",
+  // /metrics is 404 until METRICS_TOKEN is set, and then wants it. See
+  // docs/OPERATIONS.md.
+  metrics,
+  metricsToken: String(process.env.METRICS_TOKEN || ""),
+  cacheStats
 }));
 
 app.use(createDocsRoutes({

@@ -35,6 +35,7 @@ const SUITES = [
   ["assets", "assets.test.js", "Pasted images: type and size limits, RBAC, dedupe and share scoping"],
   ["code", "code.test.js", "Code blocks: copy buttons, the clipboard paths and live highlighting"],
   ["audit", "audit.test.js", "The security events are written down, and the log holds nothing worth stealing"],
+  ["logging", "logging.test.js", "Request ids, log levels and formats, and what /metrics will tell a scraper"],
   ["headers", "headers.test.js", "The headers on every response, and HSTS only where the deployment is HTTPS"],
   ["graphql", "graphql.test.js", "The graph: behind the read policy, says what /api says, and has limits"],
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],

@@ -356,6 +356,9 @@ more than their names suggest, and that page says which and why.
 | `ALLOWED_ORIGINS` | *(none)* | Extra origins the CSRF origin check accepts, comma-separated, for a deployment reached under more than one name. `PUBLIC_BASE_URL` and loopback on `PORT` are always accepted. |
 | `MDVIEWER_STATE_DIR` | the checkout | Moves the documents, recycle bin and organizer somewhere else, so runtime state can live outside the repo. The test suite uses it to point at a temp directory. |
 | `LOG_REQUESTS` | `true` | One log line per request, written when the response finishes. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. How the volume comes down without a deploy. |
+| `LOG_FORMAT` | `text` | `text` for a person reading `docker compose logs`, `json` for something collecting it. |
+| `METRICS_TOKEN` | *(none)* | Turns on `/metrics` and is the bearer token it wants. Unset, that route is a 404. |
 | `LOG_STATIC` | `false` | Include static assets in that log. Off by default because they drown out everything else. |
 | `ENABLE_GRAPHQL_INTROSPECTION` | `false` | Re-enables GraphQL schema introspection for local schema work. |
 
