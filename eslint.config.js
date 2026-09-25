@@ -5,6 +5,7 @@
 
 const js = require("@eslint/js");
 const noUnsanitized = require("eslint-plugin-no-unsanitized");
+const security = require("eslint-plugin-security");
 
 const BROWSER_GLOBALS = {
   window: "readonly",
@@ -181,6 +182,67 @@ const NODE_GLOBALS = {
   TextDecoder: "readonly"
 };
 
+/* eslint-plugin-security, selectively.
+ *
+ * The plugin is fourteen rules and three of them account for almost four
+ * hundred reports here, none of which is a bug. What is below is the split,
+ * written down so the next person does not have to run it to find out.
+ *
+ * On as errors: nine rules that report nothing today. That is the point —
+ * each is a thing this app has no business doing, so the rule costs nothing
+ * now and refuses the first one. A server that must shell out or read a
+ * computed module path can turn one off in a commit that says why.
+ *
+ * On as a warning: detect-unsafe-regex, which earned it. It found a real one
+ * — decodeDataUri in lib/link-preview.js matched a data: URI's parameters
+ * with `(?:;[^,]*)*`, where each parameter could itself contain the separator,
+ * so `data:x;a;a;a…` with no comma had exponentially many ways to be read.
+ * Forty of them would have held the event loop for hours, and the href comes
+ * off a page a stranger asked the server to preview. It still reports that
+ * one, because the fix made the repeat unambiguous rather than removing it,
+ * and the rule counts nested quantifiers without asking whether they overlap.
+ * That is also why the other twelve are reported: each was given an input
+ * built to make it blow up — sixty thousand characters down the path that has
+ * to fail — and the worst of them took two milliseconds. The list of thirteen
+ * is pinned in test/limits.test.js, so a fourteenth is a decision rather than
+ * a number that grew.
+ *
+ * Off, with the reason rather than without:
+ *
+ *   detect-object-injection (230) — every `obj[key]` in the codebase. This is
+ *     a JavaScript app; the rule is a syntax census, not a finding.
+ *   detect-non-literal-fs-filename (130) — this is a file server, so every
+ *     fs call takes a computed path. What actually stops traversal is
+ *     resolveDocPath and sanitizeFilename, which every route goes through and
+ *     which the suites test directly. The rule cannot see that and would
+ *     report the safe calls and the unsafe ones alike.
+ *   detect-non-literal-regexp (23) — a RegExp built from a variable. One is
+ *     in lib (attributeValue, whose tag names are literals a few lines up),
+ *     three are in the client and build a matcher from a term the caller
+ *     escaped, and the other nineteen are test suites building a matcher.
+ *   detect-possible-timing-attacks (1) — `password === null`, which is the
+ *     null window.prompt returns when the box is cancelled, in client code
+ *     where there is no timing to attack.
+ */
+const SECURITY_RULES = {
+  "security/detect-child-process": "error",
+  "security/detect-eval-with-expression": "error",
+  "security/detect-non-literal-require": "error",
+  "security/detect-pseudoRandomBytes": "error",
+  "security/detect-buffer-noassert": "error",
+  "security/detect-new-buffer": "error",
+  "security/detect-bidi-characters": "error",
+  "security/detect-disable-mustache-escape": "error",
+  "security/detect-no-csrf-before-method-override": "error",
+
+  "security/detect-unsafe-regex": "warn",
+
+  "security/detect-object-injection": "off",
+  "security/detect-non-literal-fs-filename": "off",
+  "security/detect-non-literal-regexp": "off",
+  "security/detect-possible-timing-attacks": "off"
+};
+
 const SHARED_RULES = {
   ...js.configs.recommended.rules,
 
@@ -199,11 +261,34 @@ const SHARED_RULES = {
   "no-var": "error",
   "prefer-const": ["error", { destructuring: "all" }],
   "no-implicit-coercion": "off",
+
+  // On the server, in the test suites and in the build tools, printing is the
+  // job. The client is the side where a stray console.log ships to everyone
+  // who opens the page, so the rule lives in BROWSER_RULES below.
   "no-console": "off",
 
   // A missing await on a write is a data-loss bug, not a style question.
   "require-atomic-updates": "error",
   "no-return-await": "error",
+
+  /* no-await-in-loop, off — and this is the audit rather than a shrug.
+   *
+   * It is on the list of rules worth having because a loop that awaits is
+   * often N round trips that should have been one Promise.all. Every one of
+   * the twenty-seven outside the test suites was read. None of them is that.
+   * Most are sequential because the iteration before allocates something the
+   * next one must see — ensureUniqueFilenameInDir hands out a name, and two
+   * uploads racing for it would land on the same file. Some stop early: the
+   * redirect chain in link-preview, the icon candidates, the mermaid render
+   * attempts. Some are sequential because what they call is not re-entrant
+   * (mermaid) or because order is the point (a library's scripts in md/lazy).
+   * Two are bounded worker pools already running under Promise.all, which is
+   * the shape the rule is asking for and cannot see.
+   *
+   * So it would report twenty-seven and be right about none, and the
+   * twenty-seven disables would say less than this paragraph does. Turning it
+   * on is one word here if a real N+1 ever shows up.
+   */
   "no-await-in-loop": "off",
 
   /* Complexity, as advice rather than as a gate.
@@ -213,7 +298,7 @@ const SHARED_RULES = {
    * question and a softer one — a long function is sometimes exactly right,
    * and a warning that says "look at this" is worth more than an error that
    * has to be argued with. What keeps them from being ignored is that the
-   * count is pinned by a test (test/code.test.js), so the list stays a
+   * count is pinned by a test (test/limits.test.js), so the list stays a
    * decision somebody made rather than a number that drifted.
    */
   complexity: ["warn", 15],
@@ -223,7 +308,9 @@ const SHARED_RULES = {
 
   "no-fallthrough": "error",
   "no-constant-condition": ["error", { checkLoops: false }],
-  "no-empty": ["error", { allowEmptyCatch: true }]
+  "no-empty": ["error", { allowEmptyCatch: true }],
+
+  ...SECURITY_RULES
 };
 
 // A browser module is `var Name = (function () { ... return {...}; })();` — a
@@ -237,6 +324,18 @@ const SHARED_RULES = {
 // namespace the globals list already names is not a redeclaration.
 const BROWSER_RULES = {
   ...SHARED_RULES,
+
+  /* Debug output, but not error reporting.
+   *
+   * A console.log left in ships to everyone who opens the page. A
+   * console.error in a catch is different: it is how this app says a
+   * highlighter or a diagram renderer fell over, and it is the only trace of
+   * it there is — the DOM suites read those and fail on one they did not
+   * expect. So the two are separated rather than the rule being turned off.
+   * There are nineteen console.error and console.warn calls in the client and
+   * no console.log at all, which is the state worth keeping.
+   */
+  "no-console": ["warn", { allow: ["error", "warn"] }],
 
   /* Every assignment to innerHTML that builds its string out of a value.
    *
@@ -274,7 +373,11 @@ module.exports = [
       "deleted_markdowns/**",
       "data/**",
       // What `npm run coverage` writes: a report, with its own scripts in it.
-      "coverage/**"
+      "coverage/**",
+      // ...and what `npm run build` writes: every page's scripts concatenated.
+      // Linting the output reports each finding a second time, at a line
+      // number in a file nobody edits.
+      "public/build/**"
     ]
   },
   {
@@ -289,6 +392,7 @@ module.exports = [
       "tools/**/*.js",
       "test/**/*.js"
     ],
+    plugins: { security },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "commonjs",
@@ -318,6 +422,7 @@ module.exports = [
     // running Python in one. Linting them as browser scripts would let a
     // reference to either slip through.
     files: ["public/js/pyodide-worker.js"],
+    plugins: { security },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",
@@ -339,7 +444,7 @@ module.exports = [
     // Browser code. No bundler, no modules — these are plain scripts.
     files: ["public/js/**/*.js"],
     ignores: ["public/js/pyodide-worker.js", "public/js/doc-kinds.js"],
-    plugins: { "no-unsanitized": noUnsanitized },
+    plugins: { "no-unsanitized": noUnsanitized, security },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",
@@ -353,7 +458,7 @@ module.exports = [
     // CommonJS module on the server, so it may say `module` as well as
     // `window`. Kept to that one file on purpose.
     files: ["public/js/doc-kinds.js"],
-    plugins: { "no-unsanitized": noUnsanitized },
+    plugins: { "no-unsanitized": noUnsanitized, security },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",

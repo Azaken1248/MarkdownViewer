@@ -155,6 +155,50 @@ elsewhere — DOMPurify's output, highlight.js's spans, a diagram this app drew
 `headers` suite checks that the rule is on, that the helper escapes what it
 promises to, and that every opt-out has a sentence above it.
 
+### What the linter is asked to catch
+
+`@eslint/js` recommended, plus the rules that catch a class of bug rather than
+a habit: `eqeqeq`, `no-var`, `prefer-const`, `require-atomic-updates` (a
+missing `await` on a write is data loss, not style), `no-unsanitized/property`
+above, and `no-console` on the client only — `console.error` in a catch is how
+this app reports a renderer falling over, a `console.log` is something
+somebody forgot.
+
+`eslint-plugin-security` is on selectively, and the selection is written down
+in `eslint.config.js` rather than left to be rediscovered. Nine of its rules
+report nothing here and are errors, which is the point: each refuses a thing
+this app has no business doing, starting with the first time somebody does it.
+Three more are off because they are a syntax census rather than a finding —
+`detect-object-injection` flags every `obj[key]` (230), and
+`detect-non-literal-fs-filename` flags every `fs` call in a file server (130),
+where what actually stops traversal is `resolveDocPath` and `sanitizeFilename`
+and the suites that test them.
+
+The one that earned its place is `detect-unsafe-regex`. It found a real bug:
+`decodeDataUri` in [`lib/link-preview.js`](lib/link-preview.js) read a `data:`
+URI's parameters with `(?:;[^,]*)*`, where a parameter could itself contain
+the separator — so `data:image/png;a;a;a…` with no comma had exponentially
+many readings. Twenty-four of them took a quarter of a second, forty would
+have taken hours, and the address comes off a page a stranger asked the server
+to preview. It is now `(?:;[^,;]*)*`, which can be read one way, and the same
+input takes half a millisecond. The plugin reports twelve more; each was
+handed sixty thousand characters down the path that has to fail and the worst
+took two milliseconds. That list is pinned in the `limits` suite, so the
+fourteenth is a regex somebody has to look at.
+
+`no-await-in-loop` is the one suggestion that was declined, with the audit
+instead of a shrug: all twenty-seven loops outside the test suites were read,
+and none of them is the N-round-trips-that-should-be-`Promise.all` the rule is
+for. Most are sequential because the iteration before allocates a filename the
+next one must see; some stop early; two are bounded worker pools already
+running under `Promise.all`, which is the shape the rule wants and cannot see.
+Twenty-seven disables would have said less than the paragraph in the config
+does.
+
+ESLint and its two plugins are pinned to exact versions. A major version of a
+linter changes what CI accepts without anybody changing a line of source, and
+that should be a commit.
+
 ### Dependencies, and the ones `npm audit` cannot see
 
 The runtime surface is four packages — `express`, `multer`, `better-sqlite3`,

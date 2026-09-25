@@ -463,10 +463,22 @@ async function run(server) {
   }
 
 
-  // Let the init fetches settle.
-  await new Promise((r) => setTimeout(r, 1500));
-
   const doc = window.document;
+
+  /* Wait for the tree, not for a stopwatch.
+   *
+   * This was a flat 1500ms "let the init fetches settle", which is the same
+   * mistake as the editor's old sleeps: a ceiling that is generous on an idle
+   * machine and not generous enough when twenty-two suites are running at
+   * once. It failed exactly that way — folder groups on the page and not one
+   * document row yet — and the checks below read the DOM without waiting for
+   * anything, because they were written to start from a tree that is already
+   * there.
+   *
+   * So the wait is for what the first of them looks at. A tree with rows in
+   * it is the app having fetched the library, rendered it, and settled.
+   */
+  await waitUntil(() => doc.querySelectorAll(".tree-row-doc").length > 0);
 
   /* The checks themselves, in six files beside this one.
    *

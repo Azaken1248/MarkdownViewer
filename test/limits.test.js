@@ -25,6 +25,40 @@ const { check, finish } = createChecker("LIMITS");
 
 const RULES = ["complexity", "max-lines-per-function", "max-depth", "max-params"];
 
+/* And which regexes the security plugin calls unsafe.
+ *
+ * This one is a list rather than a count, because the answer is per regex and
+ * the answer is what matters. safe-regex counts nested quantifiers; it does
+ * not ask whether the two levels can match the same character, which is what
+ * decides between linear and exponential. It was right once — decodeDataUri
+ * in lib/link-preview.js, where a data: URI's parameters could each contain
+ * the separator, so `data:x;a;a;a…` with no comma had exponentially many
+ * readings and forty of them would have held the event loop for hours. That
+ * is fixed, and still reported, because the repeat is unambiguous now rather
+ * than gone.
+ *
+ * The rest were each handed sixty thousand characters down the path that has
+ * to fail. The worst took two milliseconds. A new one on this list has not
+ * been looked at, which is the whole point of the list.
+ */
+const UNSAFE_REGEX_RULE = "security/detect-unsafe-regex";
+
+const PROBED_REGEXES = [
+  "lib/http/asset-versions.js:44",
+  "lib/link-preview.js:672",
+  "public/js/dd/paint.js:23",
+  "public/js/dm/cells.js:216",
+  "public/js/dm/grammar.js:12",
+  "public/js/dm/grammar.js:13",
+  "public/js/dm/grammar.js:89",
+  "public/js/dm/grammar.js:141",
+  "public/js/md/lazy.js:28",
+  "public/js/md/mermaid.js:28",
+  "public/js/visual-editor.js:40",
+  "public/js/visual-editor.js:749",
+  "test/visual/model.js:346"
+];
+
 /* The budget: none of them.
  *
  * The rules went in as warnings with seventy-four of them outstanding, and
@@ -112,6 +146,20 @@ const CLOSED_OVER = [];
   check("the functions that switch a limit off are the ones on the list",
     [...new Set(found)].sort(), CLOSED_OVER);
   check("...and each says why on the line above", unexplained, []);
+
+  console.log("=== and the regexes called unsafe are the ones that were probed ===");
+  const flagged = [];
+  for (const result of results) {
+    const relative = path.relative(root, result.filePath);
+    for (const message of result.messages) {
+      if (message.ruleId === UNSAFE_REGEX_RULE) {
+        flagged.push(`${relative}:${message.line}`);
+      }
+    }
+  }
+
+  check("every regex the plugin calls unsafe has been looked at",
+    flagged.sort(), [...PROBED_REGEXES].sort());
 
   process.exit(finish());
 })().catch((error) => {
