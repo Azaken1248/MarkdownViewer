@@ -340,3 +340,194 @@ The cache numbers are there for a specific question. Those three budgets —
 whether they are right is not answerable from the source. A cache that never
 evicts is bigger than it needs to be; one that misses constantly is smaller.
 Now there is a number.
+
+---
+
+## Rate limits
+
+Every ceiling is a fixed window of one minute, and every one is a ceiling
+against a runaway rather than a security boundary — the guards are the
+boundary. They are set in one place at the top of `server.js` and mounted in
+one place beside it, so what is limited is answerable without reading a route.
+
+| What | Per | Budget |
+| --- | --- | --- |
+| State changes on `/api/*` (POST, PUT, PATCH, DELETE) | account, or address with no session | 300, or 60 |
+| Saves — `POST /api/docs`, `PUT /api/docs/…` | account | 120 |
+| Uploads — a document, a folder, a pasted image | account | 30 |
+| `GET /api/docs/search` | account | 240 |
+| Link previews fetched from elsewhere | account | 20 |
+| `/healthz`, which needs no session, and `/graphql` | address | 60 |
+
+Reads are not counted by the wide ceiling on purpose. The client reads a great
+deal — it fetches every document once to warm its offline search — and that
+grows with the library, so a cap on reads low enough to mean anything would
+break it and one high enough to allow it would mean nothing. The reads that
+cost something have the buckets above.
+
+A refusal is a `429` with a `Retry-After` header and a message saying which
+budget ran out. The map behind each bucket is capped at ten thousand keys, so
+a caller presenting addresses by the thousand fills it and is forgotten rather
+than growing it. The limits are per process: under two, every ceiling is
+twice as high, which for a ceiling is fine.
+
+The login lockout is the one limit that is a boundary rather than a ceiling,
+and it is the one that does not work this way. Eight wrong guesses in fifteen
+minutes lock an account for fifteen; forty from one address lock the address.
+The count lives in the database, so a restart does not reset it — a crash loop
+or a redeploy used to turn the lockout into a speed bump — and two processes
+share one count rather than each allowing eight. The `db` suite checks all
+three.
+
+---
+
+## The audit log
+
+The request log says what was asked and how it was answered. It does not say
+who signed in from where, whose password was changed by whom, or who erased a
+document — so after an incident, "what did this account do before we
+noticed?" had no answer. `data/audit.jsonl` is the answer: one JSON line per
+event that matters, appended, owner-readable only.
+
+| Event | When |
+| --- | --- |
+| `login.ok`, `login.failed`, `login.refused` | a sign-in, a wrong guess (with the reason the response never gives: no such user, disabled, bad password), a guess made while locked |
+| `login.locked` | the guess that locked an account or an address, and for how long |
+| `permission.denied` | a signed-in account asking for what its role does not allow — a viewer trying to write |
+| `share.created`, `share.rotated`, `share.revoked` | a share link's life; rotation is how a leaked link is revoked |
+| `password.changed`, `password.change.failed` | by the owner or by an admin; and a wrong current password, which is a guess from inside a session |
+| `user.created`, `user.role`, `user.disabled`, `user.enabled`, `user.deleted` | what changed about an account, and by whom |
+| `doc.erased` | the one thing here that cannot be undone |
+
+Every line carries who (the signed-in account, when there is one), the
+address, and a user agent cut to 120 characters. Never a document's text, a
+search term, a token, a password or a hash of one — the `audit` suite walks a
+server through all of the above and then searches the log for each of those
+and requires them absent. Reads and saves write no line: the log is for what
+an incident review asks about, not a second request log.
+
+`AUDIT_LOG=stderr` hands the lines to whatever collects the process's output,
+for a deployment that ships logs somewhere; the default is a file because the
+point is to still have it later.
+
+---
+
+## Notes on the public deployment
+
+The canonical origin is baked in rather than read from the request. A `Host`
+header is attacker-controlled, and building the canonical or oEmbed URL from it
+lets someone else decide where a link preview points. `PUBLIC_BASE_URL`
+overrides the default; nothing else does.
+
+Behind a reverse proxy, set `TRUST_PROXY` — otherwise `req.protocol` reports the
+proxy hop rather than the client's scheme.
+
+A write that arrives with an `Origin` header has to name an origin this
+deployment answers on: `PUBLIC_BASE_URL`, anything in `ALLOWED_ORIGINS`, or
+loopback on `PORT`. That list is configuration, not something read off the
+request, and the check no longer switches itself off under `TRUST_PROXY` — it
+used to, on the grounds that behind a proxy the request's own idea of its
+origin could differ from the public one, which meant the deployment that
+most needed the check was the one without it. It is the layer in front of
+the CSRF token, not the only lock.
+
+Every response carries the same set of headers — a Content Security Policy,
+`nosniff`, a referrer policy, `X-Frame-Options`, a same-origin opener policy
+and resource policy, and a permissions policy that denies the camera, the
+microphone, location, USB and payment — including static files, errors and
+refused API calls, because a policy that covers only the pages somebody
+remembered to cover is not a policy. They live in `lib/http/headers.js` with
+the reason for each, and the `headers` suite asks eight kinds of response for
+the set.
+
+The Content Security Policy allows no inline or evaluated *script*. It does
+allow inline *styles* — `style-src 'unsafe-inline'` — and that is a deliberate
+trade with three reasons, all of them checked by the `headers` suite so the
+allowance expires the day none of them holds: the app's own diagram drawing
+writes `style` attributes whose values come from the document (a box's colour
+from its `classDef`), which no hash can cover and no nonce applies to, since
+nonces cover `<style>` elements and never attributes; KaTeX sets inline style
+attributes on what it typesets; and Mermaid injects a `<style>` into every SVG
+it renders. Styles cannot execute; what style injection can do is redress the
+page, and scripts — the vector that matters — stay pinned to this origin and
+two SRI-checked CDNs.
+
+`Strict-Transport-Security` is the one that depends on the deployment. It is
+sent when `PUBLIC_BASE_URL` is HTTPS and not otherwise: a plain-HTTP box that
+sent it would tell the browser never to come back the way it can. A year,
+with subdomains, and without `preload` — that submits the domain to a list
+browsers ship with and is effectively irreversible, so it is a decision to
+make on purpose.
+
+The resource policy means the app's own responses — a pasted image, an icon,
+the embed card — cannot be embedded by a page on another origin. A crawler
+fetching `og:image` for a link preview is a server, not a browser, and is not
+affected.
+
+---
+
+---
+
+## Deploying
+
+```bash
+npm ci
+pm2 start server.js --name azadocs --update-env
+pm2 save
+```
+
+With a reverse proxy in front:
+
+```bash
+TRUST_PROXY=true pm2 start server.js --name azadocs --update-env
+```
+
+Set `TRUST_PROXY` when there is a proxy in front, or `req.ip` is the proxy's
+address for everyone — which makes the per-address rate limit meaningless — and
+the session cookie's `Secure` flag is decided from `PUBLIC_BASE_URL`, so serve
+over HTTPS.
+
+`SIGTERM` and `SIGINT` shut down gracefully: the server stops accepting
+connections, lets in-flight requests finish, and exits — with a 10-second
+backstop. This matters because organizer writes are read-modify-write behind a
+lock, and killing the process mid-write is exactly the corruption that used to
+wipe every folder assignment.
+
+---
+
+---
+
+## Troubleshooting
+
+**Diagrams do not render.** Check the browser console for Mermaid parse errors —
+a block that fails to parse falls back to showing its source. If nothing renders
+at all, the CDN is likely unreachable; every third-party asset is pinned with an
+SRI hash, so a hash mismatch also blocks the script. The engine is fetched on
+demand rather than up front, so this shows up as a toast when a document with a
+diagram is opened, not as a failure at startup — and the same goes for maths and
+syntax highlighting.
+
+**A notebook does not render.** It has to be valid `.ipynb` JSON. Very large
+outputs are worth trimming before upload.
+
+**Documents do not appear.** They must be in `public/docs/` (or
+`$MDVIEWER_STATE_DIR/docs/`) with a supported extension. The list is served from
+disk on each request, so a refresh is enough — no restart needed.
+
+**Editing controls are missing.** They are hidden rather than disabled for
+accounts that cannot use them. Check the role on your account — a `viewer` sees
+no create, upload or edit buttons.
+
+**Locked out entirely.** If the last admin password is lost, stop the server
+and empty the accounts: `sqlite3 data/azadocs.db "DELETE FROM users"` (sessions
+go with them). The next boot sees no account, seeds a fresh admin and prints a
+new generated password once. Documents, folders, shares and links are
+untouched.
+
+**"Too many failed attempts."** That account is locked for 15 minutes. It clears
+on a server restart, since the limiter is in memory.
+
+**Link previews point at the wrong host.** `PUBLIC_BASE_URL` wins over
+everything, including the request. Check what it is set to.
+
+---

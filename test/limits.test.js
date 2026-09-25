@@ -56,6 +56,7 @@ const PROBED_REGEXES = [
   "public/js/md/mermaid.js:28",
   "public/js/visual-editor.js:40",
   "public/js/visual-editor.js:749",
+  "test/operations.test.js:197",
   "test/visual/model.js:346",
   "tools/cdn-pins.js:25"
 ];

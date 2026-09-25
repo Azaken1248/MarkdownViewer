@@ -2,8 +2,18 @@
   "name": "azadocs",
   "version": "1.0.0",
   "private": true,
-  "description": "A personal markdown library with a file explorer, live editor, Mermaid diagrams and full-text search.",
   "main": "server.js",
+  "description": "A self-hosted markdown library with full-text search, in-place editing, and inline Mermaid, LaTeX and Jupyter rendering.",
+  "license": "MIT",
+  "author": "Azaken1248",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Azaken1248/MarkdownViewer.git"
+  },
+  "homepage": "https://md.azaken.com",
+  "bugs": {
+    "url": "https://github.com/Azaken1248/MarkdownViewer/issues"
+  },
   "engines": {
     "node": ">=20"
   },

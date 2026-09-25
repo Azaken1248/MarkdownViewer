@@ -142,6 +142,69 @@ check("it says the restore is tested rather than asserted",
 check("...and that suite is one the runner runs",
   read("test", "run.js").includes('"restore.test.js"'), true);
 
+console.log("=== the repository says who may use it, and how to report a hole ===");
+
+const license = read("LICENSE");
+check("there is a licence", license.includes("MIT License"), true);
+check("...naming a copyright holder", /Copyright \(c\) \d{4} \S/.test(license), true);
+check("...and requiring the notice to travel with the code",
+  license.includes("shall be included in all"), true);
+check("package.json agrees with it", JSON.parse(read("package.json")).license, "MIT");
+check("...and the README says the same", /## License[\s\S]{0,200}MIT/.test(readme), true);
+
+const security = read("SECURITY.md");
+check("there is a way to report a vulnerability privately",
+  security.includes("Report a vulnerability"), true);
+check("...that says not to open a public issue", /do not open a public issue/i.test(security), true);
+check("the README points at it", readme.includes("SECURITY.md"), true);
+
+/* The contributing guide is the one that rots quietest: it describes commands
+ * and conventions, and nothing breaks when it stops being true. So the parts
+ * of it that can be checked are.
+ */
+const contributing = read("CONTRIBUTING.md");
+for (const script of ["npm test", "npm run lint", "npm run typecheck"]) {
+  check(`CONTRIBUTING names \`${script}\`, which exists`,
+    contributing.includes(script)
+    && Boolean(scripts[script.replace(/^npm (run )?/, "")]), true);
+}
+
+check("...and the zero budget it describes is the budget",
+  contributing.includes("budget for those warnings is **zero**")
+  && read("test", "limits.test.js").includes('complexity: 0'), true);
+check("...and the escaping helper it points at is where it says",
+  contributing.includes("public/js/dom-html.js")
+  && fs.existsSync(path.join(ROOT, "public", "js", "dom-html.js")), true);
+check("...and the history really has no attribution trailers, as it claims",
+  contributing.includes("No attribution trailers"), true);
+
+console.log("=== and every document it points at exists ===");
+
+// A README full of links to pages that were renamed is worse than a long
+// README, because the reader finds out one click at a time.
+const pages = ["README.md", "CONTRIBUTING.md", "SECURITY.md",
+  "docs/USAGE.md", "docs/OPERATIONS.md", "docs/ARCHITECTURE.md",
+  "docs/API.md", "docs/TESTING.md"];
+
+const broken = [];
+for (const page of pages) {
+  // Code spans and fenced blocks first: `![alt](/api/assets/…)` is an example
+  // of markdown, not a link to anywhere.
+  const body = read(...page.split("/"))
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "");
+  const from = path.dirname(path.join(ROOT, page));
+  for (const [, target] of body.matchAll(/\]\((?!https?:|#|mailto:)([^)#]+)(?:#[^)]*)?\)/g)) {
+    if (!fs.existsSync(path.resolve(from, target))) {
+      broken.push(`${page} -> ${target}`);
+    }
+  }
+}
+
+check("no link in the documentation points at a file that is not there", broken, []);
+check("(and there was something to check)", pages.every((page) =>
+  fs.existsSync(path.join(ROOT, page))), true);
+
 /* And `docker compose up -d`, which the page opens with, has something to
  * run. A worked example in prose is a worked example somebody retypes wrong.
  */

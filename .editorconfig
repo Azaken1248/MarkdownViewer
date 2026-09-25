@@ -1,0 +1,16 @@
+# Two-space indentation, LF endings and a trailing newline, which is what every
+# file here already uses. This is so an editor does the right thing without
+# anybody having to notice.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+# Two trailing spaces are a line break in markdown.
+trim_trailing_whitespace = false
