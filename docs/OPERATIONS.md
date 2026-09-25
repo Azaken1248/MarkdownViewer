@@ -178,11 +178,74 @@ Everything a running instance cannot regenerate lives under
 | `data/azadocs.db` | accounts, sessions, share links, saved links, folder metadata (plus its `-wal` and `-shm` siblings) |
 | `data/audit.jsonl` | the security events, unless `AUDIT_LOG` says otherwise |
 
-The documents are files on disk in their real folders, readable without this
-app — that is deliberate, and it means `tar` over the state directory is a
-complete backup. The database is SQLite in WAL mode, so a copy taken while the
-app is running can be torn; use `sqlite3 data/azadocs.db ".backup out.db"`, or
-stop the container for the length of the copy.
+Those five are the product. Every document, every folder assignment, every
+account, every share token, every uploaded image. They are correctly not in
+git, and the atomic-write discipline that protects them from a crash mid-write
+does nothing about a lost disk, a deleted volume, or an `rm -rf` in the wrong
+terminal. The recycle bin is a user-facing undo on the same disk, which is not
+a backup of anything.
+
+### Taking one
+
+```bash
+npm run backup -- --state /var/lib/mdviewer --out /mnt/backups --keep 30
+```
+
+```bash
+# ...or from inside the container, writing to a second volume
+docker compose exec mdviewer node tools/backup.js --out /backups --keep 30
+```
+
+**It runs while the app is running.** Nothing is stopped, quiesced or locked:
+the database is copied with SQLite's own online backup, which takes and
+releases a read lock as it walks the pages, so a writer is never blocked and
+what lands is one consistent point in time rather than a file that was being
+written to. Everything else is plain files written atomically, so a copy gets
+the old one or the new one and never half of one.
+
+What is still possible is skew — a document saved between the database
+snapshot and the file copy. The app treats the directory as the truth and the
+database as an index it rebuilds from, so that resolves itself; it is the
+reason the script copies the database first and the documents second rather
+than the other way round.
+
+`--keep N` drops all but the newest N archives in `--out`. The script will tell
+you if you have pointed `--out` inside the directory it is backing up, because
+a copy on the same disk is not a backup.
+
+A nightly cron line, with the archive going somewhere else afterwards:
+
+```cron
+17 3 * * *  cd /srv/mdviewer && npm run backup -- --state /var/lib/mdviewer --out /mnt/backups --keep 30 >> /var/log/mdviewer-backup.log 2>&1
+```
+
+### Restoring one, which is the half that matters
+
+```bash
+npm run restore -- /mnt/backups/azadocs-2026-09-25T03-17-00-000.tar.gz --state /tmp/check
+```
+
+It refuses a directory that already has something in it unless `--force`,
+because the obvious use is restoring beside a running instance to see whether
+the archive is any good, and the obvious accident is typing the live path while
+doing it. After unpacking it opens the database, checks it has the five tables
+whose absence would mean lost accounts, sessions, share links, saved links or
+folders, and counts what it found.
+
+Then boot against it, which is the end of the proof:
+
+```bash
+MDVIEWER_STATE_DIR=/tmp/check PORT=4322 npm start
+curl -s localhost:4322/healthz     # reads the document directory; 503 if it cannot
+```
+
+**A backup nobody has restored is a hypothesis**, so that round trip is a test.
+`npm test restore` seeds a server, writes a document and hands out a share
+link, takes an archive while the server is still answering, unpacks it
+elsewhere, boots a second server against the result and checks that the
+document is there, that the share link handed out before the backup still
+opens, and that the account can still sign in with the password it had. It runs
+on every CI run, so "we have backups" is checked rather than believed.
 
 ---
 

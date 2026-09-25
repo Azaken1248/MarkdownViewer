@@ -43,6 +43,7 @@ const SUITES = [
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
   ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],
+  ["restore", "restore.test.js", "A backup taken from a running server, restored, and booted against"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
   ["limits", "limits.test.js", "How complicated the code is allowed to get, and the budget for it"],
   ["operations", "operations.test.js", "The Dockerfile and the deployment notes, against what the server does"],

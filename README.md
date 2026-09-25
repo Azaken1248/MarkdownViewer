@@ -334,6 +334,8 @@ Bumping one means changing the version in the tag and recomputing the hash —
 | `npm run lint:fix` | The same, applying the fixes it can |
 | `npm run typecheck` | Check the JSDoc types with `tsc --checkJs`. No TypeScript, no build |
 | `npm run audit:cdn` | Advisories and integrity for the eight libraries loaded from a CDN, which `npm audit` cannot see |
+| `npm run backup` | A consistent copy of the state directory, taken while the app is running |
+| `npm run restore` | Unpack one into a directory and check the database came across |
 
 ---
 

@@ -126,6 +126,22 @@ check("...and that the CSRF check no longer depends on it",
 
 check("the README points at it", readme.includes("docs/OPERATIONS.md"), true);
 
+/* And the backup section describes commands that exist.
+ *
+ * The state directory is what nothing else takes responsibility for, so a
+ * backup page naming a script that was renamed is worse than no page.
+ */
+const scripts = JSON.parse(read("package.json")).scripts;
+check("the backup command it names is a script", Boolean(scripts.backup), true);
+check("...and so is the restore", Boolean(scripts.restore), true);
+check("...and both files are there",
+  [fs.existsSync(path.join(ROOT, "tools", "backup.js")),
+    fs.existsSync(path.join(ROOT, "tools", "restore.js"))], [true, true]);
+check("it says the restore is tested rather than asserted",
+  operations.includes("npm test restore"), true);
+check("...and that suite is one the runner runs",
+  read("test", "run.js").includes('"restore.test.js"'), true);
+
 /* And `docker compose up -d`, which the page opens with, has something to
  * run. A worked example in prose is a worked example somebody retypes wrong.
  */
