@@ -1,0 +1,37 @@
+# The smallest thing that runs this. See docs/OPERATIONS.md for what each of
+# these means and for the reverse proxy that usually sits in front.
+#
+#   docker compose up -d
+#   docker compose logs -f        # the first boot prints an admin password once
+services:
+  mdviewer:
+    build: .
+    restart: unless-stopped
+
+    # Bound to loopback, because the thing that should be listening on 443 is
+    # a reverse proxy and not this. Change to "4321:4321" to reach it directly.
+    ports:
+      - "127.0.0.1:4321:4321"
+
+    environment:
+      # Set this to the address people actually use. It decides whether the
+      # session cookie is Secure and whether HSTS is sent, so an https:// value
+      # here is not cosmetic — see docs/OPERATIONS.md.
+      PUBLIC_BASE_URL: http://localhost:4321
+
+      # Only when something is actually in front of this. It decides which
+      # address the rate limiter, the login lockout and the audit log see.
+      # TRUST_PROXY: "true"
+
+      # Hand the security events to the container log rather than writing them
+      # inside the volume, since something is usually collecting stdout already.
+      AUDIT_LOG: stderr
+
+    # A named volume, not a bind mount: it takes /state's ownership from the
+    # image, where a host directory would keep the host's and the non-root user
+    # could not write to it. A host path needs `chown 1000:1000` first.
+    volumes:
+      - state:/state
+
+volumes:
+  state:

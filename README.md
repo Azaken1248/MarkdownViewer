@@ -339,7 +339,11 @@ Bumping one means changing the version in the tag and recomputing the hash —
 
 ## Configuration
 
-Everything is environment variables; there is no config file.
+Everything is environment variables; there is no config file. For running this
+somewhere — the `Dockerfile`, a compose file, a worked nginx and Caddy setup,
+what to back up and what to watch — see
+[docs/OPERATIONS.md](docs/OPERATIONS.md). Two of the variables below decide
+more than their names suggest, and that page says which and why.
 
 | Variable | Default | What it does |
 | --- | --- | --- |

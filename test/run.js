@@ -44,6 +44,7 @@ const SUITES = [
   ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
   ["limits", "limits.test.js", "How complicated the code is allowed to get, and the budget for it"],
+  ["operations", "operations.test.js", "The Dockerfile and the deployment notes, against what the server does"],
   ["build", "build.test.js", "The optional bundles, and that they are the same app unbundled"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"],

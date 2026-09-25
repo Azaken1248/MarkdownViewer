@@ -1,0 +1,32 @@
+# What the image does not need, and what it must not carry.
+#
+# The second half matters more: this repository holds a state directory and a
+# set of review documents that are nobody's business in a published image.
+
+# Rebuilt inside the image, and a host's build is for the host's platform —
+# better-sqlite3 is a compiled binary.
+node_modules
+public/build
+
+.git
+.github
+.gitignore
+
+# State. A running instance keeps documents, uploads, the database and the
+# recycle bin here; none of it belongs in an image, and a stale copy baked in
+# would be shadowed by the volume anyway.
+data
+assets
+deleted_markdowns
+markdown
+coverage
+
+# The suites are not run from the image, and they are a third of the repository.
+test
+
+# Working documents.
+REVIEW-*.md
+*_PLAN.md
+TODO.md
+Dockerfile
+.dockerignore
