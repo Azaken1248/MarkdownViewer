@@ -401,7 +401,7 @@ const getDiagramTemplate = templateReader(DIAGRAM_TEMPLATE_PATH, served("diagram
 /* Which documents a search covers. Scoring them is lib/docs/search.js; picking
  * the corpus is here, because it is the storage layout that decides it.
  */
-async function searchDocuments(query, scope = "docs") {
+async function searchDocuments(query, scope = "docs", limit = 0) {
   const organizer = await readOrganizerState();
   // Each scope reads a different directory, so resolve it once and reuse it below.
   const scopeDir = scope === "recycle-bin"
@@ -413,7 +413,7 @@ async function searchDocuments(query, scope = "docs") {
     ? await getDocs(organizer)
     : await getRecycleDocs(organizer, scopeDir);
 
-  return searchIn({ query, docs, scopeDir, scope });
+  return searchIn({ query, docs, scopeDir, scope, limit });
 }
 
 const {

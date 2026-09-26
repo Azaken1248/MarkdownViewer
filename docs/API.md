@@ -29,6 +29,18 @@ decision, and the message for that comes from the store.
 | --- | --- | --- |
 | `GET` | `/api/docs` | List all documents with their folder assignments |
 | `GET` | `/api/docs/search?q=` | Full-text search across contents, filenames and titles |
+
+A search answers with `matches`, `searchTerms`, `total` and `limit`. `total` is
+how many documents matched and `matches.length` is how many came back, so a
+search that hit the ceiling can be told from one that did not:
+
+```json
+{ "matches": [ ... 200 of them ... ], "total": 250, "limit": 200 }
+```
+
+The two are equal when nothing was cut. A ceiling that changes the answer
+without saying so is a wrong answer that looks like a right one, which is why
+the count is the real one.
 | `GET` | `/api/docs/*file` | Document content |
 | `POST` | `/api/docs` | Create. Accepts `fileName`, `content`, `folderId` |
 | `PUT` | `/api/docs/*file` | Update content |

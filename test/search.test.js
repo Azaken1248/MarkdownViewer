@@ -150,6 +150,79 @@ const order = (result) => result.matches.map((match) => match.file);
     check("...and a search of the library does not", order(inLibrary), []);
   }
 
+  /* A ceiling that changes the answer has to say so.
+   *
+   * Two hundred results looks like an answer. Nothing in the old response
+   * said the two hundred and first existed, which is the worst failure a
+   * search box has: a wrong answer that admits nothing.
+   */
+  console.log("=== and a search that was cut says how much it cut ===");
+  {
+    const manyDir = path.join(dir, "many");
+    fs.mkdirSync(manyDir, { recursive: true });
+
+    const many = [];
+    for (let n = 0; n < 250; n += 1) {
+      const file = `note-${String(n).padStart(4, "0")}.md`;
+      fs.writeFileSync(path.join(manyDir, file), `# Note ${n}\n\nfindable content here.\n`);
+      many.push({
+        file,
+        title: `Note ${n}`,
+        folderName: "",
+        size: 40,
+        updatedAt: fs.statSync(path.join(manyDir, file)).mtime.toISOString()
+      });
+    }
+
+    const search = makeSearch(path.join(dir, "many-db"), true);
+    const cut = await search({ query: "findable", docs: many, scopeDir: manyDir });
+
+    check("the ceiling is what comes back", cut.matches.length, 200);
+    check("...and the count is what matched", cut.total, 250);
+    check("...and the ceiling itself is in the answer", cut.limit, 200);
+
+    // Under the ceiling the two agree, so a caller can compare them without
+    // having to know which case it is in.
+    const whole = await search({ query: "findable", docs: many.slice(0, 12), scopeDir: manyDir });
+    check("a search that was not cut says so by agreeing with itself",
+      [whole.matches.length, whole.total], [12, 12]);
+
+    // The caller's own smaller limit, which the graph passes down rather than
+    // slicing afterwards.
+    const asked = await search({ query: "findable", docs: many, scopeDir: manyDir, limit: 5 });
+    check("a caller may ask for fewer", [asked.matches.length, asked.limit], [5, 5]);
+    check("...and is still told how many there were", asked.total, 250);
+
+    // ...but not for more than the server holds, which is the whole point of
+    // there being a ceiling.
+    const greedy = await search({ query: "findable", docs: many, scopeDir: manyDir, limit: 5000 });
+    check("asking for more than the ceiling gets the ceiling",
+      [greedy.matches.length, greedy.limit], [200, 200]);
+
+    const nothing = await search({ query: "", docs: many, scopeDir: manyDir });
+    check("an empty query is nothing rather than everything",
+      [nothing.matches.length, nothing.total], [0, 0]);
+  }
+
+  /* ...and the other half of saying so, which is saying it to somebody.
+   *
+   * A source check rather than a rendered one: proving it in the DOM means
+   * seeding two hundred and fifty documents into that suite for one line of
+   * text. What can go wrong here is the client ignoring the field, and that
+   * is visible from the file.
+   */
+  console.log("=== and the search box says it out loud ===");
+  {
+    const client = fs.readFileSync(
+      path.join(__dirname, "..", "public", "js", "app", "searching.js"), "utf8");
+
+    check("the client reads the count the server sends", client.includes("payload.total"), true);
+    check("...compares it against what arrived",
+      /total\s*>\s*matches\.length/.test(client), true);
+    check("...and says both numbers when they differ",
+      /\$\{matches\.length\} of \$\{total\}/.test(client), true);
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
   process.exit(finish());
 })().catch((error) => {

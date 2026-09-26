@@ -98,7 +98,18 @@ var AppSearching = (function () {
       state.groupRevealCounts.clear();
       state.filteredDocs = matches;
       renderSuperSearchPanel(rawQuery, matches, searchTerms);
-      setMeta(`${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
+
+      /* `total` is how many matched; `matches.length` is how many came back.
+       *
+       * The server stops at a ceiling, and a count that only says how many
+       * arrived is a wrong answer that looks like a right one — two hundred
+       * results and nothing to say the two hundred and first existed.
+       */
+      const total = Number(payload.total);
+      const cut = Number.isFinite(total) && total > matches.length;
+      setMeta(cut
+        ? `${matches.length} of ${total} result(s) in ${contextLabel} for "${rawQuery.trim()}"`
+        : `${matches.length} result(s) in ${contextLabel} for "${rawQuery.trim()}"`);
       renderDocList();
     } catch (error) {
       if (requestId !== state.searchRequestId) {

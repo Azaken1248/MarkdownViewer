@@ -84,6 +84,19 @@ const { check, finish } = createChecker("GRAPHQL");
       check("a search is the search box's search",
         graphSearch.map((m) => [m.file, m.snippet]), restSearch.map((m) => [m.file, m.snippet]));
 
+      /* The graph's limit is asked for, not sliced afterwards.
+       *
+       * It used to slice what the search had already cut, so a caller asking
+       * for more than the server's ceiling got the ceiling and nothing said
+       * which of the two numbers was the real one. The schema says so now,
+       * and a smaller limit has to be honoured on the way in.
+       */
+      const fewer = (await gql('{ search(query: "alpha", limit: 1) { file } }', H)).body.data.search;
+      check("a caller may ask the graph for fewer results", fewer.length <= 1, true);
+      const more = (await gql('{ search(query: "alpha", limit: 900) { file } }', H)).body.data.search;
+      check("...and asking for more than there are is not an error",
+        more.length, graphSearch.length);
+
       const graphLinks = (await gql("{ links { id url title groups icon } }", H)).body.data.links;
       const restLinks = (await server.request("GET", "/api/links", undefined, H)).body.links;
       check("the links are the links", graphLinks.map((l) => l.id), restLinks.map((l) => l.id));
