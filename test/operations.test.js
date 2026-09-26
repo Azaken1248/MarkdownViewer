@@ -215,6 +215,27 @@ check("...which is a tool that exists and a script that names it",
 check("...and the same checks run in the suite, not a second copy of them",
   read("test", "production.test.js").includes('require("../tools/smoke.js")'), true);
 
+/* The two files that do nothing until somebody else turns up.
+ *
+ * A CODEOWNERS naming a path that has been renamed is worse than no
+ * CODEOWNERS, because it silently stops requesting the review it was written
+ * to request. A checklist naming a command that does not exist is the same
+ * kind of wrong.
+ */
+const owners = read(".github", "CODEOWNERS");
+const ownedPaths = [...owners.matchAll(/^(\/\S+)\s+@/gm)].map(([, one]) => one);
+check("(CODEOWNERS names some paths)", ownedPaths.length > 0, true);
+check("every path it names is a file that is there",
+  ownedPaths.filter((one) => !fs.existsSync(path.join(ROOT, one.slice(1)))), []);
+
+const template = read(".github", "pull_request_template.md");
+const asked = [...template.matchAll(/`(npm [^`]+)`/g)].map(([, one]) => one);
+check("(the template asks for some commands)", asked.length >= 3, true);
+check("...and each one is a script that exists",
+  asked.filter((one) => !scripts[one.replace(/^npm (run )?/, "")]), []);
+check("...and it points at the conventions rather than repeating them",
+  template.includes("CONTRIBUTING.md"), true);
+
 console.log("=== and every document it points at exists ===");
 
 // A README full of links to pages that were renamed is worse than a long

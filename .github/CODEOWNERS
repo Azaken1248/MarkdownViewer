@@ -1,0 +1,17 @@
+# Who gets asked to review what.
+#
+# One person owns all of it today, so this file does nothing yet. It is here
+# because the moment there is a second contributor it starts working without
+# anybody remembering it was needed — which is the only time a file like this
+# is ever written, and the worst time to write it.
+#
+# Paths are matched last-wins, so a more specific line below overrides *.
+
+* @Azaken1248
+
+# The four that decide what the app is allowed to do. Worth naming separately
+# so that a change to one is never a change somebody skimmed on the way past.
+/lib/guards.js          @Azaken1248
+/lib/http/headers.js    @Azaken1248
+/lib/auth.js            @Azaken1248
+/public/js/dom-html.js  @Azaken1248
