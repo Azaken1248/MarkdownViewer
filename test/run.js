@@ -39,6 +39,7 @@ const SUITES = [
   ["headers", "headers.test.js", "The headers on every response, and HSTS only where the deployment is HTTPS"],
   ["graphql", "graphql.test.js", "The graph: behind the read policy, says what /api says, and has limits"],
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],
+  ["body", "body.test.js", "What an endpoint accepts, and every way it refuses what it does not"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],

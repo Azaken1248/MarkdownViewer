@@ -309,6 +309,12 @@ one is kept instead, so a request is one id across the chain; with
 `TRUST_PROXY` off the header is ignored, because otherwise a client chooses
 what its own log line says.
 
+A request the client abandoned carries `aborted=true` and is counted like any
+other. `finish` — the response reaching the socket — does not fire when the
+client hangs up first, so listening for it alone meant an abandoned request was
+neither logged nor counted, which is backwards: a client abandoning requests is
+exactly the thing nobody would otherwise see.
+
 **What a line never carries:** the query string (search terms are the contents
 of somebody's documents), the body, or any header. Who made the request is on
 it, because that is the question being asked of a log.

@@ -160,6 +160,40 @@ function captured(options = {}) {
   check("no line for an asset", quietStatic.out, []);
   check("...but it happened, and was counted", counted.length, 1);
 
+  console.log("=== a request the client abandoned is still counted ===");
+
+  /* `finish` is the response reaching the socket, and it does not fire when
+   * the client hangs up first — so an abandoned request was neither logged nor
+   * counted, which is backwards: a client abandoning requests is exactly what
+   * nobody would otherwise see. `close` fires either way.
+   */
+  {
+    const abandoned = captured({ format: "json" });
+    const seen = [];
+    const handlers = {};
+    const abortReq = { method: "GET", path: "/api/docs", get: () => undefined, id: "gone" };
+    const abortRes = {
+      statusCode: 200,
+      writableFinished: false,
+      on: (event, fn) => { handlers[event] = fn; }
+    };
+
+    requestLogger({ log: abandoned.log, onFinished: (one) => seen.push(one) })(
+      abortReq, abortRes, () => {});
+
+    check("(both events are listened for)",
+      [typeof handlers.finish, typeof handlers.close], ["function", "function"]);
+
+    handlers.close();
+    check("a request that only closed was counted", seen.length, 1);
+    check("...and logged", abandoned.out.length, 1);
+    check("...and says it did not finish", JSON.parse(abandoned.out[0]).aborted, true);
+
+    // Both fire on an ordinary response, and one line is one request.
+    handlers.finish();
+    check("...and a second event does not log it twice", abandoned.out.length, 1);
+  }
+
   console.log("=== the caches say whether their budgets were right ===");
 
   const cache = createLruCache(100);

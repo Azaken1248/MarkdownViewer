@@ -648,7 +648,7 @@ var DiagramEditor = (function () {
     }
   }
 
-  function alongRoute(ed, points, at) {
+  function alongRoute(points, at) {
     let walked = 0;
     let best = { away: Infinity, at: 0 };
 
@@ -690,8 +690,8 @@ var DiagramEditor = (function () {
 
     const dropped = { x: snap(ed, at.x), y: snap(ed, at.y) };
     const via = [...(edge.waypoints || [])];
-    const mark = alongRoute(ed, route.points, dropped);
-    const before = via.findIndex((one) => alongRoute(ed, route.points, one) > mark);
+    const mark = alongRoute(route.points, dropped);
+    const before = via.findIndex((one) => alongRoute(route.points, one) > mark);
     const put = before < 0 ? via.length : before;
 
     via.splice(put, 0, dropped);
@@ -714,7 +714,7 @@ var DiagramEditor = (function () {
     drawAtOnce(ed);
   }
 
-  function sideFor(ed, box, at) {
+  function sideFor(box, at) {
     const left = at.x - box.x;
     const right = (box.x + box.w) - at.x;
     const top = at.y - box.y;
@@ -746,7 +746,7 @@ var DiagramEditor = (function () {
     // Both ends left to the router is said plainly, and the writer is what
     // decides that saying it is the same as saying nothing.
     const sides = Array.isArray(edge.sides) ? [...edge.sides] : ["a", "a"];
-    sides[end] = sideFor(ed, box, at);
+    sides[end] = sideFor(box, at);
     edge.sides = sides;
 
     redrawEdge(ed, index);
@@ -1629,7 +1629,7 @@ var DiagramEditor = (function () {
     }).replace(/\n$/, "");
   }
 
-  function copyOutside(ed, text) {
+  function copyOutside(text) {
   // Not every browser and not every page will allow it, and a menu item
   // that throws is worse than one that quietly does nothing here.
     try {
@@ -1714,7 +1714,7 @@ var DiagramEditor = (function () {
       { label: `Cut ${them}`, icon: "ph-scissors", keys: "Ctrl+X", run: () => cutSelection(ed) },
       { label: `Copy ${them}`, icon: "ph-clipboard", keys: "Ctrl+C", run: () => copySelection(ed) },
       { label: `Copy ${them} as Mermaid`, icon: "ph-code",
-        run: () => copyOutside(ed, selectionSource(ed)) },
+        run: () => copyOutside(selectionSource(ed)) },
       "-",
       held
         ? { label: "Rename group", icon: "ph-textbox",
@@ -1773,7 +1773,7 @@ var DiagramEditor = (function () {
       barItem(ed),
       "-",
       { label: "Copy diagram as Mermaid", icon: "ph-code",
-        run: () => copyOutside(ed, sourceNow(ed)) }
+        run: () => copyOutside(sourceNow(ed)) }
     ];
   }
 
@@ -2023,7 +2023,7 @@ var DiagramEditor = (function () {
     drawAtOnce(ed);
   }
 
-  function cellRun(ed, item, at) {
+  function cellRun(item, at) {
     return DiagramDraw.cellBoxes(DiagramModel.textCells(item.text || ""),
       at.w, at.h, DiagramModel.tableMetrics(item));
   }
@@ -2035,7 +2035,7 @@ var DiagramEditor = (function () {
       return null;
     }
 
-    const cells = cellRun(ed, item, at);
+    const cells = cellRun(item, at);
     const now = cells.findIndex((one) =>
       one.row === from.row && one.column === from.column);
 
@@ -2050,7 +2050,7 @@ var DiagramEditor = (function () {
 
     const where = () => {
       const at = boxOf(ed, id);
-      const found = at && cellRun(ed, item, at)
+      const found = at && cellRun(item, at)
         .find((one) => one.row === row && one.column === column);
 
       return found
@@ -3450,7 +3450,7 @@ var DiagramEditor = (function () {
     return { ...styleOf(ed, item), ...(item?.style || {}) }["font-size"] || "";
   }
 
-  function wearing(ed, declarations, offered, keys) {
+  function wearing(declarations, offered, keys) {
     const found = offered.find(([, part]) =>
       keys.every((key) => (declarations[key] || "") === (part[key] || "")));
 
@@ -3574,8 +3574,8 @@ var DiagramEditor = (function () {
     custom.addEventListener("change", () => {
       restyle(ed, ids, {
         fill: custom.value,
-        stroke: darken(ed, custom.value, 0.45),
-        color: darken(ed, custom.value, 0.8)
+        stroke: darken(custom.value, 0.45),
+        color: darken(custom.value, 0.8)
       });
     });
     row.append(custom);
@@ -3637,8 +3637,8 @@ var DiagramEditor = (function () {
     row.className = "ve-diagram-row ve-diagram-border";
 
     const declarations = ids.length === 1 ? styleOf(ed, nodeById(ed, ids[0])) : {};
-    const dash = wearing(ed, declarations, DIAGRAM_BORDERS, ["stroke-dasharray"]);
-    const weight = wearing(ed, declarations, DIAGRAM_WEIGHTS, ["stroke-width"]);
+    const dash = wearing(declarations, DIAGRAM_BORDERS, ["stroke-dasharray"]);
+    const weight = wearing(declarations, DIAGRAM_WEIGHTS, ["stroke-width"]);
 
     const named = (offered) => offered.map(([name]) => [name, name]);
 
@@ -3973,7 +3973,7 @@ var DiagramEditor = (function () {
     const listed = (offered) => offered.map(([name]) => [name, name]);
 
     const family = chooser(ed, "ve-diagram-kind", "Font",
-      listed(DIAGRAM_FAMILIES), wearing(ed, declarations, DIAGRAM_FAMILIES, ["font-family"]));
+      listed(DIAGRAM_FAMILIES), wearing(declarations, DIAGRAM_FAMILIES, ["font-family"]));
 
     // A patch that always names its own key, so choosing "Default" takes the
     // family off rather than leaving the old one behind unmentioned.
@@ -4127,7 +4127,7 @@ var DiagramEditor = (function () {
     return holder;
   }
 
-  function darken(ed, hex, amount) {
+  function darken(hex, amount) {
     const found = /^#([0-9a-f]{6})$/i.exec(String(hex));
     if (!found) {
       return hex;
@@ -4484,7 +4484,7 @@ var DiagramEditor = (function () {
     return known ? item.parent : null;
   };
 
-  function glyphFor(ed, item) {
+  function glyphFor(item) {
     const wanted = (choice) => {
       if (item.image) {
         return Boolean(choice.picture);
@@ -4518,7 +4518,7 @@ var DiagramEditor = (function () {
     glyph.className = "ve-diagram-leaf-glyph";
     // As above: one of this file's own SVG paths, wrapped.
     // eslint-disable-next-line no-unsanitized/property
-    glyph.innerHTML = shapeGlyph(glyphFor(ed, item));
+    glyph.innerHTML = shapeGlyph(glyphFor(item));
 
     row.append(glyph, leafName(ed, stepLabel(ed, item)));
 
