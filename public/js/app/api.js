@@ -86,7 +86,18 @@ var AppApi = (function () {
     }
 
     if (!response.ok) {
-      throw new Error(payload?.error || `Request failed (${response.status})`);
+      /* The status travels with the message.
+       *
+       * A caller that wants to tell "this is gone" from "this is broken" had
+       * no way to: every refusal arrived as a bare Error carrying whatever
+       * sentence the server wrote. Background work in particular needs the
+       * difference — a document deleted while its content was being fetched
+       * is not a failure worth logging, and a 500 is.
+       */
+      const error = /** @type {Error & { status?: number }} */ (
+        new Error(payload?.error || `Request failed (${response.status})`));
+      error.status = response.status;
+      throw error;
     }
   }
 

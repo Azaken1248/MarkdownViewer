@@ -264,6 +264,16 @@ var AppDocs = (function () {
    */
   const HYDRATE_CONCURRENCY = 3;
 
+  /* A document that went away while this was fetching it.
+   *
+   * Hydration walks the whole library in the background to warm the offline
+   * search, and a document deleted between the listing and the fetch answers
+   * 404. That is the ordinary course of somebody using the app while it runs,
+   * not a fault: the search index simply will not have a document that no
+   * longer exists. Anything else is still worth saying out loud.
+   */
+  const wasDeletedMeanwhile = (error) => error?.status === 404;
+
   async function hydrateSearchContent() {
     const queue = state.docs.map((doc) => doc.file);
 
@@ -272,7 +282,9 @@ var AppDocs = (function () {
         try {
           await loadDocContent(file);
         } catch (error) {
-          console.error(error);
+          if (!wasDeletedMeanwhile(error)) {
+            console.error(error);
+          }
         }
       }
     };
@@ -286,7 +298,10 @@ var AppDocs = (function () {
         try {
           await loadDeletedDocContent(doc.file);
         } catch (error) {
-          console.error(error);
+          // Same race, in the bin: it can be emptied while this is reading it.
+          if (!wasDeletedMeanwhile(error)) {
+            console.error(error);
+          }
         }
       })
     );
