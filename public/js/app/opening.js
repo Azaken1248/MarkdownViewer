@@ -90,6 +90,9 @@ var AppOpening = (function () {
     bindTaskCheckboxes(file, rawContent);
 
     state.activeFile = file;
+    // The outline is the document's own headings, so it is rebuilt with the
+    // document rather than kept and patched.
+    AppDocIndex.refresh();
     // Selection-only change: repaint the highlight, don't rebuild the list.
     updateActiveRowHighlight();
     updateActiveDocUI(file);

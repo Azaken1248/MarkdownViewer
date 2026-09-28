@@ -1,0 +1,159 @@
+/* --------------------------------------------------------------------------
+   Document outline
+
+   A third column in .layout, beside the viewer rather than inside it: the
+   viewer is the scroll container, and an outline that scrolls away with the
+   document is an outline you cannot use to leave where you are.
+
+   The column is only there when the panel is. A grid track of 0 would still
+   draw the border and the gap, so the track itself is added by the class on
+   <body> and removed with it.
+   -------------------------------------------------------------------------- */
+
+body.has-doc-index .layout {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--doc-index-width);
+}
+
+.doc-index {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.doc-index[hidden] {
+  display: none;
+}
+
+.doc-index-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 12px 10px 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.doc-index-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* The list itself scrolls; the heading above it does not. */
+.doc-index-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 6px 20px;
+}
+
+.doc-index-list,
+.doc-index-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Indent comes from the nesting, so a level is a level however deep the
+   document's own numbering jumps around. */
+.doc-index-children {
+  padding-left: 14px;
+}
+
+.doc-index-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.doc-index-caret {
+  flex-shrink: 0;
+  width: 20px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: transform 120ms ease, color 120ms ease;
+}
+
+.doc-index-caret:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.doc-index-caret.is-empty {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Collapsed points right, the way every tree in this app already does. */
+.doc-index-caret[aria-expanded="false"] {
+  transform: rotate(-90deg);
+}
+
+.doc-index-link {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.35;
+  text-decoration: none;
+  /* Long headings wrap rather than being cut off: the outline is for finding
+     a section, and half its name is not enough to recognise it by. */
+  overflow-wrap: anywhere;
+}
+
+/* A deeper heading is quieter, so the shape of the document is readable at a
+   glance without reading any of it. */
+.doc-index-link[data-level="1"],
+.doc-index-link[data-level="2"] {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.doc-index-link[data-level="5"],
+.doc-index-link[data-level="6"] {
+  font-size: 12px;
+}
+
+.doc-index-link:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.doc-index-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Where the reader is. A bar rather than a fill, so it reads as a position in
+   a list instead of as a selected item somebody clicked. */
+.doc-index-link.is-active {
+  color: var(--accent);
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-index-caret {
+    transition: none;
+  }
+}

@@ -101,6 +101,7 @@ const BROWSER_GLOBALS = {
   AppPlaces: "readonly",
   AppAccountMenu: "readonly",
   AppSidebar: "readonly",
+  AppDocIndex: "readonly",
   AppEditorKeys: "readonly",
   AppDocs: "readonly",
   AppTaskLists: "readonly",

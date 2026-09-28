@@ -494,6 +494,7 @@ async function run(server) {
 
   await require("./dom/tree.js")(ctx);
   await require("./dom/chrome.js")(ctx);
+  await require("./dom/outline.js")(ctx);
   await require("./dom/page-editor.js")(ctx);
   await require("./dom/editing.js")(ctx);
   await require("./dom/links-and-roles.js")(ctx);

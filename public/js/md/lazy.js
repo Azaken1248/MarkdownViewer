@@ -181,10 +181,74 @@ var MdLazy = (function () {
   marked.setOptions({
     gfm: true,
     breaks: false,
-    mangle: false,
-    headerIds: true,
     langPrefix: "language-"
   });
+
+  /* An anchor on every heading.
+   *
+   * `headerIds: true` used to be in the options above and did nothing: marked
+   * removed the option, so it was accepted, ignored, and read for years as
+   * though it worked. Every heading this app rendered had no id — which meant
+   * no deep link to a section, and nothing for an outline to point at.
+   *
+   * So the renderer says it instead. The slug is the heading's text, lowercased,
+   * with runs of anything that is not a letter, a number or a dash turned into
+   * one dash — the GitHub shape, because that is what a reader pasting an
+   * anchor from somewhere else will expect. Unicode is kept: a heading in
+   * Greek or Hindi gets an anchor in Greek or Hindi rather than an empty one.
+   */
+  function slugOf(text) {
+    const base = String(text)
+      .trim()
+      .toLowerCase()
+      .replace(/[\s]+/g, "-")
+      .replace(/[^\p{L}\p{N}_-]+/gu, "")
+      .replace(/-{2,}/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    // A heading of nothing but punctuation still needs somewhere to point.
+    return base || "section";
+  }
+
+  // Two headings with the same words get different anchors, because a link
+  // that goes to the first of three "Examples" is a link that is wrong twice.
+  function uniqueSlugs() {
+    const seen = new Map();
+    return (text) => {
+      const slug = slugOf(text);
+      const taken = seen.get(slug) || 0;
+      seen.set(slug, taken + 1);
+      return taken === 0 ? slug : `${slug}-${taken}`;
+    };
+  }
+
+  let nextSlug = uniqueSlugs();
+
+  /* marked.use, when there is a marked that has it.
+   *
+   * The suites stand in for the library with the two functions they need, and
+   * a page whose CDN is blocked gets whatever it gets — neither is a reason
+   * for the app to fail to start. A heading without an anchor is a heading
+   * without an anchor; it is not a broken page.
+   */
+  if (typeof marked.use === "function") {
+    marked.use({
+      // Each parse is its own document, so the numbering starts with it.
+      hooks: {
+        preprocess(markdown) {
+          nextSlug = uniqueSlugs();
+          return markdown;
+        }
+      },
+      renderer: {
+        heading({ tokens, depth }) {
+          const text = this.parser.parseInline(tokens);
+          const plain = tokens.map((token) => token.text || token.raw || "").join("");
+          return `<h${depth} id="${nextSlug(plain)}">${text}</h${depth}>\n`;
+        }
+      }
+    });
+  }
 
 
   // Local copy: a lowercase helper, not shared behaviour worth coupling over.
