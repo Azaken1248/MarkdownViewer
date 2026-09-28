@@ -22,8 +22,7 @@
     outline: document.getElementById("shareOutline"),
     outlineBody: document.getElementById("shareOutlineBody"),
     outlineToggle: document.getElementById("shareOutlineToggle"),
-    outlineClose: document.getElementById("shareOutlineClose"),
-    outlineBackdrop: document.getElementById("shareOutlineBackdrop")
+    outlineClose: document.getElementById("shareOutlineClose")
   };
 
   /* The outline, on this page's elements.
@@ -37,7 +36,6 @@
     body: elements.outlineBody,
     toggle: elements.outlineToggle,
     closeBtn: elements.outlineClose,
-    backdrop: elements.outlineBackdrop,
     scroller: document.querySelector(".share-page")
   });
 

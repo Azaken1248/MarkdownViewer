@@ -149,40 +149,40 @@
     </button>
   </header>
 
-  <!-- The document's own headings. A rail in the left margin where there is
-       room for one, and a panel over the document where there is not. -->
-  <button class="doc-index-backdrop" id="shareOutlineBackdrop" type="button"
-    aria-label="Hide the outline" hidden></button>
+  <div class="share-layout">
+    <main class="share-main">
+      <div class="share-loading" id="shareLoading">
+        <i class="ph ph-circle-notch" aria-hidden="true"></i>
+        <p>Loading the document…</p>
+      </div>
 
-  <aside class="doc-index" id="shareOutline" aria-label="Document outline" hidden>
-    <div class="doc-index-head">
-      <h2 id="shareOutlineTitle">Outline</h2>
+      <section class="share-error" id="shareError" hidden>
+        <i class="ph ph-link-break" aria-hidden="true"></i>
+        <h1 id="shareErrorTitle">This link is not valid</h1>
+        <p id="shareErrorMessage">It may have been revoked, or the document may have been deleted.</p>
+      </section>
 
-      <button class="icon-btn icon-btn-sm" id="shareOutlineClose" type="button"
-        title="Hide the outline" aria-label="Hide the outline">
-        <i class="ph ph-x" aria-hidden="true"></i>
-      </button>
-    </div>
+      <article class="markdown-body share-body" id="shareContent"></article>
 
-    <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
-  </aside>
+      <footer class="share-footer" id="shareFooter" hidden>
+        <p id="shareMeta"></p>
+      </footer>
+    </main>
 
-  <main class="share-main">
-    <div class="share-loading" id="shareLoading">
-      <i class="ph ph-circle-notch" aria-hidden="true"></i>
-      <p>Loading the document…</p>
-    </div>
+    <!-- The document's own headings, in the column beside it rather than over
+         it: a panel that covers what you are reading is a panel you close
+         before you can read it. -->
+    <aside class="doc-index" id="shareOutline" aria-label="Document outline" hidden>
+      <div class="doc-index-head">
+        <h2 id="shareOutlineTitle">Outline</h2>
 
-    <section class="share-error" id="shareError" hidden>
-      <i class="ph ph-link-break" aria-hidden="true"></i>
-      <h1 id="shareErrorTitle">This link is not valid</h1>
-      <p id="shareErrorMessage">It may have been revoked, or the document may have been deleted.</p>
-    </section>
+        <button class="icon-btn icon-btn-sm" id="shareOutlineClose" type="button"
+          title="Hide the outline" aria-label="Hide the outline">
+          <i class="ph ph-x" aria-hidden="true"></i>
+        </button>
+      </div>
 
-    <article class="markdown-body share-body" id="shareContent"></article>
-
-    <footer class="share-footer" id="shareFooter" hidden>
-      <p id="shareMeta"></p>
-    </footer>
-  </main>
+      <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
+    </aside>
+  </div>
 </div>

@@ -164,8 +164,7 @@ module.exports = async (ctx) => {
       panel: doc.getElementById("shareOutline"),
       body: outlineBody,
       toggle,
-      closeBtn: doc.getElementById("shareOutlineClose"),
-      backdrop: doc.getElementById("shareOutlineBackdrop")
+      closeBtn: doc.getElementById("shareOutlineClose")
     }).refresh();
 
     const links = () => /** @type {HTMLElement[]} */ (
@@ -185,7 +184,39 @@ module.exports = async (ctx) => {
     check("...and a leaf offers nothing to press",
       outlineBody.querySelectorAll(".doc-index-caret.is-empty").length, 2);
 
-    // Collapsing hides what is under it and says so.
+    /* It opens on the top level and the one below it, not the whole tree.
+     *
+     * Eighty-four headings all at once is a list to scroll rather than an
+     * outline to read, so a reader gets the sections and their parts and
+     * opens the rest if they want it. Here that means "Deeper" starts hidden
+     * under "One", and "One" itself does not.
+     */
+    // Hidden by a collapsed branch, rather than by the panel itself being
+    // shut — so the walk stops at the list.
+    const underACollapsedBranch = (link) => {
+      for (let at = link.parentElement; at && at !== outlineBody; at = at.parentElement) {
+        if (/** @type {HTMLElement} */ (at).hidden) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    const visible = () => links().filter((link) => !underACollapsedBranch(link))
+      .map((link) => link.textContent);
+    check("the top level and the one below it are open", visible(),
+      ["The document", "One", "Two"]);
+    check("...and anything deeper starts shut",
+      outlineBody.querySelector(".doc-index-caret[aria-expanded='false']") !== null, true);
+
+    // Expanding reaches what was shut.
+    /** @type {HTMLElement} */ (
+      outlineBody.querySelector(".doc-index-caret[aria-expanded='false']")).click();
+    check("expanding a branch reveals what is under it", visible(),
+      ["The document", "One", "Deeper", "Two"]);
+
+    // ...and collapsing puts it back, saying so.
     /** @type {HTMLElement} */ (
       outlineBody.querySelector(".doc-index-caret[aria-expanded='true']")).click();
     check("collapsing a branch hides its children",

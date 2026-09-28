@@ -125,18 +125,6 @@ var DocIndex = (function () {
     }
   }
 
-  /* Is the panel over the document, or beside it?
-   *
-   * The stylesheet decides, at a width where there is room for a rail in the
-   * margin — so this asks it rather than keeping a second copy of the
-   * breakpoint that would drift from the first. When there is room, nothing is
-   * covered and nothing needs dismissing.
-   */
-  function overlaying(view) {
-    return Boolean(view.backdrop)
-      && window.getComputedStyle(view.backdrop).display !== "none";
-  }
-
   function toggleBranch(view, id) {
     if (view.collapsed.has(id)) {
       view.collapsed.delete(id);
@@ -181,12 +169,6 @@ var DocIndex = (function () {
       scrollToHeading(view, entry.node);
       view.active = entry.id;
       paintActive(view);
-
-      // Over the document, so reading what you just jumped to means getting it
-      // out of the way. Beside the document, it stays where it is.
-      if (overlaying(view)) {
-        show(view, false);
-      }
     });
 
     return link;
@@ -274,10 +256,6 @@ var DocIndex = (function () {
     const listed = view.tree.length > 0;
     view.panel.hidden = !wanted || !listed;
 
-    if (view.backdrop) {
-      view.backdrop.hidden = !wanted || !listed;
-    }
-
     if (view.toggle) {
       view.toggle.setAttribute("aria-expanded", wanted ? "true" : "false");
       const label = wanted ? "Hide the outline" : "Show the outline";
@@ -291,11 +269,35 @@ var DocIndex = (function () {
   /* Build it again for whatever is on the page now. Called once the document
    * has rendered, because the headings are the document's.
    */
+  /* What is open when the outline first appears.
+   *
+   * The whole tree expanded is a wall: the Linear Algebra notes are 84
+   * headings, and all of them at once is a list to scroll rather than an
+   * outline to read. So a reader gets the top level and the one below it —
+   * the sections and their parts — and opens the rest if they want it.
+   *
+   * Depth, not heading level: a document that starts at h2 has its own idea
+   * of what a top-level section is, and this follows the shape of the tree
+   * that was actually built rather than the numbers in the markup.
+   */
+  function collapseBelowDepthOne(entries, collapsed, depth = 0) {
+    for (const entry of entries) {
+      if (entry.children.length > 0) {
+        if (depth >= 1) {
+          collapsed.add(entry.id);
+        }
+
+        collapseBelowDepthOne(entry.children, collapsed, depth + 1);
+      }
+    }
+  }
+
   function refresh(view) {
     const headings = headingsIn(view.content);
     view.collapsed.clear();
     view.active = headings[0]?.id || "";
     view.tree = nest(headings);
+    collapseBelowDepthOne(view.tree, view.collapsed);
 
     // One heading is a title, not an outline. Two is a document with sections.
     const listed = headings.length > 1;
@@ -322,15 +324,6 @@ var DocIndex = (function () {
       show(view, false);
       view.toggle?.focus();
     });
-    view.backdrop?.addEventListener("click", () => show(view, false));
-
-    // Escape closes it, which is what a panel over the document has to do.
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && view.open && overlaying(view)) {
-        show(view, false);
-        view.toggle?.focus();
-      }
-    });
   }
 
   /* One outline, on the elements it was handed.
@@ -346,7 +339,6 @@ var DocIndex = (function () {
       body: options.body,
       toggle: options.toggle || null,
       closeBtn: options.closeBtn || null,
-      backdrop: options.backdrop || null,
       scroller: options.scroller || null,
       collapsed: new Set(),
       tree: [],

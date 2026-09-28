@@ -1,67 +1,52 @@
 /* --------------------------------------------------------------------------
    Document outline
 
-   The headings of the document being read, as a tree beside it.
+   The headings of the document being read, in the column beside it.
 
-   The share page is a centred column with nothing either side of it, so the
-   outline is positioned rather than placed in a layout: a rail in the left
-   margin where the window is wide enough to have one, and a panel over the
-   document where it is not. Either way it does not move the text — a reader
-   who opens the outline should not have the paragraph they were reading jump
-   somewhere else.
+   A column in the layout rather than a panel over the page: the first version
+   floated, fixed to the viewport and covering the header, and a panel you have
+   to dismiss before you can read what you just jumped to is a panel that is in
+   the way. This one sits under the header, to the right of the document — the
+   same side as the button that opens it — and stays there as the page scrolls.
    -------------------------------------------------------------------------- */
 
+/* The row under the header. The document takes the space that is left, so
+   opening the outline narrows the measure rather than covering it. */
+.share-layout {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+}
+
 .doc-index {
-  position: fixed;
-  z-index: 40;
+  /* Sticky against the page's own scroller, so it stays put once the header
+     has scrolled away without ever having been fixed to the viewport. */
+  position: sticky;
   top: 0;
-  left: 0;
+  flex-shrink: 0;
   width: 280px;
-  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
 }
 
 .doc-index[hidden] {
   display: none;
 }
 
-/* Wide enough for a margin: the rail sits in it, level with the document, and
-   nothing overlaps. 1360px is where a 900px column still leaves 230px a side. */
-@media (min-width: 1360px) {
-  .doc-index {
-    width: min(280px, calc((100vw - 900px) / 2 - 16px));
-    border-right: 0;
-  }
-}
-
-/* Below that it is over the document, so it needs something to dismiss it. */
-.doc-index-backdrop {
-  position: fixed;
-  z-index: 39;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  cursor: default;
-  background: rgb(0 0 0 / 45%);
-}
-
-.doc-index-backdrop[hidden] {
-  display: none;
-}
-
-@media (min-width: 1360px) {
-  /* There is room for the rail, so nothing is covered and nothing needs
-     dismissing. */
-  .doc-index-backdrop {
+/* Below this there is not room for a document and a column beside it, so
+   there is no outline and nothing offering one. */
+@media (max-width: 1000px) {
+  .doc-index,
+  #shareOutlineToggle {
     display: none;
   }
 }
+
 
 .doc-index-head {
   display: flex;
