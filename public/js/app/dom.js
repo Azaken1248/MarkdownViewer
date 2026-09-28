@@ -70,12 +70,6 @@ var AppDom = (function () {
     superSearchPanel: element("superSearchPanel"),
     superSearchCount: element("superSearchCount"),
     superSearchList: element("superSearchList"),
-
-    // The document outline, beside the viewer.
-    docIndex: element("docIndex"),
-    docIndexBody: element("docIndexBody"),
-    docIndexCloseBtn: element("docIndexCloseBtn"),
-    docIndexToggleBtn: element("docIndexToggleBtn"),
     superSearchHint: element("superSearchHint"),
     clearFilterBtn: button("clearFilterBtn"),
     themeToggleBtn: button("themeToggleBtn"),

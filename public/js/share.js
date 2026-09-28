@@ -18,8 +18,28 @@
     content: document.getElementById("shareContent"),
     footer: document.getElementById("shareFooter"),
     meta: document.getElementById("shareMeta"),
-    themeToggle: document.getElementById("shareThemeToggle")
+    themeToggle: document.getElementById("shareThemeToggle"),
+    outline: document.getElementById("shareOutline"),
+    outlineBody: document.getElementById("shareOutlineBody"),
+    outlineToggle: document.getElementById("shareOutlineToggle"),
+    outlineClose: document.getElementById("shareOutlineClose"),
+    outlineBackdrop: document.getElementById("shareOutlineBackdrop")
   };
+
+  /* The outline, on this page's elements.
+   *
+   * The share page scrolls a container of its own rather than the window, so
+   * that is what is handed over — the module does not go looking for it.
+   */
+  const outline = DocIndex.create({
+    content: elements.content,
+    panel: elements.outline,
+    body: elements.outlineBody,
+    toggle: elements.outlineToggle,
+    closeBtn: elements.outlineClose,
+    backdrop: elements.outlineBackdrop,
+    scroller: document.querySelector(".share-page")
+  });
 
   MarkdownCore.configure({
     onWarning(message) {
@@ -127,6 +147,10 @@
 
     // Diagrams, code and math, exactly as the app renders them.
     await MarkdownCore.renderMermaidBlocks(elements.content);
+
+    // The headings exist once the document has rendered, so the outline is
+    // built from what is actually on the page rather than from the markdown.
+    outline.refresh();
   }
 
   /* -- theme ---------------------------------------------------------------

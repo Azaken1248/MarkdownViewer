@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <!-- The standalone share view.
      Deliberately its own page rather than a mode of the app: nothing here can
      reach the explorer, the editor, the search index or another document, so
@@ -73,6 +74,7 @@
 <link rel="stylesheet" href="/css/app/print.css" />
 <link rel="stylesheet" href="/css/app/accounts.css" />
 <link rel="stylesheet" href="/css/app/share.css" />
+<link rel="stylesheet" href="/css/app/doc-index.css" />
 <link rel="stylesheet" href="/css/app/error.css" />
 <link rel="stylesheet" href="/css/app/notebook-run.css" />
 
@@ -120,6 +122,7 @@
 <script src="/js/md/mermaid.js" defer></script>
 <script src="/js/md/panzoom.js" defer></script>
 <script src="/js/markdown-core.js" defer></script>
+<script src="/js/doc-index.js" defer></script>
 <script src="/js/share.js" defer></script>
 
 <div class="share-page">
@@ -134,10 +137,35 @@
       <span>Shared document</span>
     </span>
 
+    <!-- Offered only for a document with headings to list. -->
+    <button class="icon-btn" id="shareOutlineToggle" type="button"
+      aria-label="Show the outline" title="Show the outline"
+      aria-expanded="false" aria-controls="shareOutline" hidden>
+      <i class="ph ph-list-bullets" aria-hidden="true"></i>
+    </button>
+
     <button class="icon-btn" id="shareThemeToggle" type="button" aria-label="Switch theme" title="Switch theme">
       <i class="ph ph-moon" aria-hidden="true"></i>
     </button>
   </header>
+
+  <!-- The document's own headings. A rail in the left margin where there is
+       room for one, and a panel over the document where there is not. -->
+  <button class="doc-index-backdrop" id="shareOutlineBackdrop" type="button"
+    aria-label="Hide the outline" hidden></button>
+
+  <aside class="doc-index" id="shareOutline" aria-label="Document outline" hidden>
+    <div class="doc-index-head">
+      <h2 id="shareOutlineTitle">Outline</h2>
+
+      <button class="icon-btn icon-btn-sm" id="shareOutlineClose" type="button"
+        title="Hide the outline" aria-label="Hide the outline">
+        <i class="ph ph-x" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
+  </aside>
 
   <main class="share-main">
     <div class="share-loading" id="shareLoading">

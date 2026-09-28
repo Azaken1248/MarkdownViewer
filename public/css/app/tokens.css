@@ -64,7 +64,6 @@
      the match navigator, which floats clear of the tree so it sits over the
      document it is searching. */
   --sidebar-width: 280px;
-  --doc-index-width: 260px;
 
   --radius-lg: 12px;
   --radius-md: 6px;

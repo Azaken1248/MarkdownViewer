@@ -1,31 +1,66 @@
 /* --------------------------------------------------------------------------
    Document outline
 
-   A third column in .layout, beside the viewer rather than inside it: the
-   viewer is the scroll container, and an outline that scrolls away with the
-   document is an outline you cannot use to leave where you are.
+   The headings of the document being read, as a tree beside it.
 
-   The column is only there when the panel is. A grid track of 0 would still
-   draw the border and the gap, so the track itself is added by the class on
-   <body> and removed with it.
+   The share page is a centred column with nothing either side of it, so the
+   outline is positioned rather than placed in a layout: a rail in the left
+   margin where the window is wide enough to have one, and a panel over the
+   document where it is not. Either way it does not move the text — a reader
+   who opens the outline should not have the paragraph they were reading jump
+   somewhere else.
    -------------------------------------------------------------------------- */
 
-body.has-doc-index .layout {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--doc-index-width);
-}
-
 .doc-index {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  left: 0;
+  width: 280px;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  height: 100%;
   overflow: hidden;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .doc-index[hidden] {
   display: none;
+}
+
+/* Wide enough for a margin: the rail sits in it, level with the document, and
+   nothing overlaps. 1360px is where a 900px column still leaves 230px a side. */
+@media (min-width: 1360px) {
+  .doc-index {
+    width: min(280px, calc((100vw - 900px) / 2 - 16px));
+    border-right: 0;
+  }
+}
+
+/* Below that it is over the document, so it needs something to dismiss it. */
+.doc-index-backdrop {
+  position: fixed;
+  z-index: 39;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  cursor: default;
+  background: rgb(0 0 0 / 45%);
+}
+
+.doc-index-backdrop[hidden] {
+  display: none;
+}
+
+@media (min-width: 1360px) {
+  /* There is room for the rail, so nothing is covered and nothing needs
+     dismissing. */
+  .doc-index-backdrop {
+    display: none;
+  }
 }
 
 .doc-index-head {
@@ -47,13 +82,13 @@ body.has-doc-index .layout {
   color: var(--text-dim);
 }
 
-/* The list itself scrolls; the heading above it does not. */
+/* The list scrolls; the heading above it does not. */
 .doc-index-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 8px 6px 20px;
+  padding: 8px 6px 24px;
 }
 
 .doc-index-list,
@@ -63,8 +98,8 @@ body.has-doc-index .layout {
   list-style: none;
 }
 
-/* Indent comes from the nesting, so a level is a level however deep the
-   document's own numbering jumps around. */
+/* The indent is the nesting, so a level is a level however the document's own
+   numbering jumps about. */
 .doc-index-children {
   padding-left: 14px;
 }
@@ -101,7 +136,7 @@ body.has-doc-index .layout {
   pointer-events: none;
 }
 
-/* Collapsed points right, the way every tree in this app already does. */
+/* Collapsed points right, the way every other tree in this app does. */
 .doc-index-caret[aria-expanded="false"] {
   transform: rotate(-90deg);
 }
@@ -116,16 +151,16 @@ body.has-doc-index .layout {
   font-size: 13px;
   line-height: 1.35;
   text-decoration: none;
-  /* Long headings wrap rather than being cut off: the outline is for finding
-     a section, and half its name is not enough to recognise it by. */
+  /* A long heading wraps rather than being cut off: the outline is for
+     recognising a section, and half its name is not enough to recognise it
+     by. */
   overflow-wrap: anywhere;
 }
 
-/* A deeper heading is quieter, so the shape of the document is readable at a
-   glance without reading any of it. */
+/* A deeper heading is quieter, so the shape of the document reads at a glance
+   without reading any of it. */
 .doc-index-link[data-level="1"],
 .doc-index-link[data-level="2"] {
-  font-weight: 600;
   color: var(--text);
 }
 
@@ -144,12 +179,12 @@ body.has-doc-index .layout {
   outline-offset: -2px;
 }
 
-/* Where the reader is. A bar rather than a fill, so it reads as a position in
-   a list instead of as a selected item somebody clicked. */
+/* Where the reader is: the colour and the weight, and nothing else.
+   No fill behind it and no bar beside it — three marks for one fact is two
+   marks too many, and this has to sit quietly in a list of eighty. */
 .doc-index-link.is-active {
   color: var(--accent);
-  background: var(--surface-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

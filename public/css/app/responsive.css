@@ -13,17 +13,6 @@
  * treatment — and the tab bar is display:none above the breakpoint rather than
  * conditionally rendered, so there is one DOM either way. */
 @media (max-width: 1160px) {
-  /* The outline is a third column, and three columns do not fit here. The
-     document keeps the width instead — the toggle stays, so the panel is one
-     press away on a window that is merely narrow rather than a phone. */
-  .doc-index {
-    display: none;
-  }
-
-  body.has-doc-index .layout {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  }
-
   .editor-tabs {
     display: flex;
   }

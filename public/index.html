@@ -61,7 +61,6 @@
   <link rel="stylesheet" href="/css/app/base.css" />
   <link rel="stylesheet" href="/css/app/search.css" />
   <link rel="stylesheet" href="/css/app/sidebar.css" />
-  <link rel="stylesheet" href="/css/app/doc-index.css" />
   <link rel="stylesheet" href="/css/app/viewer.css" />
   <link rel="stylesheet" href="/css/app/markdown.css" />
   <link rel="stylesheet" href="/css/app/controls.css" />
@@ -194,7 +193,6 @@
   <script src="/js/app/places.js" defer></script>
   <script src="/js/app/account-menu.js" defer></script>
   <script src="/js/app/sidebar.js" defer></script>
-  <script src="/js/app/doc-index.js" defer></script>
   <script src="/js/app/editor-keys.js" defer></script>
   <script src="/js/app.js" defer></script>
 </head>
@@ -407,13 +405,6 @@
           </div>
 
           <div class="viewer-actions">
-            <!-- Shown only for a document that has headings to list. -->
-            <button class="icon-btn" id="docIndexToggleBtn" type="button"
-              aria-label="Show the outline" title="Show the outline"
-              aria-expanded="false" aria-controls="docIndex" hidden>
-              <i class="ph ph-list-bullets" aria-hidden="true"></i>
-            </button>
-
             <!-- Markdown, not the rendered text. This is a markdown library, so
                  what is worth carrying out of it is the source: it pastes into
                  another document and comes back the same. -->
@@ -603,23 +594,6 @@
         </div>
       </main>
 
-      <!-- The document's own headings, as a tree you can collapse. A nav of
-           nested lists rather than an ARIA tree widget: nested lists are what
-           a screen reader already understands, and links are already reachable
-           by Tab, where a tree role promises an arrow-key model that would
-           then have to be built and kept working. -->
-      <aside class="doc-index" id="docIndex" aria-label="Document outline" hidden>
-        <div class="doc-index-head">
-          <h2 id="docIndexTitle">Outline</h2>
-
-          <button class="icon-btn icon-btn-sm" id="docIndexCloseBtn" type="button"
-            title="Hide the outline" aria-label="Hide the outline">
-            <i class="ph ph-x" aria-hidden="true"></i>
-          </button>
-        </div>
-
-        <nav class="doc-index-body" id="docIndexBody" aria-labelledby="docIndexTitle"></nav>
-      </aside>
     </div>
 
   </div>

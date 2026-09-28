@@ -230,8 +230,6 @@ bindAccountMenu();
 
 bindSidebar();
 
-AppDocIndex.bindDocIndex();
-
 bindPlaceSwitcher();
 
 elements.addLinkBtn.addEventListener("click", openLinkModal);

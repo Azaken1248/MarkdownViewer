@@ -101,7 +101,6 @@ const BROWSER_GLOBALS = {
   AppPlaces: "readonly",
   AppAccountMenu: "readonly",
   AppSidebar: "readonly",
-  AppDocIndex: "readonly",
   AppEditorKeys: "readonly",
   AppDocs: "readonly",
   AppTaskLists: "readonly",
@@ -125,6 +124,7 @@ const BROWSER_GLOBALS = {
   // the modules under /js/md, then markdown-core.js, which is made of them.
   DocKinds: "readonly",
   DomHtml: "readonly",
+  DocIndex: "readonly",
   MdLazy: "readonly",
   MdText: "readonly",
   MdCode: "readonly",

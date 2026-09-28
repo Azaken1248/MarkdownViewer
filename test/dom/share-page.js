@@ -136,6 +136,89 @@ module.exports = async (ctx) => {
     check("nothing was logged as an error", problems.filter((p) => !/Could not parse CSS/.test(p)), []);
   }
 
+  console.log("=== the outline lists the document's own headings ===");
+  {
+    const { window } = view;
+    const doc = window.document;
+    const content = doc.getElementById("shareContent");
+    const outlineBody = doc.getElementById("shareOutlineBody");
+    const toggle = doc.getElementById("shareOutlineToggle");
+
+    /* The document above has one heading, so there is nothing to outline —
+     * which is itself the first thing worth checking, because a panel that
+     * offers itself for a document with a title and no sections is noise.
+     */
+    check("a document with one heading is not offered an outline", toggle.hidden, true);
+
+    // A document with sections in it. Put on the page directly: this suite
+    // stands marked in, so there is no markdown pass here to make headings.
+    content.innerHTML = [
+      '<h1 id="top">The document</h1>',
+      '<h2 id="one">One</h2>',
+      '<h3 id="deeper">Deeper</h3>',
+      '<h2 id="two">Two</h2>',
+      '<h2>No anchor</h2>'
+    ].join("");
+    window.DocIndex.create({
+      content,
+      panel: doc.getElementById("shareOutline"),
+      body: outlineBody,
+      toggle,
+      closeBtn: doc.getElementById("shareOutlineClose"),
+      backdrop: doc.getElementById("shareOutlineBackdrop")
+    }).refresh();
+
+    const links = () => /** @type {HTMLElement[]} */ (
+      [...outlineBody.querySelectorAll(".doc-index-link")]);
+    check("now it is offered", toggle.hidden, false);
+    check("one entry per heading that has an anchor",
+      links().map((link) => link.textContent), ["The document", "One", "Deeper", "Two"]);
+    check("...a heading with no anchor is left out rather than linked nowhere",
+      links().some((link) => link.textContent === "No anchor"), false);
+    check("...each pointing at something on the page",
+      links().every((link) => content.querySelector(`#${link.dataset.id}`)), true);
+    check("...nested the way the levels say",
+      outlineBody.querySelectorAll(":scope > ul > li").length, 1);
+    check("a branch says whether it is open",
+      outlineBody.querySelector(".doc-index-caret[aria-expanded]").getAttribute("aria-expanded"),
+      "true");
+    check("...and a leaf offers nothing to press",
+      outlineBody.querySelectorAll(".doc-index-caret.is-empty").length, 2);
+
+    // Collapsing hides what is under it and says so.
+    /** @type {HTMLElement} */ (
+      outlineBody.querySelector(".doc-index-caret[aria-expanded='true']")).click();
+    check("collapsing a branch hides its children",
+      /** @type {HTMLElement} */ (outlineBody.querySelector(".doc-index-children")).hidden, true);
+    check("...and the control says it is shut",
+      outlineBody.querySelector(".doc-index-caret").getAttribute("aria-expanded"), "false");
+  }
+
+  console.log("=== the levels nest by what they declare ===");
+  {
+    const { nest } = view.window.DocIndex;
+
+    const tree = nest([
+      { id: "a", text: "A", level: 1 },
+      { id: "b", text: "B", level: 2 },
+      { id: "c", text: "C", level: 3 },
+      { id: "d", text: "D", level: 2 }
+    ]);
+    check("a level is a level", tree.map((one) => one.id), ["a"]);
+    check("...and what sits under it is under it", tree[0].children.map((one) => one.id), ["b", "d"]);
+    check("...however deep", tree[0].children[0].children.map((one) => one.id), ["c"]);
+
+    // A document that starts at h3 is not malformed, it starts there.
+    const deep = nest([{ id: "x", text: "X", level: 3 }, { id: "y", text: "Y", level: 4 }]);
+    check("a document that starts deep starts at the top of its own tree",
+      [deep.length, deep[0].children.length], [1, 1]);
+
+    // A jump from h2 to h4 means the h4 belongs to the h2, not to a level the
+    // document does not have.
+    const jumped = nest([{ id: "p", text: "P", level: 2 }, { id: "q", text: "Q", level: 4 }]);
+    check("a skipped level does not invent one", jumped[0].children.map((one) => one.id), ["q"]);
+  }
+
   console.log("=== and its theme toggle is the same cycle as the app's ===");
   {
     const { window } = view;

@@ -49,6 +49,31 @@ const CRITICAL_PATH_ALLOWED = [
   "dompurify@"
 ];
 
+/* Every page begins with a doctype, and nothing at all comes before it.
+ *
+ * share.html and error.html had none. A page with no doctype is rendered in
+ * quirks mode, and KaTeX refuses to run in quirks mode at all — so every
+ * formula in every shared document silently failed to render, all 955 of them
+ * in the notes this was found with, while the same document in the app was
+ * fine. Quirks mode also changes box-sizing, so the layout of both pages was
+ * subtly wrong on top of it.
+ *
+ * A comment first is enough to cause it, which is how it happened: both files
+ * open with a note explaining what they are.
+ */
+console.log("=== every page is in standards mode ===");
+{
+  const publicDir = path.join(__dirname, "..", "public");
+
+  const pages = fs.readdirSync(publicDir).filter((name) => name.endsWith(".html"));
+  check("(there are pages to check)", pages.length >= 4, true);
+
+  const wrong = pages.filter((name) =>
+    !fs.readFileSync(path.join(publicDir, name), "utf8").startsWith("<!DOCTYPE html>"));
+  check("no page has anything before its doctype", wrong, []);
+}
+
+
 console.log("=== the critical path is only what cannot be deferred ===");
 for (const [name, html] of [["index.html", index], ["share.html", share]]) {
   const remote = remoteTags(html);
