@@ -97,6 +97,112 @@ var MdText = (function () {
     ? trimmed === "$$"
     : trimmed === "]" || trimmed === "\\]");
 
+/* Inline maths, taken out of the line before markdown can read it.
+ *
+ * `$...$` used to be left in the text for KaTeX's own scanner to find after
+ * markdown had run, which meant markdown saw the TeX first and applied its own
+ * escaping rules to it. `\\` is an escaped backslash in markdown and becomes
+ * one; `\{` is an escaped brace and becomes a bare one. So
+ *
+ *     $\left\{ \begin{bmatrix} 0 & 0 \\ y & 0 \end{bmatrix} \right\}$
+ *
+ * reached KaTeX as `\left{ ... 0 & 0 \ y & 0 ...` — a missing delimiter and a
+ * row separator turned into a space — and rendered as an error. Display maths
+ * never had this problem, because the walk above lifts it out first. This does
+ * the same for the inline kind, which is the whole fix: markdown never sees
+ * TeX at all.
+ *
+ * The placeholder keeps the source as its text as well as in the attribute,
+ * because the page editor renders blocks without the KaTeX pass and a person
+ * editing a paragraph has to see the formula they are editing.
+ */
+
+// A dollar that is a delimiter, rather than a price or an escape. The rules
+// are the ones markdown-it-katex settled on after this exact argument: an
+// opener is not followed by a space, a closer is not preceded by one, and a
+// closer is not followed by a digit — which is what keeps "$5 and $10" prose.
+const opensInlineMath = (line, at) => at + 1 < line.length && !/\s/.test(line[at + 1]);
+
+const closesInlineMath = (line, at, from) => at > from
+  && !/\s/.test(line[at - 1])
+  && !/[0-9]/.test(line[at + 1] || "");
+
+/* Where an inline code span runs to, or -1.
+ *
+ * Backticks win over dollars: `$x$` inside code is code, and the run has to be
+ * closed by a run of the same length, which is markdown's own rule.
+ */
+function codeSpanEnd(line, at) {
+  let ticks = 0;
+  while (line[at + ticks] === "`") {
+    ticks += 1;
+  }
+
+  const closer = line.indexOf("`".repeat(ticks), at + ticks);
+  return closer === -1 ? -1 : closer + ticks;
+}
+
+function extractInlineMath(line, mark) {
+  if (!line.includes("$")) {
+    return line;
+  }
+
+  let out = "";
+  let index = 0;
+
+  while (index < line.length) {
+    const char = line[index];
+
+    // An escaped dollar is a dollar, and the backslash stays for markdown to
+    // deal with as it always has.
+    if (char === "\\" && line[index + 1] === "$") {
+      out += line.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+
+    if (char === "`") {
+      const end = codeSpanEnd(line, index);
+      if (end !== -1) {
+        out += line.slice(index, end);
+        index = end;
+        continue;
+      }
+    }
+
+    if (char !== "$" || !opensInlineMath(line, index)) {
+      out += char;
+      index += 1;
+      continue;
+    }
+
+    // Find the closer, skipping escaped dollars inside the maths.
+    let end = -1;
+    for (let at = index + 1; at < line.length; at += 1) {
+      if (line[at] === "\\") {
+        at += 1;
+        continue;
+      }
+
+      if (line[at] === "$" && closesInlineMath(line, at, index)) {
+        end = at;
+        break;
+      }
+    }
+
+    if (end === -1) {
+      out += char;
+      index += 1;
+      continue;
+    }
+
+    out += mark(line.slice(index + 1, end), line.slice(index, end + 1));
+    index = end + 1;
+  }
+
+  return out;
+}
+
   // Where the walk is: inside a fence, inside a maths block, or in the prose.
   function mathWalker(push) {
     let inCodeFence = false;
@@ -161,16 +267,29 @@ var MdText = (function () {
           return;
         }
 
-        push(line);
+        // Inside a fence the text is the text. Everywhere else, the inline
+        // maths comes out before markdown is allowed to read the line.
+        push(inCodeFence ? line : extractInlineMath(line, inlineMathMarker));
       },
       // A block nobody closed is not maths, it is the rest of the document.
       end: () => held
     };
   }
 
+  /* One inline formula, as the element that stands in for it.
+   *
+   * The TeX is carried base64 in the attribute so that no amount of markdown,
+   * sanitising or HTML escaping can alter it, and repeated as the element's
+   * text so the page editor — which renders without KaTeX — still shows the
+   * formula somebody is editing. `$` and all.
+   */
+  const inlineMathMarker = (tex, source) =>
+    `<span class="math-inline" data-math-tex="${encodeBase64Utf8(tex)}">${escapeHtml(source)}</span>`;
+
   function normalizeMarkdownMath(markdown) {
     const source = String(markdown || "");
-    if (!source.includes("[") && !source.includes("]") && !source.includes("\\[") && !source.includes("$$")) {
+    if (!source.includes("$") && !source.includes("[") && !source.includes("]")
+      && !source.includes("\\[")) {
       return source;
     }
 
@@ -197,6 +316,6 @@ var MdText = (function () {
   // equation as raw TeX, so the pattern errs towards fetching.
 
   return {
-    normalize, encodeBase64Utf8, decodeBase64Utf8, normalizeMatrixEnvironments, escapeHtml, isNotebookFile, isDiagramFile, toMermaidMarkdown, activeThemeName, normalizeMarkdownMath, renderMarkdown
+    normalize, encodeBase64Utf8, decodeBase64Utf8, normalizeMatrixEnvironments, escapeHtml, isNotebookFile, isDiagramFile, toMermaidMarkdown, activeThemeName, normalizeMarkdownMath, renderMarkdown, extractInlineMath
   };
 })();

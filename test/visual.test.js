@@ -34,6 +34,21 @@ for (const file of modelScriptPaths(ROOT)) {
 }
 const DM = globalThis.DiagramModel;
 
+/* The render engine's text pass, for the maths checks.
+ *
+ * It is what lifts a formula out of a line before markdown can read it, and
+ * the other half of the round trip visual-editor.js does — so the two belong
+ * in the same suite. marked and DOMPurify only have to exist: what is under
+ * test is the pass in front of them.
+ */
+const stubs = /** @type {any} */ (globalThis);
+stubs.marked = { setOptions() {}, parse: (source) => source };
+stubs.DOMPurify = { sanitize: (html) => html };
+for (const file of ["dom-html.js", "doc-kinds.js", "md/lazy.js", "md/text.js"]) {
+  loadScript(path.join(ROOT, "js", file));
+}
+const MdText = globalThis.MdText;
+
 // And the drawing, which is what makes writing the layout down worth doing: a
 // diagram that says where its boxes are is one this app can draw itself.
 loadScript(path.join(ROOT, "js", "diagram-icons.js"));
@@ -79,9 +94,10 @@ function walkDocuments(dir) {
  * library's documents.
  */
 const ctx = {
-  check, VE, DM, DD, roundTrips, walkDocuments, fs, path, ROOT, JSDOM, styleSource
+  check, VE, DM, DD, MdText, roundTrips, walkDocuments, fs, path, ROOT, JSDOM, styleSource
 };
 
+require("./visual/math.js")(ctx);
 require("./visual/blocks.js")(ctx);
 require("./visual/model.js")(ctx);
 require("./visual/lines.js")(ctx);

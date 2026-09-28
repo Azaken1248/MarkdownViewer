@@ -352,6 +352,22 @@ var VisualEditor = (function () {
       return "";
     }
 
+    /* A formula is not prose and must not be escaped like prose.
+     *
+     * Before this, a paragraph holding `$\alpha$` came back from an edit as
+     * `$\\alpha$`, because the serializer saw a text node and escaped the
+     * backslash the way it escapes every other one — and it compounded, so the
+     * same paragraph edited twice doubled it again. Maths is now a marker
+     * element (md/text.js), and what it stands for is written back exactly.
+     *
+     * Its text is the answer rather than the attribute beside it, because in
+     * the page editor the text is what somebody has been typing into; the
+     * attribute is what it was before they started.
+     */
+    if (node.classList && node.classList.contains("math-inline")) {
+      return node.textContent || "";
+    }
+
     const tag = node.tagName.toLowerCase();
     const inner = childrenToMarkdown(node);
 

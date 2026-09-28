@@ -13,7 +13,7 @@ var MdMath = (function () {
   const INLINE_MATH_PATTERN = /\$[^$\n]+\$|\\\(|\\\[|\\begin\{/;
 
   function hasMathContent(root) {
-    if (root.querySelector(".math-block[data-math-tex]")) {
+    if (root.querySelector(".math-block[data-math-tex], .math-inline[data-math-tex]")) {
       return true;
     }
 
@@ -49,20 +49,28 @@ var MdMath = (function () {
       return;
     }
 
+    /* Both kinds of marker, drawn from the attribute nobody could have
+     * altered. The TeX went in before markdown ran and comes out here, so what
+     * KaTeX is handed is exactly what the document said.
+     */
     if (window.katex) {
-      const blockNodes = root.querySelectorAll(".math-block[data-math-tex]");
-      for (const node of blockNodes) {
-        const tex = decodeBase64Utf8(node.getAttribute("data-math-tex") || "");
+      for (const [selector, displayMode] of [
+        [".math-block[data-math-tex]", true],
+        [".math-inline[data-math-tex]", false]
+      ]) {
+        for (const node of root.querySelectorAll(selector)) {
+          const tex = decodeBase64Utf8(node.getAttribute("data-math-tex") || "");
 
-        try {
-          window.katex.render(tex, node, {
-            displayMode: true,
-            throwOnError: false,
-            errorColor: "#eb9b96"
-          });
-        } catch (error) {
-          console.error("Math block rendering failed", error);
-          node.textContent = tex;
+          try {
+            window.katex.render(tex, node, {
+              displayMode,
+              throwOnError: false,
+              errorColor: "#eb9b96"
+            });
+          } catch (error) {
+            console.error("Math rendering failed", error);
+            node.textContent = tex;
+          }
         }
       }
     }
