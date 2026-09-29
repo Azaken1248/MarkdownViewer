@@ -251,6 +251,38 @@ check("...and is the right way round however it was dragged",
 check("a dragged line is two points", G.shapeFromDrag("line", [0, 0], [10, 10]).length, 2);
 check("an arrowhead is two strokes", G.arrowHead([0, 0], [100, 0]).length, 2);
 
+/* Joined-up writing is loops — the round of an e, the turn at the bottom of a
+ * u — and an average wide enough to take a tremor out is wide enough to
+ * flatten one. A tight wave stands in for them: the shake has to go and the
+ * loop has to keep its size.
+ */
+const wave = (wavelength, jitter) => Array.from({ length: 300 }, (_, i) => {
+  const x = i * 0.9;
+  return [x, (Math.sin((x / wavelength) * Math.PI * 2) * 8) + wobble(jitter)];
+});
+
+const amplitude = (points) => {
+  const ys = points.map(([, y]) => y);
+  return (Math.max(...ys) - Math.min(...ys)) / 2;
+};
+
+check("a loop the size of a letter keeps its size",
+  Math.abs(amplitude(G.enhance(wave(24, 1.5))) - 8) < 1, true);
+check("...and so does an open hand", Math.abs(amplitude(G.enhance(wave(48, 1.5))) - 8) < 1, true);
+
+// How hard the pen was pressed has to reach the nib. Resampling and smoothing
+// both used to drop it on the floor, so a stylus drew the same line a mouse
+// did.
+const pressed = G.enhance(Array.from({ length: 60 }, (_, i) => [i * 3, 0, 0.1 + (i / 70)]));
+check("pressure survives being resampled and smoothed",
+  pressed.every((point) => point.length === 3), true);
+check("...and still rises across the stroke",
+  pressed[pressed.length - 1][2] > pressed[0][2] + 0.5, true);
+
+const forces = G.nibWidths(pressed, 6, pressed.map((point) => point[2]));
+check("...and a harder-pressed end draws wider",
+  forces[forces.length - 3] > forces[2] * 1.2, true);
+
 console.log("=== where the marks are kept ===");
 
 /* localStorage, standing in. The real one belongs to a browser; what is under

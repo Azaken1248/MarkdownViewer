@@ -74,8 +74,7 @@ var AnnotateGeometry = (function () {
 
       let travelled = spacing - carried;
       while (travelled <= segment) {
-        const t = travelled / segment;
-        out.push([from[0] + ((to[0] - from[0]) * t), from[1] + ((to[1] - from[1]) * t)]);
+        out.push(between(from, to, travelled / segment));
         travelled += spacing;
       }
 
@@ -155,21 +154,88 @@ var AnnotateGeometry = (function () {
         y += points[at][1];
       }
 
-      out.push([x / (to - from + 1), y / (to - from + 1)]);
+      const moved = [x / (to - from + 1), y / (to - from + 1)];
+      // How hard the pen was pressed is not a coordinate and is not averaged
+      // with its neighbours; it is carried across, because a sample that
+      // arrived without one is a thin spot in the middle of the line.
+      if (points[i].length > 2) {
+        moved.push(points[i][2]);
+      }
+
+      out.push(moved);
     }
 
     out.push(points[points.length - 1]);
     return out;
   }
 
-  /* Smoothed twice, the second time gently.
+  /* Smoothed twice, the second time gently, and held back where the line
+   * turns.
    *
-   * One wide averaging window takes the shake out but rounds off the corners
-   * of a letter with it. Two narrow passes come to much the same strength
-   * while following the line more closely, because a box filter applied twice
-   * is a bell rather than a rectangle.
+   * One wide averaging window takes the shake out but rounds off the letters
+   * with it. Two narrow passes come to much the same strength while following
+   * the line more closely, because a box filter applied twice is a bell
+   * rather than a rectangle.
+   *
+   * That is still not enough for joined-up writing. Cursive is loops — the
+   * round of an e, the crossing of an l, the turn at the bottom of a u — and
+   * an average wide enough to take out a tremor is wide enough to flatten a
+   * loop that size, which is what turns a written word into a fence. So each
+   * sample is drawn back towards where the pen actually went, by how sharply
+   * the line is turning there: fully smoothed along the long runs, where the
+   * shake is all there is to see, and left alone at the turns, where the
+   * shape is.
    */
-  const enhance = (points, spacing = 2.5) => smooth(smooth(resample(points, spacing)), 1);
+  function enhance(points, spacing = 2.5) {
+    const even = resample(points, spacing);
+    return relax(even, smooth(smooth(even), 1));
+  }
+
+  /* How sharply the line turns at each sample, from 0 (straight on) to 1 (a
+   * right angle or tighter).
+   *
+   * Measured a few samples either side rather than between neighbours, which
+   * at this spacing is mostly noise — and measured on the smoothed line
+   * rather than the raw one, because a tremor makes turns as sharp as any
+   * loop and is precisely what this must not mistake for one.
+   */
+  const BEND_SPAN = 3;
+
+  /* How far back towards the raw samples a turn is allowed to pull, at most.
+   *
+   * All the way back keeps the loop but brings the tremor at the top of it
+   * with it, and measured against a clean sine the loops came out larger than
+   * they were drawn. Half way is enough: a tight loop keeps its size to within
+   * a fortieth, and what is left of the shake on the long runs is close to
+   * what full smoothing would have taken out.
+   */
+  const BEND_PULL = 0.5;
+
+  function bendAt(points, i) {
+    const before = points[Math.max(0, i - BEND_SPAN)];
+    const after = points[Math.min(points.length - 1, i + BEND_SPAN)];
+    const coming = Math.atan2(points[i][1] - before[1], points[i][0] - before[0]);
+    const going = Math.atan2(after[1] - points[i][1], after[0] - points[i][0]);
+    const away = Math.abs(((going - coming + Math.PI) % (Math.PI * 2)) - Math.PI);
+
+    return Math.min(1, away / (Math.PI / 2));
+  }
+
+  function relax(raw, averaged) {
+    if (raw.length < 3) {
+      return averaged;
+    }
+
+    return averaged.map((point, i) => {
+      const keep = bendAt(averaged, i) * BEND_PULL;
+      const back = [
+        point[0] + ((raw[i][0] - point[0]) * keep),
+        point[1] + ((raw[i][1] - point[1]) * keep)
+      ];
+
+      return point.length > 2 ? back.concat([point[2]]) : back;
+    });
+  }
 
   /* More samples along the same line, so the point eraser has something to cut.
    *

@@ -29,7 +29,10 @@
   top: var(--ink-bar, 0px);
   flex-shrink: 0;
   width: 280px;
-  max-height: calc(100dvh - var(--ink-bar, 0px));
+  /* The full height rather than as tall as the list happens to be: a column
+     that stops halfway down leaves its edge hanging in the middle of the
+     page, which reads as something unfinished rather than as a column. */
+  height: calc(100dvh - var(--ink-bar, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -76,7 +79,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 8px 6px 24px;
+  padding: 10px 8px 28px;
 }
 
 .doc-index-list,
@@ -89,13 +92,21 @@
 /* The indent is the nesting, so a level is a level however the document's own
    numbering jumps about. */
 .doc-index-children {
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
+/* Room to breathe between the headings. A list of eighty is read by
+   scanning it, and scanning wants space between the lines more than it wants
+   to see four more of them at once. */
 .doc-index-row {
   display: flex;
   align-items: flex-start;
   gap: 2px;
+}
+
+.doc-index-item + .doc-index-item,
+.doc-index-item > .doc-index-children {
+  margin-top: 3px;
 }
 
 .doc-index-caret {
@@ -133,11 +144,11 @@
   flex: 1;
   min-width: 0;
   display: block;
-  padding: 4px 8px;
+  padding: 5px 9px;
   border-radius: 6px;
   color: var(--fg-muted);
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.45;
   text-decoration: none;
   /* A long heading wraps rather than being cut off: the outline is for
      recognising a section, and half its name is not enough to recognise it
