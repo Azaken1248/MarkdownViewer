@@ -110,6 +110,12 @@ check("an arc is not a line", kindOf(Array.from({ length: 60 }, (_, i) => {
   return [10 + (t * 210), 10 + (Math.sin(t * Math.PI) * 70)];
 })), null);
 check("a tap is not a shape", kindOf([[5, 5], [6, 5], [6, 6], [5, 6]]), null);
+// A letter is round, closed and about as regular as a hand-drawn ring — the
+// only thing that tells them apart is how big they are.
+check("a handwritten o is a letter, not a ring",
+  kindOf(drawEllipse([100, 100], [14, 17], 40, 1.5)), null);
+check("...and a ring drawn round a word is a ring",
+  kindOf(drawEllipse([100, 100], [70, 40], 80, 2)), "ellipse");
 check("two points are not a shape", kindOf([[0, 0], [50, 50]]), null);
 
 console.log("=== a recognised shape comes back clean ===");
@@ -161,6 +167,26 @@ const stroke = [[0, 0], [100, 0]];
 check("a rub across the middle of a segment finds it", G.nearPoint(stroke, [50, 4], 6), true);
 check("...and one well away from it does not", G.nearPoint(stroke, [50, 40], 6), false);
 check("a dot is found by what lands on it", G.nearPoint([[10, 10]], [12, 12], 6), true);
+
+/* The point eraser cuts the line, not the samples that happen to be left of
+ * it. A stroke is simplified before it is stored, so a long underline is two
+ * points a hundred pixels apart; rubbing at its middle has to divide it
+ * first or it comes away with nothing.
+ */
+const long = [[0, 0], [100, 0]];
+check("a long segment is divided into pieces the eraser can reach",
+  G.densify(long, 10).length, 11);
+check("...each one exactly on the line it came from",
+  G.densify(long, 10).every(([, y]) => y === 0), true);
+check("...and the ends left where they were",
+  [G.densify(long, 10)[0], G.densify(long, 10)[10]], long);
+check("a segment already short enough is left alone",
+  G.densify([[0, 0], [4, 0]], 10), [[0, 0], [4, 0]]);
+check("dividing an already divided stroke adds nothing",
+  G.densify(G.densify(long, 10), 10).length, 11);
+check("pressure is carried into the samples it makes",
+  G.densify([[0, 0, 0.2], [10, 0, 0.8]], 5)[1].map((n) => Math.round(n * 100) / 100),
+  [5, 0, 0.5]);
 
 console.log("=== a shape drawn on purpose ===");
 

@@ -46,7 +46,6 @@ var Annotate = (function () {
     { id: "arrow", label: "Arrow", icon: "ph-arrow-up-right" },
     { id: "rectangle", label: "Rectangle", icon: "ph-rectangle" },
     { id: "ellipse", label: "Ellipse", icon: "ph-circle" },
-    { id: "eraser", label: "Eraser", icon: "ph-eraser" },
     { id: "laser", label: "Laser pointer", icon: "ph-cursor" }
   ];
 
@@ -341,6 +340,59 @@ var Annotate = (function () {
     return group;
   }
 
+  /* The two erasers.
+   *
+   * They stand in the toolbar as tools in their own right rather than as a
+   * mode hidden behind a second press on one eraser button, because a mode
+   * you cannot see is a mode you do not know you are in. Picking either one
+   * picks up the eraser; pressing the one you are holding puts it down.
+   */
+  const ERASERS = [
+    { id: "stroke", label: "Eraser: whole stroke", icon: "ph-eraser" },
+    { id: "point", label: "Eraser: rub out", icon: "ph-dot-outline" }
+  ];
+
+  function eraserButtons(view) {
+    const group = document.createElement("div");
+    group.className = "ink-group";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Eraser");
+
+    for (const mode of ERASERS) {
+      const made = button("ink-btn ink-eraser", mode.label, mode.icon);
+      made.dataset.eraser = mode.id;
+      made.setAttribute("aria-pressed", "false");
+      made.addEventListener("click", () => {
+        const held = view.tool === "eraser" && view.eraserMode === mode.id;
+        view.eraserMode = mode.id;
+        holdTool(view, held ? "none" : "eraser");
+      });
+      group.appendChild(made);
+    }
+
+    return group;
+  }
+
+  /* Ink to shape, which is a mode rather than a tool: it changes what the pen
+   * leaves behind, not what a drag does. On by default, and off in one press
+   * for anyone whose handwriting keeps being read as a circle.
+   */
+  function shapeToggle(view) {
+    const group = document.createElement("div");
+    group.className = "ink-group";
+
+    const made = button("ink-btn ink-toggle", "Tidy shapes as they are drawn", "ph-shapes");
+    made.setAttribute("aria-pressed", String(view.inkToShape));
+    made.addEventListener("click", () => {
+      view.inkToShape = !view.inkToShape;
+      paintToolbar(view);
+    });
+
+    view.shapeBtn = made;
+    group.appendChild(made);
+    return group;
+  }
+
   function actionButtons(view) {
     const group = document.createElement("div");
     group.className = "ink-group";
@@ -369,7 +421,10 @@ var Annotate = (function () {
     bar.className = "ink-toolbar";
     bar.setAttribute("role", "toolbar");
     bar.setAttribute("aria-label", "Annotation tools");
-    bar.append(toolButtons(view), colourButtons(view), widthButtons(view), actionButtons(view));
+    bar.append(
+      toolButtons(view), eraserButtons(view), colourButtons(view),
+      widthButtons(view), shapeToggle(view), actionButtons(view)
+    );
 
     view.status = document.createElement("p");
     view.status.className = "ink-status";
@@ -385,6 +440,11 @@ var Annotate = (function () {
       made.setAttribute("aria-pressed", String(made.dataset.tool === view.tool));
     }
 
+    for (const made of view.toolbar.querySelectorAll(".ink-eraser")) {
+      const on = view.tool === "eraser" && made.dataset.eraser === view.eraserMode;
+      made.setAttribute("aria-pressed", String(on));
+    }
+
     for (const made of view.toolbar.querySelectorAll(".ink-swatch")) {
       made.setAttribute("aria-pressed", String(made.dataset.colour === view.colour));
     }
@@ -393,15 +453,20 @@ var Annotate = (function () {
       made.setAttribute("aria-pressed", String(Number(made.dataset.width) === view.width));
     }
 
+    view.shapeBtn.setAttribute("aria-pressed", String(view.inkToShape));
     view.undoBtn.disabled = view.past.length === 0;
     view.redoBtn.disabled = view.future.length === 0;
     view.clearBtn.disabled = view.strokes.length === 0;
   }
 
+  // Pressing the tool you are holding puts it down, which is how you get back
+  // to reading without hunting for an off switch.
   function chooseTool(view, tool) {
-    // Pressing the tool you are holding puts it down, which is how you get
-    // back to reading without hunting for an off switch.
-    view.tool = view.tool === tool ? "none" : tool;
+    holdTool(view, view.tool === tool ? "none" : tool);
+  }
+
+  function holdTool(view, tool) {
+    view.tool = tool;
     Surface.clearLaser(view);
 
     // The layer only takes the pointer when there is something to draw with;
@@ -513,6 +578,27 @@ var Annotate = (function () {
     view.sizeWatcher.observe(view.surface);
   }
 
+  /* How tall the bar is, published to the page.
+   *
+   * The bar sticks to the top of the scroller, and so does the outline beside
+   * the document; without this the outline's heading would sit underneath the
+   * tools. The height is measured rather than assumed because the bar wraps to
+   * two rows on a narrow window. A hidden bar measures zero, which is exactly
+   * the offset wanted when the tools are away.
+   */
+  function watchToolbar(view) {
+    if (!window.ResizeObserver) {
+      return;
+    }
+
+    view.barWatcher = new window.ResizeObserver(() => {
+      const height = view.toolbar.getBoundingClientRect().height;
+      document.documentElement.style.setProperty("--ink-bar", `${Math.round(height)}px`);
+    });
+
+    view.barWatcher.observe(view.toolbar);
+  }
+
   /* Annotation over one document.
    *
    * `token` is what the marks are filed under, so two shared documents open in
@@ -529,6 +615,7 @@ var Annotate = (function () {
       toolbar: options.toolbar,
       token: options.token || "",
       tool: "none",
+      eraserMode: "stroke",
       colour: COLOURS[0].value,
       laserColour: "#ff4d4d",
       width: WIDTHS[1].value,
@@ -551,6 +638,7 @@ var Annotate = (function () {
     bindPointer(view);
     bindKeys(view);
     watchSize(view);
+    watchToolbar(view);
 
     return {
       /* Called once the document has rendered: the layer is sized to it and
@@ -570,6 +658,7 @@ var Annotate = (function () {
       },
       strokeCount: () => view.strokes.length,
       tool: () => view.tool,
+      eraserMode: () => view.eraserMode,
       chooseTool: (tool) => chooseTool(view, tool),
       undo: () => undo(view),
       redo: () => redo(view),

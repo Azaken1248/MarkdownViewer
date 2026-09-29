@@ -29,12 +29,28 @@
   mix-blend-mode: multiply;
 }
 
-/* A laser is a pointer, not a mark: it glows, and it goes. */
+/* A laser is a pointer, not a mark: it glows, and it goes.
+
+   A dot with a halo and a tail that tapers away behind it, rather than the
+   flat stroked line the first version drew — one glow over the whole group so
+   the tail, the halo and the dot light up together instead of each carrying
+   its own shadow. */
 .ink-laser {
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 4px currentcolor);
-  opacity: 0.9;
   pointer-events: none;
+  filter: drop-shadow(0 0 5px currentcolor);
+}
+
+.ink-laser-tail {
+  /* The tail is behind the dot in every sense: it is where the pointer has
+     been, and it should not compete with where it is. */
+  opacity: 0.7;
+}
+
+/* A hot centre, which is what a laser looks like: the dot reads as white at
+   its middle and as its own colour at the edge. */
+.ink-laser-dot {
+  stroke: rgb(255 255 255 / 70%);
+  stroke-width: 1;
 }
 
 /* While a tool is held, a drag is a stroke rather than a text selection. */
@@ -52,28 +68,24 @@
 /* --------------------------------------------------------------------------
    The toolbar
 
-   Floating clear of the document at the bottom, because it has to be reachable
-   from wherever the reader has scrolled to and the page has no chrome of its
-   own to hang it from.
+   A second bar under the header rather than a panel floating over the page.
+   The first version hovered at the bottom of the viewport, which put it on top
+   of the words it was meant to be marking. This one is part of the page's
+   chrome, and sticks to the top of the scroller so it is still there once the
+   header has scrolled away.
    -------------------------------------------------------------------------- */
 
 .ink-toolbar {
-  position: fixed;
+  position: sticky;
+  top: 0;
   z-index: 60;
-  left: 50%;
-  bottom: max(16px, env(safe-area-inset-bottom));
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  justify-content: center;
   gap: 4px;
-  max-width: min(92vw, 720px);
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 5px max(12px, env(safe-area-inset-right)) 5px max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: var(--shadow-overlay);
 }
 
 .ink-toolbar[hidden] {
@@ -138,11 +150,28 @@
 }
 
 /* The tool being held. A filled button rather than a tint, because this is the
-   one piece of state on the bar that changes what a drag does. */
-.ink-tool[aria-pressed="true"] {
+   one piece of state on the bar that changes what a drag does. The two erasers
+   are tools like any other, and say so the same way. */
+.ink-tool[aria-pressed="true"],
+.ink-eraser[aria-pressed="true"] {
   color: var(--canvas);
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* A mode rather than a tool, so it is lit rather than filled: the bar should
+   only ever have one button shouting that it is what a drag does now. */
+.ink-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent-muted);
+  background: var(--raised);
+}
+
+/* The rub-out eraser's mark is a dot, which at the bar's icon size is nearly
+   nothing at all. It is drawn larger so the two erasers can be told apart
+   without reading their tooltips. */
+.ink-eraser[data-eraser="point"] i {
+  font-size: 24px;
 }
 
 .ink-danger:hover {
@@ -189,7 +218,6 @@
   font-size: 12px;
   line-height: 1.4;
   color: var(--attention);
-  text-align: center;
 }
 
 .ink-status:empty {
@@ -204,15 +232,37 @@
   }
 }
 
-/* On a phone the bar wraps to two rows and the document needs room under it
-   so the last paragraph is not permanently behind the tools. */
+/* On a phone the bar wraps to two rows. It is in the flow, so nothing has to
+   make room for it — but the groups need to pack tighter to fit. */
 @media (max-width: 640px) {
   .ink-toolbar {
-    max-width: calc(100vw - 16px);
     gap: 2px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
   }
 
-  body.is-annotating .share-body {
-    padding-bottom: 140px;
+  .ink-group {
+    padding: 0 2px;
+  }
+
+  /* Still above the 24px WCAG 2.5.8 asks for, and the difference is a third
+     row: at 32px the colours, the thicknesses and the actions cannot share a
+     line, and the bar takes a seventh of a phone screen for as long as it is
+     open. */
+  .ink-btn,
+  .ink-swatch,
+  .ink-width {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+  }
+
+  .ink-swatch::after {
+    width: 16px;
+    height: 16px;
+  }
+
+  .ink-eraser[data-eraser="point"] i {
+    font-size: 22px;
   }
 }

@@ -21,12 +21,14 @@
 
 .doc-index {
   /* Sticky against the page's own scroller, so it stays put once the header
-     has scrolled away without ever having been fixed to the viewport. */
+     has scrolled away without ever having been fixed to the viewport. The
+     offset is the annotation bar's height, published by the bar itself: it
+     sticks to the same edge, and is zero when the tools are away. */
   position: sticky;
-  top: 0;
+  top: var(--ink-bar, 0px);
   flex-shrink: 0;
   width: 280px;
-  max-height: 100dvh;
+  max-height: calc(100dvh - var(--ink-bar, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;

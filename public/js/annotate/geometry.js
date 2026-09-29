@@ -55,6 +55,47 @@ var AnnotateGeometry = (function () {
    * averages over a count rather than a distance treats those differently.
    * Then a moving average takes out the tremor.
    */
+  /* More samples along the same line, so the point eraser has something to cut.
+   *
+   * A stroke is simplified before it is stored, so a straight underline is two
+   * samples a hundred pixels apart. Rubbing at its middle touched neither of
+   * them and the line survived whole: the eraser has to work against the line,
+   * not against whichever samples happen to be left of it. Only segments
+   * longer than `step` are divided, and every sample added sits exactly on the
+   * segment it came from, so the shape is untouched.
+   */
+  function densify(points, step) {
+    if (points.length < 2 || step <= 0) {
+      return points.slice();
+    }
+
+    const out = [points[0]];
+
+    for (let i = 1; i < points.length; i += 1) {
+      const pieces = Math.ceil(distance(points[i - 1], points[i]) / step);
+
+      for (let piece = 1; piece < pieces; piece += 1) {
+        out.push(between(points[i - 1], points[i], piece / pieces));
+      }
+
+      out.push(points[i]);
+    }
+
+    return out;
+  }
+
+  // Every component, pressure included: a sample that arrived without one
+  // would be a thin spot in the middle of a line nobody pressed differently.
+  function between(from, to, t) {
+    const at = [from[0] + ((to[0] - from[0]) * t), from[1] + ((to[1] - from[1]) * t)];
+
+    if (from.length > 2 && to.length > 2) {
+      at.push(from[2] + ((to[2] - from[2]) * t));
+    }
+
+    return at;
+  }
+
   function resample(points, spacing) {
     if (points.length < 2 || spacing <= 0) {
       return points.slice();
@@ -88,6 +129,42 @@ var AnnotateGeometry = (function () {
     }
 
     return out;
+  }
+
+  /* A curve through the points, as cubics.
+   *
+   * The quadratic version of this put its control point on the sample and its
+   * ends on the midpoints either side, which is cheap and always slightly
+   * wrong: the curve passes through the midpoints and only near the samples,
+   * so every bend is flattened a little and a loop of handwriting comes out
+   * looking deflated.
+   *
+   * Catmull-Rom passes through every sample, and converts to a cubic bezier
+   * exactly — the two control points are a sixth of the way along the
+   * neighbouring span. That is the difference between ink that follows the
+   * hand and ink that approximates it.
+   */
+  function throughPointsCubic(points) {
+    if (points.length < 2) {
+      return points.length === 1 ? `M ${round(points[0][0])} ${round(points[0][1])}` : "";
+    }
+
+    let d = `M ${round(points[0][0])} ${round(points[0][1])}`;
+
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const before = points[Math.max(0, i - 1)];
+      const from = points[i];
+      const to = points[i + 1];
+      const after = points[Math.min(points.length - 1, i + 2)];
+
+      const c1 = [from[0] + ((to[0] - before[0]) / 6), from[1] + ((to[1] - before[1]) / 6)];
+      const c2 = [to[0] - ((after[0] - from[0]) / 6), to[1] - ((after[1] - from[1]) / 6)];
+
+      d += ` C ${round(c1[0])} ${round(c1[1])} ${round(c2[0])} ${round(c2[1])}`
+        + ` ${round(to[0])} ${round(to[1])}`;
+    }
+
+    return d;
   }
 
   // The ends are left alone: a stroke that starts where the pen landed is a
@@ -211,9 +288,22 @@ var AnnotateGeometry = (function () {
    * width, which looks worse than no taper at all. `pressures` is used when
    * the device gave any; a mouse gives none and gets speed alone.
    */
+  // How many samples at each end the nib is lifting over. A pen touching down
+  // and leaving leaves a point, not a blunt end, and this is what draws that.
+  const TAPER = 6;
+
+  function taperAt(index, count) {
+    const fromStart = Math.min(1, (index + 1) / TAPER);
+    const fromEnd = Math.min(1, (count - index) / TAPER);
+    // Eased rather than linear: a straight ramp makes a wedge, a curve makes
+    // a nib.
+    return Math.sqrt(Math.min(fromStart, fromEnd));
+  }
+
   function nibWidths(points, baseWidth, pressures) {
     const widths = [];
-    let eased = baseWidth / 2;
+    const half = baseWidth / 2;
+    let eased = half * 0.35;
 
     for (let i = 0; i < points.length; i += 1) {
       const step = i === 0 ? 0 : distance(points[i - 1], points[i]);
@@ -225,9 +315,16 @@ var AnnotateGeometry = (function () {
         ? 0.55 + (pressures[i] * 0.75)
         : 1;
 
-      const wanted = (baseWidth / 2) * fromSpeed * fromPressure;
-      eased += (wanted - eased) * 0.35;
-      widths.push(Math.max(baseWidth * 0.18, eased));
+      /* Eased gently, because the nib should not follow every sample.
+       *
+       * At 0.35 the width tracked the sampling noise and the stroke rippled
+       * along its length — worse than no taper at all. A slower follow means
+       * the thickness changes over the length of a letter rather than over
+       * three samples, which is what a real pen does.
+       */
+      const wanted = half * fromSpeed * fromPressure;
+      eased += (wanted - eased) * 0.12;
+      widths.push(Math.max(baseWidth * 0.12, eased * taperAt(i, points.length)));
     }
 
     return widths;
@@ -267,8 +364,11 @@ var AnnotateGeometry = (function () {
     const capAt = (side, i, sweep) =>
       `A ${round(widths[i])} ${round(widths[i])} 0 0 ${sweep} ${round(side[i][0])} ${round(side[i][1])}`;
 
-    return `${throughPoints(left)} ${capAt(right, end, 1)}`
-      + ` ${throughPoints(right.slice().reverse()).replace(/^M [^ ]+ [^ ]+/, "")}`
+    // Out along one edge, round the end, back along the other, round again.
+    // Cubics on both edges, so the outline follows the hand as closely as the
+    // centreline does.
+    return `${throughPointsCubic(left)} ${capAt(right, end, 1)}`
+      + ` ${throughPointsCubic(right.slice().reverse()).replace(/^M [^ ]+ [^ ]+/, "")}`
       + ` ${capAt(left, 0, 1)} Z`;
   }
 
@@ -419,7 +519,17 @@ var AnnotateGeometry = (function () {
   ];
 
   // Too small to have been aimed at anything.
-  const TOO_SMALL = 12;
+  /* Below this, a stroke is taken for writing rather than for a shape.
+   *
+   * At twelve pixels it was anything at all, and a handwritten O became a
+   * perfect ellipse while an l became a ruled line — which is not tidying
+   * somebody's handwriting, it is replacing it. A deliberate shape drawn to
+   * mark up a document is a ring round a word or a box round a paragraph, and
+   * both are far bigger than the letters they are drawn over. Sixty pixels
+   * is above a comfortably written capital and well below a ring round a
+   * word, which is the gap this has to sit in.
+   */
+  const TOO_SMALL = 60;
 
   function factsAbout(points, diagonal) {
     const closed = isClosed(points);
@@ -564,8 +674,8 @@ var AnnotateGeometry = (function () {
 
   return {
     distance, pathLength, boundsOf, centroidOf,
-    resample, smooth, enhance, toPath,
-    normalAt, nibWidths, inkOutline, throughPoints,
+    resample, densify, smooth, enhance, toPath,
+    normalAt, nibWidths, inkOutline, throughPoints, throughPointsCubic, taperAt,
     scalePoints,
     simplify, perpendicularDistance, straightness, isClosed, radialSpread,
     recognise, shapePoints, shapeFromDrag, arrowHead,

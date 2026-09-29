@@ -187,6 +187,16 @@ var AnnotateSurface = (function () {
       points: [at]
     };
 
+    /* Where the drag started, kept apart from the points.
+     *
+     * A shape tool rebuilds its whole point list on every move, so after the
+     * first one `points[0]` is the first point of the generated shape rather
+     * than the corner the drag began at. Anchoring to it meant an ellipse
+     * collapsed towards its own left edge as it was dragged and came out a few
+     * pixels across whatever box was asked for.
+     */
+    view.drawing.from = at;
+
 
     view.liveNode = drawStroke(view.drawing);
     view.svg.appendChild(view.liveNode);
@@ -201,7 +211,7 @@ var AnnotateSurface = (function () {
     }
 
     if (SHAPE_TOOLS.has(live.tool)) {
-      live.points = G.shapeFromDrag(live.tool, live.points[0], at);
+      live.points = G.shapeFromDrag(live.tool, live.from, at);
     } else {
       live.points.push(at);
     }
@@ -244,61 +254,175 @@ var AnnotateSurface = (function () {
 
   /* --- Erasing ------------------------------------------------------------ */
 
-  // Whole strokes, not parts of them. Predictable to use, trivial to undo, and
-  // it never leaves a stroke split into pieces that were one thing a moment
-  // ago.
-  function eraseAt(view, at) {
-    const radius = Math.max(8, view.width * 2);
-    const kept = [];
-    const removed = [];
+  // Against what the stroke looks like, not what it is stored as: a
+  // highlighter is drawn four times wider than its width says, and an eraser
+  // that reached for the stored number would pass through the middle of a band
+  // it was clearly aimed at.
+  const drawnWidth = (stroke) =>
+    (stroke.tool === "highlighter" ? stroke.width * HIGHLIGHTER_NIB : stroke.width);
 
-    for (const stroke of view.strokes) {
-      // Against what the stroke looks like, not what it is stored as: a
-      // highlighter is drawn four times wider than its width says, and an
-      // eraser that reached for the stored number would pass straight through
-      // the middle of a band it was clearly aimed at.
-      const drawn = stroke.tool === "highlighter" ? stroke.width * HIGHLIGHTER_NIB : stroke.width;
+  const eraserReach = (view) => Math.max(8, view.width * 2);
 
-      if (G.nearPoint(stroke.points, at, radius + (drawn / 2))) {
-        removed.push(stroke);
-      } else {
-        kept.push(stroke);
-      }
-    }
+  // Half a pixel: enough to drop the samples the eraser added back in and
+  // nothing a reader could see the loss of.
+  const TIDY = 0.5;
 
-    if (removed.length === 0) {
+  const countPoints = (total, run) => total + run.length;
+
+  /* Two erasers, because they are for different jobs.
+   *
+   * Whole strokes is the one to reach for: predictable, trivial to undo, and
+   * it never leaves half a letter behind. But it is useless for taking the
+   * tail off a long underline or opening a gap in a box, which is what a
+   * point eraser is for — and a stroke eraser that swallows an entire
+   * paragraph's worth of ink because it clipped the end is infuriating.
+   */
+  function eraseWholeStrokes(view, at) {
+    const radius = eraserReach(view);
+    const kept = view.strokes.filter((stroke) =>
+      !G.nearPoint(stroke.points, at, radius + (drawnWidth(stroke) / 2)));
+
+    if (kept.length === view.strokes.length) {
       return false;
     }
 
     view.strokes = kept;
-    redraw(view);
     return true;
+  }
+
+  /* The point eraser takes out the samples it touches and keeps what is left
+   * either side, so a stroke rubbed through the middle becomes two strokes.
+   * A run too short to be worth drawing is dropped rather than left as a
+   * speck nobody can see or erase.
+   */
+  function eraseAtPoints(view, at) {
+    const radius = eraserReach(view);
+    const out = [];
+    let changed = false;
+
+    for (const stroke of view.strokes) {
+      const reach = radius + (drawnWidth(stroke) / 2);
+
+      if (!G.nearPoint(stroke.points, at, reach)) {
+        out.push(stroke);
+        continue;
+      }
+
+      /* Against the line rather than against its samples: the stroke is
+       * divided finely enough that the eraser cannot pass between two of
+       * them, then each surviving run is tidied back down, so rubbing a
+       * corner off a long straight line does not leave a hundred samples
+       * where there were two.
+       */
+      const dense = G.densify(stroke.points, reach / 2);
+      const runs = splitAround(dense, at, reach);
+
+      if (runs.reduce(countPoints, 0) === dense.length) {
+        out.push(stroke);
+        continue;
+      }
+
+      changed = true;
+      for (const run of runs) {
+        out.push({ ...stroke, points: G.simplify(run, TIDY) });
+      }
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    view.strokes = out;
+    return true;
+  }
+
+  // The runs of a stroke that the eraser did not touch.
+  function splitAround(points, at, radius) {
+    const runs = [];
+    let run = [];
+
+    for (const point of points) {
+      if (G.distance(point, at) <= radius) {
+        if (run.length > 1) {
+          runs.push(run);
+        }
+
+        run = [];
+        continue;
+      }
+
+      run.push(point);
+    }
+
+    if (run.length > 1) {
+      runs.push(run);
+    }
+
+    return runs;
+  }
+
+  function eraseAt(view, at) {
+    const erased = view.eraserMode === "point"
+      ? eraseAtPoints(view, at)
+      : eraseWholeStrokes(view, at);
+
+    if (erased) {
+      redraw(view);
+    }
+
+    return erased;
   }
 
   /* --- The laser ---------------------------------------------------------- */
 
+  /* A laser is a bright dot with a trail behind it, not a red line.
+   *
+   * The first version drew the whole tail at one width with a glow round it,
+   * which reads as a fat red worm rather than as a pointer. A real one is a
+   * small intense point, and what the eye takes for a trail is the tail
+   * thinning and fading behind it — so it is drawn as three pieces: a tapered
+   * tail, a soft halo at the tip, and the dot itself.
+   */
   function laserTo(view, at) {
     if (!view.laser) {
       view.laser = { points: [] };
     }
 
     view.laser.points.push(at);
-    // Only the last stretch: a laser that keeps its whole path is a pen.
-    view.laser.points = view.laser.points.slice(-60);
+    // Only the last stretch. A laser that keeps its whole path is a pen.
+    view.laser.points = view.laser.points.slice(-26);
 
-    const path = pathFor({
-      tool: "laser", colour: view.laserColour, width: view.width * 1.4,
-      points: view.laser.points
-    });
-    path.setAttribute("class", "ink-laser");
+    // `color` is a presentation attribute, which is what lets the stylesheet
+    // hang a glow of the right colour off currentcolor.
+    const group = node("g", { class: "ink-laser", color: view.laserColour });
+    const tail = view.laser.points;
 
-    if (view.laserNode) {
-      view.svg.replaceChild(path, view.laserNode);
-    } else {
-      view.svg.appendChild(path);
+    if (tail.length > 1) {
+      group.appendChild(node("path", {
+        d: G.inkOutline(tail, Math.max(3, view.width), null),
+        fill: view.laserColour,
+        "fill-opacity": "0.55",
+        class: "ink-laser-tail"
+      }));
     }
 
-    view.laserNode = path;
+    const [x, y] = at;
+    const dot = Math.max(3.5, view.width * 0.9);
+    group.appendChild(node("circle", {
+      cx: x, cy: y, r: dot * 2.2, fill: view.laserColour,
+      "fill-opacity": "0.18", class: "ink-laser-halo"
+    }));
+    group.appendChild(node("circle", {
+      cx: x, cy: y, r: dot, fill: view.laserColour, class: "ink-laser-dot"
+    }));
+
+    if (view.laserNode) {
+      view.svg.replaceChild(group, view.laserNode);
+    } else {
+      view.svg.appendChild(group);
+    }
+
+    view.laserNode = group;
     window.clearTimeout(view.laserTimer);
     view.laserTimer = window.setTimeout(() => clearLaser(view), LASER_FADE_MS);
   }
@@ -315,6 +439,7 @@ var AnnotateSurface = (function () {
     node, pathFor, arrowPath, drawStroke,
     makeLayer, ensureLayer, resize, pointIn,
     redraw, beginStroke, extendStroke, settleStroke,
-    eraseAt, laserTo, clearLaser
+    eraseAt, eraseWholeStrokes, eraseAtPoints, splitAround, drawnWidth,
+    laserTo, clearLaser
   };
 })();
