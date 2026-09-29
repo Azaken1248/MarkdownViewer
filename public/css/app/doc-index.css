@@ -64,7 +64,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--fg-muted);
 }
 
 /* The list scrolls; the heading above it does not. */
@@ -106,14 +106,14 @@
   border: 0;
   border-radius: 6px;
   background: none;
-  color: var(--text-dim);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: transform 120ms ease, color 120ms ease;
 }
 
 .doc-index-caret:hover {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--fg);
+  background: var(--raised);
 }
 
 .doc-index-caret.is-empty {
@@ -132,7 +132,7 @@
   display: block;
   padding: 4px 8px;
   border-radius: 6px;
-  color: var(--text-dim);
+  color: var(--fg-muted);
   font-size: 13px;
   line-height: 1.35;
   text-decoration: none;
@@ -146,7 +146,7 @@
    without reading any of it. */
 .doc-index-link[data-level="1"],
 .doc-index-link[data-level="2"] {
-  color: var(--text);
+  color: var(--fg);
 }
 
 .doc-index-link[data-level="5"],
@@ -155,8 +155,8 @@
 }
 
 .doc-index-link:hover {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--fg);
+  background: var(--raised);
 }
 
 .doc-index-link:focus-visible {

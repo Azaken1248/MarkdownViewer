@@ -75,6 +75,7 @@
 <link rel="stylesheet" href="/css/app/accounts.css" />
 <link rel="stylesheet" href="/css/app/share.css" />
 <link rel="stylesheet" href="/css/app/doc-index.css" />
+<link rel="stylesheet" href="/css/app/annotate.css" />
 <link rel="stylesheet" href="/css/app/error.css" />
 <link rel="stylesheet" href="/css/app/notebook-run.css" />
 
@@ -123,6 +124,10 @@
 <script src="/js/md/panzoom.js" defer></script>
 <script src="/js/markdown-core.js" defer></script>
 <script src="/js/doc-index.js" defer></script>
+<script src="/js/annotate/geometry.js" defer></script>
+<script src="/js/annotate/store.js" defer></script>
+<script src="/js/annotate/surface.js" defer></script>
+<script src="/js/annotate.js" defer></script>
 <script src="/js/share.js" defer></script>
 
 <div class="share-page">
@@ -144,10 +149,22 @@
       <i class="ph ph-list-bullets" aria-hidden="true"></i>
     </button>
 
+    <!-- Writing on the document. The marks are kept in this browser and are
+         never sent anywhere, so this is the reader's own copy of somebody
+         else's document. -->
+    <button class="icon-btn" id="shareAnnotateToggle" type="button"
+      aria-label="Annotate this document" title="Annotate this document"
+      aria-expanded="false" aria-controls="shareInkToolbar">
+      <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+    </button>
+
     <button class="icon-btn" id="shareThemeToggle" type="button" aria-label="Switch theme" title="Switch theme">
       <i class="ph ph-moon" aria-hidden="true"></i>
     </button>
   </header>
+
+  <!-- Filled in by js/annotate.js when the tools are opened. -->
+  <div id="shareInkToolbar" hidden></div>
 
   <div class="share-layout">
     <main class="share-main">

@@ -1,0 +1,218 @@
+/* --------------------------------------------------------------------------
+   Annotating a shared document
+
+   A transparency over the page: the ink layer is inside the content box and
+   the same size as it, so a mark stays on the paragraph it was drawn over
+   while the page scrolls. It takes the pointer only while a tool is held —
+   otherwise the document underneath selects and scrolls exactly as it did.
+   -------------------------------------------------------------------------- */
+
+.ink-layer {
+  /* Above the text, below the toolbar. */
+  z-index: 5;
+  touch-action: none;
+}
+
+/* The highlighter has to leave the words readable, and which blend does that
+   depends on which way round the page is.
+
+   On the dark theme the text is pale on near-black, so a highlighter has to
+   lighten: multiply over a black background is black, which is what turned an
+   amber stripe into a muddy olive smear that hid the line it was marking. On
+   the light theme it is the other way about, and multiply is what keeps black
+   text black under a yellow band. */
+.ink-layer path[data-tool="highlighter"] {
+  mix-blend-mode: screen;
+}
+
+:root[data-theme="light"] .ink-layer path[data-tool="highlighter"] {
+  mix-blend-mode: multiply;
+}
+
+/* A laser is a pointer, not a mark: it glows, and it goes. */
+.ink-laser {
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px currentcolor);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* While a tool is held, a drag is a stroke rather than a text selection. */
+.is-annotating {
+  user-select: none;
+}
+
+/* The outline column stays above the ink and usable: the layer covers the
+   whole page, and a panel you cannot press because there is a transparency
+   over it is a panel that is broken. */
+.doc-index {
+  z-index: 10;
+}
+
+/* --------------------------------------------------------------------------
+   The toolbar
+
+   Floating clear of the document at the bottom, because it has to be reachable
+   from wherever the reader has scrolled to and the page has no chrome of its
+   own to hang it from.
+   -------------------------------------------------------------------------- */
+
+.ink-toolbar {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: min(92vw, 720px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.ink-toolbar[hidden] {
+  display: none;
+}
+
+/* The groups are separated by a hairline rather than by space, so the bar
+   stays compact enough to sit over a document without covering much of it. */
+.ink-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.ink-group + .ink-group {
+  border-left: 1px solid var(--border);
+}
+
+.ink-btn,
+.ink-swatch,
+.ink-width {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* WCAG 2.5.8 wants 24px; these are the controls somebody uses with a stylus,
+     so they get more than the minimum. */
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.ink-btn:hover,
+.ink-swatch:hover,
+.ink-width:hover {
+  color: var(--fg);
+  background: var(--raised);
+}
+
+.ink-btn:focus-visible,
+.ink-swatch:focus-visible,
+.ink-width:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ink-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ink-btn:disabled:hover {
+  color: var(--fg-muted);
+  background: none;
+}
+
+/* The tool being held. A filled button rather than a tint, because this is the
+   one piece of state on the bar that changes what a drag does. */
+.ink-tool[aria-pressed="true"] {
+  color: var(--canvas);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ink-danger:hover {
+  color: var(--danger);
+}
+
+/* --- Colours ------------------------------------------------------------- */
+
+.ink-swatch::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 1px solid rgb(0 0 0 / 25%);
+}
+
+.ink-swatch[aria-pressed="true"] {
+  border-color: var(--fg-muted);
+  background: var(--raised);
+}
+
+/* --- Thickness ----------------------------------------------------------- */
+
+.ink-width > span {
+  display: block;
+  width: 18px;
+  border-radius: 4px;
+  background: currentcolor;
+}
+
+.ink-width[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+  background: var(--raised);
+}
+
+/* --- What it has to say -------------------------------------------------- */
+
+.ink-status {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--attention);
+  text-align: center;
+}
+
+.ink-status:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-btn,
+  .ink-swatch,
+  .ink-width {
+    transition: none;
+  }
+}
+
+/* On a phone the bar wraps to two rows and the document needs room under it
+   so the last paragraph is not permanently behind the tools. */
+@media (max-width: 640px) {
+  .ink-toolbar {
+    max-width: calc(100vw - 16px);
+    gap: 2px;
+  }
+
+  body.is-annotating .share-body {
+    padding-bottom: 140px;
+  }
+}

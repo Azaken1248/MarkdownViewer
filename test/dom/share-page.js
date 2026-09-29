@@ -225,6 +225,46 @@ module.exports = async (ctx) => {
       outlineBody.querySelector(".doc-index-caret").getAttribute("aria-expanded"), "false");
   }
 
+  console.log("=== writing on it stays on this machine ===");
+  {
+    const { window, sent: requests } = view;
+    const doc = window.document;
+
+    /* The point of the feature, checked first: a shared link is somebody
+     * else's document, and the marks a reader puts on it are the reader's
+     * own. Nothing about them is sent anywhere.
+     */
+    const asked = requests.map((one) => one.path);
+    check("(the page has only ever asked for the document itself)",
+      asked.every((path) => path.startsWith("/api/share/")), true);
+
+    const ink = window.Annotate.create({
+      surface: doc.querySelector(".share-layout"),
+      content: doc.getElementById("shareContent"),
+      toolbar: doc.createElement("div"),
+      token: "a-token-for-the-suite"
+    });
+
+    ink.restore();
+    check("a document nobody has drawn on has no ink", ink.strokeCount(), 0);
+    check("...and no tool is held, so the words are still selectable",
+      ink.tool(), "none");
+
+    // The layer goes over the whole page rather than over the column of text,
+    // which is what makes the margins drawable.
+    const layer = doc.querySelector(".ink-layer");
+    check("the layer is over the page, not inside the text",
+      layer.parentElement.className, "share-layout");
+
+    ink.chooseTool("pen");
+    check("choosing a tool arms the layer", ink.tool(), "pen");
+    check("...and pressing the same tool again puts it down",
+      (ink.chooseTool("pen"), ink.tool()), "none");
+
+    check("nothing was sent while any of that happened",
+      requests.map((one) => one.path), asked);
+  }
+
   console.log("=== the levels nest by what they declare ===");
   {
     const { nest } = view.window.DocIndex;

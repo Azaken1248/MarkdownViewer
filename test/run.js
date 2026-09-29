@@ -42,6 +42,7 @@ const SUITES = [
   ["body", "body.test.js", "What an endpoint accepts, and every way it refuses what it does not"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
+  ["annotate", "annotate.test.js", "Ink on a shared document: smoothing, ink to shape, and where it is kept"],
   ["markdown", "markdown.test.js", "The real marked: heading anchors, and the maths markers passing through"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
   ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],

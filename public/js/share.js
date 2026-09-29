@@ -22,7 +22,9 @@
     outline: document.getElementById("shareOutline"),
     outlineBody: document.getElementById("shareOutlineBody"),
     outlineToggle: document.getElementById("shareOutlineToggle"),
-    outlineClose: document.getElementById("shareOutlineClose")
+    outlineClose: document.getElementById("shareOutlineClose"),
+    annotateToggle: document.getElementById("shareAnnotateToggle"),
+    inkToolbar: document.getElementById("shareInkToolbar")
   };
 
   /* The outline, on this page's elements.
@@ -37,6 +39,42 @@
     toggle: elements.outlineToggle,
     closeBtn: elements.outlineClose,
     scroller: document.querySelector(".share-page")
+  });
+
+  /* Writing on it.
+   *
+   * Filed under the share token, so two shared documents open in the same
+   * browser keep their own marks — and nothing here goes to the server.
+   */
+  const ink = Annotate.create({
+    // The ink goes over the whole page rather than over the column of words,
+    // so the margins either side can be written in — which is where a note
+    // that does not fit beside its line has to go.
+    surface: document.querySelector(".share-layout"),
+    content: elements.content,
+    toolbar: elements.inkToolbar,
+    token: shareTokenFromLocation()
+  });
+
+  // The tools are out of the way until they are asked for, because most of the
+  // time a shared document is a thing somebody is reading.
+  function showTools(wanted) {
+    elements.inkToolbar.hidden = !wanted;
+    elements.annotateToggle.setAttribute("aria-expanded", wanted ? "true" : "false");
+    const label = wanted ? "Put the pen down" : "Annotate this document";
+    elements.annotateToggle.setAttribute("aria-label", label);
+    elements.annotateToggle.title = label;
+    document.body.classList.toggle("is-annotating", wanted);
+
+    // Closing the tools puts the pen down: a toolbar that is gone while a drag
+    // still draws is a document nobody can select text in any more.
+    if (!wanted && ink.tool() !== "none") {
+      ink.chooseTool(ink.tool());
+    }
+  }
+
+  elements.annotateToggle.addEventListener("click", () => {
+    showTools(elements.inkToolbar.hidden);
   });
 
   MarkdownCore.configure({
@@ -149,6 +187,10 @@
     // The headings exist once the document has rendered, so the outline is
     // built from what is actually on the page rather than from the markdown.
     outline.refresh();
+
+    // ...and so does the document the ink sits on, which has to be its final
+    // size before a stroke drawn at the bottom of it lands in the right place.
+    ink.restore();
   }
 
   /* -- theme ---------------------------------------------------------------

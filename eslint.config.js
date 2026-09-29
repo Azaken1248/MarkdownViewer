@@ -125,6 +125,11 @@ const BROWSER_GLOBALS = {
   DocKinds: "readonly",
   DomHtml: "readonly",
   DocIndex: "readonly",
+  // Annotating a shared document: the maths, where it is kept, and the ink.
+  AnnotateGeometry: "readonly",
+  AnnotateStore: "readonly",
+  AnnotateSurface: "readonly",
+  Annotate: "readonly",
   MdLazy: "readonly",
   MdText: "readonly",
   MdCode: "readonly",
