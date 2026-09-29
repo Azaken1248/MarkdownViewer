@@ -113,6 +113,18 @@ var AnnotateSurface = (function () {
 
   const drawStroke = (stroke) => (stroke.tool === "arrow" ? arrowPath(stroke) : pathFor(stroke));
 
+  /* The stroke as it will be once the pen comes up.
+   *
+   * The live line was drawn from the raw samples and only smoothed on pen-up,
+   * so the writing visibly changed the moment you lifted — which is
+   * disconcerting in the way that only happens after you have finished. The
+   * preview runs through the same enhancement, for the same tools that get it
+   * when the stroke is settled.
+   */
+  const previewOf = (live) => (SHAPE_TOOLS.has(live.tool) || live.tool === "highlighter"
+    ? live
+    : { ...live, points: G.enhance(live.points) });
+
   /* --- The layer ---------------------------------------------------------- */
 
   /* The layer goes over the whole page, not over the column of text.
@@ -212,7 +224,7 @@ var AnnotateSurface = (function () {
     view.drawing.from = at;
 
 
-    view.liveNode = drawStroke(view.drawing);
+    view.liveNode = drawStroke(previewOf(view.drawing));
     view.svg.appendChild(view.liveNode);
   }
 
@@ -230,7 +242,7 @@ var AnnotateSurface = (function () {
       live.points.push(at);
     }
 
-    const replacement = drawStroke(live);
+    const replacement = drawStroke(previewOf(live));
     view.svg.replaceChild(replacement, view.liveNode);
     view.liveNode = replacement;
   }

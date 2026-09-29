@@ -183,6 +183,16 @@ const interiorWobble = (points) => Math.sqrt(points.slice(1, -1)
 
 check("the shake is taken out", interiorWobble(smoothed) < interiorWobble(rough) * 0.75, true);
 
+/* The nib lands and lifts rather than appearing at full width, but only just:
+ * a long taper down to a hairline made every letter wispy at the size
+ * somebody actually writes at.
+ */
+const nib = G.nibWidths(G.enhance(drawLine([0, 0], [200, 0], 80, 1)), 6, null);
+check("a stroke is thinner at its ends than in its middle",
+  nib[0] < Math.max(...nib), true);
+check("...but does not end in a hairline",
+  Math.min(...nib) / Math.max(...nib) > 0.6, true);
+
 // The ends are where the pen landed and where it left. Moving those makes a
 // stroke that does not start where it was aimed.
 check("the first point is exactly where the pen went down", smoothed[0], rough[0]);

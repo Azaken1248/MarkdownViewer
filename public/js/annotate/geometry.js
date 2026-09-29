@@ -55,47 +55,6 @@ var AnnotateGeometry = (function () {
    * averages over a count rather than a distance treats those differently.
    * Then a moving average takes out the tremor.
    */
-  /* More samples along the same line, so the point eraser has something to cut.
-   *
-   * A stroke is simplified before it is stored, so a straight underline is two
-   * samples a hundred pixels apart. Rubbing at its middle touched neither of
-   * them and the line survived whole: the eraser has to work against the line,
-   * not against whichever samples happen to be left of it. Only segments
-   * longer than `step` are divided, and every sample added sits exactly on the
-   * segment it came from, so the shape is untouched.
-   */
-  function densify(points, step) {
-    if (points.length < 2 || step <= 0) {
-      return points.slice();
-    }
-
-    const out = [points[0]];
-
-    for (let i = 1; i < points.length; i += 1) {
-      const pieces = Math.ceil(distance(points[i - 1], points[i]) / step);
-
-      for (let piece = 1; piece < pieces; piece += 1) {
-        out.push(between(points[i - 1], points[i], piece / pieces));
-      }
-
-      out.push(points[i]);
-    }
-
-    return out;
-  }
-
-  // Every component, pressure included: a sample that arrived without one
-  // would be a thin spot in the middle of a line nobody pressed differently.
-  function between(from, to, t) {
-    const at = [from[0] + ((to[0] - from[0]) * t), from[1] + ((to[1] - from[1]) * t)];
-
-    if (from.length > 2 && to.length > 2) {
-      at.push(from[2] + ((to[2] - from[2]) * t));
-    }
-
-    return at;
-  }
-
   function resample(points, spacing) {
     if (points.length < 2 || spacing <= 0) {
       return points.slice();
@@ -203,7 +162,55 @@ var AnnotateGeometry = (function () {
     return out;
   }
 
-  const enhance = (points, spacing = 2.5) => smooth(resample(points, spacing));
+  /* Smoothed twice, the second time gently.
+   *
+   * One wide averaging window takes the shake out but rounds off the corners
+   * of a letter with it. Two narrow passes come to much the same strength
+   * while following the line more closely, because a box filter applied twice
+   * is a bell rather than a rectangle.
+   */
+  const enhance = (points, spacing = 2.5) => smooth(smooth(resample(points, spacing)), 1);
+
+  /* More samples along the same line, so the point eraser has something to cut.
+   *
+   * A stroke is simplified before it is stored, so a straight underline is two
+   * samples a hundred pixels apart. Rubbing at its middle touched neither of
+   * them and the line survived whole: the eraser has to work against the line,
+   * not against whichever samples happen to be left of it. Only segments
+   * longer than `step` are divided, and every sample added sits exactly on the
+   * segment it came from, so the shape is untouched.
+   */
+  function densify(points, step) {
+    if (points.length < 2 || step <= 0) {
+      return points.slice();
+    }
+
+    const out = [points[0]];
+
+    for (let i = 1; i < points.length; i += 1) {
+      const pieces = Math.ceil(distance(points[i - 1], points[i]) / step);
+
+      for (let piece = 1; piece < pieces; piece += 1) {
+        out.push(between(points[i - 1], points[i], piece / pieces));
+      }
+
+      out.push(points[i]);
+    }
+
+    return out;
+  }
+
+  // Every component, pressure included: a sample that arrived without one
+  // would be a thin spot in the middle of a line nobody pressed differently.
+  function between(from, to, t) {
+    const at = [from[0] + ((to[0] - from[0]) * t), from[1] + ((to[1] - from[1]) * t)];
+
+    if (from.length > 2 && to.length > 2) {
+      at.push(from[2] + ((to[2] - from[2]) * t));
+    }
+
+    return at;
+  }
 
   /* The same marks on a surface that has changed size.
    *
@@ -299,20 +306,29 @@ var AnnotateGeometry = (function () {
    */
   // How many samples at each end the nib is lifting over. A pen touching down
   // and leaving leaves a point, not a blunt end, and this is what draws that.
-  const TAPER = 6;
+  /* How far in from each end the nib lifts, in samples, and how far it lifts.
+   *
+   * A pen lands and leaves, so a stroke of one width to both its ends looks
+   * printed rather than written. But fifteen pixels of taper down to a
+   * hairline made every letter wispy at the size somebody actually writes at,
+   * which is the wrong end of the trade: the taper is shorter now and stops
+   * well short of nothing.
+   */
+  const TAPER = 3;
+  const TAPER_FLOOR = 0.6;
 
   function taperAt(index, count) {
     const fromStart = Math.min(1, (index + 1) / TAPER);
     const fromEnd = Math.min(1, (count - index) / TAPER);
     // Eased rather than linear: a straight ramp makes a wedge, a curve makes
     // a nib.
-    return Math.sqrt(Math.min(fromStart, fromEnd));
+    return TAPER_FLOOR + ((1 - TAPER_FLOOR) * Math.sqrt(Math.min(fromStart, fromEnd)));
   }
 
   function nibWidths(points, baseWidth, pressures) {
     const widths = [];
     const half = baseWidth / 2;
-    let eased = half * 0.35;
+    let eased = half * 0.8;
 
     for (let i = 0; i < points.length; i += 1) {
       const step = i === 0 ? 0 : distance(points[i - 1], points[i]);
@@ -333,7 +349,7 @@ var AnnotateGeometry = (function () {
        */
       const wanted = half * fromSpeed * fromPressure;
       eased += (wanted - eased) * 0.12;
-      widths.push(Math.max(baseWidth * 0.12, eased * taperAt(i, points.length)));
+      widths.push(Math.max(baseWidth * 0.3, eased * taperAt(i, points.length)));
     }
 
     return widths;
