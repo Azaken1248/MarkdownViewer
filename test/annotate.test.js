@@ -131,6 +131,49 @@ const corners = G.shapePoints(boxy);
 check("a rectangle is redrawn square", corners.length, 5);
 check("...closing back on its first corner", corners[0], corners[corners.length - 1]);
 
+/* Tidying has to leave the shape where it was drawn.
+ *
+ * The first version fitted everything into the stroke's upright bounding box,
+ * so a box drawn at a slant came back upright and half again as large. These
+ * draw the same rectangle at an angle and check it comes back the same size,
+ * still at that angle.
+ */
+const tilt = (points, angle, [cx, cy]) => points.map(([x, y]) => [
+  cx + ((x - cx) * Math.cos(angle)) - ((y - cy) * Math.sin(angle)),
+  cy + ((x - cx) * Math.sin(angle)) + ((y - cy) * Math.cos(angle))
+]);
+
+const upright = [[20, 20], [200, 20], [200, 120], [20, 120]];
+const slanted = G.shapePoints(G.recognise(tilt(drawPolygon(upright, 25, 2), 0.52, [110, 70])));
+const sides = [0, 1, 2, 3].map((i) => G.distance(slanted[i], slanted[i + 1]));
+
+check("a box drawn at a slant is still 180 by 100",
+  sides.map((side) => Math.round(side / 10) * 10).sort((a, b) => a - b),
+  [100, 100, 180, 180]);
+check("...and is still at a slant, rather than stood upright",
+  Math.round(G.boundsOf(slanted).width) > 200, true);
+
+const nearly = G.shapePoints(G.recognise(tilt(drawPolygon(upright, 25, 1), 0.05, [110, 70])));
+check("a box drawn three degrees off square is drawn square",
+  nearly.slice(0, 4).map(([x]) => Math.round(x)).sort((a, b) => a - b).filter((x, i, all) => all.indexOf(x) === i).length,
+  2);
+
+// A hand lifts off sideways at the end of a stroke, and a line drawn from the
+// first point to the last leans by however far that hook went.
+const hooked = drawLine([10, 100], [210, 100], 40, 0.5).concat([[212, 105], [213, 109]]);
+const ruled = G.fitLine(hooked);
+check("a line drawn nearly flat is ruled flat", Math.round(ruled[0][1] - ruled[1][1]), 0);
+check("...and one drawn on a slant keeps its slant",
+  Math.round(G.fitLine(drawLine([0, 0], [200, 100], 40, 0.5))[1][1]) > 80, true);
+
+console.log("=== drawn as the shape it became ===");
+
+check("a tidied box is drawn with corners rather than curves",
+  /Q/.test(G.cornerPath(slanted)), false);
+check("...and closes on itself", G.cornerPath(slanted).endsWith("Z"), true);
+check("a line is not closed", G.cornerPath([[0, 0], [10, 10]]).endsWith("Z"), false);
+check("ink is still drawn as curves", /Q/.test(G.toPath(drawLine([0, 0], [100, 0], 20, 1))), true);
+
 console.log("=== handwriting enhancement ===");
 
 const rough = drawLine([0, 0], [200, 0], 80, 5);

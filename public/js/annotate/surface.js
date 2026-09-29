@@ -47,11 +47,25 @@ var AnnotateSurface = (function () {
   // A shape is a shape and wants an even edge; a pen wants to look like a pen.
   const INKED = new Set(["pen"]);
 
+  /* The shapes whose corners are the point of them.
+   *
+   * Everything else is smoothed through the middles of its segments, which is
+   * right for ink and for an ellipse and quite wrong for a box: a rectangle
+   * smoothed that way has no corners left.
+   */
+  const CORNERED = new Set(["line", "arrow", "rectangle", "triangle"]);
+
+  // A stroke the pen drew and ink-to-shape then tidied. It keeps the tool it
+  // was drawn with — it is still the pen's colour and width and it erases and
+  // saves like any other stroke — but it is drawn as the shape it became.
+  const kindOf = (stroke) => stroke.shape || stroke.tool;
+  const nibbed = (stroke) => INKED.has(stroke.tool) && !stroke.shape;
+
   // How much fatter a highlighter is than the pen at the same setting.
   const HIGHLIGHTER_NIB = 4;
 
   function pathFor(stroke) {
-    if (INKED.has(stroke.tool)) {
+    if (nibbed(stroke)) {
       const path = node("path", {
         d: G.inkOutline(stroke.points, stroke.width, stroke.points.map((point) => point[2] || 0)),
         fill: stroke.colour,
@@ -65,7 +79,7 @@ var AnnotateSurface = (function () {
     const highlighter = stroke.tool === "highlighter";
 
     const path = node("path", {
-      d: G.toPath(stroke.points),
+      d: CORNERED.has(kindOf(stroke)) ? G.cornerPath(stroke.points) : G.toPath(stroke.points),
       fill: "none",
       stroke: stroke.colour,
       // A highlighter is a chisel tip, not a pen: the same width setting gives
@@ -246,6 +260,9 @@ var AnnotateSurface = (function () {
       const shape = G.recognise(live.points);
       if (shape) {
         live.points = G.shapePoints(shape);
+        // What it became, so it is drawn as that shape rather than as the
+        // pen stroke it started life as.
+        live.shape = shape.kind;
       }
     }
 

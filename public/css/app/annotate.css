@@ -53,6 +53,22 @@
   stroke-width: 1;
 }
 
+/* Ink that has just been tidied into a shape, for as long as it takes to
+   notice it happened. */
+@keyframes ink-snap {
+  from {
+    opacity: 0.3;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.ink-tidied {
+  animation: ink-snap 200ms ease-out;
+}
+
 /* While a tool is held, a drag is a stroke rather than a text selection. */
 .is-annotating {
   user-select: none;
@@ -229,6 +245,10 @@
   .ink-swatch,
   .ink-width {
     transition: none;
+  }
+
+  .ink-tidied {
+    animation: none;
   }
 }
 

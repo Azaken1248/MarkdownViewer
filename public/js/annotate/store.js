@@ -35,9 +35,14 @@ var AnnotateStore = (function () {
       v: VERSION,
       strokes: strokes.map((stroke) => ({
         tool: stroke.tool,
+        shape: stroke.shape,
         colour: stroke.colour,
         width: stroke.width,
-        points: stroke.points.map(([x, y]) => [trim(x), trim(y)])
+        // The third number, where there is one, is how hard the pen was
+        // pressed. Dropping it made a stroke come back from storage thinner
+        // and flatter than the one that was drawn.
+        points: stroke.points.map(([x, y, force]) =>
+          (force === undefined ? [trim(x), trim(y)] : [trim(x), trim(y), Math.round(force * 100) / 100]))
       }))
     });
   }
@@ -82,13 +87,14 @@ var AnnotateStore = (function () {
   function isStroke(stroke) {
     return Boolean(stroke)
       && typeof stroke.tool === "string"
+      && (stroke.shape === undefined || typeof stroke.shape === "string")
       && typeof stroke.colour === "string"
       && Number.isFinite(stroke.width)
       && Array.isArray(stroke.points)
       && stroke.points.length > 0
       && stroke.points.every((point) =>
-        Array.isArray(point) && point.length === 2
-        && Number.isFinite(point[0]) && Number.isFinite(point[1]));
+        Array.isArray(point) && point.length >= 2 && point.length <= 3
+        && point.every(Number.isFinite));
   }
 
   /* Saving answers what happened, because the caller has something to say

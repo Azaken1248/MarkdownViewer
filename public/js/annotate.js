@@ -246,6 +246,18 @@ var Annotate = (function () {
 
     view.strokes.push(stroke);
     Surface.redraw(view);
+
+    /* A tidied shape says so, briefly.
+     *
+     * Ink to shape changes the stroke under the pen the instant it comes up,
+     * and without a moment's fade it is not obvious that anything was done —
+     * or that undo will give the freehand version back. The stroke just
+     * drawn is the last one on the layer.
+     */
+    if (stroke.shape) {
+      view.svg.lastElementChild?.classList.add("ink-tidied");
+    }
+
     persist(view);
     paintToolbar(view);
   }

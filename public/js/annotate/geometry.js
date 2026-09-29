@@ -123,9 +123,18 @@ var AnnotateGeometry = (function () {
       carried = segment - (travelled - spacing);
     }
 
+    /* A stroke ends where the pen came up, always.
+     *
+     * The even spacing almost never divides the last segment exactly, and
+     * dropping the remainder left the stroke ending up to half a step short
+     * of where it was drawn to. If there is room for one more sample it is
+     * the real end; if there is not, the sample nearest it is moved onto it.
+     */
     const last = points[points.length - 1];
     if (distance(out[out.length - 1], last) > spacing / 2) {
       out.push(last);
+    } else if (out.length > 1) {
+      out[out.length - 1] = last;
     }
 
     return out;
@@ -474,6 +483,18 @@ var AnnotateGeometry = (function () {
    * middles of its edges at 1.0.
    */
   function radialSpread(points) {
+    /* Measured in the shape's own frame.
+     *
+     * Normalising by the upright bounding box only makes an oval round again
+     * when the oval was drawn upright: a ring drawn at a slant came out with
+     * a spread far too wide to be recognised, and stayed a wobbly freehand
+     * loop. Turning it flat first asks the question that was meant — is this
+     * round? — rather than is this round and square to the page.
+     */
+    return spreadOf(points.map((point) => turn(point, -orientedBox(points))));
+  }
+
+  function spreadOf(points) {
     const bounds = boundsOf(points);
     const rx = bounds.width / 2;
     const ry = bounds.height / 2;
@@ -561,44 +582,218 @@ var AnnotateGeometry = (function () {
 
     const facts = factsAbout(points, diagonal);
     const rule = SHAPE_RULES.find((one) => one.matches(facts));
-    return rule ? { kind: rule.kind, bounds, points: facts.outline } : null;
+    return rule ? { kind: rule.kind, bounds, outline: facts.outline, ink: points } : null;
+  }
+
+  /* --- Fitting the tidy shape to the ink ---------------------------------
+   *
+   * The first version drew every shape inside the stroke's axis-aligned
+   * bounding box, which is only right when the shape was drawn square to the
+   * page. A box drawn at a slant came back upright and half again as large,
+   * because the bounding box of a tilted rectangle is much bigger than the
+   * rectangle inside it. These fit the shape to the ink instead: its own
+   * angle, its own middle, and a nudge to square only when it was very nearly
+   * square already.
+   */
+
+  const cross = (o, a, b) =>
+    (((a[0] - o[0]) * (b[1] - o[1])) - ((a[1] - o[1]) * (b[0] - o[0])));
+
+  const turn = (point, angle) => [
+    (point[0] * Math.cos(angle)) - (point[1] * Math.sin(angle)),
+    (point[0] * Math.sin(angle)) + (point[1] * Math.cos(angle))
+  ];
+
+  // The smallest convex ring the ink fits inside (Andrew's monotone chain).
+  function convexHull(points) {
+    const sorted = points.slice().sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+
+    if (sorted.length < 3) {
+      return sorted;
+    }
+
+    return halfHull(sorted).concat(halfHull(sorted.slice().reverse()));
+  }
+
+  function halfHull(sorted) {
+    const out = [];
+
+    for (const point of sorted) {
+      while (out.length > 1 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) {
+        out.pop();
+      }
+
+      out.push(point);
+    }
+
+    out.pop();
+    return out;
+  }
+
+  /* The smallest box round the ink, at whatever angle that box happens to be.
+   *
+   * One side of the smallest box always lies along an edge of the hull, which
+   * is what makes this a search over a handful of angles rather than over all
+   * of them.
+   */
+  function orientedBox(points) {
+    const hull = convexHull(points);
+    let best = null;
+
+    for (let i = 0; i < hull.length; i += 1) {
+      const from = hull[i];
+      const to = hull[(i + 1) % hull.length];
+      const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+      const box = boundsOf(hull.map((point) => turn(point, -angle)));
+      const area = box.width * box.height;
+
+      if (!best || area < best.area) {
+        best = { area, angle, box };
+      }
+    }
+
+    return best ? best.angle : 0;
+  }
+
+  /* Five degrees. Nobody drawing a box round a paragraph means it to be three
+   * degrees off square, and anybody who tilts one on purpose tilts it further
+   * than this.
+   */
+  const SQUARE_ENOUGH = 0.09;
+
+  function squared(angle, step) {
+    const nearest = Math.round(angle / step) * step;
+    return Math.abs(angle - nearest) < SQUARE_ENOUGH ? nearest : angle;
+  }
+
+  // The ink measured along its own angle: where the shape sits, and how big it
+  // is, in the frame it is going to be drawn in.
+  function framed(points, angle) {
+    const box = boundsOf(points.map((point) => turn(point, -angle)));
+    return {
+      angle,
+      cx: (box.minX + box.maxX) / 2,
+      cy: (box.minY + box.maxY) / 2,
+      halfWidth: box.width / 2,
+      halfHeight: box.height / 2
+    };
+  }
+
+  const frameFor = (points) => framed(points, squared(orientedBox(points), Math.PI / 2));
+
+  const placed = (frame, dx, dy) => turn([frame.cx + dx, frame.cy + dy], frame.angle);
+
+  function fitRectangle(points) {
+    const frame = frameFor(points);
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+      .map(([x, y]) => placed(frame, x * frame.halfWidth, y * frame.halfHeight));
+
+    return corners.concat([corners[0]]);
   }
 
   // An ellipse as points, so it draws, erases and saves the way everything
   // else does rather than being a second kind of thing.
-  function ellipsePoints(bounds, steps = 48) {
-    const cx = (bounds.minX + bounds.maxX) / 2;
-    const cy = (bounds.minY + bounds.maxY) / 2;
-    const rx = bounds.width / 2;
-    const ry = bounds.height / 2;
+  function ringOf(frame, steps = 48) {
     const out = [];
 
     for (let i = 0; i <= steps; i += 1) {
       const angle = (i / steps) * Math.PI * 2;
-      out.push([cx + (rx * Math.cos(angle)), cy + (ry * Math.sin(angle))]);
+      out.push(placed(frame,
+        frame.halfWidth * Math.cos(angle),
+        frame.halfHeight * Math.sin(angle)));
     }
 
     return out;
   }
 
+  const fitEllipse = (points) => ringOf(frameFor(points));
+
+  // A drag is square to the page by definition: the two corners are all it
+  // says, and there is no angle to find.
+  const ellipseIn = (bounds) => ringOf({
+    angle: 0,
+    cx: (bounds.minX + bounds.maxX) / 2,
+    cy: (bounds.minY + bounds.maxY) / 2,
+    halfWidth: bounds.width / 2,
+    halfHeight: bounds.height / 2
+  });
+
+  /* A straight line through the ink rather than between its ends.
+   *
+   * A stroke almost always hooks as the pen comes up, and a line drawn from
+   * the first point to the last leans by however far that hook went. This is
+   * the line the ink is scattered about — and if that is within five degrees
+   * of flat, upright or a true diagonal, it is drawn as exactly that, which
+   * is what somebody ruling a line under a sentence wanted.
+   */
+  function fitLine(points) {
+    const middle = centroidOf(points);
+    const angle = squared(principalAngle(points, middle), Math.PI / 4);
+    const along = points.map((point) =>
+      ((point[0] - middle[0]) * Math.cos(angle)) + ((point[1] - middle[1]) * Math.sin(angle)));
+
+    return [Math.min(...along), Math.max(...along)].map((reach) => [
+      middle[0] + (reach * Math.cos(angle)),
+      middle[1] + (reach * Math.sin(angle))
+    ]);
+  }
+
+  // The direction the ink mostly runs in: the first principal axis, which is
+  // the least-squares line without the special case for a vertical one.
+  function principalAngle(points, middle) {
+    let xx = 0;
+    let yy = 0;
+    let xy = 0;
+
+    for (const point of points) {
+      const dx = point[0] - middle[0];
+      const dy = point[1] - middle[1];
+      xx += dx * dx;
+      yy += dy * dy;
+      xy += dx * dy;
+    }
+
+    return 0.5 * Math.atan2(2 * xy, xx - yy);
+  }
+
+  /* Straight from point to point, and closed if it comes back where it
+   * started.
+   *
+   * `toPath` smooths a stroke through the middles of its segments, which is
+   * right for ink and wrong for a shape: a rectangle drawn that way has no
+   * corners left at all — five points became a blob. A shape that was tidied
+   * into corners is drawn with them.
+   */
+  function cornerPath(points) {
+    if (points.length < 2) {
+      return toPath(points);
+    }
+
+    const closed = distance(points[0], points[points.length - 1]) < 0.5;
+    const ring = closed ? points.slice(0, -1) : points;
+    const d = ring
+      .map(([x, y], i) => `${i === 0 ? "M" : "L"} ${round(x)} ${round(y)}`)
+      .join(" ");
+
+    return closed ? `${d} Z` : d;
+  }
+
   /* The clean version of what was drawn. */
   function shapePoints(shape) {
-    const { minX, minY, maxX, maxY } = shape.bounds;
-
     if (shape.kind === "line") {
-      return [shape.points[0], shape.points[shape.points.length - 1]];
+      return fitLine(shape.ink);
     }
 
     if (shape.kind === "rectangle") {
-      return [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY], [minX, minY]];
+      return fitRectangle(shape.ink);
     }
 
     if (shape.kind === "triangle") {
-      const corners = shape.points.slice(0, 3);
-      return corners.length === 3 ? corners.concat([corners[0]]) : shape.points;
+      const corners = shape.outline.slice(0, 3);
+      return corners.length === 3 ? corners.concat([corners[0]]) : shape.outline;
     }
 
-    return ellipsePoints(shape.bounds);
+    return fitEllipse(shape.ink);
   }
 
   /* A shape drawn on purpose, from the two corners of a drag.
@@ -621,7 +816,7 @@ var AnnotateGeometry = (function () {
       ];
     }
 
-    return ellipsePoints(bounds);
+    return ellipseIn(bounds);
   }
 
   /* The two short strokes of an arrowhead at the end of a line. */
@@ -674,11 +869,12 @@ var AnnotateGeometry = (function () {
 
   return {
     distance, pathLength, boundsOf, centroidOf,
-    resample, densify, smooth, enhance, toPath,
+    resample, densify, smooth, enhance, toPath, cornerPath,
     normalAt, nibWidths, inkOutline, throughPoints, throughPointsCubic, taperAt,
     scalePoints,
     simplify, perpendicularDistance, straightness, isClosed, radialSpread,
     recognise, shapePoints, shapeFromDrag, arrowHead,
+    convexHull, orientedBox, fitLine, fitRectangle, fitEllipse,
     nearPoint, distanceToSegment
   };
 })();
