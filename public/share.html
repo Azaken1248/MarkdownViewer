@@ -132,6 +132,13 @@
 
 <div class="share-page">
   <header class="share-header">
+    <!-- Offered only for a document with headings to list. -->
+    <button class="icon-btn" id="shareOutlineToggle" type="button"
+      aria-label="Show the outline" title="Show the outline"
+      aria-expanded="false" aria-controls="shareOutline" hidden>
+      <i class="ph ph-list-bullets" aria-hidden="true"></i>
+    </button>
+
     <span class="share-brand">
       <i class="ph ph-book-open-text" aria-hidden="true"></i>
       <span>AzaDocs</span>
@@ -141,13 +148,6 @@
       <i class="ph ph-link-simple" aria-hidden="true"></i>
       <span>Shared document</span>
     </span>
-
-    <!-- Offered only for a document with headings to list. -->
-    <button class="icon-btn" id="shareOutlineToggle" type="button"
-      aria-label="Show the outline" title="Show the outline"
-      aria-expanded="false" aria-controls="shareOutline" hidden>
-      <i class="ph ph-list-bullets" aria-hidden="true"></i>
-    </button>
 
     <!-- Writing on the document. The marks are kept in this browser and are
          never sent anywhere, so this is the reader's own copy of somebody
@@ -167,6 +167,22 @@
   <div id="shareInkToolbar" hidden></div>
 
   <div class="share-layout">
+    <!-- The document's own headings, in the column beside it rather than over
+         it: a panel that covers what you are reading is a panel you close
+         before you can read it. -->
+    <aside class="doc-index" id="shareOutline" aria-label="Document outline" hidden>
+      <div class="doc-index-head">
+        <h2 id="shareOutlineTitle">Outline</h2>
+
+        <button class="icon-btn icon-btn-sm" id="shareOutlineClose" type="button"
+          title="Hide the outline" aria-label="Hide the outline">
+          <i class="ph ph-x" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
+    </aside>
+
     <main class="share-main">
       <div class="share-loading" id="shareLoading">
         <i class="ph ph-circle-notch" aria-hidden="true"></i>
@@ -186,20 +202,5 @@
       </footer>
     </main>
 
-    <!-- The document's own headings, in the column beside it rather than over
-         it: a panel that covers what you are reading is a panel you close
-         before you can read it. -->
-    <aside class="doc-index" id="shareOutline" aria-label="Document outline" hidden>
-      <div class="doc-index-head">
-        <h2 id="shareOutlineTitle">Outline</h2>
-
-        <button class="icon-btn icon-btn-sm" id="shareOutlineClose" type="button"
-          title="Hide the outline" aria-label="Hide the outline">
-          <i class="ph ph-x" aria-hidden="true"></i>
-        </button>
-      </div>
-
-      <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
-    </aside>
   </div>
 </div>

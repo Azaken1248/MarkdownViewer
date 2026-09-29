@@ -6,8 +6,9 @@
    A column in the layout rather than a panel over the page: the first version
    floated, fixed to the viewport and covering the header, and a panel you have
    to dismiss before you can read what you just jumped to is a panel that is in
-   the way. This one sits under the header, to the right of the document — the
-   same side as the button that opens it — and stays there as the page scrolls.
+   the way. This one sits under the header, down the left of the document —
+   the same side as the button that opens it, which is first in the header the
+   way the app's own sidebar toggle is — and stays there as the page scrolls.
    -------------------------------------------------------------------------- */
 
 /* The row under the header. The document takes the space that is left, so
@@ -33,7 +34,7 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .doc-index[hidden] {
