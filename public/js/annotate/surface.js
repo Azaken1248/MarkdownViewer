@@ -24,10 +24,6 @@ var AnnotateSurface = (function () {
   const SVG_NS = "http://www.w3.org/2000/svg";
   const G = AnnotateGeometry;
 
-  // A laser is a pointer, not a mark: it shows where you are looking and then
-  // stops existing. Nothing about it is saved.
-  const LASER_FADE_MS = 900;
-
   function node(name, attributes) {
     const made = document.createElementNS(SVG_NS, name);
     for (const [key, value] of Object.entries(attributes)) {
@@ -404,27 +400,106 @@ var AnnotateSurface = (function () {
 
   /* --- The laser ---------------------------------------------------------- */
 
-  /* A laser is a bright dot with a trail behind it, not a red line.
+  /* A laser is where you are pointing now, and a little of where you were.
    *
-   * The first version drew the whole tail at one width with a glow round it,
-   * which reads as a fat red worm rather than as a pointer. A real one is a
-   * small intense point, and what the eye takes for a trail is the tail
-   * thinning and fading behind it — so it is drawn as three pieces: a tapered
-   * tail, a soft halo at the tip, and the dot itself.
+   * It is drawn as three pieces — a tapered tail, a soft halo at the tip, and
+   * the dot itself — because a line of even width with a glow round it reads
+   * as a fat red worm rather than as a pointer.
+   *
+   * What makes it behave like one is the ageing. Each piece of trail lives a
+   * third of a second and no longer, so holding still does not leave a
+   * comet's tail hanging in the air: it draws itself back into the dot and
+   * the dot stays under the pointer. The first version kept the last
+   * twenty-six samples however old they were and then took the whole thing
+   * away at once, which is what a laser does not do.
+   *
+   * And it follows the pointer rather than the drag. A laser is on while it
+   * is in your hand; pressing a button is not part of pointing at something.
    */
+  const TRAIL_MS = 320;
+
+  // A tenth of a pixel for the geometry, a hundredth for the fade: enough that
+  // neither shows a step, and short enough that the attribute is not a
+  // seventeen-digit number sixty times a second.
+  const round = (value) => Math.round(value * 10) / 10;
+
+  // How long the dot takes to go once the pointer has left the page.
+  const LASER_FADE_MS = 260;
+
+  const nextFrame = (step) => (window.requestAnimationFrame
+    ? window.requestAnimationFrame(step)
+    : window.setTimeout(step, 16));
+
   function laserTo(view, at) {
     if (!view.laser) {
-      view.laser = { points: [] };
+      view.laser = { trail: [], at, gone: 0 };
     }
 
-    view.laser.points.push(at);
-    // Only the last stretch. A laser that keeps its whole path is a pen.
-    view.laser.points = view.laser.points.slice(-26);
+    view.laser.at = at;
+    view.laser.gone = 0;
+    view.laser.trail.push({ at, time: Date.now() });
+    paintLaser(view);
+    followLaser(view);
+  }
 
+  // The pointer has left the page: the dot fades rather than vanishing, so it
+  // does not blink out of the corner of somebody's eye.
+  function releaseLaser(view) {
+    if (view.laser && !view.laser.gone) {
+      view.laser.gone = Date.now();
+      followLaser(view);
+    }
+  }
+
+  /* Frames only while something is changing.
+   *
+   * A trail ages whether or not the pointer moves, so it needs its own clock
+   * — but once the trail has run out and the dot is simply sitting where it
+   * was left, nothing will change until the pointer moves again and there is
+   * no reason to redraw sixty times a second.
+   */
+  function followLaser(view) {
+    if (view.laserFrame) {
+      return;
+    }
+
+    const step = () => {
+      view.laserFrame = 0;
+      if (!view.laser) {
+        return;
+      }
+
+      const showing = paintLaser(view);
+      if (!showing) {
+        clearLaser(view);
+      } else if (view.laser.trail.length > 0 || view.laser.gone) {
+        view.laserFrame = nextFrame(step);
+      }
+    };
+
+    view.laserFrame = nextFrame(step);
+  }
+
+  // Whether there is still anything to see.
+  function paintLaser(view) {
+    const laser = view.laser;
+    const now = Date.now();
+    laser.trail = laser.trail.filter((mark) => now - mark.time < TRAIL_MS);
+
+    const left = laser.gone ? 1 - ((now - laser.gone) / LASER_FADE_MS) : 1;
+    if (left <= 0) {
+      return false;
+    }
+
+    show(view, laserGroup(view, left));
+    return true;
+  }
+
+  function laserGroup(view, left) {
     // `color` is a presentation attribute, which is what lets the stylesheet
     // hang a glow of the right colour off currentcolor.
-    const group = node("g", { class: "ink-laser", color: view.laserColour });
-    const tail = view.laser.points;
+    const group = node("g", { class: "ink-laser", color: view.laserColour, opacity: Math.round(left * 100) / 100 });
+    const tail = view.laser.trail.map((mark) => mark.at);
 
     if (tail.length > 1) {
       group.appendChild(node("path", {
@@ -435,16 +510,20 @@ var AnnotateSurface = (function () {
       }));
     }
 
-    const [x, y] = at;
+    const [x, y] = view.laser.at;
     const dot = Math.max(3.5, view.width * 0.9);
     group.appendChild(node("circle", {
-      cx: x, cy: y, r: dot * 2.2, fill: view.laserColour,
+      cx: round(x), cy: round(y), r: round(dot * 2.2), fill: view.laserColour,
       "fill-opacity": "0.18", class: "ink-laser-halo"
     }));
     group.appendChild(node("circle", {
-      cx: x, cy: y, r: dot, fill: view.laserColour, class: "ink-laser-dot"
+      cx: round(x), cy: round(y), r: round(dot), fill: view.laserColour, class: "ink-laser-dot"
     }));
 
+    return group;
+  }
+
+  function show(view, group) {
     if (view.laserNode) {
       view.svg.replaceChild(group, view.laserNode);
     } else {
@@ -452,12 +531,14 @@ var AnnotateSurface = (function () {
     }
 
     view.laserNode = group;
-    window.clearTimeout(view.laserTimer);
-    view.laserTimer = window.setTimeout(() => clearLaser(view), LASER_FADE_MS);
   }
 
   function clearLaser(view) {
-    window.clearTimeout(view.laserTimer);
+    if (view.laserFrame && window.cancelAnimationFrame) {
+      window.cancelAnimationFrame(view.laserFrame);
+    }
+
+    view.laserFrame = 0;
     view.laserNode?.remove();
     view.laserNode = null;
     view.laser = null;
@@ -469,6 +550,6 @@ var AnnotateSurface = (function () {
     makeLayer, ensureLayer, resize, pointIn,
     redraw, beginStroke, extendStroke, settleStroke,
     eraseAt, eraseWholeStrokes, eraseAtPoints, splitAround, drawnWidth,
-    laserTo, clearLaser
+    laserTo, releaseLaser, clearLaser
   };
 })();

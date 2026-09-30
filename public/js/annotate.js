@@ -179,16 +179,22 @@ var Annotate = (function () {
   }
 
   function onMove(view, event) {
+    /* The laser follows the pointer, not the drag.
+     *
+     * Holding a button down is not part of pointing at something: a laser is
+     * on while it is in your hand. Every other tool needs the pen to be down
+     * before a move means anything.
+     */
+    if (view.tool === "laser") {
+      Surface.laserTo(view, Surface.pointIn(view, event));
+      return;
+    }
+
     if (!view.pointerDown) {
       return;
     }
 
     const at = withPressure(view, event);
-
-    if (view.tool === "laser") {
-      Surface.laserTo(view, at);
-      return;
-    }
 
     if (view.tool === "eraser") {
       rubOut(view, at);
@@ -499,7 +505,12 @@ var Annotate = (function () {
     view.svg.addEventListener("pointercancel", (event) => onUp(view, event));
     // A pen leaving the page mid-stroke should finish the stroke, not strand
     // it — pointer capture means this only fires when capture was refused.
-    view.svg.addEventListener("pointerleave", (event) => onUp(view, event));
+    view.svg.addEventListener("pointerleave", (event) => {
+      // The laser goes out when the pointer goes, since there is no longer
+      // anywhere on the page it is pointing at.
+      Surface.releaseLaser(view);
+      onUp(view, event);
+    });
   }
 
   function bindKeys(view) {
@@ -639,7 +650,7 @@ var Annotate = (function () {
       liveNode: null,
       laser: null,
       laserNode: null,
-      laserTimer: 0,
+      laserFrame: 0,
       pointerDown: false,
       erasedThisDrag: false,
       statusTimer: 0
