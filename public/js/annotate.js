@@ -170,7 +170,7 @@ var Annotate = (function () {
 
     if (view.tool === "eraser") {
       view.erasedThisDrag = false;
-      rubOut(view, at);
+      trackEraser(view, event);
       return;
     }
 
@@ -190,18 +190,31 @@ var Annotate = (function () {
       return;
     }
 
+    if (view.tool === "eraser") {
+      trackEraser(view, event);
+      return;
+    }
+
     if (!view.pointerDown) {
       return;
     }
 
-    const at = withPressure(view, event);
+    Surface.extendStroke(view, withPressure(view, event));
+  }
 
-    if (view.tool === "eraser") {
-      rubOut(view, at);
-      return;
+  /* The rub-out eraser shows how much it will take before it takes it, so its
+   * ring follows the pointer whether or not the pointer is down.
+   */
+  function trackEraser(view, event) {
+    const at = Surface.pointIn(view, event);
+
+    if (view.eraserMode === "point") {
+      Surface.showReach(view, at);
     }
 
-    Surface.extendStroke(view, at);
+    if (view.pointerDown) {
+      rubOut(view, at);
+    }
   }
 
   // One drag is one undo step, however many strokes it rubs out.
@@ -261,7 +274,8 @@ var Annotate = (function () {
      * drawn is the last one on the layer.
      */
     if (stroke.shape) {
-      view.svg.lastElementChild?.classList.add("ink-tidied");
+      const drawn = [...view.svg.querySelectorAll("path[data-tool]")].pop();
+      drawn?.classList.add("ink-tidied");
     }
 
     persist(view);
@@ -277,7 +291,10 @@ var Annotate = (function () {
     const made = document.createElement("button");
     made.type = "button";
     made.className = className;
-    made.title = title;
+    // `data-tip` rather than `title`: the bar draws its own tooltips, because
+    // the browser's take a second to appear, never appear for a keyboard, and
+    // cannot be made to match anything around them.
+    made.dataset.tip = title;
     made.setAttribute("aria-label", title);
 
     const glyph = document.createElement("i");
@@ -315,7 +332,7 @@ var Annotate = (function () {
       made.type = "button";
       made.className = "ink-swatch";
       made.dataset.colour = colour.value;
-      made.title = colour.name;
+      made.dataset.tip = colour.name;
       made.setAttribute("aria-label", colour.name);
       made.setAttribute("aria-pressed", "false");
       made.style.setProperty("--swatch", colour.value);
@@ -340,7 +357,7 @@ var Annotate = (function () {
       made.type = "button";
       made.className = "ink-width";
       made.dataset.width = String(width.value);
-      made.title = width.name;
+      made.dataset.tip = width.name;
       made.setAttribute("aria-label", width.name);
       made.setAttribute("aria-pressed", "false");
 
@@ -463,12 +480,21 @@ var Annotate = (function () {
       made.setAttribute("aria-pressed", String(on));
     }
 
+    /* A colour and a thickness are settings for the tool in your hand, so
+     * with no tool in your hand there is nothing for them to set. Offering
+     * them anyway invites somebody to pick a colour, draw nothing, and
+     * wonder which part of it did not work.
+     */
+    const idle = view.tool === "none";
+
     for (const made of view.toolbar.querySelectorAll(".ink-swatch")) {
       made.setAttribute("aria-pressed", String(made.dataset.colour === view.colour));
+      made.disabled = idle;
     }
 
     for (const made of view.toolbar.querySelectorAll(".ink-width")) {
       made.setAttribute("aria-pressed", String(Number(made.dataset.width) === view.width));
+      made.disabled = idle;
     }
 
     view.shapeBtn.setAttribute("aria-pressed", String(view.inkToShape));
@@ -486,6 +512,7 @@ var Annotate = (function () {
   function holdTool(view, tool) {
     view.tool = tool;
     Surface.clearLaser(view);
+    Surface.hideReach(view);
 
     // The layer only takes the pointer when there is something to draw with;
     // otherwise the document underneath is selectable as usual.
@@ -507,8 +534,10 @@ var Annotate = (function () {
     // it — pointer capture means this only fires when capture was refused.
     view.svg.addEventListener("pointerleave", (event) => {
       // The laser goes out when the pointer goes, since there is no longer
-      // anywhere on the page it is pointing at.
+      // anywhere on the page it is pointing at, and the eraser's ring with
+      // it: it marks a place on the page and the pointer has left.
       Surface.releaseLaser(view);
+      Surface.hideReach(view);
       onUp(view, event);
     });
   }
@@ -640,7 +669,6 @@ var Annotate = (function () {
       tool: "none",
       eraserMode: "stroke",
       colour: COLOURS[0].value,
-      laserColour: "#ff4d4d",
       width: WIDTHS[1].value,
       inkToShape: options.inkToShape !== false,
       strokes: [],
@@ -651,6 +679,7 @@ var Annotate = (function () {
       laser: null,
       laserNode: null,
       laserFrame: 0,
+      ringNode: null,
       pointerDown: false,
       erasedThisDrag: false,
       statusTimer: 0

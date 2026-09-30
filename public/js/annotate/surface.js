@@ -199,6 +199,19 @@ var AnnotateSurface = (function () {
     for (const stroke of view.strokes) {
       view.svg.appendChild(drawStroke(stroke));
     }
+
+    /* The pointer's own furniture goes back on top.
+     *
+     * The laser and the eraser's ring live on the same layer as the ink but
+     * are not strokes and are not in the list, so rebuilding the list takes
+     * them off the page. Erasing redraws on every step, which is exactly when
+     * the ring is being looked at.
+     */
+    for (const extra of [view.ringNode, view.laserNode]) {
+      if (extra) {
+        view.svg.appendChild(extra);
+      }
+    }
   }
 
   function beginStroke(view, at) {
@@ -415,6 +428,10 @@ var AnnotateSurface = (function () {
    *
    * And it follows the pointer rather than the drag. A laser is on while it
    * is in your hand; pressing a button is not part of pointing at something.
+   *
+   * It shines in whichever colour is selected, like every other tool on the
+   * bar. The white core is what keeps it reading as a laser rather than as a
+   * dot of paint, whatever colour is behind it.
    */
   const TRAIL_MS = 320;
 
@@ -491,20 +508,20 @@ var AnnotateSurface = (function () {
       return false;
     }
 
-    show(view, laserGroup(view, left));
+    show(view, laserGroup(view, left), "laserNode");
     return true;
   }
 
   function laserGroup(view, left) {
     // `color` is a presentation attribute, which is what lets the stylesheet
     // hang a glow of the right colour off currentcolor.
-    const group = node("g", { class: "ink-laser", color: view.laserColour, opacity: Math.round(left * 100) / 100 });
+    const group = node("g", { class: "ink-laser", color: view.colour, opacity: Math.round(left * 100) / 100 });
     const tail = view.laser.trail.map((mark) => mark.at);
 
     if (tail.length > 1) {
       group.appendChild(node("path", {
         d: G.inkOutline(tail, Math.max(3, view.width), null),
-        fill: view.laserColour,
+        fill: view.colour,
         "fill-opacity": "0.55",
         class: "ink-laser-tail"
       }));
@@ -513,24 +530,52 @@ var AnnotateSurface = (function () {
     const [x, y] = view.laser.at;
     const dot = Math.max(3.5, view.width * 0.9);
     group.appendChild(node("circle", {
-      cx: round(x), cy: round(y), r: round(dot * 2.2), fill: view.laserColour,
+      cx: round(x), cy: round(y), r: round(dot * 2.2), fill: view.colour,
       "fill-opacity": "0.18", class: "ink-laser-halo"
     }));
     group.appendChild(node("circle", {
-      cx: round(x), cy: round(y), r: round(dot), fill: view.laserColour, class: "ink-laser-dot"
+      cx: round(x), cy: round(y), r: round(dot), fill: view.colour, class: "ink-laser-dot"
     }));
 
     return group;
   }
 
-  function show(view, group) {
-    if (view.laserNode) {
-      view.svg.replaceChild(group, view.laserNode);
+  // Swapped in place where the old one still is, and appended where a redraw
+  // has been through and taken it off.
+  function show(view, group, held) {
+    const was = view[held];
+    if (was && was.parentNode === view.svg) {
+      view.svg.replaceChild(group, was);
     } else {
       view.svg.appendChild(group);
     }
 
-    view.laserNode = group;
+    view[held] = group;
+  }
+
+  /* --- How far the eraser reaches ------------------------------------------
+   *
+   * The rub-out eraser takes away exactly what it touches, so how much it
+   * touches is worth knowing before it touches it: the ring is drawn at the
+   * size the eraser actually reaches, and follows the pointer whether or not
+   * it is down.
+   *
+   * The whole-stroke eraser gets no ring. Its reach is only how it finds a
+   * stroke — once found, the whole stroke goes, however far outside the
+   * circle it runs — so a circle there would say something untrue.
+   */
+  function showReach(view, at) {
+    show(view, node("circle", {
+      cx: round(at[0]),
+      cy: round(at[1]),
+      r: round(eraserReach(view)),
+      class: "ink-eraser-ring"
+    }), "ringNode");
+  }
+
+  function hideReach(view) {
+    view.ringNode?.remove();
+    view.ringNode = null;
   }
 
   function clearLaser(view) {
@@ -550,6 +595,7 @@ var AnnotateSurface = (function () {
     makeLayer, ensureLayer, resize, pointIn,
     redraw, beginStroke, extendStroke, settleStroke,
     eraseAt, eraseWholeStrokes, eraseAtPoints, splitAround, drawnWidth,
-    laserTo, releaseLaser, clearLaser
+    laserTo, releaseLaser, clearLaser,
+    showReach, hideReach
   };
 })();
