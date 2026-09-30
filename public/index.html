@@ -804,6 +804,18 @@
       <p class="field-hint" id="shareOnceHint" hidden>This link is shown once. It is stored hashed, so it cannot be
         displayed again — create a new one if you lose it, which also revokes this one.</p>
 
+      <!-- Its own permission. Reading the document on the page and carrying
+           the file away are different decisions, and only the second one
+           leaves the library, so this is not part of being able to read. -->
+      <label class="share-permit" id="shareExportField" hidden>
+        <input type="checkbox" id="shareExportToggle" />
+        <span class="share-permit-text">
+          <strong>Allow exporting</strong>
+          <span class="field-hint">Anyone with the link can download this document as PDF, HTML, Markdown or
+            Word, with its diagrams, maths and any annotations they have made. Off unless you turn it on.</span>
+        </span>
+      </label>
+
       <div class="dialog-actions">
         <button class="btn" id="shareCloseBtn" type="button">Close</button>
         <button class="btn danger" id="revokeShareBtn" type="button" hidden>Revoke link</button>

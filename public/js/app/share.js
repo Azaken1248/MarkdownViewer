@@ -70,6 +70,8 @@ var AppShare = (function () {
       `;
       elements.revokeShareBtn.hidden = false;
       elements.createShareBtn.textContent = "Replace link";
+      elements.shareExportField.hidden = false;
+      elements.shareExportToggle.checked = Boolean(share.allowExport);
     } else {
       elements.shareStatus.innerHTML = html`
         <p class="share-live"><i class="ph ph-lock-simple" aria-hidden="true"></i>
@@ -78,6 +80,9 @@ var AppShare = (function () {
       `;
       elements.revokeShareBtn.hidden = true;
       elements.createShareBtn.textContent = "Create link";
+      // Nothing to permit until there is a link to permit it on.
+      elements.shareExportField.hidden = true;
+      elements.shareExportToggle.checked = false;
     }
   }
 
@@ -141,6 +146,31 @@ var AppShare = (function () {
     }
   }
 
+  /* Saved as it is switched rather than on a Save button.
+   *
+   * There is no other pending state in this dialog, so a button to confirm one
+   * checkbox would only be a way to think you had changed something and not
+   * have. If the write fails the box goes back to what the server still says.
+   */
+  async function setExportAllowed(allowed) {
+    const file = state.shareFile;
+
+    try {
+      const payload = await requestJson(`/api/docs/${docUrl(file)}/share`, {
+        method: "PATCH",
+        body: JSON.stringify({ allowExport: allowed })
+      });
+
+      state.shares.set(file, { ...state.shares.get(file), ...payload.share, file });
+      notify(allowed
+        ? "Anyone with the link can now export this document."
+        : "Exporting from the link is off.", "success");
+    } catch (error) {
+      elements.shareExportToggle.checked = !allowed;
+      notify(error.message, "error");
+    }
+  }
+
   // The button carries the state, so you can see at a glance whether the open
   // document is published without opening the dialog.
   function updateShareButton() {
@@ -172,6 +202,7 @@ var AppShare = (function () {
     closeShareModal,
     createShareLink,
     revokeShareLink,
+    setExportAllowed,
     updateShareButton
   };
 })();

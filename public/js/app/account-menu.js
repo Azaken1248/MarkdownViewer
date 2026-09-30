@@ -11,7 +11,8 @@ var AppAccountMenu = (function () {
 const { elements } = AppDom;
 const { state } = AppState;
 const { notify } = AppNotify;
-const { openShareModal, closeShareModal, createShareLink, revokeShareLink } = AppShare;
+const { openShareModal, closeShareModal, createShareLink, revokeShareLink,
+  setExportAllowed } = AppShare;
 const {
   openLoginModal, submitLogin, signOut,
   openPasswordModal, closePasswordModal, submitPasswordChange
@@ -113,6 +114,10 @@ function bindAccountMenu() {
 
   elements.revokeShareBtn.addEventListener("click", () => {
     void revokeShareLink();
+  });
+
+  elements.shareExportToggle.addEventListener("change", () => {
+    void setExportAllowed(elements.shareExportToggle.checked);
   });
 
   elements.copyShareUrlBtn.addEventListener("click", async () => {

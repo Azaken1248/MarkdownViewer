@@ -266,3 +266,51 @@
   outline-offset: 2px;
 }
 
+
+/* --------------------------------------------------------------------------
+   A permission on a share link
+
+   Its own row rather than another field, because it is a decision about what
+   the link may do and not a value being filled in.
+   -------------------------------------------------------------------------- */
+
+.share-permit {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.share-permit:hover {
+  border-color: var(--fg-subtle);
+}
+
+.share-permit[hidden] {
+  display: none;
+}
+
+.share-permit input {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.share-permit-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.share-permit .field-hint {
+  margin: 0;
+}

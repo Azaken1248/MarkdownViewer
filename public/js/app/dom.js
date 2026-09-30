@@ -185,6 +185,8 @@ var AppDom = (function () {
     shareUrlInput: input("shareUrlInput"),
     copyShareUrlBtn: button("copyShareUrlBtn"),
     shareOnceHint: element("shareOnceHint"),
+    shareExportField: element("shareExportField"),
+    shareExportToggle: /** @type {HTMLInputElement} */ (element("shareExportToggle")),
     shareCloseBtn: button("shareCloseBtn"),
     revokeShareBtn: button("revokeShareBtn"),
     createShareBtn: button("createShareBtn"),

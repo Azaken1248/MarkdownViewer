@@ -497,12 +497,43 @@ module.exports = async (ctx) => {
     check("the raw token is never listed", JSON.stringify(shares).includes(token), false);
     check("views are counted", record.views > 0, true);
 
+    /* Taking a copy away is its own permission.
+     *
+     * Reading a document on a page and carrying the file off are different
+     * decisions, and only the second one leaves the library — so it is not
+     * read off "can view", and it is off until somebody turns it on.
+     */
+    check("a new link does not allow exporting", record.allowExport, false);
+    check("...and the page is told so",
+      (await stranger.get(`/api/share/${token}`)).body.allowExport, false);
+
+    const allowed = await admin.patch("/api/docs/beta.md/share", { allowExport: true });
+    check("a manager can allow it", allowed.status, 200);
+    check("...and the share says so", allowed.body.share.allowExport, true);
+    check("...as does the page", (await stranger.get(`/api/share/${token}`)).body.allowExport, true);
+
+    check("a reader of the link cannot allow it themselves",
+      (await stranger.patch("/api/docs/beta.md/share", { allowExport: true })).status, 401);
+    check("and it takes a boolean, not a nudge",
+      (await admin.patch("/api/docs/beta.md/share", { allowExport: "yes" })).status, 400);
+    check("a document that is not shared has nothing to allow",
+      (await admin.patch("/api/docs/never-shared.md/share", { allowExport: true })).status, 404);
+
     // Rotation is the only way to un-leak a URL.
     const rotated = await admin.post("/api/docs/beta.md/share");
     check("re-sharing reports that it rotated", rotated.body.rotated, true);
     check("the old link stops working", (await stranger.get(`/api/share/${token}`)).status, 404);
     const newToken = rotated.body.url.split("/s/")[1];
     check("the new link works", (await stranger.get(`/api/share/${newToken}`)).status, 200);
+    // Replacing the URL is republishing the same document, not making a new
+    // decision about it: a permission that quietly came back on (or off) when
+    // a link was rotated would be one nobody could rely on.
+    check("rotating the link keeps the export permission",
+      (await stranger.get(`/api/share/${newToken}`)).body.allowExport, true);
+
+    await admin.patch("/api/docs/beta.md/share", { allowExport: false });
+    check("and it can be taken away again",
+      (await stranger.get(`/api/share/${newToken}`)).body.allowExport, false);
 
     await admin.del("/api/docs/beta.md/share");
     check("revoking kills the link", (await stranger.get(`/api/share/${newToken}`)).status, 404);
