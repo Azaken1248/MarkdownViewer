@@ -134,5 +134,61 @@ var AnnotateStore = (function () {
     }
   }
 
-  return { load, save, clear, packed, isStroke, MAX_BYTES, VERSION, keyFor };
+  /* --- The reader's own colours -------------------------------------------
+   *
+   * Not per document: a colour somebody mixed is theirs, and having to mix it
+   * again on the next shared link would be the sort of thing that makes a
+   * feature not worth using. So this one key holds them for the whole origin.
+   *
+   * Only `#rrggbb`, and only as many as fit on a sensible menu — what comes
+   * back out of storage was put there by an earlier version of this file or
+   * by somebody with the console open, and it ends up as a CSS colour and an
+   * SVG attribute.
+   */
+  const PALETTE_KEY = `${PREFIX}palette`;
+  const MAX_COLOURS = 24;
+
+  const isColour = (value) => typeof value === "string" && (/^#[0-9a-f]{6}$/i).test(value);
+
+  function loadPalette() {
+    let raw = null;
+    try {
+      raw = window.localStorage.getItem(PALETTE_KEY);
+    } catch {
+      return [];
+    }
+
+    if (!raw) {
+      return [];
+    }
+
+    try {
+      const saved = JSON.parse(raw);
+      if (!saved || saved.v !== VERSION || !Array.isArray(saved.colours)) {
+        return [];
+      }
+
+      return saved.colours.filter(isColour).slice(0, MAX_COLOURS);
+    } catch {
+      return [];
+    }
+  }
+
+  function savePalette(colours) {
+    const kept = colours.filter(isColour).slice(0, MAX_COLOURS);
+
+    try {
+      window.localStorage.setItem(PALETTE_KEY, JSON.stringify({ v: VERSION, colours: kept }));
+      return { saved: true, colours: kept };
+    } catch {
+      // The colours are still in hand for this visit; only the remembering
+      // failed.
+      return { saved: false, reason: "refused", colours: kept };
+    }
+  }
+
+  return {
+    load, save, clear, packed, isStroke, MAX_BYTES, VERSION, keyFor,
+    loadPalette, savePalette, isColour, MAX_COLOURS, PALETTE_KEY
+  };
 })();

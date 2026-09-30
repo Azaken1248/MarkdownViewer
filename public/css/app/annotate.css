@@ -234,7 +234,9 @@
     position: relative;
   }
 
-  .ink-toolbar [data-tip]::after {
+  /* ::before, because a swatch draws its colour with ::after and a tooltip
+     that took that pseudo-element took the colours off the bar with it. */
+  .ink-toolbar [data-tip]::before {
     content: attr(data-tip);
     position: absolute;
     top: calc(100% + 7px);
@@ -256,14 +258,14 @@
 
   /* Waiting a moment, so running the pointer along the bar on the way to
      something else does not leave a trail of them. */
-  .ink-toolbar [data-tip]:hover::after,
-  .ink-toolbar [data-tip]:focus-visible::after {
+  .ink-toolbar [data-tip]:hover::before,
+  .ink-toolbar [data-tip]:focus-visible::before {
     opacity: 1;
     transition-delay: 350ms;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .ink-toolbar [data-tip]::after {
+    .ink-toolbar [data-tip]::before {
       transition: none;
     }
   }
@@ -283,6 +285,139 @@
 .ink-swatch[aria-pressed="true"] {
   border-color: var(--fg-muted);
   background: var(--raised);
+}
+
+.ink-swatch[hidden] {
+  display: none;
+}
+
+/* The row is a rebuildable element rather than the group itself, and lays out
+   as though it were not there. */
+.ink-swatch-row {
+  display: contents;
+}
+
+.ink-more {
+  width: 20px;
+  font-size: 12px;
+}
+
+/* --- The reader's own colours -------------------------------------------- */
+
+/* Hung under the swatches it belongs to. The group is the positioning
+   context, so the menu stays under the colours however the bar wraps. */
+.ink-colours {
+  position: relative;
+}
+
+.ink-palette {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 80;
+  width: 216px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.ink-palette[hidden] {
+  display: none;
+}
+
+.ink-palette-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.ink-palette-empty {
+  margin: 0;
+  padding: 4px 2px 8px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* The swatch and the way to be rid of it, as one thing: the cross sits on the
+   corner of the colour it forgets. */
+.ink-palette-swatch {
+  position: relative;
+  display: inline-flex;
+}
+
+.ink-palette-drop {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--fg-muted);
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ink-palette-swatch:hover .ink-palette-drop,
+.ink-palette-drop:focus-visible {
+  opacity: 1;
+}
+
+.ink-palette-drop:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* The native picker, which every platform already has and every reader
+   already knows how to drive. The input itself is the whole label's worth of
+   click target, laid over it rather than shown. */
+.ink-palette-add {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ink-palette-add:hover {
+  color: var(--fg);
+  border-color: var(--fg-subtle);
+  background: var(--raised);
+}
+
+.ink-palette-add:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ink-picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-palette-drop {
+    transition: none;
+  }
 }
 
 /* --- Thickness ----------------------------------------------------------- */

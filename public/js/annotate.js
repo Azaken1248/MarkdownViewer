@@ -321,29 +321,209 @@ var Annotate = (function () {
     return group;
   }
 
+  /* --- Colours -------------------------------------------------------------
+   *
+   * The six on the bar are the ones worth a press without opening anything.
+   * Anything else somebody mixes goes in their own palette, which is kept for
+   * the whole browser rather than for the document: a colour you had to mix
+   * again on every shared link is a colour you would stop bothering with.
+   */
+  function swatch(view, value, name) {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.className = "ink-swatch";
+    made.dataset.colour = value;
+    made.dataset.tip = name;
+    made.setAttribute("aria-label", name);
+    made.setAttribute("aria-pressed", "false");
+    made.style.setProperty("--swatch", value);
+    // Read back off the button rather than closed over, because the one
+    // standing for a mixed colour changes which colour it is.
+    made.addEventListener("click", () => pickColour(view, made.dataset.colour));
+    return made;
+  }
+
+  function pickColour(view, value) {
+    view.colour = value;
+
+    // Reaching for one of your own moves it to the front, which is what keeps
+    // the ones you actually use on the bar and the rest a press away.
+    if (view.colours.includes(value) && view.colours[0] !== value) {
+      view.colours = [value].concat(view.colours.filter((one) => one !== value));
+      AnnotateStore.savePalette(view.colours);
+      paintPalette(view);
+    }
+
+    closePalette(view);
+    paintToolbar(view);
+  }
+
+  // How many of the reader's own colours stand on the bar beside the six.
+  // Enough to keep a working set to hand, few enough that the bar does not
+  // become a paint box.
+  const ON_THE_BAR = 3;
+
   function colourButtons(view) {
     const group = document.createElement("div");
-    group.className = "ink-group";
+    group.className = "ink-group ink-colours";
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", "Colour");
 
-    for (const colour of COLOURS) {
-      const made = document.createElement("button");
-      made.type = "button";
-      made.className = "ink-swatch";
-      made.dataset.colour = colour.value;
-      made.dataset.tip = colour.name;
-      made.setAttribute("aria-label", colour.name);
-      made.setAttribute("aria-pressed", "false");
-      made.style.setProperty("--swatch", colour.value);
-      made.addEventListener("click", () => {
-        view.colour = colour.value;
-        paintToolbar(view);
-      });
-      group.appendChild(made);
+    // Its own element so the row can be rebuilt as the reader's colours
+    // change, without taking the menu button with it. `display: contents`
+    // keeps it out of the way of the group's own layout.
+    view.swatchRow = document.createElement("span");
+    view.swatchRow.className = "ink-swatch-row";
+    group.appendChild(view.swatchRow);
+    paintSwatches(view);
+
+    view.paletteBtn = button("ink-btn ink-more", "More colours", "ph-caret-down");
+    view.paletteBtn.setAttribute("aria-haspopup", "true");
+    view.paletteBtn.setAttribute("aria-expanded", "false");
+    view.paletteBtn.addEventListener("click", () => togglePalette(view));
+    group.appendChild(view.paletteBtn);
+
+    group.appendChild(paletteMenu(view));
+    return group;
+  }
+
+  /* The palette itself: everything mixed so far, and the way to mix another.
+   *
+   * Rebuilt whenever it changes rather than patched, because it is a dozen
+   * buttons and the alternative is keeping a list of nodes in step with a
+   * list of colours for no gain anybody could see.
+   */
+  function paletteMenu(view) {
+    view.palette = document.createElement("div");
+    view.palette.className = "ink-palette";
+    view.palette.setAttribute("role", "group");
+    view.palette.setAttribute("aria-label", "Your colours");
+    view.palette.hidden = true;
+
+    view.paletteList = document.createElement("div");
+    view.paletteList.className = "ink-palette-list";
+    view.palette.appendChild(view.paletteList);
+
+    /* A native colour input, which is the whole point of not building one:
+     * every platform already has a picker its owner knows how to drive, and
+     * it is the one place a colour can be chosen with an eyedropper.
+     */
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.className = "ink-picker";
+    picker.value = view.colour;
+    picker.setAttribute("aria-label", "Mix a colour");
+    picker.addEventListener("change", () => addColour(view, picker.value));
+
+    const add = document.createElement("label");
+    add.className = "ink-palette-add";
+    add.appendChild(picker);
+
+    const plus = document.createElement("i");
+    plus.className = "ph ph-plus";
+    plus.setAttribute("aria-hidden", "true");
+    add.append(plus, document.createTextNode("Add a colour"));
+
+    view.palette.appendChild(add);
+    paintPalette(view);
+    return view.palette;
+  }
+
+  /* The row on the bar: the six, then the reader's most recent.
+   *
+   * Rebuilt only when the list it is standing for has changed — this runs
+   * after every stroke, and a row of buttons replaced that often is a row
+   * that takes the keyboard focus off one of them mid-press.
+   */
+  function paintSwatches(view) {
+    const wanted = COLOURS.map((colour) => [colour.value, colour.name])
+      .concat(view.colours.slice(0, ON_THE_BAR).map((colour) => [colour, colour]));
+    const key = wanted.map(([value]) => value).join(" ");
+
+    if (view.swatchRow.dataset.key === key) {
+      return;
     }
 
-    return group;
+    view.swatchRow.dataset.key = key;
+    view.swatchRow.replaceChildren();
+    for (const [value, name] of wanted) {
+      view.swatchRow.appendChild(swatch(view, value, name));
+    }
+  }
+
+  function paintPalette(view) {
+    view.paletteList.replaceChildren();
+
+    if (view.colours.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "ink-palette-empty";
+      empty.textContent = "No colours of your own yet.";
+      view.paletteList.appendChild(empty);
+      return;
+    }
+
+    for (const colour of view.colours) {
+      view.paletteList.appendChild(mixedSwatch(view, colour));
+    }
+  }
+
+  function mixedSwatch(view, colour) {
+    const holder = document.createElement("span");
+    holder.className = "ink-palette-swatch";
+
+    const made = swatch(view, colour, colour);
+    made.setAttribute("aria-pressed", String(colour === view.colour));
+
+    // A palette you can only add to fills up with the near-misses of the
+    // colour somebody was actually after.
+    const drop = button("ink-palette-drop", `Forget ${colour}`, "ph-x");
+    drop.addEventListener("click", () => forgetColour(view, colour));
+
+    holder.append(made, drop);
+    return holder;
+  }
+
+  function addColour(view, value) {
+    if (!AnnotateStore.isColour(value) || view.colours.includes(value)) {
+      pickColour(view, value);
+      return;
+    }
+
+    // Newest first, so the last one mixed is the first one reached for.
+    view.colours = [value].concat(view.colours).slice(0, AnnotateStore.MAX_COLOURS);
+    AnnotateStore.savePalette(view.colours);
+    view.colour = value;
+    paintPalette(view);
+    paintToolbar(view);
+  }
+
+  function forgetColour(view, value) {
+    view.colours = view.colours.filter((one) => one !== value);
+    AnnotateStore.savePalette(view.colours);
+    paintPalette(view);
+    paintToolbar(view);
+  }
+
+  function togglePalette(view) {
+    if (view.palette.hidden) {
+      openPalette(view);
+    } else {
+      closePalette(view);
+    }
+  }
+
+  function openPalette(view) {
+    view.palette.hidden = false;
+    view.paletteBtn.setAttribute("aria-expanded", "true");
+  }
+
+  function closePalette(view) {
+    if (!view.palette || view.palette.hidden) {
+      return;
+    }
+
+    view.palette.hidden = true;
+    view.paletteBtn.setAttribute("aria-expanded", "false");
   }
 
   function widthButtons(view) {
@@ -487,9 +667,17 @@ var Annotate = (function () {
      */
     const idle = view.tool === "none";
 
+    paintSwatches(view);
+
     for (const made of view.toolbar.querySelectorAll(".ink-swatch")) {
       made.setAttribute("aria-pressed", String(made.dataset.colour === view.colour));
       made.disabled = idle;
+    }
+
+    view.paletteBtn.disabled = idle;
+
+    if (idle) {
+      closePalette(view);
     }
 
     for (const made of view.toolbar.querySelectorAll(".ink-width")) {
@@ -542,6 +730,19 @@ var Annotate = (function () {
     });
   }
 
+  // A menu stays open until it is chosen from or dismissed, and pressing the
+  // page is a dismissal.
+  function bindAway(view) {
+    document.addEventListener("pointerdown", (event) => {
+      const inside = view.palette.contains(/** @type {Node} */ (event.target))
+        || view.paletteBtn.contains(/** @type {Node} */ (event.target));
+
+      if (!inside) {
+        closePalette(view);
+      }
+    });
+  }
+
   function bindKeys(view) {
     document.addEventListener("keydown", (event) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
@@ -560,9 +761,21 @@ var Annotate = (function () {
         return;
       }
 
-      // Escape puts the pen down, which is the way out of drawing mode that
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      // Escape closes what is open before it puts anything down: one press,
+      // one thing undone, which is the order somebody expects it in.
+      if (!view.palette.hidden) {
+        closePalette(view);
+        view.paletteBtn.focus();
+        return;
+      }
+
+      // And then puts the pen down, which is the way out of drawing mode that
       // somebody will try first.
-      if (event.key === "Escape" && view.tool !== "none") {
+      if (view.tool !== "none") {
         chooseTool(view, view.tool);
       }
     });
@@ -669,6 +882,9 @@ var Annotate = (function () {
       tool: "none",
       eraserMode: "stroke",
       colour: COLOURS[0].value,
+      // Mixed by this reader, kept for the whole browser rather than for the
+      // document: see AnnotateStore.loadPalette.
+      colours: AnnotateStore.loadPalette(),
       width: WIDTHS[1].value,
       inkToShape: options.inkToShape !== false,
       strokes: [],
@@ -689,6 +905,7 @@ var Annotate = (function () {
     buildToolbar(view);
     bindPointer(view);
     bindKeys(view);
+    bindAway(view);
     watchSize(view);
     watchToolbar(view);
 

@@ -352,4 +352,38 @@ check("more ink than there is room for is refused rather than half-written",
   Store.save("token-huge", huge), { saved: false, reason: "too-big" });
 check("...and nothing was written", Store.load("token-huge"), []);
 
+console.log("=== the reader's own colours ===");
+
+/* Kept for the whole browser rather than for the document, so they are the
+ * one thing here that is not filed under a share token. What comes back out
+ * ends up as a CSS colour and an SVG attribute, so it is checked on the way
+ * in and again on the way out.
+ */
+check("colours are saved and come back in order",
+  Store.savePalette(["#ff8800", "#3355ff"]).colours, ["#ff8800", "#3355ff"]);
+check("...and load the same way", Store.loadPalette(), ["#ff8800", "#3355ff"]);
+
+check("what is not a colour is not saved",
+  Store.savePalette(["#ff8800", "red", "javascript:alert(1)", "#GGGGGG", 7, null]).colours,
+  ["#ff8800"]);
+check("...and is not loaded either, whatever put it there", (() => {
+  saved.set(Store.PALETTE_KEY, JSON.stringify({ v: 1, colours: ["#ff8800", "url(x)"] }));
+  return Store.loadPalette();
+})(), ["#ff8800"]);
+
+check("three hexits are not six", Store.savePalette(["#f80"]).colours, []);
+check("a palette longer than the menu is trimmed",
+  Store.savePalette(Array.from({ length: 40 }, (_, i) =>
+    `#${i.toString(16).padStart(2, "0")}0000`)).colours.length,
+  Store.MAX_COLOURS);
+
+saved.set(Store.PALETTE_KEY, "{not json");
+check("an unreadable palette is no palette", Store.loadPalette(), []);
+
+saved.set(Store.PALETTE_KEY, JSON.stringify({ v: 99, colours: ["#ff8800"] }));
+check("a version this does not know is not read", Store.loadPalette(), []);
+
+saved.delete(Store.PALETTE_KEY);
+check("a reader who has mixed nothing has nothing", Store.loadPalette(), []);
+
 process.exit(finish());
