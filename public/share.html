@@ -75,6 +75,7 @@
 <link rel="stylesheet" href="/css/app/accounts.css" />
 <link rel="stylesheet" href="/css/app/share.css" />
 <link rel="stylesheet" href="/css/app/doc-index.css" />
+<link rel="stylesheet" href="/css/app/export.css" />
 <link rel="stylesheet" href="/css/app/annotate.css" />
 <link rel="stylesheet" href="/css/app/error.css" />
 <link rel="stylesheet" href="/css/app/notebook-run.css" />
@@ -128,6 +129,9 @@
 <script src="/js/annotate/store.js" defer></script>
 <script src="/js/annotate/surface.js" defer></script>
 <script src="/js/annotate.js" defer></script>
+<script src="/js/export/snapshot.js" defer></script>
+<script src="/js/export/formats.js" defer></script>
+<script src="/js/export.js" defer></script>
 <script src="/js/share.js" defer></script>
 
 <div class="share-page">
@@ -157,6 +161,15 @@
       aria-expanded="false" aria-controls="shareInkToolbar">
       <i class="ph ph-pencil-simple" aria-hidden="true"></i>
     </button>
+
+    <!-- Only when the link was published with exporting allowed. The page
+         asks the server; it does not decide for itself. -->
+    <span class="export-anchor">
+      <button class="icon-btn" id="shareExportBtn" type="button" hidden
+        aria-label="Export this document" title="Export this document">
+        <i class="ph ph-download-simple" aria-hidden="true"></i>
+      </button>
+    </span>
 
     <button class="icon-btn" id="shareThemeToggle" type="button" aria-label="Switch theme" title="Switch theme">
       <i class="ph ph-moon" aria-hidden="true"></i>

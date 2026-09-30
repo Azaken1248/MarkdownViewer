@@ -62,6 +62,10 @@ const BROWSER_GLOBALS = {
   // one — including the diagram page, which loads none of the rest of this.
   ThemeSwitch: "readonly",
   DiagramIcons: "readonly",
+  // Exporting, which the workspace and a share page both load.
+  Exporter: "readonly",
+  ExportSnapshot: "readonly",
+  ExportFormats: "readonly",
   // The modules app.js is assembled from, in /js/app, each loaded before it.
   // app.js itself, which is the last of them and exports what it is.
   App: "readonly",
@@ -79,6 +83,7 @@ const BROWSER_GLOBALS = {
   AppLinks: "readonly",
   AppPastedImages: "readonly",
   AppShare: "readonly",
+  AppExport: "readonly",
   AppLocation: "readonly",
   AppTheme: "readonly",
   AppNotebook: "readonly",

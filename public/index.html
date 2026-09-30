@@ -71,6 +71,7 @@
   <link rel="stylesheet" href="/css/app/diagram-panel.css" />
   <link rel="stylesheet" href="/css/app/dock.css" />
   <link rel="stylesheet" href="/css/app/responsive.css" />
+  <link rel="stylesheet" href="/css/app/export.css" />
   <link rel="stylesheet" href="/css/app/print.css" />
   <link rel="stylesheet" href="/css/app/accounts.css" />
   <link rel="stylesheet" href="/css/app/share.css" />
@@ -194,6 +195,10 @@
   <script src="/js/app/account-menu.js" defer></script>
   <script src="/js/app/sidebar.js" defer></script>
   <script src="/js/app/editor-keys.js" defer></script>
+  <script src="/js/export/snapshot.js" defer></script>
+  <script src="/js/export/formats.js" defer></script>
+  <script src="/js/export.js" defer></script>
+  <script src="/js/app/export.js" defer></script>
   <script src="/js/app.js" defer></script>
 </head>
 
@@ -422,6 +427,13 @@
               title="Share this document">
               <i class="ph ph-link-simple" aria-hidden="true"></i>
             </button>
+
+            <span class="export-anchor">
+              <button class="icon-btn" id="exportDocBtn" type="button"
+                aria-label="Export this document" title="Export this document">
+                <i class="ph ph-download-simple" aria-hidden="true"></i>
+              </button>
+            </span>
 
             <button class="icon-btn" id="softDeleteDocBtn" type="button" aria-label="Move this document to recycle bin"
               title="Move to recycle bin">

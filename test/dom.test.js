@@ -416,6 +416,12 @@ async function run(server) {
   // button is pressed.
   loadScript(window, path.join(ROOT, "js", "notebook-runtime.js"));
 
+  // Exporting, which the share page loads too and which app/export.js reaches
+  // for as soon as app.js wires the button up.
+  for (const file of ["export/snapshot.js", "export/formats.js", "export.js"]) {
+    loadScript(window, path.join(ROOT, "js", file));
+  }
+
   for (const file of appModules) loadScript(window, file);
 
   console.log("=== app.js evaluates against the real DOM ===");

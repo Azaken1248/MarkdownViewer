@@ -227,6 +227,7 @@ elements.clearSearchBtn.addEventListener("click", () => {
 // -- account menu -----------------------------------------------------------
 
 bindAccountMenu();
+AppExport.attach();
 
 bindSidebar();
 

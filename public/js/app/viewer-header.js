@@ -233,6 +233,7 @@ var AppViewerHeader = (function () {
     }
 
     updateShareButton();
+    AppExport.updateExportButton();
   }
 
   // A dialog or a menu left open over a control that has just been taken away.
@@ -319,6 +320,7 @@ var AppViewerHeader = (function () {
     // A notebook is read here and edited in Jupyter; everything else opens.
     enableDocButtons({ ...DOC_BUTTONS.open, edit: notebookFile });
     updateShareButton();
+    AppExport.updateExportButton();
     applyPermissionGating();
   }
 

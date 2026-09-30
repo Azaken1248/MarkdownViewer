@@ -1,0 +1,108 @@
+/* --------------------------------------------------------------------------
+   Export
+
+   A menu of four formats under the button that opens it. It says what each
+   one is for, because "PDF or Word?" is only an obvious question if you
+   already know that one of them goes through the print dialogue and the other
+   is laid out again by Word.
+   -------------------------------------------------------------------------- */
+
+.export-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  width: 264px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.export-menu[hidden] {
+  display: none;
+}
+
+.export-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-item:hover {
+  background: var(--raised);
+}
+
+.export-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.export-item > i {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--fg-muted);
+  font-size: 18px;
+}
+
+.export-item:hover > i {
+  color: var(--accent);
+}
+
+.export-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.export-item-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.export-item-note {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* What it is doing, while it does it: collecting a long document's
+   stylesheets, fonts and pictures is a second or two of nothing happening. */
+.export-status {
+  margin: 4px 2px 2px;
+  padding: 0 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.export-status:empty {
+  display: none;
+}
+
+/* The button itself, while an export is being built. */
+.is-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .export-menu {
+    width: min(264px, calc(100vw - 32px));
+  }
+}

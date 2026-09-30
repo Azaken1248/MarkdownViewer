@@ -82,6 +82,7 @@ var AppDom = (function () {
     sidebar: element("sidebar"),
     emptyState: element("emptyState"),
     docContent: element("docContent"),
+    exportDocBtn: button("exportDocBtn"),
     viewer: /** @type {HTMLElement} */ (document.querySelector(".viewer")),
     placeDocsBtn: anchor("placeDocsBtn"),
     placeLinksBtn: anchor("placeLinksBtn"),

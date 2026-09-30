@@ -24,6 +24,7 @@
     outlineToggle: document.getElementById("shareOutlineToggle"),
     outlineClose: document.getElementById("shareOutlineClose"),
     annotateToggle: document.getElementById("shareAnnotateToggle"),
+    exportBtn: document.getElementById("shareExportBtn"),
     inkToolbar: document.getElementById("shareInkToolbar")
   };
 
@@ -191,6 +192,32 @@
     // ...and so does the document the ink sits on, which has to be its final
     // size before a stroke drawn at the bottom of it lands in the right place.
     ink.restore();
+
+    /* Exporting, if the link was published with it allowed.
+     *
+     * The server decides and the page asks: a button hidden by the client
+     * would be a permission enforced by the client, and there is nothing to
+     * enforce here anyway — the copy is made from what is already on screen.
+     * What the permission governs is whether the offer is made at all.
+     */
+    if (payload.allowExport) {
+      offerExport(payload);
+    }
+  }
+
+  function offerExport(payload) {
+    elements.exportBtn.hidden = false;
+    Exporter.attach({
+      button: elements.exportBtn,
+      name: () => payload.file,
+      title: () => payload.title,
+      article: () => elements.content,
+      // The ink is drawn over the whole page, margins and all, so the copy
+      // has to be of the whole page for it to land on the right words.
+      surface: () => document.querySelector(".share-layout"),
+      ink: () => document.querySelector(".ink-layer"),
+      source: () => payload.content
+    });
   }
 
   /* -- theme ---------------------------------------------------------------
