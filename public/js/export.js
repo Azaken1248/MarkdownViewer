@@ -157,14 +157,17 @@ var Exporter = (function () {
     }
 
     setBusy(view, true);
-    say(view, "Collecting the page…");
+    say(view, format === "docx" ? "Drawing the diagrams for Word…" : "Collecting the page…");
 
     try {
       const snapshot = await ExportSnapshot.build({
         title: view.parts.title(),
         article: view.parts.article(),
         surface: view.parts.surface?.() || null,
-        ink: view.parts.ink?.() || null
+        ink: view.parts.ink?.() || null,
+        // Word is given pictures where the others are given vectors: its HTML
+        // importer does not know what an inline SVG is and drops it.
+        forWord: format === "docx"
       });
 
       await deliver(view, format, snapshot, name);

@@ -21,10 +21,21 @@ module.exports = async (ctx) => {
     check("but eval() is still refused", csp.includes("'unsafe-eval'"), false);
     check("...and so is inline script", directive("script-src").includes("'unsafe-inline'"), false);
 
-    // Pyodide fetches its runtime and packages over fetch(), which script-src
-    // does not cover.
+    /* Pyodide fetches its runtime and packages over fetch(), which script-src
+     * does not cover — and an export reads this page's own stylesheets and
+     * fonts the same way, from the origins style-src and font-src already
+     * name. Nothing here is reachable that a page does not already load from.
+     */
     check("the runtime CDN is reachable", directive("connect-src").includes("https://cdn.jsdelivr.net"), true);
-    check("...and nothing else is", directive("connect-src"), "connect-src 'self' https://cdn.jsdelivr.net");
+    check("...and the CDNs the pages take their styles and fonts from",
+      directive("connect-src"),
+      "connect-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com"
+      + " https://fonts.googleapis.com https://fonts.gstatic.com");
+    check("...and nothing beyond what style-src and font-src already allow",
+      directive("connect-src").split(/\s+/).slice(1)
+        .filter((origin) => origin !== "'self'")
+        .filter((origin) => !csp.includes(`style-src`) || !(directive("style-src") + directive("font-src")).includes(origin)),
+      []);
 
     check("workers may only come from this origin", directive("worker-src"), "worker-src 'self'");
     check("object-src is still none", directive("object-src"), "object-src 'none'");

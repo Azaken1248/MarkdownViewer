@@ -13,7 +13,9 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const { JSDOM } = require("jsdom");
 const { createChecker } = require("./helpers/check.js");
+const { CSP_DIRECTIVES } = require("../lib/http/headers");
 
 const { check, finish } = createChecker("EXPORT");
 const ROOT = path.join(__dirname, "..", "public", "js");
@@ -160,5 +162,92 @@ check("...under a checksum that matches them",
   u32(14), Formats.crc32(new TextEncoder().encode("<Types/>")));
 
 check("an empty zip is still a zip", Formats.zipOf([]).length, 22);
+
+console.log("=== an export may fetch what the pages already load ===");
+
+/* The quiet failure this catches.
+ *
+ * A copy is built by reading this page's own stylesheets and carrying them
+ * into one file. Fetching them is an XHR, so it is connect-src that decides —
+ * and connect-src did not name the font CDN that style-src and font-src both
+ * did. The export was refused the font stylesheet, said nothing, and produced
+ * documents set in whatever the machine that opened them happened to have.
+ *
+ * So: every origin a page loads a stylesheet from has to be an origin the
+ * export is allowed to fetch from. Add a CDN to a page and forget this, and
+ * this check is what says so.
+ */
+const publicDir = path.join(__dirname, "..", "public");
+const connectSrc = CSP_DIRECTIVES.match(/connect-src([^;]*)/)[1];
+
+const styleOrigins = new Set();
+for (const page of ["index.html", "share.html", "error.html", "diagram.html"]) {
+  const html = fs.readFileSync(path.join(publicDir, page), "utf8");
+  for (const [, href] of html.matchAll(/<link[^>]*\shref="(https:\/\/[^"]+)"/g)) {
+    styleOrigins.add(new URL(href).origin);
+  }
+}
+
+check("the pages do load stylesheets from somewhere else", styleOrigins.size > 0, true);
+check("...and the export is allowed to fetch every one of them",
+  [...styleOrigins].filter((origin) => !connectSrc.includes(origin)), []);
+console.log(`  (${[...styleOrigins].join(", ")})`);
+
+// And the frame the PDF is printed in, which default-src would otherwise
+// refuse: a page's only way to make a PDF is to print one.
+check("a blob may be framed, which is how the PDF is printed",
+  /frame-src [^;]*blob:/.test(CSP_DIRECTIVES), true);
+
+console.log("=== what Word is given instead of an SVG ===");
+
+/* Word's HTML importer does not know what an inline <svg> is: it drops it,
+ * and a document full of diagrams arrives full of holes. These are the two
+ * measurements that decide what gets drawn to a canvas instead.
+ */
+const dom = new JSDOM(`<body><article>
+  <p>before</p>
+  <span class="katex"><span class="katex-mathml">x squared</span><span class="katex-html">x<sup>2</sup></span></span>
+  <svg id="big" width="200" height="120"></svg>
+  <svg id="rule" width="16" height="0.016"></svg>
+</article></body>`);
+
+const { document: page } = dom.window;
+const article = page.querySelector("article");
+
+// jsdom lays nothing out, so the boxes are the ones under test rather than
+// ones it measured: a big diagram, and KaTeX's fraction bar.
+const boxes = { big: { width: 200, height: 120 }, rule: { width: 16, height: 0.256 } };
+for (const svg of article.querySelectorAll("svg")) {
+  svg.getBoundingClientRect = () => boxes[svg.id];
+}
+
+const copy = /** @type {any} */ (article.cloneNode(true));
+Snapshot.recordSvgSizes(article, copy);
+
+const sizeOf = (id) => {
+  const svg = copy.querySelector(`#${id}`);
+  return [svg.dataset.exportW, svg.dataset.exportH];
+};
+
+check("a diagram is recorded at the size it is shown at", sizeOf("big"), ["200", "120"]);
+// KaTeX draws a fraction bar as an SVG a sixtieth of an em tall. Rounded, it
+// is nothing, and something measured as nothing is skipped — which took the
+// bar out of every fraction in the document.
+check("a hairline rule is recorded as a pixel rather than as nothing", sizeOf("rule"), ["16", "1"]);
+
+/* KaTeX writes every formula twice: MathML for a screen reader, and the spans
+ * that are actually shown, with the first hidden by a clip rectangle. Word
+ * ignores the clip and renders both.
+ */
+check("the hidden MathML is there to start with", copy.querySelectorAll(".katex-mathml").length, 1);
+Snapshot.dropHiddenMath(copy);
+check("...and is dropped, so Word does not show every formula twice",
+  copy.querySelectorAll(".katex-mathml").length, 0);
+check("...while the formula that is shown stays",
+  copy.querySelector(".katex-html").textContent, "x2");
+
+Snapshot.forgetSvgSizes(copy);
+check("the measurements do not travel with the copy",
+  copy.querySelectorAll("[data-export-w]").length, 0);
 
 process.exit(finish());

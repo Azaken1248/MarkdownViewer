@@ -45,6 +45,9 @@ const BROWSER_GLOBALS = {
   File: "readonly",
   FileReader: "readonly",
   FormData: "readonly",
+  // Drawing an SVG to a canvas, which is how a diagram reaches Word.
+  XMLSerializer: "readonly",
+  Image: "readonly",
   CSS: "readonly",
   NodeFilter: "readonly",
 

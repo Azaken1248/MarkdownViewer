@@ -300,6 +300,116 @@ var ExportSnapshot = (function () {
     }
   }
 
+  /* --- What Word can be given -------------------------------------------
+   *
+   * Word's HTML importer does not know what an inline <svg> is. It drops it,
+   * which is what turns a document full of diagrams into a document full of
+   * holes — so for that one format every SVG is drawn to a canvas first and
+   * carried as a picture instead. Every other format keeps the vector, which
+   * stays sharp at any zoom and is a tenth of the size.
+   *
+   * The size has to be taken from the live element: a clone is not in any
+   * document, so it has no layout and measures zero. It is recorded on the
+   * copy before anything is stripped, while the two trees still match.
+   */
+  function recordSvgSizes(live, copy) {
+    const there = live.querySelectorAll("svg");
+    const here = copy.querySelectorAll("svg");
+
+    here.forEach((svg, index) => {
+      const box = there[index]?.getBoundingClientRect();
+      if (box && box.width > 0 && box.height > 0) {
+        // At least a pixel each way. KaTeX draws a fraction bar as an SVG a
+        // sixtieth of an em tall, which rounds to nothing and would be
+        // dropped as unmeasurable — taking the bar out of the fraction.
+        svg.dataset.exportW = String(Math.max(1, Math.round(box.width)));
+        svg.dataset.exportH = String(Math.max(1, Math.round(box.height)));
+      }
+    });
+  }
+
+  async function flattenSvg(root, budget) {
+    for (const svg of [...root.querySelectorAll("svg")]) {
+      const width = Number(svg.dataset.exportW || 0);
+      const height = Number(svg.dataset.exportH || 0);
+      if (!width || !height) {
+        continue;
+      }
+
+      const png = await svgAsPng(svg, width, height);
+      if (!png || png.length > budget.left) {
+        failed.push("a diagram");
+        continue;
+      }
+
+      budget.left -= png.length;
+      const picture = document.createElement("img");
+      picture.setAttribute("src", png);
+      picture.setAttribute("width", String(width));
+      picture.setAttribute("height", String(height));
+      picture.setAttribute("alt", svg.getAttribute("aria-label") || "Diagram");
+      svg.replaceWith(picture);
+    }
+  }
+
+  // Twice the size it is shown at, so it is not soft when the page it lands
+  // on is printed.
+  const PIXEL_RATIO = 2;
+
+  function svgAsPng(svg, width, height) {
+    const drawable = /** @type {SVGElement} */ (svg.cloneNode(true));
+    drawable.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    drawable.setAttribute("width", String(width));
+    drawable.setAttribute("height", String(height));
+
+    const source = new XMLSerializer().serializeToString(drawable);
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+
+    return new Promise((resolve) => {
+      const picture = new Image();
+
+      picture.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = width * PIXEL_RATIO;
+          canvas.height = height * PIXEL_RATIO;
+          const paper = canvas.getContext("2d");
+          paper.drawImage(picture, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/png"));
+        } catch {
+          // An SVG that reached outside this origin taints the canvas, and a
+          // tainted canvas will not be read back. One picture missing is
+          // better than an export that does not happen.
+          resolve(null);
+        }
+      };
+
+      picture.onerror = () => resolve(null);
+      picture.src = url;
+    });
+  }
+
+  // The measurements were for the rasteriser's benefit and are nobody else's
+  // business.
+  function forgetSvgSizes(root) {
+    for (const svg of root.querySelectorAll("[data-export-w]")) {
+      delete (/** @type {HTMLElement} */ (svg)).dataset.exportW;
+      delete (/** @type {HTMLElement} */ (svg)).dataset.exportH;
+    }
+  }
+
+  /* KaTeX writes every formula twice: once as MathML for a screen reader and
+   * once as the spans that are actually shown, with the first hidden by a
+   * clip rectangle. Word ignores the clip and renders both, so every formula
+   * arrives doubled and the second one as unreadable source. The copy that is
+   * not shown is the one to drop.
+   */
+  function dropHiddenMath(root) {
+    for (const spoken of root.querySelectorAll(".katex-mathml")) {
+      spoken.remove();
+    }
+  }
+
   /* Nothing that only makes sense while the page is live.
    *
    * A copy button copies to a clipboard the file does not have, a pan-zoom
@@ -437,15 +547,23 @@ html, body {
    * workspace document has no ink and no surface, and is simply the article
    * at the width it is being read at.
    */
-  async function build({ title, article, surface = null, ink = null }) {
+  async function build({ title, article, surface = null, ink = null, forWord = false }) {
     failed.length = 0;
     const budget = { left: MAX_EMBEDDED_BYTES };
     const theme = document.documentElement.getAttribute("data-theme") || "dark";
     const box = geometryOf(article, surface);
 
     const copy = /** @type {HTMLElement} */ (article.cloneNode(true));
+    recordSvgSizes(article, copy);
     stripLiveParts(copy);
     await embedImages(copy, budget);
+
+    if (forWord) {
+      dropHiddenMath(copy);
+      await flattenSvg(copy, budget);
+    }
+
+    forgetSvgSizes(copy);
 
     let drawn = "";
     if (ink && ink.querySelector("path, circle, g")) {
@@ -456,7 +574,21 @@ html, body {
       inkCopy.setAttribute("height", String(box.height));
       inkCopy.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
       await embedImages(inkCopy, budget);
-      drawn = inkCopy.outerHTML;
+
+      if (forWord) {
+        // The ink is an SVG like any other, and Word would drop it with the
+        // rest — which would be the whole point of the export missing.
+        inkCopy.dataset.exportW = String(box.width);
+        inkCopy.dataset.exportH = String(box.height);
+        const holder = document.createElement("div");
+        holder.appendChild(inkCopy);
+        await flattenSvg(holder, budget);
+        const picture = holder.firstElementChild;
+        picture.setAttribute("class", "export-ink");
+        drawn = picture.outerHTML;
+      } else {
+        drawn = inkCopy.outerHTML;
+      }
     }
 
     const styles = await collectStyles(budget);
@@ -499,6 +631,9 @@ ${drawn}
     embedFonts,
     geometryOf,
     pageStyles,
+    dropHiddenMath,
+    recordSvgSizes,
+    forgetSvgSizes,
     withoutPrintRules,
     MAX_EMBEDDED_BYTES
   };
