@@ -389,6 +389,42 @@ var ExportSnapshot = (function () {
     });
   }
 
+  /* The document cut into pages, with the ink laid over each of them.
+   *
+   * The cutting is ExportPaginate's: it measures the document and ends pages
+   * at headings, which is the whole reason this is not left to the browser.
+   * What is left here is placing the ink, which is held in the coordinates of
+   * the surface it was drawn on — so each sheet shows its own slice of it, by
+   * moving the layer up by however far down the document that sheet starts.
+   */
+  function intoSheets(copy, box, size, layer) {
+    const sheets = ExportPaginate.intoPages(copy, size);
+
+    if (layer) {
+      for (const sheet of sheets) {
+        const from = Number(sheet.dataset.docTop || 0);
+        const holder = document.createElement("div");
+        holder.className = "export-sheet-ink";
+        holder.style.left = `${size.marginX + box.inkLeft}px`;
+        holder.style.top = `${size.marginY + box.inkTop - box.docTop - from}px`;
+        holder.style.width = `${box.surfaceWidth}px`;
+        holder.style.height = `${box.surfaceHeight}px`;
+        holder.appendChild(layer.cloneNode(true));
+        sheet.appendChild(holder);
+      }
+    }
+
+    const pages = document.createElement("div");
+    pages.className = "export-pages";
+    for (const sheet of sheets) {
+      sheet.removeAttribute("data-doc-top");
+      sheet.removeAttribute("data-page-width");
+      pages.appendChild(sheet);
+    }
+
+    return pages.outerHTML;
+  }
+
   // The measurements were for the rasteriser's benefit and are nobody else's
   // business.
   function forgetSvgSizes(root) {
@@ -474,6 +510,9 @@ var ExportSnapshot = (function () {
       inset: Math.round((body.left - page.left) - left),
       bodyWidth: Math.round(body.width),
       hasInk: Boolean(drawn),
+      // Where the document's own top edge is inside the cropped box: the ink
+      // may start above it, and every sheet's ink is offset from here.
+      docTop: Math.round((body.top - page.top) - top),
       inkLeft: Math.round(-left),
       inkTop: Math.round(-top),
       surfaceWidth: Math.round(page.width),
@@ -541,6 +580,112 @@ var ExportSnapshot = (function () {
    */
   const flowedPage = () => "width: auto;";
 
+  const A4_HEIGHT_MM = 297;
+
+  /* The sheet, in the document's own pixels.
+   *
+   * Everything is sized so that one scale takes the whole sheet to A4: the
+   * margins are inside it rather than outside, which is what lets the page's
+   * own background run to the edge of the paper instead of stopping at a
+   * frame the browser paints in its own grey.
+   */
+  function sheetGeometry(box) {
+    const scale = box.hasInk ? fitToPage(box.width) : 1;
+    const px = (mm) => Math.round(((mm * PX_PER_MM) / scale) * 10) / 10;
+
+    return {
+      scale,
+      sheetWidth: px(A4_WIDTH_MM),
+      sheetHeight: px(A4_HEIGHT_MM),
+      marginX: px(SIDE_MARGIN_MM),
+      marginY: px(TOP_MARGIN_MM),
+      contentWidth: px(A4_WIDTH_MM - (SIDE_MARGIN_MM * 2)),
+      contentHeight: px(A4_HEIGHT_MM - (TOP_MARGIN_MM * 2)),
+      // With ink on it the document keeps the width and the place it had on
+      // screen, because that is what the ink was drawn over. Without, it is
+      // simply set to the page.
+      docWidth: box.hasInk ? box.bodyWidth : px(A4_WIDTH_MM - (SIDE_MARGIN_MM * 2)),
+      docInset: box.hasInk ? box.inset : 0
+    };
+  }
+
+  function sheetStyles(size) {
+    return `
+/* --- Sheets --------------------------------------------------------------
+ *
+ * One element per page, at the size of the page, with the margins inside it.
+ * The breaks were chosen by measuring the document rather than by letting the
+ * browser cut wherever the box filled up, so there is nothing left for it to
+ * decide: each sheet is exactly one sheet.
+ */
+.export-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 0;
+}
+
+/* The sheet's size, its padding and its overflow are set on the element
+   itself by the paginator, which has to be able to measure one. What is left
+   here is what it looks like. */
+.export-sheet {
+  background: var(--canvas);
+}
+
+/* The space above a heading belongs between it and what came before, not at
+   the top of a page. */
+.export-sheet-body > :first-child {
+  margin-top: 0 !important;
+}
+
+/* A block too tall for any page, shrunk until it fits one. */
+.export-shrunk {
+  display: block;
+}
+
+/* Each sheet carries its own slice of the ink. The layer inside is placed by
+   the holder and does nothing of its own. */
+.export-sheet-ink {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.export-sheet-ink > * {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  .export-pages {
+    display: block;
+    gap: 0;
+    padding: 0;
+  }
+
+  /* The sheet is A4 the moment it is scaled, and it is the whole page: no
+     browser margin, so the background reaches the edge of the paper. */
+  .export-sheet {
+    zoom: ${size.scale};
+    margin: 0;
+    break-after: page;
+    break-inside: avoid;
+  }
+
+  .export-sheet:last-child {
+    break-after: auto;
+  }
+}
+`;
+  }
+
   function pageStyles(box, theme) {
     return `
 /* --- The export's own layout ------------------------------------------- */
@@ -576,8 +721,11 @@ html, body {
 
 
 /* The layer is still the size of the surface it was drawn on; it is moved so
-   that the part of it over this document is the part that shows. */
-.export-ink {
+   that the part of it over this document is the part that shows.
+
+   Scoped to the continuous layout: on a sheet it is the sheet that places the
+   ink, and a layer that moved itself as well would be moved twice. */
+.export-page > .export-ink {
   position: absolute;
   left: ${box.inkLeft}px;
   top: ${box.inkTop}px;
@@ -674,7 +822,7 @@ html, body {
    * workspace document has no ink and no surface, and is simply the article
    * at the width it is being read at.
    */
-  async function build({ title, article, surface = null, ink = null, forWord = false }) {
+  async function build({ title, article, surface = null, ink = null, forWord = false, paged = false }) {
     failed.length = 0;
     const budget = { left: MAX_EMBEDDED_BYTES };
     const theme = document.documentElement.getAttribute("data-theme") || "dark";
@@ -693,6 +841,7 @@ html, body {
     forgetSvgSizes(copy);
 
     let drawn = "";
+    let inkLayer = null;
     if (ink && ink.querySelector("path, circle, g")) {
       const inkCopy = /** @type {SVGElement} */ (ink.cloneNode(true));
       inkCopy.setAttribute("class", "export-ink");
@@ -714,13 +863,24 @@ html, body {
         await flattenSvg(holder, budget);
         const picture = holder.firstElementChild;
         picture.setAttribute("class", "export-ink");
-        drawn = picture.outerHTML;
+        inkLayer = picture;
       } else {
-        drawn = inkCopy.outerHTML;
+        inkLayer = inkCopy;
       }
+
+      drawn = inkLayer.outerHTML;
     }
 
     const styles = await collectStyles(budget);
+    const size = sheetGeometry(box);
+    const laidOut = paged
+      ? intoSheets(copy, box, size, inkLayer)
+      : `<div class="export-page">
+<div class="export-doc">
+${copy.outerHTML}
+</div>
+${drawn}
+</div>`;
 
     return {
       html: `<!DOCTYPE html>
@@ -735,14 +895,10 @@ ${styles}
 <style>
 ${pageStyles(box, theme)}
 </style>
+${paged ? `<style>\n${sheetStyles(size)}\n</style>` : ""}
 </head>
 <body>
-<div class="export-page">
-<div class="export-doc">
-${copy.outerHTML}
-</div>
-${drawn}
-</div>
+${laidOut}
 </body>
 </html>
 `,
@@ -760,6 +916,8 @@ ${drawn}
     embedFonts,
     geometryOf,
     pageStyles,
+    sheetGeometry,
+    sheetStyles,
     fitToPage,
     dropHiddenMath,
     recordSvgSizes,

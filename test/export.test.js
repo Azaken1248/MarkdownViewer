@@ -23,11 +23,12 @@ const ROOT = path.join(__dirname, "..", "public", "js");
 // Plain scripts whose top-level `var` is the namespace, run the way a page
 // runs them. Neither touches the document until it is called.
 global.window = /** @type {any} */ (globalThis);
-for (const file of ["export/snapshot.js", "export/formats.js"]) {
+for (const file of ["export/paginate.js", "export/snapshot.js", "export/formats.js"]) {
   vm.runInThisContext(fs.readFileSync(path.join(ROOT, file), "utf8"), { filename: file });
 }
 
 const Snapshot = globalThis.ExportSnapshot;
+const Paginate = globalThis.ExportPaginate;
 const Formats = globalThis.ExportFormats;
 
 console.log("=== the app's print rules are not part of a copy ===");
@@ -285,5 +286,84 @@ check("...while the formula that is shown stays",
 Snapshot.forgetSvgSizes(copy);
 check("the measurements do not travel with the copy",
   copy.querySelectorAll("[data-export-w]").length, 0);
+
+console.log("=== where the pages end ===");
+
+/* The browser paginates by one rule: fill the box, then cut. It does not know
+ * that a heading belongs with what follows it, so it cuts in the middle of
+ * sections, tables and worked examples. These are the rules that replace it,
+ * as arithmetic over a list of boxes — which is where they can be argued with
+ * without a browser in the room.
+ */
+const PAGE = 1000;
+
+// A document as a list of blocks: each `[height, isHeading]`, stacked.
+function stack(blocks) {
+  let at = 0;
+  return blocks.map(([height, heading = false]) => {
+    const box = { top: at, bottom: at + height, heading, atomic: false };
+    at += height;
+    return box;
+  });
+}
+
+check("a document that fits is one page",
+  Paginate.pageStarts(stack([[200], [300], [400]]), PAGE), [0]);
+check("nothing at all is still one page", Paginate.pageStarts([], PAGE), [0]);
+
+// With no heading to aim at, the cut goes between two blocks — never inside
+// one, which is the whole difference from letting the browser do it.
+check("without a heading it breaks before the block that does not fit",
+  Paginate.pageStarts(stack([[400], [400], [400], [400]]), PAGE), [0, 2]);
+
+/* A heading in the last quarter of the page is where a reader expects the
+ * page to end, so the page ends there even though more would have fitted.
+ */
+const atTheFoot = stack([[300], [300], [200], [100, true], [400]]);
+check("a heading near the foot of the page ends it", Paginate.pageStarts(atTheFoot, PAGE), [0, 3]);
+check("...and it is the heading that starts the next page, not what came before it",
+  atTheFoot[3].heading, true);
+
+// A heading higher up the page is not worth losing a third of a sheet for.
+check("a heading early in the page is left where it is",
+  Paginate.pageStarts(stack([[200], [100, true], [400], [400], [400]]), PAGE), [0, 3]);
+
+/* A block taller than any page cannot be cut and cannot be fitted: it gets a
+ * page of its own, and the layout shrinks it to fit. What must not happen is
+ * the loop failing to move on.
+ */
+const huge = Paginate.pageStarts(stack([[300], [2400], [300]]), PAGE);
+check("a block taller than a page gets a page of its own", huge, [0, 1, 2]);
+check("...and the pagination still ends", huge.length < 10, true);
+
+/* The reach is a preference. This is not: a heading at the foot of a page is
+ * a title for a blank space, and the reader turns over to find the section
+ * starting again with no name on it.
+ */
+const stranded = stack([[300], [300], [150, true], [400], [400]]);
+check("a heading is never the last thing on a page",
+  Paginate.pageStarts(stranded, PAGE).every((start, i, all) => {
+    const last = (i + 1 < all.length ? all[i + 1] : stranded.length) - 1;
+    return !stranded[last].heading;
+  }), true);
+check("...even when it falls just outside the reach", Paginate.pageStarts(stranded, PAGE), [0, 2]);
+
+const twoTitles = stack([[600], [100, true], [100, true], [400]]);
+check("two headings in a row move to the next page together",
+  Paginate.pageStarts(twoTitles, PAGE), [0, 1]);
+
+check("every page starts after the one before it",
+  Paginate.pageStarts(stack([[400], [400], [400], [400], [400], [400]]), PAGE)
+    .every((start, i, all) => i === 0 || start > all[i - 1]), true);
+
+/* How far up the page a heading may be and still be worth ending on. Too
+ * narrow and a section starts three lines from the foot of a page; too wide
+ * and a page ends a third of the way down.
+ */
+const nearly = stack([[300], [400], [100, true], [150], [400]]);
+check("a wide reach ends the page at a heading two thirds down",
+  Paginate.pageStarts(nearly, PAGE, 0.4), [0, 2]);
+check("...and a narrow one fills the page instead",
+  Paginate.pageStarts(nearly, PAGE, 0.05), [0, 4]);
 
 process.exit(finish());

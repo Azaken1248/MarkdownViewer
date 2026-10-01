@@ -157,7 +157,10 @@ var Exporter = (function () {
     }
 
     setBusy(view, true);
-    say(view, format === "docx" ? "Drawing the diagrams for Word…" : "Collecting the page…");
+    say(view, {
+      docx: "Drawing the diagrams for Word…",
+      pdf: "Collecting the page and working out where it breaks…"
+    }[format] || "Collecting the page…");
 
     try {
       const snapshot = await ExportSnapshot.build({
@@ -167,7 +170,10 @@ var Exporter = (function () {
         ink: view.parts.ink?.() || null,
         // Word is given pictures where the others are given vectors: its HTML
         // importer does not know what an inline SVG is and drops it.
-        forWord: format === "docx"
+        forWord: format === "docx",
+        // Only the PDF is cut into pages here. A web page scrolls, and Word
+        // lays the document out again on its own paper.
+        paged: format === "pdf"
       });
 
       await deliver(view, format, snapshot, name);
