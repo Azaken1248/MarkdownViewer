@@ -23,12 +23,13 @@ const ROOT = path.join(__dirname, "..", "public", "js");
 // Plain scripts whose top-level `var` is the namespace, run the way a page
 // runs them. Neither touches the document until it is called.
 global.window = /** @type {any} */ (globalThis);
-for (const file of ["export/paginate.js", "export/snapshot.js", "export/formats.js"]) {
+for (const file of ["export/paginate.js", "export/snapshot.js", "export/pdf.js", "export/formats.js"]) {
   vm.runInThisContext(fs.readFileSync(path.join(ROOT, file), "utf8"), { filename: file });
 }
 
 const Snapshot = globalThis.ExportSnapshot;
 const Paginate = globalThis.ExportPaginate;
+const Pdf = globalThis.ExportPdf;
 const Formats = globalThis.ExportFormats;
 
 console.log("=== the app's print rules are not part of a copy ===");
@@ -230,10 +231,9 @@ check("...and the export is allowed to fetch every one of them",
   [...styleOrigins].filter((origin) => !connectSrc.includes(origin)), []);
 console.log(`  (${[...styleOrigins].join(", ")})`);
 
-// And the frame the PDF is printed in, which default-src would otherwise
-// refuse: a page's only way to make a PDF is to print one.
-check("a blob may be framed, which is how the PDF is printed",
-  /frame-src [^;]*blob:/.test(CSP_DIRECTIVES), true);
+// Nothing frames anything any more: the PDF is written here rather than
+// printed through a dialogue, so the allowance that needed went back.
+check("nothing may be framed", /frame-src/.test(CSP_DIRECTIVES), false);
 
 console.log("=== what Word is given instead of an SVG ===");
 
@@ -284,6 +284,37 @@ check("...while the formula that is shown stays",
   copy.querySelector(".katex-html").textContent, "x2");
 
 Snapshot.forgetSvgSizes(copy);
+
+console.log("=== what is wider than the page it is printed on ===");
+
+/* On a screen a wide formula or a wide table is given a scrollbar. Paper has
+ * no scrollbar: whatever is past the edge is simply not there, and the reader
+ * gets half an equation and a grey line where the rest was. A document set to
+ * the width of a page rather than the width of a window has plenty of these.
+ */
+const wideDom = new JSDOM(`<body><div id="block">
+  <div class="math-block"><span>a very long formula</span></div>
+</div></body>`);
+
+const block = wideDom.window.document.getElementById("block");
+const inner = block.querySelector(".math-block");
+const widths = (el, client, scroll) => {
+  Object.defineProperty(el, "clientWidth", { value: client, configurable: true });
+  Object.defineProperty(el, "scrollWidth", { value: scroll, configurable: true });
+};
+
+widths(block, 700, 700);
+widths(inner, 700, 700);
+check("a block that fits is left alone", Paginate.fitsWidth(block), 1);
+
+widths(inner, 700, 875);
+check("...and one whose formula runs off the edge says by how much",
+  Math.round(Paginate.fitsWidth(block) * 100) / 100, 0.8);
+
+// The block itself can be the thing that overflows, not only something in it.
+widths(block, 700, 1400);
+widths(inner, 700, 700);
+check("the block's own overflow counts too", Paginate.fitsWidth(block), 0.5);
 check("the measurements do not travel with the copy",
   copy.querySelectorAll("[data-export-w]").length, 0);
 
@@ -401,5 +432,72 @@ console.log(`  (pages filled ${fills.map((f) => Math.round(f * 100)).join("%, ")
 const nowhere = stack([[900], [100, true], [980], [100]]);
 check("a heading that cannot fit with what follows it is still placed",
   Paginate.pageStarts(nowhere, PAGE).length > 1, true);
+
+console.log("=== the PDF, written here rather than printed ===");
+
+/* The browser will only make one through the print dialogue, and the dialogue
+ * belongs to the person rather than to the page: it adds its own margins
+ * around the ones the sheets carry and leaves a white border round a document
+ * whose background is not white. So the file is assembled byte by byte, and
+ * these are the bytes a reader needs to find anything in it at all.
+ */
+const sheetPage = (pixels) => ({
+  width: 794, height: 1123, pixelWidth: 1588, pixelHeight: 2246,
+  bytes: new Uint8Array(pixels)
+});
+
+const file = Pdf.write({ pages: [sheetPage([1, 2, 3]), sheetPage([4, 5])], title: "Vectors (notes)" });
+const asText = Buffer.from(file).toString("latin1");
+
+check("it says what it is", asText.startsWith("%PDF-1.7"), true);
+// Four high bytes in a comment on the second line: how a reader is told the
+// file is binary and must not be helpfully re-encoded on the way somewhere.
+check("...and that it is binary", [...file.slice(10, 14)].every((byte) => byte > 127), true);
+check("it ends where a PDF ends", asText.trimEnd().endsWith("%%EOF"), true);
+
+check("every page is there", (asText.match(/\/Type \/Page[^s]/g) || []).length, 2);
+check("...and the page tree counts them", /\/Type \/Pages \/Count 2/.test(asText), true);
+
+// A4 at 72 points to the inch rather than CSS's 96, which is the one
+// conversion in the whole file and the one that decides the paper size.
+check("the paper is A4", /\/MediaBox \[0 0 595.5 842.25\]/.test(asText), true);
+check("...which is the sheet, in points", Math.round(794 * Pdf.PT_PER_PX * 100) / 100, 595.5);
+
+check("the picture is drawn over the whole of it",
+  asText.includes("q 595.5 0 0 842.25 0 0 cm /Im0 Do Q"), true);
+check("...as a JPEG, which a PDF can carry without being told how",
+  (asText.match(/\/Filter \/DCTDecode/g) || []).length, 2);
+
+/* The cross-reference table is how a reader finds an object: it is a list of
+ * byte offsets, and one of them being wrong by a byte is a file that will not
+ * open. So each is checked against what is actually at that offset.
+ */
+const startxref = Number(asText.match(/startxref\s+(\d+)/)[1]);
+check("the table is where the trailer says it is",
+  asText.slice(startxref, startxref + 4), "xref");
+
+const offsets = [...asText.slice(startxref).matchAll(/^(\d{10}) 00000 n/gm)].map((m) => Number(m[1]));
+check("there is one offset per object", offsets.length, Number(asText.match(/\/Size (\d+)/)[1]) - 1);
+check("...and every one of them lands on its object",
+  offsets.every((at, index) => asText.slice(at).startsWith(`${index + 1} 0 obj`)), true);
+
+check("the catalogue points at the page tree", /\/Type \/Catalog \/Pages 2 0 R/.test(asText), true);
+check("the title is carried, with its brackets escaped",
+  Pdf.write({ pages: [sheetPage([1])], title: "a (b) c" }) && asText.includes("/Title (Vectors \\(notes\\))"), true);
+
+check("a document of one page is a document", (() => {
+  const one = Buffer.from(Pdf.write({ pages: [sheetPage([9])], title: "x" })).toString("latin1");
+  return (one.match(/\/Type \/Page[^s]/g) || []).length;
+})(), 1);
+
+// An SVG wrapping the sheet is what the canvas draws, and it is parsed by the
+// XML parser: a stylesheet full of `>` and `&` has to be out of its way.
+const svg = Pdf.svgFor("<div/>", "a > b { content: \"&\"; }", { width: 10, height: 20 }).join("");
+/* The CDATA is commented out as well as opened: the XML parser needs the
+ * CDATA so a `>` in a selector is not markup, and the CSS parser needs the
+ * comment so the CDATA is not a rule. Both are satisfied at once. */
+check("the stylesheet rides inside CDATA, inside a comment",
+  svg.includes("/*<![CDATA[*/a > b") && svg.includes("/*]]>*/"), true);
+check("...and the sheet is sized in the viewBox", svg.includes('viewBox="0 0 10 20"'), true);
 
 process.exit(finish());

@@ -418,7 +418,7 @@ async function run(server) {
 
   // Exporting, which the share page loads too and which app/export.js reaches
   // for as soon as app.js wires the button up.
-  for (const file of ["export/paginate.js", "export/snapshot.js", "export/formats.js", "export.js"]) {
+  for (const file of ["export/paginate.js", "export/snapshot.js", "export/pdf.js", "export/formats.js", "export.js"]) {
     loadScript(window, path.join(ROOT, "js", file));
   }
 

@@ -21,7 +21,7 @@ var Exporter = (function () {
       id: "pdf",
       label: "PDF",
       icon: "ph-file-pdf",
-      note: "Opens the print dialogue. Choose “Save as PDF”, and set Margins to “None” — the pages carry their own."
+      note: "Pages chosen here, not by the print dialogue."
     },
     {
       id: "html",
@@ -203,8 +203,13 @@ var Exporter = (function () {
       return;
     }
 
-    say(view, "In the dialogue: “Save as PDF”, and Margins “None”.");
-    await ExportFormats.toPdf(snapshot);
+    const bytes = await ExportFormats.toPdf(snapshot, name, (done, all) => {
+      say(view, `Drawing page ${done} of ${all}…`);
+    });
+
+    tell(view, `Saved as a PDF of ${snapshot.sheets.length} page`
+      + `${snapshot.sheets.length === 1 ? "" : "s"}, ${Math.round(bytes / 1024)}KB.${short}`,
+    short ? "warning" : "success");
   }
 
   /* --- Wiring -------------------------------------------------------------- */

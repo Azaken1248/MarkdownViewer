@@ -58,20 +58,17 @@ function carried(headers) {
 
     check("the CSP keeps frame-ancestors, which X-Frame-Options is the fallback for",
       CSP_DIRECTIVES.includes("frame-ancestors 'self'"), true);
-    /* The other allowance, and the reason it stays.
+    /* An allowance that went back.
      *
-     * A page cannot write a PDF; it can only ask the browser to print
-     * something. Printing a copy of the document rather than the app around
-     * it means framing that copy, and the copy is a blob this page built
-     * from itself — so what this permits is the app framing its own output.
+     * frame-src was opened to blob: for one release, so a PDF could be
+     * printed through the browser's dialogue by framing a copy of the
+     * document. The export writes the file itself now, nothing frames
+     * anything, and default-src refuses what is not named.
      */
-    check("frame-src allows blob:, which is how a PDF is printed",
-      /frame-src [^;]*blob:/.test(CSP_DIRECTIVES), true);
-    check("...and nothing else may be framed",
-      /frame-src 'self' blob:;/.test(`${CSP_DIRECTIVES};`), true);
-    check("the export still prints through a frame it made itself",
-      fs.readFileSync(path.join(publicDir, "js", "export", "formats.js"), "utf8")
-        .includes("createObjectURL"), true);
+    check("nothing may be framed", /frame-src/.test(CSP_DIRECTIVES), false);
+    check("...and the export does not need to frame anything",
+      /document\.createElement\("iframe"\)/.test(
+        fs.readFileSync(path.join(publicDir, "js", "export", "formats.js"), "utf8")), false);
 
     check("nothing here may ask for a camera, a microphone, a location, a device or a payment",
       ["camera=()", "microphone=()", "geolocation=()", "usb=()", "payment=()"].every((p) => PERMISSIONS_POLICY.includes(p)), true);

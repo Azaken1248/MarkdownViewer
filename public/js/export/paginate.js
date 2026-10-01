@@ -270,24 +270,74 @@ var ExportPaginate = (function () {
     return last.bottom > floor + 1;
   }
 
-  /* A block too tall for any page is shrunk until it fits one.
+  /* The things inside a block that scroll sideways rather than wrap.
    *
-   * It is the only thing that can be done with a diagram taller than a sheet
-   * of paper, and it is what a person would do: make it smaller rather than
-   * cut it in half.
+   * On a screen a wide formula or a wide table is given a scrollbar. Paper
+   * has no scrollbar: whatever is past the edge is simply not there, and the
+   * reader gets half an equation and a grey line where the rest was.
    */
-  function fitOversized(box, height) {
-    const tall = box.bottom - box.top;
-    if (tall <= height) {
-      return;
+  const SCROLLERS = ".katex-display, .math-block, pre, table, .mermaid-block, .notebook-cell";
+
+  // How much a block has to shrink for everything in it to fit its own box.
+  // One is "it already does".
+  function fitsWidth(el) {
+    let fit = 1;
+
+    for (const inner of [el, ...el.querySelectorAll(SCROLLERS)]) {
+      if (inner.clientWidth > 0 && inner.scrollWidth > inner.clientWidth + 1) {
+        fit = Math.min(fit, inner.clientWidth / inner.scrollWidth);
+      }
     }
 
-    const holder = document.createElement("div");
-    holder.className = "export-shrunk";
-    holder.style.zoom = String(Math.max(0.3, Math.floor((height / tall) * 100) / 100));
-    box.el.replaceWith(holder);
-    holder.appendChild(box.el);
-    box.el = holder;
+    return fit;
+  }
+
+  /* A block too big for a page is shrunk until it fits one.
+   *
+   * Too tall and it would be cut in half; too wide and the right of it would
+   * be cut off — and a document printed at the width of a page rather than
+   * the width of a window has plenty that is suddenly too wide. Making it
+   * smaller is what anybody would do with it by hand, and the only thing that
+   * can be done with a diagram taller than a sheet of paper.
+   */
+  const SMALLEST = 0.3;
+
+  /* Tried rather than calculated, for the width.
+   *
+   * Shrinking a block shrinks its padding with it, so the room its contents
+   * gain is not the whole of what it gave up — one pass of arithmetic left a
+   * formula two per cent over the edge and still cut off. Measuring again
+   * after shrinking asks the only question that matters, which is whether it
+   * fits now.
+   */
+  const TRIES = 4;
+
+  function fitOversized(box, size) {
+    const tall = box.bottom - box.top;
+    let zoom = tall > size.contentHeight ? size.contentHeight / tall : 1;
+    let holder = null;
+
+    for (let tries = 0; tries < TRIES; tries += 1) {
+      const fit = fitsWidth(holder || box.el);
+      if (zoom >= 1 && fit >= 1) {
+        return;
+      }
+
+      zoom = Math.max(SMALLEST, Math.floor(zoom * fit * 100) / 100);
+
+      if (!holder) {
+        holder = document.createElement("div");
+        holder.className = "export-shrunk";
+        box.el.replaceWith(holder);
+        holder.appendChild(box.el);
+        box.el = holder;
+      }
+
+      holder.style.zoom = String(zoom);
+      if (fit >= 1 || zoom <= SMALLEST) {
+        return;
+      }
+    }
   }
 
   /* The document, as a list of sheets.
@@ -311,7 +361,7 @@ var ExportPaginate = (function () {
 
     const boxes = boxesOf(holder);
     for (const box of boxes) {
-      fitOversized(box, size.contentHeight);
+      fitOversized(box, size);
     }
 
     // Measured again: shrinking a block changed what comes after it.
@@ -353,6 +403,8 @@ var ExportPaginate = (function () {
     boxesOf,
     isAtomic,
     isHeading,
+    fitsWidth,
+    SCROLLERS,
     HEADING_WORTH,
     LONELY_HEADING,
     STRANDED_HEADING,

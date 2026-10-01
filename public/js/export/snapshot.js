@@ -418,11 +418,10 @@ var ExportSnapshot = (function () {
     pages.className = "export-pages";
     for (const sheet of sheets) {
       sheet.removeAttribute("data-doc-top");
-      sheet.removeAttribute("data-page-width");
       pages.appendChild(sheet);
     }
 
-    return pages.outerHTML;
+    return { pages, sheets };
   }
 
   // The measurements were for the rasteriser's benefit and are nobody else's
@@ -873,8 +872,9 @@ html, body {
 
     const styles = await collectStyles(budget);
     const size = sheetGeometry(box);
-    const laidOut = paged
-      ? intoSheets(copy, box, size, inkLayer)
+    const cut = paged ? intoSheets(copy, box, size, inkLayer) : null;
+    const laidOut = cut
+      ? cut.pages.outerHTML
       : `<div class="export-page">
 <div class="export-doc">
 ${copy.outerHTML}
@@ -905,7 +905,32 @@ ${laidOut}
       // What could not be carried, so the caller can say so rather than
       // handing somebody a file with holes in it and no explanation.
       missing: failed.slice(),
-      box
+      box,
+      /* The pages as elements, and everything needed to draw one.
+       *
+       * The PDF is written here rather than printed, so it needs the sheets
+       * themselves — not their markup inside a document it would have to
+       * load — and the stylesheet that makes them look like anything.
+       */
+      sheets: cut ? cut.sheets : null,
+      styles: `${styles}\n${pageStyles(box, theme)}\n${paged ? sheetStyles(size) : ""}`,
+      size: {
+        width: size.sheetWidth,
+        height: size.sheetHeight,
+        theme,
+        background: window.getComputedStyle(document.documentElement).backgroundColor
+      },
+      /* The paper, which is not the same as the drawing.
+       *
+       * A sheet with ink on it is laid out at the width the ink was drawn at
+       * and may be any number of pixels across; the paper it ends up on is
+       * always A4. The picture is simply stretched into it, which is the one
+       * place the scale that used to be a `zoom` now lives.
+       */
+      paper: {
+        width: A4_WIDTH_MM * PX_PER_MM,
+        height: A4_HEIGHT_MM * PX_PER_MM
+      }
     };
   }
 

@@ -56,64 +56,34 @@ var ExportFormats = (function () {
 
   /* --- PDF ----------------------------------------------------------------
    *
-   * The browser's print engine rather than a canvas.
+   * Written here rather than printed.
    *
-   * Drawing the page to a bitmap and wrapping it in a PDF would match pixel
-   * for pixel, and would also produce a file with no text in it: nothing to
-   * select, nothing to search, nothing for a screen reader, and formulas
-   * blurred at any zoom past the one they were rasterised at. Printing keeps
-   * all of it as text and vector, and the export stylesheet sets the sheet to
-   * the width of the page so nothing reflows on the way.
+   * The browser can make a PDF, but only through the print dialogue, and the
+   * dialogue is the person's and not the page's: it adds its own margins
+   * around the ones the sheets already carry, scales the sheet down to fit
+   * inside them, and leaves a white border round a document whose background
+   * is not white. No CSS overrules a setting in a dialogue.
    *
-   * It goes through the print dialogue, because that is the only way a web
-   * page is allowed to make a PDF. "Save as PDF" is the destination.
+   * So the sheets the paginator chose are drawn and assembled into a file
+   * directly: the right size, the right number of pages, the background to
+   * the edge of the paper, and a download rather than a dialogue.
    */
-  function toPdf(snapshot) {
-    return /** @type {Promise<void>} */ (new Promise((resolve) => {
-      const url = URL.createObjectURL(new Blob([snapshot.html], { type: "text/html" }));
-      const frame = document.createElement("iframe");
-      frame.setAttribute("aria-hidden", "true");
-      frame.title = "Printable copy";
-      // Off-screen rather than display:none: a frame that is not being laid
-      // out has no fonts loaded and nothing to print.
-      frame.style.cssText =
-        "position:fixed;left:-10000px;top:0;width:1200px;height:800px;border:0;opacity:0";
+  async function toPdf(snapshot, name, onPage) {
+    const bytes = await ExportPdf.render({
+      sheets: snapshot.sheets,
+      css: snapshot.styles,
+      size: snapshot.size,
+      paper: snapshot.paper,
+      title: name,
+      onPage
+    });
 
-      const done = () => {
-        frame.remove();
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-
-      frame.addEventListener("load", () => {
-        void printFrame(frame).then(done, done);
-      });
-
-      frame.src = url;
-      document.body.appendChild(frame);
-    }));
-  }
-
-  async function printFrame(frame) {
-    const inner = frame.contentWindow;
-    const doc = frame.contentDocument;
-
-    // Fonts first: printing before they arrive prints the fallback, which is
-    // the one thing everybody notices.
-    if (doc && doc.fonts && doc.fonts.ready) {
-      await doc.fonts.ready;
+    if (!bytes) {
+      throw new Error("none of the pages could be drawn");
     }
 
-    await /** @type {Promise<void>} */ (new Promise((settle) => {
-      window.setTimeout(settle, 120);
-    }));
-    inner.focus();
-    inner.print();
-    // Chrome resolves print() when the dialogue closes; Safari does not wait
-    // at all. Either way the frame is finished with once we are back here.
-    await /** @type {Promise<void>} */ (new Promise((settle) => {
-      window.setTimeout(settle, 250);
-    }));
+    download(new Blob([bytes], { type: "application/pdf" }), `${fileStem(name)}.pdf`);
+    return bytes.length;
   }
 
   /* --- DOCX ---------------------------------------------------------------

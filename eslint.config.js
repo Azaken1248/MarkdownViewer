@@ -70,6 +70,7 @@ const BROWSER_GLOBALS = {
   ExportSnapshot: "readonly",
   ExportFormats: "readonly",
   ExportPaginate: "readonly",
+  ExportPdf: "readonly",
   // The modules app.js is assembled from, in /js/app, each loaded before it.
   // app.js itself, which is the last of them and exports what it is.
   App: "readonly",
