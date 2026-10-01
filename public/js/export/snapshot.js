@@ -438,17 +438,108 @@ var ExportSnapshot = (function () {
    * annotated at. The export is therefore a fixed-width page: the same width
    * as the surface on screen, with the document in the same place inside it.
    */
-  function geometryOf(article, surface) {
+  /* The box the copy is of.
+   *
+   * Not the whole page: the document column, grown to take in anything that
+   * was drawn outside it. The first version used the surface — the full width
+   * of the browser window — which made a sheet a third empty, and on paper
+   * that is a document shrunk to fit a margin nobody wrote in.
+   */
+  const INK_MARGIN = 24;
+
+  function geometryOf(article, surface, ink) {
     const page = (surface || article).getBoundingClientRect();
     const body = article.getBoundingClientRect();
 
+    // Everything is measured from the surface's top-left, which is the origin
+    // the ink's own coordinates are in.
+    let left = body.left - page.left;
+    let top = body.top - page.top;
+    let right = left + body.width;
+    let bottom = top + body.height;
+
+    const drawn = inkBounds(ink);
+    if (drawn) {
+      left = Math.min(left, drawn.x - INK_MARGIN);
+      top = Math.min(top, drawn.y - INK_MARGIN);
+      right = Math.max(right, drawn.x + drawn.width + INK_MARGIN);
+      bottom = Math.max(bottom, drawn.y + drawn.height + INK_MARGIN);
+    }
+
     return {
-      width: Math.round(page.width),
-      height: Math.round(Math.max(page.height, body.height)),
-      inset: Math.round(body.left - page.left),
-      bodyWidth: Math.round(body.width)
+      width: Math.round(right - left),
+      height: Math.round(bottom - top),
+      // Where the document sits inside that box, and where the ink layer has
+      // to be moved to so its coordinates still land on the same words.
+      inset: Math.round((body.left - page.left) - left),
+      bodyWidth: Math.round(body.width),
+      hasInk: Boolean(drawn),
+      inkLeft: Math.round(-left),
+      inkTop: Math.round(-top),
+      surfaceWidth: Math.round(page.width),
+      surfaceHeight: Math.round(Math.max(page.height, body.height))
     };
   }
+
+  // What was actually drawn, rather than the layer it was drawn on — which is
+  // the size of the whole page whether or not anything is on it.
+  function inkBounds(ink) {
+    if (!ink || !ink.querySelector("path, circle, g")) {
+      return null;
+    }
+
+    try {
+      const box = ink.getBBox();
+      return box.width > 0 && box.height > 0 ? box : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /* --- The sheet ----------------------------------------------------------
+   *
+   * A4, with margins, and the document scaled to fit across it.
+   *
+   * The first version made the sheet whatever width the page happened to be
+   * on screen and gave it no margins at all. That produced a PDF on paper
+   * nobody has, with text running into the edge, pages ending wherever the
+   * boundary fell, and — because a print dialogue will fit an unusual page
+   * box onto real paper however it likes — content cut off at the side.
+   *
+   * So the page is a page. What keeps the copy faithful is `zoom`: unlike a
+   * transform it takes part in layout, so the whole box shrinks together —
+   * every line breaks where it broke on screen, every diagram keeps its
+   * proportions, and the ink stays over the words it was drawn over. It is
+   * only the paper that is a different size.
+   */
+  const A4_WIDTH_MM = 210;
+  const SIDE_MARGIN_MM = 12;
+  const TOP_MARGIN_MM = 14;
+  const PX_PER_MM = 96 / 25.4;
+  const PRINTABLE_PX = (A4_WIDTH_MM - (SIDE_MARGIN_MM * 2)) * PX_PER_MM;
+
+  // Never magnified: a narrow document blown up to fill A4 is a large-print
+  // edition of itself, which is not what it looked like.
+  const fitToPage = (width) => Math.min(1, Math.round((PRINTABLE_PX / width) * 1000) / 1000);
+
+  /* With ink on it, the page is scaled rather than reflowed.
+   *
+   * A stroke is at a position, not next to a word, so the moment a line
+   * breaks differently the ink is over the wrong thing. `zoom` takes part in
+   * layout, so the whole box shrinks together and every line breaks where it
+   * broke on screen — it is only the paper that is a different size.
+   */
+  const inkedPage = (box) => `zoom: ${fitToPage(box.width)};`;
+
+  /* Without ink, it is simply a document, and a document should be set to the
+   * page it is printed on.
+   *
+   * Scaling one of those too made a reading pane the width of somebody's
+   * monitor come out at seven point, which is a picture of a document rather
+   * than a document. Nothing is positioned over the words, so the words may
+   * move.
+   */
+  const flowedPage = () => "width: auto;";
 
   function pageStyles(box, theme) {
     return `
@@ -483,48 +574,84 @@ html, body {
   width: ${box.bodyWidth}px;
 }
 
-/* Laid over the document at the size it was drawn at, and not interactive:
-   it is a picture of some ink now. */
+
+/* The layer is still the size of the surface it was drawn on; it is moved so
+   that the part of it over this document is the part that shows. */
 .export-ink {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: ${box.width}px;
-  height: ${box.height}px;
+  left: ${box.inkLeft}px;
+  top: ${box.inkTop}px;
+  width: ${box.surfaceWidth}px;
+  height: ${box.surfaceHeight}px;
   pointer-events: none;
 }
 
 @media print {
-  /* A sheet the width of the page, so nothing reflows and the ink stays on
-     the words it was drawn over. The height is that width in A4's
-     proportions, which is what makes the result look like a document rather
-     than like a screenshot of one. */
+  ${box.hasInk ? "" : ".export-doc { margin-left: 0; width: auto; }"}
+
   @page {
-    size: ${box.width}px ${Math.round(box.width * 1.414)}px;
-    margin: 0;
+    size: A4;
+    margin: ${TOP_MARGIN_MM}mm ${SIDE_MARGIN_MM}mm;
   }
 
   .export-page {
     min-height: 0;
+    margin: 0;
+    ${box.hasInk ? inkedPage(box) : flowedPage()}
   }
 
   /* The things that are unreadable when a page break lands in the middle of
-     them. Ink cannot be kept off a break — it is one picture over the whole
-     document — but everything under it can. */
+     them. */
   .markdown-body pre,
   .markdown-body blockquote,
   .markdown-body tr,
   .markdown-body img,
+  .markdown-body figure,
   .markdown-body .katex-display,
-  .markdown-body .mermaid-block {
+  .markdown-body .mermaid-block,
+  .markdown-body .notebook-cell {
     break-inside: avoid;
   }
 
+  /* A heading at the foot of a page is a heading for nothing. */
   .markdown-body h1,
   .markdown-body h2,
   .markdown-body h3,
-  .markdown-body h4 {
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
     break-after: avoid;
+    break-inside: avoid;
+  }
+
+  /* One line of a paragraph stranded on its own is the thing that makes a
+     printed document look like it was printed by accident. */
+  .markdown-body p,
+  .markdown-body li,
+  .markdown-body blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* A table that runs over says what its columns are on each page. */
+  .markdown-body thead {
+    display: table-header-group;
+  }
+
+  /* A line that introduces something — "Example:", "where" — belongs on the
+     same page as the thing it introduces. */
+  .markdown-body p:has(+ .katex-display),
+  .markdown-body p:has(+ pre),
+  .markdown-body p:has(+ table),
+  .markdown-body p:has(+ blockquote),
+  .markdown-body p:has(+ .mermaid-block) {
+    break-after: avoid;
+  }
+
+  /* Ink is one picture over the whole document and cannot be kept off a
+     break; what it must not do is stop the pages after the first. */
+  .export-ink {
+    break-inside: auto;
   }
 }
 
@@ -551,7 +678,7 @@ html, body {
     failed.length = 0;
     const budget = { left: MAX_EMBEDDED_BYTES };
     const theme = document.documentElement.getAttribute("data-theme") || "dark";
-    const box = geometryOf(article, surface);
+    const box = geometryOf(article, surface, ink);
 
     const copy = /** @type {HTMLElement} */ (article.cloneNode(true));
     recordSvgSizes(article, copy);
@@ -570,16 +697,18 @@ html, body {
       const inkCopy = /** @type {SVGElement} */ (ink.cloneNode(true));
       inkCopy.setAttribute("class", "export-ink");
       inkCopy.removeAttribute("style");
-      inkCopy.setAttribute("width", String(box.width));
-      inkCopy.setAttribute("height", String(box.height));
-      inkCopy.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+      // Kept at the size of the surface it was drawn on, and moved rather
+      // than redrawn: a stroke's coordinates mean what they meant.
+      inkCopy.setAttribute("width", String(box.surfaceWidth));
+      inkCopy.setAttribute("height", String(box.surfaceHeight));
+      inkCopy.setAttribute("viewBox", `0 0 ${box.surfaceWidth} ${box.surfaceHeight}`);
       await embedImages(inkCopy, budget);
 
       if (forWord) {
         // The ink is an SVG like any other, and Word would drop it with the
         // rest — which would be the whole point of the export missing.
-        inkCopy.dataset.exportW = String(box.width);
-        inkCopy.dataset.exportH = String(box.height);
+        inkCopy.dataset.exportW = String(box.surfaceWidth);
+        inkCopy.dataset.exportH = String(box.surfaceHeight);
         const holder = document.createElement("div");
         holder.appendChild(inkCopy);
         await flattenSvg(holder, budget);
@@ -631,6 +760,7 @@ ${drawn}
     embedFonts,
     geometryOf,
     pageStyles,
+    fitToPage,
     dropHiddenMath,
     recordSvgSizes,
     forgetSvgSizes,

@@ -96,18 +96,54 @@ check("an icon font is not: the document has no icons in it",
 
 console.log("=== the page the copy is laid out on ===");
 
-const box = { width: 1200, height: 3000, inset: 166, bodyWidth: 868 };
-const styles = Snapshot.pageStyles(box, "dark");
+const inked = {
+  width: 868, height: 3000, inset: 0, bodyWidth: 868, hasInk: true,
+  inkLeft: -266, inkTop: 0, surfaceWidth: 1400, surfaceHeight: 3000
+};
+const styles = Snapshot.pageStyles(inked, "dark");
 
-// A sheet the width of the page on screen, because anything else reflows the
-// text — and ink drawn over a paragraph is drawn at a position, not at a word.
-check("the sheet is as wide as the page was", styles.includes("size: 1200px"), true);
-check("...and in A4's proportions", styles.includes("1697px"), true);
-check("the document sits where it sat", styles.includes("margin-left: 166px"), true);
-check("...at the width it had", styles.includes("width: 868px"), true);
-check("the ink is laid over the whole page", styles.includes("height: 3000px"), true);
+/* On paper it is A4, because a sheet the width of somebody's browser window
+ * is paper nobody has — and a print dialogue asked to fit an unusual page box
+ * onto real paper will cut the sides off it.
+ */
+check("the sheet is A4", styles.includes("size: A4"), true);
+check("...with margins, rather than text running into the edge",
+  /margin: 14mm 12mm/.test(styles), true);
+
+/* With ink on it the document is scaled, not reflowed: a stroke is at a
+ * position, so the moment a line breaks differently the ink is over the wrong
+ * word. 868px into 186mm of printable width is 0.81.
+ */
+check("a page with ink on it is scaled to fit", styles.includes("zoom: 0.81"), true);
+check("...and is not reflowed", styles.includes("width: auto;\n  }"), false);
+check("the document sits where it sat", styles.includes("margin-left: 0px"), true);
+check("the ink keeps the coordinates it was drawn in",
+  styles.includes("left: -266px") && styles.includes("width: 1400px"), true);
+
+/* Without ink there is nothing positioned over the words, so the words may
+ * move — and should: scaling a reading pane the width of a monitor came out
+ * at seven point, which is a picture of a document rather than a document.
+ */
+const flowed = { ...inked, width: 1220, bodyWidth: 1220, hasInk: false, inkLeft: 0 };
+const flowedStyles = Snapshot.pageStyles(flowed, "dark");
+check("a page with no ink is set to the paper instead", flowedStyles.includes("width: auto;"), true);
+check("...rather than shrunk", /zoom:/.test(flowedStyles), false);
+
+check("a narrow document is never magnified to fill the page", Snapshot.fitToPage(400), 1);
+check("...and a wide one is scaled by exactly what it takes",
+  Snapshot.fitToPage(1406), 0.5);
+
 check("colours are printed rather than dropped", styles.includes("print-color-adjust: exact"), true);
-check("the theme goes with it", Snapshot.pageStyles(box, "light").includes("color-scheme: light"), true);
+check("the theme goes with it", Snapshot.pageStyles(inked, "light").includes("color-scheme: light"), true);
+
+// The breaks that make a printed document look like it was printed by
+// accident: a heading at the foot of a page, one line of a paragraph on its
+// own, a table row split down the middle.
+for (const rule of ["break-after: avoid", "orphans: 3", "widows: 3", "table-header-group"]) {
+  check(`the print rules say ${rule}`, styles.includes(rule), true);
+}
+check("a line that introduces a block stays with it",
+  styles.includes("p:has(+ .katex-display)"), true);
 
 console.log("=== what a document is called when it lands in a folder ===");
 
