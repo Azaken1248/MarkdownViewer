@@ -30,14 +30,32 @@
 var ExportPaginate = (function () {
   "use strict";
 
-  /* How far up the page a heading may be and still be worth ending on.
+  /* What a break is worth.
    *
-   * Too small and headings near the bottom are missed; too large and a page
-   * ends a third of the way down because there happened to be a heading
-   * there. A quarter is about where a reader stops reading a short page as a
-   * mistake and starts reading it as the end of a section.
+   * `HEADING_WORTH` is the only number here with a feel to it: it is how much
+   * of a page may be left empty to end it at a heading. The cost of a page is
+   * the fraction left empty, squared, and a break that is not at a heading
+   * pays this on top — so a heading break is taken whenever it wastes less
+   * than its square root, about a third of a page, and refused when it would
+   * waste more.
+   *
+   * Squared rather than linear because two pages a quarter empty are better
+   * than one full page and one half empty, and squaring is what says so.
    */
-  const HEADING_REACH = 0.25;
+  const HEADING_WORTH = 0.1;
+
+  // A heading with a single block under it at the foot of a page is a section
+  // that starts and then stops. Cheaper than a bad gap, dearer than a good one.
+  const LONELY_HEADING = 0.05;
+
+  /* A heading left at the foot of a page is a title for a blank space, and
+   * costs more than any page could cost by being empty — the worst of those
+   * is one. But it is a price and not a refusal: a heading whose first
+   * paragraph will not fit on a page with it has nowhere else to go, and a
+   * rule that forbids it outright makes every arrangement impossible and the
+   * document one long page.
+   */
+  const STRANDED_HEADING = 2;
 
   const HEADINGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 
@@ -54,88 +72,87 @@ var ExportPaginate = (function () {
 
   /* --- Where to cut --------------------------------------------------------
    *
+   * Every break is chosen at once rather than one at a time.
+   *
+   * Taking the best-looking break each time a page fills up is a greedy walk,
+   * and a greedy walk cannot see that ending this page at a heading leaves
+   * the next one two thirds empty. So each possible page is costed and the
+   * set of pages with the lowest total is the one used — the same shape of
+   * problem as breaking a paragraph into lines, and the same answer: look at
+   * the whole of it before deciding any of it.
+   *
    * `blocks` is the document as a list of boxes, in order, each with the top
    * and bottom it occupies and whether it is a heading. The answer is the
    * index of the first block on each page.
    */
-  function pageStarts(blocks, pageHeight, reach = HEADING_REACH) {
-    if (blocks.length === 0 || pageHeight <= 0) {
+  function pageStarts(blocks, pageHeight, worth = HEADING_WORTH) {
+    const count = blocks.length;
+    if (count === 0 || pageHeight <= 0) {
       return [0];
     }
 
-    const starts = [0];
-    let first = 0;
+    // cost[i] is the best total for the document from block i onwards, and
+    // after[i] is the first block of the page that follows.
+    const cost = new Array(count + 1).fill(Infinity);
+    const after = new Array(count + 1).fill(count);
+    cost[count] = 0;
 
-    while (first < blocks.length) {
-      const next = nextStart(blocks, first, pageHeight, reach);
-      if (next === null) {
-        break;
+    for (let first = count - 1; first >= 0; first -= 1) {
+      for (const last of pagesFrom(blocks, first, pageHeight)) {
+        const here = pageCost(blocks, { first, last, pageHeight, worth });
+        if (here + cost[last] < cost[first]) {
+          cost[first] = here + cost[last];
+          after[first] = last;
+        }
       }
+    }
 
-      starts.push(next);
-      first = next;
+    const starts = [];
+    for (let at = 0; at < count; at = after[at]) {
+      starts.push(at);
     }
 
     return starts;
   }
 
-  function nextStart(blocks, first, pageHeight, reach) {
-    const top = blocks[first].top;
-    const bottom = top + pageHeight;
+  /* Every page that could start at `first`: one block, two, as many as fit.
+   *
+   * The first is always allowed even when it does not fit, because a block
+   * taller than a page still has to go somewhere — it gets a page of its own
+   * and the layout shrinks it.
+   */
+  function pagesFrom(blocks, first, pageHeight) {
+    const ends = [first + 1];
 
-    // The first block that does not fit. If everything left fits, this is the
-    // last page and there is nothing more to decide.
-    let overflow = -1;
-    for (let i = first; i < blocks.length; i += 1) {
-      if (blocks[i].bottom > bottom) {
-        overflow = i;
+    for (let last = first + 2; last <= blocks.length; last += 1) {
+      if (blocks[last - 1].bottom - blocks[first].top > pageHeight) {
         break;
       }
+
+      ends.push(last);
     }
 
-    if (overflow === -1) {
-      return null;
-    }
-
-    // Always make progress: a block taller than the page gets a page of its
-    // own and is shrunk to fit it.
-    const cut = Math.max(overflow, first + 1);
-    const wanted = headingNear(blocks, { first, cut, earliest: top + (pageHeight * (1 - reach)) });
-    return withoutTrailingHeading(blocks, first, wanted);
+    return ends;
   }
 
-  /* A heading is never the last thing on a page.
+  /* What it costs to put blocks[first..last-1] on one page.
    *
-   * It is a label for what comes after it, and a label at the foot of a page
-   * labels a blank space — the reader turns over and finds the section
-   * starting again with no title. The reach above is a preference; this is
-   * not. Several headings in a row move together, which is what happens when
-   * a section title is followed immediately by a subsection title.
+   * The last page of a document is free however short it is: a document does
+   * not owe the bottom of its final sheet anything.
    */
-  function withoutTrailingHeading(blocks, first, cut) {
-    let at = cut;
-
-    while (at > first + 1 && blocks[at - 1].heading) {
-      at -= 1;
+  function pageCost(blocks, { first, last, pageHeight, worth }) {
+    if (last >= blocks.length) {
+      return 0;
     }
 
-    return at;
-  }
+    const used = blocks[last - 1].bottom - blocks[first].top;
+    const empty = Math.max(0, pageHeight - used) / pageHeight;
 
-  /* A heading in the last quarter of the page is where the page should end.
-   *
-   * Searching back from the cut rather than forward from the top, so the
-   * answer is the last such heading and the page is as full as it can be
-   * while still ending somewhere a reader would have ended it.
-   */
-  function headingNear(blocks, { first, cut, earliest }) {
-    for (let i = cut; i > first + 1; i -= 1) {
-      if (blocks[i].heading && blocks[i].top >= earliest) {
-        return i;
-      }
-    }
+    // The reader turns over and the section starts again with no name on it.
+    const stranded = blocks[last - 1].heading ? STRANDED_HEADING : 0;
+    const lonely = last - first > 1 && blocks[last - 2].heading ? LONELY_HEADING : 0;
 
-    return cut;
+    return (empty * empty) + (blocks[last].heading ? 0 : worth) + stranded + lonely;
   }
 
   /* --- Measuring -----------------------------------------------------------
@@ -336,7 +353,9 @@ var ExportPaginate = (function () {
     boxesOf,
     isAtomic,
     isHeading,
-    HEADING_REACH,
+    HEADING_WORTH,
+    LONELY_HEADING,
+    STRANDED_HEADING,
     ATOMIC
   };
 })();

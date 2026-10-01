@@ -356,14 +356,50 @@ check("every page starts after the one before it",
   Paginate.pageStarts(stack([[400], [400], [400], [400], [400], [400]]), PAGE)
     .every((start, i, all) => i === 0 || start > all[i - 1]), true);
 
-/* How far up the page a heading may be and still be worth ending on. Too
- * narrow and a section starts three lines from the foot of a page; too wide
- * and a page ends a third of the way down.
+/* How much of a page may be left empty to end it at a heading. The cost of a
+ * page is the fraction left empty, squared, and a break that is not at a
+ * heading pays this on top — so a heading break is taken whenever it wastes
+ * less than the square root of it.
  */
 const nearly = stack([[300], [400], [100, true], [150], [400]]);
-check("a wide reach ends the page at a heading two thirds down",
-  Paginate.pageStarts(nearly, PAGE, 0.4), [0, 2]);
-check("...and a narrow one fills the page instead",
-  Paginate.pageStarts(nearly, PAGE, 0.05), [0, 4]);
+check("worth a third of a page, the heading two thirds down is taken",
+  Paginate.pageStarts(nearly, PAGE, 0.3), [0, 2]);
+check("...and worth almost nothing, the page is filled instead",
+  Paginate.pageStarts(nearly, PAGE, 0.001), [0, 4]);
+
+/* Why it is costed over the whole document rather than page by page.
+ *
+ * Twenty blocks with headings scattered through them, some of them tall
+ * enough to be awkward. Whatever arrangement it picks, no page before the
+ * last may be left badly empty — which is the thing a greedy walk cannot
+ * promise, because it decides each page before it has seen the next.
+ */
+const mixed = stack([
+  [180], [120, true], [240], [300], [160], [90, true], [420], [200],
+  [140, true], [380], [260], [110], [130, true], [460], [180], [240],
+  [100, true], [320], [280], [150]
+]);
+
+const fills = (() => {
+  const starts = Paginate.pageStarts(mixed, PAGE);
+  return starts.slice(0, -1).map((from, i) => {
+    const to = (starts[i + 1] ?? mixed.length) - 1;
+    return (mixed[to].bottom - mixed[from].top) / PAGE;
+  });
+})();
+
+check("no page before the last is left more than a third empty",
+  fills.every((fill) => fill >= 0.66), true);
+check("...and none of them overflows", fills.every((fill) => fill <= 1), true);
+console.log(`  (pages filled ${fills.map((f) => Math.round(f * 100)).join("%, ")}%)`);
+
+/* A heading whose first paragraph will not fit on a page with it has nowhere
+ * else to go. The rule against stranding one is a price, not a refusal:
+ * priced as a refusal, no arrangement is possible at all and the whole
+ * document comes back as a single page.
+ */
+const nowhere = stack([[900], [100, true], [980], [100]]);
+check("a heading that cannot fit with what follows it is still placed",
+  Paginate.pageStarts(nowhere, PAGE).length > 1, true);
 
 process.exit(finish());

@@ -21,7 +21,7 @@ var Exporter = (function () {
       id: "pdf",
       label: "PDF",
       icon: "ph-file-pdf",
-      note: "Opens the print dialogue — choose “Save as PDF”."
+      note: "Opens the print dialogue. Choose “Save as PDF”, and set Margins to “None” — the pages carry their own."
     },
     {
       id: "html",
@@ -203,7 +203,7 @@ var Exporter = (function () {
       return;
     }
 
-    say(view, "Opening the print dialogue…");
+    say(view, "In the dialogue: “Save as PDF”, and Margins “None”.");
     await ExportFormats.toPdf(snapshot);
   }
 
