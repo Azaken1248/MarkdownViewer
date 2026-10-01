@@ -95,6 +95,104 @@ var ExportPdf = (function () {
   const escapeText = (value) => String(value)
     .replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 
+  /* --- The text over the picture -------------------------------------------
+   *
+   * A page of this file is a picture of a page, which is exact and cannot be
+   * searched, selected, or read aloud. So the words go on it as well, in the
+   * one way a PDF has of saying "this text is here but do not draw it": text
+   * render mode 3, which is what every scanner puts under an OCR'd page.
+   *
+   * The glyphs are never drawn, so the font they would be drawn in does not
+   * matter and none is embedded. What matters is two things: where each word
+   * sits, so that selecting a line selects that line, and what each byte
+   * means, which is the ToUnicode map's job and is what a search reads.
+   *
+   * Identity-H and two bytes a character, because the alternative is a
+   * single-byte encoding with 256 places in it and this is a document with
+   * Greek, arrows and set theory in it.
+   */
+  function fontObjects(out) {
+    // Every code means the character of the same number: a map of the whole
+    // of the basic plane in four lines, rather than an entry per character.
+    const cmap = [
+      "/CIDInit /ProcSet findresource begin 12 dict begin begincmap",
+      "/CMapName /A-UCS2 def /CMapType 2 def",
+      "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def",
+      "1 begincodespacerange <0000> <FFFF> endcodespacerange",
+      "1 beginbfrange <0000> <FFFF> <0000> endbfrange",
+      "endcmap CMapName currentdict /CMap defineresource pop end end"
+    ].join("\n");
+
+    const bytes = new TextEncoder().encode(cmap);
+    const toUnicodeId = out.object(`<< /Length ${bytes.length} >>`, bytes);
+
+    // No FontFile: nothing is drawn, so there is nothing to draw it with.
+    // The descriptor is here because a strict reader asks for one.
+    const descriptorId = out.object([
+      "<< /Type /FontDescriptor /FontName /Helvetica /Flags 32",
+      "/FontBBox [-166 -225 1000 931] /ItalicAngle 0",
+      "/Ascent 718 /Descent -207 /CapHeight 718 /StemV 88 >>"
+    ].join(" "));
+
+    const cidId = out.object([
+      "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Helvetica",
+      "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>",
+      `/FontDescriptor ${descriptorId} 0 R /DW 1000`,
+      "/CIDToGIDMap /Identity >>"
+    ].join(" "));
+
+    return out.object([
+      "<< /Type /Font /Subtype /Type0 /BaseFont /Helvetica /Encoding /Identity-H",
+      `/DescendantFonts [${cidId} 0 R] /ToUnicode ${toUnicodeId} 0 R >>`
+    ].join(" "));
+  }
+
+  // UTF-16 code units, as the hex a PDF string takes. Characters outside the
+  // basic plane arrive as their two surrogates, which is what a reader
+  // recombines on the way back out.
+  function hexOf(text) {
+    let out = "";
+
+    for (const unit of text) {
+      for (let at = 0; at < unit.length; at += 1) {
+        out += unit.charCodeAt(at).toString(16).padStart(4, "0");
+      }
+    }
+
+    return out;
+  }
+
+  /* One word, placed where the picture shows it.
+   *
+   * Every glyph of the unembedded font is one em wide, so a word of n
+   * characters set at the size it is on the page comes out n ems long and
+   * almost never the width of the word underneath. Tz — horizontal scaling —
+   * stretches it to exactly that width, which is what makes a selection
+   * follow the line rather than run off the end of it.
+   */
+  function wordAt(run, k, pageHeight) {
+    const size = Math.max(1, run.size * k);
+    const natural = run.text.length * size;
+    const stretch = natural > 0 ? Math.round((run.width * k / natural) * 10000) / 100 : 100;
+
+    return [
+      `/F1 ${Math.round(size * 100) / 100} Tf`,
+      `${Math.min(1000, Math.max(1, stretch))} Tz`,
+      `1 0 0 1 ${Math.round(run.x * k * 100) / 100} `
+        + `${Math.round((pageHeight - (run.y * k)) * 100) / 100} Tm`,
+      `<${hexOf(run.text)}> Tj`
+    ].join(" ");
+  }
+
+  function textLayer(runs, k, pageHeight) {
+    if (!runs || runs.length === 0) {
+      return "";
+    }
+
+    // 3 Tr: fill no pixels. The words are there to be found, not seen.
+    return `\nBT 3 Tr\n${runs.map((run) => wordAt(run, k, pageHeight)).join("\n")}\nET`;
+  }
+
   /* One page per picture.
    *
    * Each page holds a content stream of four operators: save the graphics
@@ -112,7 +210,9 @@ var ExportPdf = (function () {
     const pagesId = 2;
     out.offsets.push(0, 0);
 
+    const fontId = fontObjects(out);
     const pageIds = [];
+
     for (const page of pages) {
       const width = Math.round(page.width * PT_PER_PX * 100) / 100;
       const height = Math.round(page.height * PT_PER_PX * 100) / 100;
@@ -124,14 +224,19 @@ var ExportPdf = (function () {
         `/Filter /DCTDecode /Length ${page.bytes.length} >>`
       ].join(" "), page.bytes);
 
-      const contentBody = `q ${width} 0 0 ${height} 0 0 cm /Im0 Do Q`;
-      const contentId = out.object(`<< /Length ${contentBody.length} >>`,
-        new TextEncoder().encode(contentBody));
+      // The drawing is in the sheet's pixels and the page is in points, so
+      // this is what takes one to the other — and the text layer has to be
+      // placed with the same number or it will not sit on the words.
+      const k = (page.width / (page.drawnWidth || page.width)) * PT_PER_PX;
+      const body = new TextEncoder().encode(
+        `q ${width} 0 0 ${height} 0 0 cm /Im0 Do Q${textLayer(page.runs, k, height)}`);
+      const contentId = out.object(`<< /Length ${body.length} >>`, body);
 
       pageIds.push(out.object([
         `<< /Type /Page /Parent ${pagesId} 0 R`,
         `/MediaBox [0 0 ${width} ${height}]`,
-        `/Resources << /XObject << /Im0 ${imageId} 0 R >> >>`,
+        `/Resources << /XObject << /Im0 ${imageId} 0 R >>`,
+        `/Font << /F1 ${fontId} 0 R >> >>`,
         `/Contents ${contentId} 0 R >>`
       ].join(" ")));
     }
@@ -297,6 +402,101 @@ var ExportPdf = (function () {
     canvas.toBlob(resolve, "image/jpeg", QUALITY);
   });
 
+  /* --- Finding the words ---------------------------------------------------
+   *
+   * Measured in the live document, because a rectangle needs a layout and a
+   * sheet that has been taken off the page has none. The sheets carry their
+   * size on themselves and the stylesheet they were built against is this
+   * page's own, so laying them out here puts every word exactly where the
+   * drawing will show it.
+   */
+  function measuringFrame() {
+    const frame = document.createElement("div");
+    frame.setAttribute("aria-hidden", "true");
+    /* Off the side of the page rather than hidden.
+     *
+     * `visibility: hidden` inherits, and the walk below skips hidden text on
+     * purpose — so a frame that hid its contents hid every word in the
+     * document from the thing looking for them, and the layer came out
+     * empty.
+     */
+    frame.style.cssText = "position:absolute;left:-20000px;top:0;pointer-events:none";
+    return frame;
+  }
+
+  /* Text nobody can see is text nobody meant to search.
+   *
+   * KaTeX writes every formula twice — once as MathML for a screen reader,
+   * hidden under a clip rectangle, and once as the spans that are shown. Both
+   * would go into the layer, and a search for a symbol would find it twice
+   * while a selection picked up a sentence of it twice over.
+   */
+  const hiddenInside = (node) => Boolean(node.parentElement?.closest(".katex-mathml"));
+
+  const WORDS = /\S+/g;
+
+  function wordsIn(node, sheetBox, runs) {
+    const style = window.getComputedStyle(node.parentElement);
+    if (style.visibility === "hidden" || style.display === "none") {
+      return;
+    }
+
+    const size = parseFloat(style.fontSize) || 0;
+    const range = document.createRange();
+
+    for (const found of node.nodeValue.matchAll(WORDS)) {
+      range.setStart(node, found.index);
+      range.setEnd(node, found.index + found[0].length);
+
+      const rect = range.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        continue;
+      }
+
+      runs.push({
+        text: found[0],
+        x: rect.left - sheetBox.left,
+        // The baseline, near enough: a descender is about a fifth of the size
+        // and nothing here is drawn, so near enough is where selection sits.
+        y: rect.bottom - sheetBox.top - (size * 0.2),
+        width: rect.width,
+        size
+      });
+    }
+  }
+
+  function textRuns(sheet) {
+    const sheetBox = sheet.getBoundingClientRect();
+    const walker = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
+    const runs = [];
+
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeValue.trim() && !hiddenInside(node)) {
+        wordsIn(node, sheetBox, runs);
+      }
+    }
+
+    return runs;
+  }
+
+  // Every sheet's words, in one layout pass rather than one each.
+  function wordsOnSheets(sheets) {
+    const frame = measuringFrame();
+    document.body.appendChild(frame);
+    for (const sheet of sheets) {
+      frame.appendChild(sheet);
+    }
+
+    const found = sheets.map(textRuns);
+
+    for (const sheet of sheets) {
+      sheet.remove();
+    }
+
+    frame.remove();
+    return found;
+  }
+
   /* Every sheet, in order, as the bytes of a PDF.
    *
    * `onPage` is called as each one is drawn, because a long document takes
@@ -305,6 +505,7 @@ var ExportPdf = (function () {
    */
   async function render({ sheets, css, size, paper, title, onPage = null }) {
     const perRun = Math.max(1, Math.floor(MAX_CANVAS / Math.round(size.height * SCALE)));
+    const words = wordsOnSheets(sheets);
     const pages = [];
 
     for (let from = 0; from < sheets.length; from += perRun) {
@@ -322,8 +523,13 @@ var ExportPdf = (function () {
           pages.push({
             width: paper.width,
             height: paper.height,
+            // What the words were measured against, which is not the paper:
+            // a sheet with ink on it is laid out at the width the ink was
+            // drawn at and then stretched onto A4.
+            drawnWidth: size.width,
             pixelWidth: canvas.width,
             pixelHeight: canvas.height,
+            runs: words[from + at],
             bytes: new Uint8Array(await blob.arrayBuffer())
           });
         }
@@ -342,5 +548,5 @@ var ExportPdf = (function () {
     return pages.length > 0 ? write({ pages, title }) : null;
   }
 
-  return { write, render, drawRun, svgFor, asXml, bodyRule, INHERITED, PT_PER_PX, SCALE, QUALITY, MAX_CANVAS };
+  return { write, render, drawRun, svgFor, asXml, bodyRule, hexOf, textRuns, INHERITED, PT_PER_PX, SCALE, QUALITY, MAX_CANVAS };
 })();

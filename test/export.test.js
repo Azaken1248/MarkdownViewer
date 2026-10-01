@@ -490,6 +490,54 @@ check("a document of one page is a document", (() => {
   return (one.match(/\/Type \/Page[^s]/g) || []).length;
 })(), 1);
 
+console.log("=== the words over the picture ===");
+
+/* A page of this file is a picture of a page, which is exact and cannot be
+ * searched. So the words go on it as well, in the one way a PDF has of saying
+ * "this text is here but do not draw it": render mode 3, which is what every
+ * scanner puts under an OCR'd page.
+ */
+const spoken = Buffer.from(Pdf.write({
+  title: "x",
+  pages: [{
+    ...sheetPage([1]),
+    drawnWidth: 794,
+    runs: [
+      { text: "Gram–Schmidt", x: 100, y: 200, width: 90, size: 16 },
+      { text: "α", x: 10, y: 400, width: 8, size: 16 }
+    ]
+  }]
+})).toString("latin1");
+
+check("the words are drawn in the mode that draws nothing", spoken.includes("BT 3 Tr"), true);
+check("...and each one is placed where the picture shows it",
+  /1 0 0 1 75 [\d.]+ Tm/.test(spoken), true);
+// PDF counts up the page and a browser counts down it, so the one has to be
+// turned into the other or every line lands at the wrong end of the page.
+check("...with the page the right way up",
+  spoken.includes(`1 0 0 1 75 ${Math.round((842.25 - 150) * 100) / 100} Tm`), true);
+
+/* Nothing is drawn, so no font is embedded — but something has to say what
+ * each code means, because that is what a search reads. Two bytes a
+ * character, because a single-byte encoding has 256 places in it and this is
+ * a document with Greek, arrows and set theory in it.
+ */
+check("the font is there to be read, not to be drawn", spoken.includes("/Subtype /Type0"), true);
+check("...two bytes a character", spoken.includes("/Encoding /Identity-H"), true);
+check("...with a map from those bytes back to the characters",
+  spoken.includes("/ToUnicode") && spoken.includes("beginbfrange <0000> <FFFF> <0000>"), true);
+check("...and no font file, since none is drawn", spoken.includes("/FontFile"), false);
+check("the page can reach the font", /\/Font << \/F1 \d+ 0 R >>/.test(spoken), true);
+
+check("a word is UTF-16, as a PDF string takes it", Pdf.hexOf("Aα"), "004103b1");
+check("...and an en dash survives it", Pdf.hexOf("–"), "2013");
+// Outside the basic plane, a character arrives as its two surrogates, which
+// is what a reader recombines on the way back out.
+check("...as does something past the basic plane", Pdf.hexOf("\u{1D400}"), "d835dc00");
+
+check("a page with no words still writes",
+  Buffer.from(Pdf.write({ pages: [sheetPage([1])], title: "x" })).toString("latin1").includes("BT"), false);
+
 // An SVG wrapping the sheet is what the canvas draws, and it is parsed by the
 // XML parser: a stylesheet full of `>` and `&` has to be out of its way.
 const svg = Pdf.svgFor("<div/>", "a > b { content: \"&\"; }", { width: 10, height: 20 }).join("");
