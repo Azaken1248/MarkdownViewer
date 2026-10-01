@@ -356,11 +356,22 @@ var ExportSnapshot = (function () {
   // on is printed.
   const PIXEL_RATIO = 2;
 
-  function svgAsPng(svg, width, height) {
+  function svgAsPng(svg, width, height, viewBox = null) {
     const drawable = /** @type {SVGElement} */ (svg.cloneNode(true));
     drawable.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    drawable.setAttribute("width", String(width));
-    drawable.setAttribute("height", String(height));
+
+    // Drawn from the live diagram, which still has the buttons that pan and
+    // zoom it. They are not part of the picture any more than a scrollbar is.
+    for (const control of drawable.querySelectorAll(".svg-pan-zoom-control")) {
+      control.remove();
+    }
+    drawable.setAttribute("width", String(Math.round(width)));
+    drawable.setAttribute("height", String(Math.round(height)));
+
+    if (viewBox && !svg.getAttribute("viewBox")) {
+      drawable.setAttribute("viewBox", viewBox);
+      drawable.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    }
 
     const source = new XMLSerializer().serializeToString(drawable);
     const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
@@ -371,8 +382,8 @@ var ExportSnapshot = (function () {
       picture.onload = () => {
         try {
           const canvas = document.createElement("canvas");
-          canvas.width = width * PIXEL_RATIO;
-          canvas.height = height * PIXEL_RATIO;
+          canvas.width = Math.round(width * PIXEL_RATIO);
+          canvas.height = Math.round(height * PIXEL_RATIO);
           const paper = canvas.getContext("2d");
           paper.drawImage(picture, 0, 0, canvas.width, canvas.height);
           resolve(canvas.toDataURL("image/png"));
@@ -403,13 +414,28 @@ var ExportSnapshot = (function () {
     if (layer) {
       for (const sheet of sheets) {
         const from = Number(sheet.dataset.docTop || 0);
+        if (box.inkTo < from || box.inkFrom > from + size.contentHeight) {
+          continue;
+        }
+
         const holder = document.createElement("div");
         holder.className = "export-sheet-ink";
-        holder.style.left = `${size.marginX + box.inkLeft}px`;
-        holder.style.top = `${size.marginY + box.inkTop - box.docTop - from}px`;
-        holder.style.width = `${box.surfaceWidth}px`;
-        holder.style.height = `${box.surfaceHeight}px`;
-        holder.appendChild(layer.cloneNode(true));
+        // Laid out by the element rather than by the stylesheet, so that a
+        // sheet measures the same here as it draws there. Taken out of the
+        // flow above all: in the flow it pushes the document down the page
+        // by the height of the whole ink layer.
+        holder.style.cssText = [
+          "position: absolute",
+          "pointer-events: none",
+          "overflow: visible",
+          `left: ${size.marginX + box.inkLeft}px`,
+          `top: ${size.marginY + box.inkTop - box.docTop - from}px`,
+          `width: ${box.surfaceWidth}px`,
+          `height: ${box.surfaceHeight}px`
+        ].join(";");
+        const slice = /** @type {HTMLElement} */ (layer.cloneNode(true));
+        slice.style.cssText = "position:absolute;left:0;top:0";
+        holder.appendChild(slice);
         sheet.appendChild(holder);
       }
     }
@@ -422,6 +448,93 @@ var ExportSnapshot = (function () {
     }
 
     return { pages, sheets };
+  }
+
+  /* --- Diagrams --------------------------------------------------------
+   *
+   * On screen a diagram is clamped to a fraction of the window, so that a
+   * tall one cannot take over the page being read, and whatever does not fit
+   * is reached by dragging it. On paper there is no dragging: what is past
+   * the edge of the box is gone, which is what cut the big ones in half.
+   *
+   * Mermaid draws without a viewBox, so the SVG's box is a window onto the
+   * drawing rather than a frame around it — making the box smaller crops the
+   * picture instead of shrinking it. Giving it the viewBox it never had is
+   * what turns the one into the other.
+   *
+   * Each diagram then becomes a single picture at its own proportions, as
+   * wide as the column and no taller than it needs to be. That also settles
+   * the other half of it: an SVG inside a foreignObject inside an SVG is a
+   * nesting Chrome does not reliably draw, and a flowchart came out as the
+   * empty box it was sitting in.
+   */
+  async function flattenDiagrams(live, copy) {
+    const there = live.querySelectorAll(".mermaid-block");
+    const here = copy.querySelectorAll(".mermaid-block");
+
+    for (const [index, block] of [...here].entries()) {
+      const drawing = there[index]?.querySelector("svg");
+      const inside = block.querySelector("svg");
+      if (!drawing || !inside) {
+        continue;
+      }
+
+      await asOnePicture(/** @type {HTMLElement} */ (block), inside, drawing);
+    }
+  }
+
+  async function asOnePicture(block, inside, drawing) {
+    const drawn = boundsOfDrawing(drawing);
+    if (!drawn) {
+      return;
+    }
+
+    const png = await svgAsPng(drawing, drawn.width, drawn.height, drawn.viewBox);
+    if (!png) {
+      failed.push("a diagram");
+      return;
+    }
+
+    const picture = document.createElement("img");
+    picture.setAttribute("src", png);
+    picture.setAttribute("alt", drawing.getAttribute("aria-roledescription") || "Diagram");
+    picture.style.cssText = "display:block;width:100%;height:auto";
+
+    inside.replaceWith(picture);
+
+    /* The box stops deciding the height and the picture starts.
+     *
+     * The ratio and the clamp are both for a window: one holds the space
+     * while a diagram renders, the other stops a tall one filling the
+     * screen. Here the picture is already drawn and its own proportions are
+     * the right ones.
+     */
+    block.style.aspectRatio = "auto";
+    block.style.maxHeight = "none";
+    block.style.minHeight = "0";
+    block.style.maxWidth = `${Math.round(drawn.width) + 26}px`;
+  }
+
+  // What the diagram actually covers, which is not what its box shows: the
+  // box is a window onto it.
+  function boundsOfDrawing(drawing) {
+    try {
+      const box = drawing.getBBox();
+      if (box.width > 0 && box.height > 0) {
+        return {
+          width: box.width,
+          height: box.height,
+          viewBox: [box.x, box.y, box.width, box.height].map(Math.round).join(" ")
+        };
+      }
+    } catch {
+      // An SVG that is not laid out has no bounds to give.
+    }
+
+    const box = drawing.getBoundingClientRect();
+    return box.width > 0 && box.height > 0
+      ? { width: box.width, height: box.height, viewBox: null }
+      : null;
   }
 
   // The measurements were for the rasteriser's benefit and are nobody else's
@@ -509,6 +622,12 @@ var ExportSnapshot = (function () {
       inset: Math.round((body.left - page.left) - left),
       bodyWidth: Math.round(body.width),
       hasInk: Boolean(drawn),
+      // Where the ink starts and stops down the document, so a sheet it does
+      // not reach is not given a copy of it. Carrying the whole layer onto
+      // all twenty-five pages of a long document made a hundred megabytes of
+      // a three megabyte file.
+      inkFrom: drawn ? Math.round(drawn.y - (body.top - page.top)) : 0,
+      inkTo: drawn ? Math.round((drawn.y + drawn.height) - (body.top - page.top)) : 0,
       // Where the document's own top edge is inside the cropped box: the ink
       // may start above it, and every sheet's ink is offset from here.
       docTop: Math.round((body.top - page.top) - top),
@@ -814,6 +933,76 @@ html, body {
   const escapeText = (value) => String(value)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  /* The document, ready to be laid out.
+   *
+   * Word and the PDF both end up as pictures, and an inline SVG survives
+   * neither: Word's importer does not know what one is, and a page of the
+   * PDF is drawn by rendering the sheet inside a foreignObject — an SVG
+   * inside a foreignObject inside an SVG is a nesting Chrome does not
+   * reliably draw, and a flowchart came out as the empty box it sat in.
+   *
+   * Only Word needs every last one of them turned into a picture, though.
+   * Its importer drops the hairline rules KaTeX draws a fraction bar with
+   * too, and there are a hundred of those in a page of maths; the PDF draws
+   * those perfectly well where they are, and doing them one at a time took
+   * an export of these notes from eight seconds to fifty.
+   */
+  async function copyOf(article, budget, { forWord, paged }) {
+    const copy = /** @type {HTMLElement} */ (article.cloneNode(true));
+    recordSvgSizes(article, copy);
+    stripLiveParts(copy);
+    await embedImages(copy, budget);
+
+    if (forWord || paged) {
+      await flattenDiagrams(article, copy);
+    }
+
+    if (forWord) {
+      dropHiddenMath(copy);
+      await flattenSvg(copy, budget);
+    }
+
+    forgetSvgSizes(copy);
+    return copy;
+  }
+
+  /* The ink, carried across as it was drawn.
+   *
+   * The layer keeps the size of the surface it was drawn on and is moved
+   * rather than redrawn, because a stroke's coordinates mean what they meant.
+   * For the formats that are pictures it becomes one: an SVG like any other,
+   * and it would go the same way as the diagrams, which would be the whole
+   * point of the export missing.
+   */
+  async function carriedInk(ink, box, budget, asPicture) {
+    if (!ink || !ink.querySelector("path, circle, g")) {
+      return null;
+    }
+
+    const layer = /** @type {SVGElement} */ (ink.cloneNode(true));
+    layer.setAttribute("class", "export-ink");
+    layer.removeAttribute("style");
+    layer.setAttribute("width", String(box.surfaceWidth));
+    layer.setAttribute("height", String(box.surfaceHeight));
+    layer.setAttribute("viewBox", `0 0 ${box.surfaceWidth} ${box.surfaceHeight}`);
+    await embedImages(layer, budget);
+
+    if (!asPicture) {
+      return layer;
+    }
+
+    layer.dataset.exportW = String(box.surfaceWidth);
+    layer.dataset.exportH = String(box.surfaceHeight);
+
+    const holder = document.createElement("div");
+    holder.appendChild(layer);
+    await flattenSvg(holder, budget);
+
+    const picture = holder.firstElementChild;
+    picture.setAttribute("class", "export-ink");
+    return picture;
+  }
+
   /* One HTML file that is the page.
    *
    * `article` is the rendered document, `surface` the box the ink was drawn
@@ -827,49 +1016,10 @@ html, body {
     const theme = document.documentElement.getAttribute("data-theme") || "dark";
     const box = geometryOf(article, surface, ink);
 
-    const copy = /** @type {HTMLElement} */ (article.cloneNode(true));
-    recordSvgSizes(article, copy);
-    stripLiveParts(copy);
-    await embedImages(copy, budget);
+    const copy = await copyOf(article, budget, { forWord, paged });
 
-    if (forWord) {
-      dropHiddenMath(copy);
-      await flattenSvg(copy, budget);
-    }
-
-    forgetSvgSizes(copy);
-
-    let drawn = "";
-    let inkLayer = null;
-    if (ink && ink.querySelector("path, circle, g")) {
-      const inkCopy = /** @type {SVGElement} */ (ink.cloneNode(true));
-      inkCopy.setAttribute("class", "export-ink");
-      inkCopy.removeAttribute("style");
-      // Kept at the size of the surface it was drawn on, and moved rather
-      // than redrawn: a stroke's coordinates mean what they meant.
-      inkCopy.setAttribute("width", String(box.surfaceWidth));
-      inkCopy.setAttribute("height", String(box.surfaceHeight));
-      inkCopy.setAttribute("viewBox", `0 0 ${box.surfaceWidth} ${box.surfaceHeight}`);
-      await embedImages(inkCopy, budget);
-
-      if (forWord) {
-        // The ink is an SVG like any other, and Word would drop it with the
-        // rest — which would be the whole point of the export missing.
-        inkCopy.dataset.exportW = String(box.surfaceWidth);
-        inkCopy.dataset.exportH = String(box.surfaceHeight);
-        const holder = document.createElement("div");
-        holder.appendChild(inkCopy);
-        await flattenSvg(holder, budget);
-        const picture = holder.firstElementChild;
-        picture.setAttribute("class", "export-ink");
-        inkLayer = picture;
-      } else {
-        inkLayer = inkCopy;
-      }
-
-      drawn = inkLayer.outerHTML;
-    }
-
+    const inkLayer = await carriedInk(ink, box, budget, forWord);
+    const drawn = inkLayer ? inkLayer.outerHTML : "";
     const styles = await collectStyles(budget);
     const size = sheetGeometry(box);
     const cut = paged ? intoSheets(copy, box, size, inkLayer) : null;
@@ -945,6 +1095,8 @@ ${laidOut}
     sheetStyles,
     fitToPage,
     dropHiddenMath,
+    flattenDiagrams,
+    boundsOfDrawing,
     recordSvgSizes,
     forgetSvgSizes,
     withoutPrintRules,

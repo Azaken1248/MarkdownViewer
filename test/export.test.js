@@ -285,6 +285,36 @@ check("...while the formula that is shown stays",
 
 Snapshot.forgetSvgSizes(copy);
 
+console.log("=== a diagram that does not fit the page ===");
+
+/* Mermaid draws without a viewBox, so the SVG's box is a window onto the
+ * drawing rather than a frame around it: making the box smaller crops the
+ * picture instead of shrinking it, which is why big diagrams arrived with
+ * their bottoms cut off. Giving it the viewBox it never had turns the one
+ * into the other.
+ */
+const svgDom = new JSDOM("<body><svg id='d'></svg></body>");
+// jsdom lays nothing out, so the two measurements a diagram is taken by are
+// the ones under test rather than ones it made.
+const drawing = /** @type {any} */ (svgDom.window.document.getElementById("d"));
+
+drawing.getBBox = () => ({ x: 10, y: 20, width: 300, height: 450 });
+check("a diagram is measured by what it draws", Snapshot.boundsOfDrawing(drawing).viewBox, "10 20 300 450");
+check("...rather than by the window it is shown through",
+  [Snapshot.boundsOfDrawing(drawing).width, Snapshot.boundsOfDrawing(drawing).height], [300, 450]);
+
+// An SVG that is not laid out has no bounds to give, and the box it sits in
+// is the next best answer.
+drawing.getBBox = () => {
+  throw new Error("not laid out");
+};
+drawing.getBoundingClientRect = () => ({ width: 120, height: 80 });
+check("...and the box will do when there is nothing to measure",
+  Snapshot.boundsOfDrawing(drawing), { width: 120, height: 80, viewBox: null });
+
+drawing.getBoundingClientRect = () => ({ width: 0, height: 0 });
+check("a diagram with no size at all is left alone", Snapshot.boundsOfDrawing(drawing), null);
+
 console.log("=== what is wider than the page it is printed on ===");
 
 /* On a screen a wide formula or a wide table is given a scrollbar. Paper has

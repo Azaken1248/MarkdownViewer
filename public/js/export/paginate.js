@@ -377,6 +377,21 @@ var ExportPaginate = (function () {
         body.appendChild(settled[at].el);
       }
 
+      /* The space above the first block is set on the block rather than in a
+       * stylesheet.
+       *
+       * The margin above a heading belongs between it and what came before,
+       * not at the top of a page — but it has to come off here, where the
+       * sheets are measured, and not only in the stylesheet the drawing
+       * uses. Everything that decides a layout is on the elements for that
+       * reason: the measuring and the drawing have to be looking at the same
+       * document.
+       */
+      const opener = /** @type {HTMLElement} */ (body.firstElementChild);
+      if (opener) {
+        opener.style.marginTop = "0";
+      }
+
       // Where this sheet starts in the document, which is what the ink has to
       // be moved by to stay over the words it was drawn on.
       sheet.dataset.docTop = String(Math.round(settled[from] ? settled[from].top : 0));
