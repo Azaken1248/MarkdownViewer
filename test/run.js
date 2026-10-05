@@ -55,6 +55,7 @@ const SUITES = [
   ["production", "production.test.js", "A NODE_ENV=production boot, and every asset its pages name"],
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"],
+  ["browser", "browser.test.js", "The five things jsdom cannot answer, in a real browser"],
   ["diagram-page", "diagram-page.test.js", "The diagram editor page, its address and the document handoff"]
 ];
 

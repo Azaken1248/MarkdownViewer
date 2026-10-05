@@ -14,8 +14,11 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Twenty-two suites, ~3,500 checks, about a minute and a half. No browser required, and
-no network: the suite is deterministic on a runner with no egress.
+Thirty-two suites, about two minutes. All but one need no browser and no
+network, and are deterministic on a runner with no egress. The exception is
+`browser`, which drives a real Chromium and is the only suite that does; with
+none installed it says so and passes, because the step that installs it lives
+in the workflow where its absence is visible.
 
 | Suite | What it covers |
 | --- | --- |
@@ -33,6 +36,37 @@ no network: the suite is deterministic on a runner with no egress.
 | `limits` | How complicated the code is allowed to get, and the budget that keeps it a decision |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server, and the share view in a window of its own |
 | `diagram-page` | The diagram editor page, its address, and the document handoff |
+| `export` | Taking a copy away: the snapshot's stylesheets, the paginator's arithmetic, the zip a .docx is |
+| `browser` | The five things jsdom cannot answer, in a real browser |
+
+### jsdom, and the one that is not
+
+Every client suite but one runs in jsdom, which is a JavaScript implementation
+of the DOM rather than a browser. That is the right trade for almost
+everything: it is fast, it runs every check in one window against one server,
+and thirty-odd suites in two minutes is worth keeping.
+
+It cannot do five things, and they are not small ones. It does not lay
+anything out, so `getBoundingClientRect()` answers zeroes and every
+measurement the app makes is unverifiable. It parses a Content-Security-Policy
+and ignores it, so the app's main defence has never been seen to refuse
+anything. It does not run a Web Worker. It does not paint. And its event loop
+is not a browser's, so anything timing-dependent passes or fails for reasons
+that are not the app's.
+
+`browser` is five checks against exactly those gaps — the console is empty,
+the CSP refuses an injected script, the layout measures what the stylesheet is
+read to mean, a document renders with the real libraries fetched and their SRI
+hashes enforced, and the theme toggle changes painted colours. The first page
+it ever loaded found a defect: the app's own icons, written as absolute URLs
+from `PUBLIC_BASE_URL`, were refused by the app's own `img-src 'self'` on any
+other hostname. `layout` and `mobile` keep their reasoning about the
+stylesheet — it is fast and it catches a different class — and `browser`
+measures the same claims, so the two have to agree.
+
+Install the browser with `npx playwright install chromium --only-shell`. It is
+266MB, needs no system packages, and is the same one the server uses to draw
+PDF exports.
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`
 seeded with a known corpus, so it exercises the write paths for real and can

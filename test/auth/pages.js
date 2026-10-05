@@ -78,7 +78,21 @@ module.exports = async (ctx) => {
     // which is how this went unnoticed.
     const touchIcon = page.match(/<link rel="apple-touch-icon" href="([^"]*)"/)?.[1] || "";
     check("the touch icon is a PNG too", touchIcon.endsWith(".png"), true);
-    check("...and is served", (await crawler.getBytes(new URL(touchIcon).pathname)).status, 200);
+    check("...and is served", (await crawler.getBytes(touchIcon)).status, 200);
+
+    /* A path, not a URL.
+     *
+     * Absolute, these are built from PUBLIC_BASE_URL, so on any other
+     * hostname the app is reached on they are cross-origin and the app's own
+     * `img-src 'self'` refuses them — the page then has no icon and two CSP
+     * violations in the console. A <link rel="icon"> is resolved against the
+     * page it is in, so a path is right wherever that page is served from.
+     * og:image stays absolute below: a crawler resolves that against nothing.
+     */
+    const favicon = page.match(/<link rel="icon"[^>]*href="([^"]*)"/)?.[1] || "";
+    check("the icons the browser loads are paths, so they are always same-origin",
+      [favicon, touchIcon].filter((href) => /^https?:/.test(href)), []);
+    check("...and both start at the root", [favicon, touchIcon].every((href) => href.startsWith("/")), true);
 
     // Discord reads oEmbed as well, and this used to hand it the SVG.
     const oembed = await crawler.get(`/oembed?url=${encodeURIComponent(`${server.origin}/`)}`);

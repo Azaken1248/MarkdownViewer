@@ -82,6 +82,26 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Chromium, for the one suite that is not jsdom — and for drawing PDF
+      # exports, which is the same browser. `--only-shell` is the headless
+      # build: 266MB rather than 450MB, and it needs no system packages.
+      #
+      # Cached on the playwright-core version, because that is what decides
+      # which build is wanted; a cache miss is a download, not a failure.
+      - name: Work out which browser build is wanted
+        id: browser
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4.2.3
+        id: browser-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.browser.outputs.version }}
+
+      - name: Install it
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --only-shell
+
       # The DOM suite spawns its own server against a temp state directory, so
       # there is nothing to start here and nothing to clean up.
       - name: Test

@@ -166,7 +166,16 @@ npm run typecheck
 | `npm run restore` | Unpack one into a directory and check the database came across |
 
 The test suites start real servers against temporary directories and drive the
-real client in jsdom; they do not touch your documents. See
+real client in jsdom; they do not touch your documents. One suite drives a real
+Chromium instead, for the things jsdom structurally cannot answer — layout,
+the Content-Security-Policy actually refusing something, painted colours. It
+needs the browser installed:
+
+```sh
+npx playwright install chromium --only-shell
+```
+
+Without it that suite says so and passes. See
 [docs/TESTING.md](docs/TESTING.md) for what each one covers.
 
 ## Security

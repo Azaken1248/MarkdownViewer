@@ -434,6 +434,18 @@ module.exports = [
     }
   },
   {
+    /* The browser suite drives a page and runs code inside it.
+     *
+     * The file is Node — it starts a server and a browser — but the bodies
+     * handed to `page.evaluate` run in the page, where `window` and
+     * `document` are the whole point. They are linted as what they are.
+     */
+    files: ["test/browser.test.js"],
+    languageOptions: {
+      globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS }
+    }
+  },
+  {
     // Web Workers have no window and no document, which is the entire point of
     // running Python in one. Linting them as browser scripts would let a
     // reference to either slip through.
