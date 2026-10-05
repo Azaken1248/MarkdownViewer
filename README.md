@@ -95,8 +95,38 @@ explains both before you need to know.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. How the volume comes down without a deploy. |
 | `LOG_FORMAT` | `text` | `text` for a person reading `docker compose logs`, `json` for something collecting it. |
 | `LOG_STATIC` | `false` | Include static assets in that log. Off by default because they drown out everything else. |
+| `PDF_BROWSER` | *(none)* | Path to a Chromium already on the machine, for drawing PDF exports. Unset, the one Playwright installs is used; with no browser at all the page writes its own PDF instead — see [Exporting](#exporting). |
 | `METRICS_TOKEN` | *(none)* | Turns on `/metrics` and is the bearer token it wants. Unset, that route is a 404. |
 | `ENABLE_GRAPHQL_INTROSPECTION` | `false` | Re-enables GraphQL schema introspection for local schema work. |
+
+## Exporting
+
+A document can be taken away as a PDF, a self-contained web page, a Word
+document or its Markdown source. Everything but the Markdown carries the
+document as it looks on screen: the same theme, the same fonts, the rendered
+maths and diagrams, and — on a shared link — whatever has been drawn over it.
+
+Where the pages break is decided by this app rather than by a print dialogue.
+It measures the document and ends a page at a heading wherever one is near the
+end, never inside a table, a diagram or a formula, and never leaving a heading
+at the foot of a page with nothing under it.
+
+The PDF itself is drawn by Chromium, which embeds a subset of each font and
+writes the text as text — about 450KB for a hundred pages of maths, searchable
+and selectable. That needs a browser on the server:
+
+```sh
+npx playwright install --with-deps chromium
+```
+
+Without one the page draws the PDF itself, as a picture of each page with the
+words laid invisibly over it. It works, it is searchable, and it is roughly
+eight times the size — the export menu says which you are getting before you
+choose it. `PDF_BROWSER` points at a Chromium that is already installed, if
+you would rather not have a second one.
+
+Exporting from a share link is off until the person who published it turns it
+on, in the share dialogue. It is not part of being able to read the page.
 
 ## Documentation
 

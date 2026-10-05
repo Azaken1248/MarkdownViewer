@@ -380,6 +380,7 @@ one place beside it, so what is limited is answerable without reading a route.
 | `GET /api/docs/search` | account | 240 |
 | Link previews fetched from elsewhere | account | 20 |
 | `/healthz`, which needs no session, and `/graphql` | address | 60 |
+| `POST /api/export/pdf`, which starts a browser | address | 10 |
 
 Reads are not counted by the wide ceiling on purpose. The client reads a great
 deal — it fetches every document once to warm its offline search — and that
@@ -402,6 +403,38 @@ share one count rather than each allowing eight. The `db` suite checks all
 three.
 
 ---
+
+## Drawing PDFs
+
+A PDF export is laid out in the reader's browser — the pages are measured and
+cut there, the diagrams fitted, the ink placed — and posted here as one
+self-contained HTML file. This server hands it to Chromium, which embeds a
+subset of each font and writes the text as text, and sends the result back.
+Roughly 450KB for a hundred pages against 8MB for the same thing drawn as
+pictures, and the words are in it rather than over it.
+
+It is optional. Install the browser with:
+
+```sh
+npx playwright install --with-deps chromium
+```
+
+or set `PDF_BROWSER` to one already on the machine. With neither, the endpoint
+answers `503 no_renderer`, the page says so in its export menu before you
+choose, and it draws the file itself instead.
+
+The browser starts on the first export and stops two minutes after the last,
+so a server nobody is exporting from carries none of it. Each render gets a
+fresh context with JavaScript turned off and every network request refused —
+the document is self-contained by construction, so anything it asks for is
+something it should not have. That leaves the HTML and CSS parsers as the
+whole of what a posted document can reach, which is why this is rate limited
+by address rather than by account: a share link published with exporting
+allowed is a credential anybody may be holding.
+
+The Docker image does not ship a browser. Adding one roughly doubles it, so
+it is a decision rather than a default: add the install line above to the
+Dockerfile, or point `PDF_BROWSER` at a Chromium on the host.
 
 ## The audit log
 

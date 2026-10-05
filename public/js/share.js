@@ -216,7 +216,10 @@
       // has to be of the whole page for it to land on the right words.
       surface: () => document.querySelector(".share-layout"),
       ink: () => document.querySelector(".ink-layer"),
-      source: () => payload.content
+      source: () => payload.content,
+      // The server draws the PDF, and this is what says it may: the same
+      // link, which the owner published with exporting allowed.
+      share: () => shareTokenFromLocation()
     });
   }
 

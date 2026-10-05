@@ -99,7 +99,10 @@ depending on what sits in front of it is not worth a tidier route pattern.
 | `GET` | `/api/shares` | List published documents (editor) |
 | `POST` | `/api/docs/*file/share` | Publish or rotate a share link (editor) |
 | `DELETE` | `/api/docs/*file/share` | Revoke a share link (editor) |
+| `PATCH` | `/api/docs/*file/share` | `{"allowExport":true\|false}` — whether the link may be exported from (editor) |
 | `GET` | `/api/share/:token` | **Public.** The shared document |
+| `GET` | `/api/export/able` | **Public.** Whether this server can draw a PDF |
+| `POST` | `/api/export/pdf` | `{"html":"…","share":"…"}` — draw a laid-out document. A session, or a share link published with exporting allowed |
 | `GET` | `/s/:token` | **Public.** The standalone share page |
 | `GET` | `/healthz` | Health check. `503` when document storage is unreadable |
 

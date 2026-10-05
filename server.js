@@ -56,6 +56,8 @@ const { createAssetRoutes, MAX_ASSET_BYTES } = require("./lib/routes/assets");
 const { createAuthRoutes } = require("./lib/routes/auth");
 const { createUserRoutes } = require("./lib/routes/users");
 const { createSharesRoutes } = require("./lib/routes/shares");
+const { createExportRoutes } = require("./lib/routes/export");
+const { createPdfRenderer } = require("./lib/pdf");
 const { createLinksRoutes } = require("./lib/routes/links");
 const { createFoldersRoutes } = require("./lib/routes/folders");
 const { createRecycleRoutes } = require("./lib/routes/recycle");
@@ -120,6 +122,10 @@ const RATE_UPLOADS_PER_SESSION = 30;
 const RATE_WRITES_PER_SESSION = 120;
 const RATE_SEARCHES_PER_SESSION = 240;
 const RATE_PUBLIC_PER_ADDRESS = 60;
+// A browser start apiece, so this is counted in documents rather than in
+// requests: ten a minute is more than anybody exports and far less than
+// anybody could use to tie the machine up.
+const RATE_EXPORTS_PER_ADDRESS = 10;
 
 const INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIR, "index.html");
 const SHARE_TEMPLATE_PATH = path.join(PUBLIC_DIR, "share.html");
@@ -306,6 +312,15 @@ const limitSearch = createLimiter({
 const limitPublic = createLimiter({
   name: "public", windowMs: RATE_WINDOW_MS, max: RATE_PUBLIC_PER_ADDRESS, keyOf: byAddress
 });
+/* Drawing a PDF starts a browser, which is the most expensive thing this
+ * server does — and a share link that allows exporting is a credential
+ * anybody may be holding. Keyed by address rather than by session for that
+ * reason: a link has no session behind it.
+ */
+const limitExports = createLimiter({
+  name: "exports", windowMs: RATE_WINDOW_MS, max: RATE_EXPORTS_PER_ADDRESS, keyOf: byAddress,
+  message: "Too many exports just now. Wait a minute and try again."
+});
 
 app.use("/api", limitApi);
 app.post(["/api/docs/upload", "/api/upload/folder", "/api/assets"], limitUploads);
@@ -470,6 +485,26 @@ app.use(createSharesRoutes({
   readCachedTextFile,
   paramDocPath,
   toDocTitle
+}));
+
+/* Drawing a PDF with the engine that already knows how.
+ *
+ * Optional: with no browser installed the endpoint says so and the page
+ * writes its own, which is smaller to deploy and larger to download.
+ * PDF_BROWSER points at a Chromium that is already on the machine, for a
+ * deployment that would rather not have a second one.
+ */
+const pdfRenderer = createPdfRenderer({
+  executablePath: process.env.PDF_BROWSER || null,
+  log: LOG_REQUESTS ? log : null
+});
+
+app.use(createExportRoutes({
+  renderer: pdfRenderer,
+  shareStore,
+  requireRead,
+  limit: limitExports,
+  audit
 }));
 
 app.use(createLinksRoutes({ linkStore, requireRead, requirePermission }));

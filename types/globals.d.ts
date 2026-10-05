@@ -47,5 +47,8 @@ declare function loadPyodide(options?: { indexURL?: string }): Promise<any>;
 declare namespace Express {
   interface Request {
     auth: import("../lib/auth.js").RequestAuth | null;
+    // Set by the export route when a share link, rather than a session, is
+    // what authorised the request.
+    exporting?: { share: string };
   }
 }

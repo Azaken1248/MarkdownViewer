@@ -535,6 +535,48 @@ module.exports = async (ctx) => {
     check("and it can be taken away again",
       (await stranger.get(`/api/share/${newToken}`)).body.allowExport, false);
 
+    /* Drawing a PDF is the one thing the page cannot do for itself.
+     *
+     * Everything about how the document looks is decided in the reader's
+     * browser and posted here as one self-contained file; this is the engine
+     * that draws it. Who may ask is the question worth checking — a share
+     * link is a credential anybody may be holding, and starting a browser is
+     * the most expensive thing this server does.
+     */
+    const able = await stranger.get("/api/export/able");
+    check("anyone may ask whether a PDF can be drawn here", able.status, 200);
+    check("...and the answer is yes or no", typeof able.body.pdf, "boolean");
+
+    const document_ = "<!doctype html><html><head><title>t</title></head><body><p>hello</p></body></html>";
+
+    check("a stranger with no link cannot have one drawn",
+      (await stranger.post("/api/export/pdf", { html: document_ })).status, 401);
+    check("...nor with a link that was never published",
+      (await stranger.post("/api/export/pdf", { html: document_, share: "not-a-real-token" })).status, 403);
+
+    // Allowed again: the checks above turned it off to prove it could be.
+    await admin.patch("/api/docs/beta.md/share", { allowExport: true });
+    const byLink = await stranger.post("/api/export/pdf", { html: document_, share: newToken });
+    const bySession = await admin.post("/api/export/pdf", { html: document_ });
+
+    for (const [who, answer] of [["a reader of the link", byLink], ["a signed-in account", bySession]]) {
+      if (answer.status === 503) {
+        // No browser on this machine, which is a deployment this supports:
+        // the page writes its own PDF when told so.
+        check(`${who} is told there is no browser here`, answer.body.code, "no_renderer");
+      } else {
+        check(`${who} can have one drawn`, answer.status, 200);
+        check("...and what comes back is a PDF", answer.raw.startsWith("%PDF"), true);
+      }
+    }
+
+    check("a document with nothing in it is not drawn",
+      (await admin.post("/api/export/pdf", { html: "" })).status, 400);
+
+    await admin.patch("/api/docs/beta.md/share", { allowExport: false });
+    check("taking the permission away takes the drawing with it",
+      (await stranger.post("/api/export/pdf", { html: document_, share: newToken })).status, 403);
+
     await admin.del("/api/docs/beta.md/share");
     check("revoking kills the link", (await stranger.get(`/api/share/${newToken}`)).status, 404);
   }

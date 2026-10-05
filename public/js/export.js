@@ -21,7 +21,7 @@ var Exporter = (function () {
       id: "pdf",
       label: "PDF",
       icon: "ph-file-pdf",
-      note: "Pages chosen here, not by the print dialogue."
+      note: "Pages chosen here, drawn by the server."
     },
     {
       id: "html",
@@ -203,13 +203,19 @@ var Exporter = (function () {
       return;
     }
 
-    const bytes = await ExportFormats.toPdf(snapshot, name, (done, all) => {
+    say(view, "Drawing the pages…");
+    const made = await ExportFormats.toPdf(snapshot, name, (done, all) => {
       say(view, `Drawing page ${done} of ${all}…`);
-    });
+    }, view.parts.share?.() || null);
 
-    tell(view, `Saved as a PDF of ${snapshot.sheets.length} page`
-      + `${snapshot.sheets.length === 1 ? "" : "s"}, ${Math.round(bytes / 1024)}KB.${short}`,
-    short ? "warning" : "success");
+    const pages = `${snapshot.sheets.length} page${snapshot.sheets.length === 1 ? "" : "s"}`;
+    // Said when it matters: a file written here is a picture of each page
+    // rather than the page, and somebody wondering why it is eight megabytes
+    // and will not search deserves the answer.
+    const how = made.drawnHere ? " Drawn in this browser: the text is searchable but not selectable." : "";
+
+    tell(view, `Saved as a PDF of ${pages}, ${Math.round(made.bytes / 1024)}KB.${short}${how}`,
+      short || made.drawnHere ? "warning" : "success");
   }
 
   /* --- Wiring -------------------------------------------------------------- */
@@ -219,6 +225,21 @@ var Exporter = (function () {
    */
   function attach(parts) {
     const view = { parts, button: parts.button, busy: false, sayTimer: 0 };
+
+    /* What the PDF will be, asked once when the bar is built.
+     *
+     * A deployment with a browser draws a real one — fonts embedded, text as
+     * text. One without has the page write a picture of each page instead,
+     * which works and is worth saying so beforehand rather than afterwards.
+     */
+    void ExportFormats.serverCanDraw().then((can) => {
+      if (!can) {
+        const item = view.menu.querySelector('.export-item[data-format="pdf"] .export-item-note');
+        if (item) {
+          item.textContent = "Drawn in this browser: a picture of each page.";
+        }
+      }
+    });
 
     view.menu = buildMenu(view);
     view.button.setAttribute("aria-haspopup", "true");

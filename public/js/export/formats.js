@@ -56,19 +56,29 @@ var ExportFormats = (function () {
 
   /* --- PDF ----------------------------------------------------------------
    *
-   * Written here rather than printed.
+   * Drawn by the engine that already knows how.
    *
-   * The browser can make a PDF, but only through the print dialogue, and the
-   * dialogue is the person's and not the page's: it adds its own margins
-   * around the ones the sheets already carry, scales the sheet down to fit
-   * inside them, and leaves a white border round a document whose background
-   * is not white. No CSS overrules a setting in a dialogue.
+   * Everything about how the document looks is decided here: where the pages
+   * break, what each sheet is, how the diagrams are fitted, where the ink
+   * sits. What a browser tab cannot do is the last step — Chromium's PDF
+   * backend, which embeds a subset of each font, writes the text as text and
+   * the diagrams as vectors, and is reachable only from outside a page. So
+   * the laid-out document goes to the server and comes back drawn: a tenth
+   * the size, with the words in it rather than over it.
    *
-   * So the sheets the paginator chose are drawn and assembled into a file
-   * directly: the right size, the right number of pages, the background to
-   * the edge of the paper, and a download rather than a dialogue.
+   * With no browser on the server the page writes its own, which is a picture
+   * of each sheet with the words laid invisibly over it. That is the fallback
+   * and not the plan: it is eight times the size and the text only sits where
+   * it was measured to sit.
    */
-  async function toPdf(snapshot, name, onPage) {
+  async function toPdf(snapshot, name, onPage, share = null) {
+    const drawn = await askServer(snapshot, share);
+
+    if (drawn) {
+      download(new Blob([drawn], { type: "application/pdf" }), `${fileStem(name)}.pdf`);
+      return { bytes: drawn.size, drawnHere: false };
+    }
+
     const bytes = await ExportPdf.render({
       sheets: snapshot.sheets,
       css: snapshot.styles,
@@ -83,7 +93,55 @@ var ExportFormats = (function () {
     }
 
     download(new Blob([bytes], { type: "application/pdf" }), `${fileStem(name)}.pdf`);
-    return bytes.length;
+    return { bytes: bytes.length, drawnHere: true };
+  }
+
+  /* The laid-out document, posted whole.
+   *
+   * It carries its own fonts and pictures, so this is megabytes rather than
+   * kilobytes — and it has to be, because the server has none of them and the
+   * ink exists only in this browser. A refusal of any kind means fall back
+   * rather than fail: the page can still write the file itself.
+   */
+  async function askServer(snapshot, share) {
+    try {
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: headersFor(),
+        body: JSON.stringify({ html: snapshot.html, share: share || undefined })
+      });
+
+      return response.ok && response.headers.get("content-type")?.includes("application/pdf")
+        ? await response.blob()
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // The app's own CSRF token where there is one. A share page has no session
+  // and sends none; its credential is the token in the body.
+  function headersFor() {
+    const headers = { "Content-Type": "application/json" };
+    const token = window.AppState?.state?.csrfToken;
+
+    if (token) {
+      headers["X-CSRF-Token"] = token;
+    }
+
+    return headers;
+  }
+
+  // Whether the server can draw one, asked before the menu says what the PDF
+  // will be. A deployment with no browser is not a deployment with no PDF.
+  async function serverCanDraw() {
+    try {
+      const response = await fetch("/api/export/able", { credentials: "same-origin" });
+      return response.ok ? Boolean((await response.json()).pdf) : false;
+    } catch {
+      return false;
+    }
   }
 
   /* --- DOCX ---------------------------------------------------------------
@@ -267,5 +325,5 @@ var ExportFormats = (function () {
     return out.bytes;
   }
 
-  return { download, fileStem, toHtml, toMarkdown, toPdf, toDocx, zipOf, crc32 };
+  return { download, fileStem, toHtml, toMarkdown, toPdf, toDocx, serverCanDraw, zipOf, crc32 };
 })();
