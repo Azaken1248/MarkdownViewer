@@ -551,8 +551,11 @@ module.exports = async (ctx) => {
 
     check("a stranger with no link cannot have one drawn",
       (await stranger.post("/api/export/pdf", { html: document_ })).status, 401);
+    // A link that does not allow it is a refusal for a stranger and not for
+    // whoever is signed in, so what is left is the ordinary question — who
+    // are you — and the ordinary answer when nobody is.
     check("...nor with a link that was never published",
-      (await stranger.post("/api/export/pdf", { html: document_, share: "not-a-real-token" })).status, 403);
+      (await stranger.post("/api/export/pdf", { html: document_, share: "not-a-real-token" })).status, 401);
 
     // Allowed again: the checks above turned it off to prove it could be.
     await admin.patch("/api/docs/beta.md/share", { allowExport: true });
@@ -574,8 +577,13 @@ module.exports = async (ctx) => {
       (await admin.post("/api/export/pdf", { html: "" })).status, 400);
 
     await admin.patch("/api/docs/beta.md/share", { allowExport: false });
-    check("taking the permission away takes the drawing with it",
-      (await stranger.post("/api/export/pdf", { html: document_, share: newToken })).status, 403);
+    check("taking the permission away takes the drawing with it, for a stranger",
+      (await stranger.post("/api/export/pdf", { html: document_, share: newToken })).status, 401);
+    // ...and not for the person who published it, who may read the document
+    // whatever the link says about everybody else.
+    check("...but not from whoever may read it anyway",
+      [200, 503].includes((await admin.post("/api/export/pdf",
+        { html: document_, share: newToken })).status), true);
 
     await admin.del("/api/docs/beta.md/share");
     check("revoking kills the link", (await stranger.get(`/api/share/${newToken}`)).status, 404);
