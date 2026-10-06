@@ -41,6 +41,7 @@ const SUITES = [
   ["limiter", "limiter.test.js", "Rate limits: the arithmetic, the bounded map, and the buckets as mounted"],
   ["body", "body.test.js", "What an endpoint accepts, and every way it refuses what it does not"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
+  ["worker", "worker.test.js", "The Python worker: the protocol, the caps, and the network it takes away"],
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
   ["annotate", "annotate.test.js", "Ink on a shared document: smoothing, ink to shape, and where it is kept"],
   ["export", "export.test.js", "Taking a copy away: the snapshot's stylesheets, and the zip a .docx is"],

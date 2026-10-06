@@ -14,7 +14,7 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Thirty-two suites, about two minutes. All but one need no browser and no
+Thirty-three suites, about two minutes. All but one need no browser and no
 network, and are deterministic on a runner with no egress. The exception is
 `browser`, which drives a real Chromium and is the only suite that does; with
 none installed it says so and passes, because the step that installs it lives
@@ -37,6 +37,7 @@ in the workflow where its absence is visible.
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server, and the share view in a window of its own |
 | `diagram-page` | The diagram editor page, its address, and the document handoff |
 | `export` | Taking a copy away: the snapshot's stylesheets, the paginator's arithmetic, the zip a .docx is |
+| `worker` | The Python worker: the message protocol, both output caps, and the network it takes away from itself |
 | `browser` | The five things jsdom cannot answer, in a real browser |
 
 ### jsdom, and the one that is not
@@ -67,6 +68,24 @@ measures the same claims, so the two have to agree.
 Install the browser with `npx playwright install chromium --only-shell`. It is
 266MB, needs no system packages, and is the same one the server uses to draw
 PDF exports.
+
+### The Python worker, which is both
+
+`public/js/pyodide-worker.js` is the only place this app runs code somebody
+else wrote, and it was the only file nothing had ever opened — jsdom has no Web
+Worker, so 291 lines sat at nought per cent.
+
+It does not need a browser for most of it. What the worker does with a message
+is a function of the message, so the `worker` suite loads it into a `vm` with a
+scope it believes is a worker's and a Pyodide that answers and nothing more.
+That reaches the protocol, both output caps, the error paths, the queue and the
+network guard, with no browser and no twelve megabyte download — the same
+technique `headers` uses to load `dom-html.js`.
+
+What it cannot say is whether Python runs. That is one check in `browser`,
+where a real Worker loads the real thing from the CDN and prints: "the fake
+agrees with the protocol" and "a cell prints" are different claims, and only
+the second is about the feature working.
 
 The `dom` suite spawns its own server against a throwaway `MDVIEWER_STATE_DIR`
 seeded with a known corpus, so it exercises the write paths for real and can
@@ -139,9 +158,13 @@ written because it named them:
 That moved `lib/routes/recycle.js` from 55% to 88%, the store from 83% to 92%,
 and the share client from nothing to 87%. What is left low is mostly the app's
 own interface modules, which the `dom` suite reaches only as far as it drives
-them, and `pyodide-worker.js`, which runs in a Web Worker that jsdom does not
-implement. The security-adjacent code — guards, sessions, the limiter, headers,
-the CSRF check — is in the nineties.
+them. The security-adjacent code — guards, sessions, the limiter, headers, the
+CSRF check — is in the nineties.
+
+`pyodide-worker.js` was the exception and is no longer: it ran in a Web Worker
+that jsdom does not implement, so nothing had executed a line of the one file
+that runs code somebody else wrote. The `worker` suite executes it in a `vm`
+instead, which is where its numbers now come from.
 
 Two things make the client's numbers mean something. `test/app-source.js`
 evaluates each script in jsdom with a `//# sourceURL` naming the file, so V8

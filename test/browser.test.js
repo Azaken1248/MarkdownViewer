@@ -139,6 +139,7 @@ async function runChecks(browser, server) {
   await theLayoutIsTheLayout(browser, server);
   await aDocumentRenders(browser, server);
   await theThemeChangesColours(browser, server);
+  await pythonRuns(browser, server);
 }
 
 /* --- 1. Nothing in the console ------------------------------------------- */
@@ -336,6 +337,81 @@ async function theThemeChangesColours(browser, server) {
 
   await page.close();
 }
+
+/* --- 6. Python, for real ---------------------------------------------------
+ *
+ * The `worker` suite drives the protocol against a Pyodide that answers and
+ * nothing more, which reaches the message handling, both caps, the error
+ * paths and the network guard without a browser. What it cannot say is
+ * whether Python runs: "the fake agrees with the protocol" and "a cell
+ * prints" are different claims.
+ *
+ * So this is one check, and it is the slow one — a real Worker, the real
+ * twelve megabytes from the CDN, and one line of Python. jsdom has no Worker
+ * at all, which is why nothing had ever executed a line of that file.
+ */
+const PYTHON_TIMEOUT_MS = 180000;
+
+async function pythonRuns(browser, server) {
+  console.log("=== Python runs in a real worker, which is the slow one ===");
+
+  const page = await browser.newPage();
+  await page.goto(`${server.origin}/`, { waitUntil: "domcontentloaded" });
+
+  const started = Date.now();
+  const answer = await page.evaluate(async (ms) => new Promise((done) => {
+    // The app's own worker, at the address the app loads it from, under the
+    // Content-Security-Policy the app serves — worker-src 'self'.
+    const worker = new Worker("/js/pyodide-worker.js");
+    const stages = [];
+    const timer = setTimeout(() => done({ timedOut: true, stages }), ms);
+
+    worker.onmessage = (event) => {
+      const message = event.data || {};
+      if (message.type === "status") {
+        stages.push(message.stage);
+        return;
+      }
+
+      if (message.type === "result") {
+        clearTimeout(timer);
+        worker.terminate();
+        done({ ...message, stages });
+      }
+    };
+
+    worker.onerror = (error) => {
+      clearTimeout(timer);
+      done({ failed: String(error.message || error), stages });
+    };
+
+    worker.postMessage({
+      type: "run",
+      id: "real",
+      notebookId: "browser-suite",
+      code: "print('hello from python')\n6 * 7"
+    });
+  }), PYTHON_TIMEOUT_MS);
+
+  const seconds = Math.round((Date.now() - started) / 1000);
+
+  if (answer.timedOut || answer.failed) {
+    check(`Python runs in a worker (gave up after ${seconds}s)`,
+      answer.failed || `timed out after ${stageList(answer)}`, "");
+    await page.close();
+    return;
+  }
+
+  check(`Python starts and runs a cell (${seconds}s)`, answer.ok, true);
+  check("...having said what it was doing on the way",
+    answer.stages.includes("downloading") && answer.stages.includes("ready"), true);
+  check("...and what the cell printed comes back", answer.stdout, ["hello from python"]);
+  check("...with the value of its last expression", answer.result, "42");
+
+  await page.close();
+}
+
+const stageList = (answer) => (answer.stages.length > 0 ? answer.stages.join(" → ") : "no status at all");
 
 void main().catch((error) => {
   console.error(error);
