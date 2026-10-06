@@ -440,7 +440,7 @@ module.exports = [
      * handed to `page.evaluate` run in the page, where `window` and
      * `document` are the whole point. They are linted as what they are.
      */
-    files: ["test/browser.test.js", "test/helpers/browser.js"],
+    files: ["test/browser.test.js", "test/accessibility.test.js", "test/helpers/browser.js"],
     languageOptions: {
       globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS }
     }

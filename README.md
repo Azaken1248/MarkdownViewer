@@ -137,6 +137,7 @@ on, in the share dialogue. It is not part of being able to read the page.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it is put together, and why: the storage model, the module layout, what loads when |
 | [docs/API.md](docs/API.md) | The HTTP API and the GraphQL read endpoint |
 | [docs/TESTING.md](docs/TESTING.md) | The test suites, and the checks that run beside them |
+| [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md) | What is checked, what is accepted, and what nobody has checked yet |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Conventions for changes: commits, tests, documentation |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability |
 

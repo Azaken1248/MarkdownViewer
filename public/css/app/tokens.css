@@ -21,7 +21,13 @@
   /* Text */
   --fg: #dce7e5;
   --fg-muted: #86a09d;
-  --fg-subtle: #5f7573;
+  /* 4.5:1 against every dark surface, including --raised-hover, because this
+     is the colour of metadata lines set at 11px and axe measures them where
+     they sit. The old #5f7573 was 3.9:1 on --surface: it read as the quiet
+     third tier it is meant to be, and it was a contrast failure on seven
+     nodes. This is as dark as it can be and still clear 4.5:1 everywhere, so
+     it stays quieter than --fg-muted. */
+  --fg-subtle: #79908d;
   --fg-on-emphasis: #ffffff;
 
   /* Accents */
@@ -118,7 +124,11 @@
 
   --fg: #101b1a;
   --fg-muted: #465956;
-  --fg-subtle: #62756f;
+  /* Same rule as the dark theme's: 4.5:1 against every light surface, not just
+     the two the first page happens to use. The old #62756f cleared --canvas and
+     was 4.4:1 on --raised, which is where the diagram editor's field labels sit
+     at 10.5px. */
+  --fg-subtle: #566862;
   --fg-on-emphasis: #ffffff;
 
   /* The pastel #8ed9cf is decorative on black and unreadable on white, so the

@@ -57,6 +57,7 @@ const SUITES = [
   ["visual", "visual.test.js", "The visual editor: block round trip, classification, serialization"],
   ["dom", "dom.test.js", "The real app in jsdom against a real server"],
   ["browser", "browser.test.js", "The five things jsdom cannot answer, in a real browser"],
+  ["accessibility", "accessibility.test.js", "What axe says about six page states, reduced motion and 200% zoom"],
   ["diagram-page", "diagram-page.test.js", "The diagram editor page, its address and the document handoff"]
 ];
 

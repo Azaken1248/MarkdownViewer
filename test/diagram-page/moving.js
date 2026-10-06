@@ -208,6 +208,10 @@ module.exports = async (ctx) => {
     const { window } = page;
     const body = page.document.querySelector(".ve-diagram-body");
     const grip = (which) => page.document.querySelector(`.ve-diagram-grip-${which}`);
+    // What is dragged and what takes the focus is the bar inside the grip, not
+    // the grip: the chevron is the grip's other child, so that a focusable
+    // separator does not have a focusable thing inside it.
+    const bar = (which) => grip(which).querySelector(".ve-diagram-grip-bar");
     const shut = (which) => grip(which).querySelector(".ve-diagram-grip-shut");
     const wide = (which) => body.style.getPropertyValue(`--dd-${which}`);
 
@@ -221,14 +225,25 @@ module.exports = async (ctx) => {
     // A separator rather than a decoration: an edge that can only be dragged is
     // an edge that belongs to whoever has a mouse.
     check("a bar is something the keyboard can reach",
-      [grip("rail").getAttribute("role"), grip("rail").tabIndex], ["separator", 0]);
+      [bar("rail").getAttribute("role"), bar("rail").tabIndex], ["separator", 0]);
+
+    /* And the chevron is beside it rather than inside it.
+     *
+     * A focusable widget with a focusable thing inside it is one a screen
+     * reader reads as the widget and never offers the button in — so the
+     * button that brings a shut region back would be unreachable by the
+     * people most likely to need it.
+     */
+    check("...and the chevron is not inside the separator",
+      [bar("rail").querySelector(".ve-diagram-grip-shut"), Boolean(shut("rail"))],
+      [null, true]);
 
     const drag = (which, from, to) => {
-      grip(which).dispatchEvent(new window.MouseEvent("pointerdown",
+      bar(which).dispatchEvent(new window.MouseEvent("pointerdown",
         { clientX: from, bubbles: true }));
-      grip(which).dispatchEvent(new window.MouseEvent("pointermove",
+      bar(which).dispatchEvent(new window.MouseEvent("pointermove",
         { clientX: to, bubbles: true }));
-      grip(which).dispatchEvent(new window.MouseEvent("pointerup",
+      bar(which).dispatchEvent(new window.MouseEvent("pointerup",
         { clientX: to, bubbles: true }));
     };
 
@@ -249,7 +264,7 @@ module.exports = async (ctx) => {
       body.classList.contains("is-rail-tight"), true);
 
     // The arrow keys move it too, by a step rather than by a pixel.
-    grip("rail").dispatchEvent(new window.KeyboardEvent("keydown",
+    bar("rail").dispatchEvent(new window.KeyboardEvent("keydown",
       { key: "ArrowRight", bubbles: true }));
     check("an arrow key moves the edge as well", wide("rail"), "76px");
 

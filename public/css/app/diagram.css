@@ -220,9 +220,16 @@
   touch-action: none;
 }
 
+/* The separator itself, filling the holder. The two are separate elements so
+   that the chevron is beside the focusable bar rather than inside it. */
+.ve-diagram-grip-bar {
+  position: absolute;
+  inset: 0;
+}
+
 .ve-diagram-grip:hover,
 .ve-diagram-grip.is-dragging,
-.ve-diagram-grip:focus-visible {
+.ve-diagram-grip-bar:focus-visible {
   background: var(--accent-muted);
   outline: none;
 }

@@ -577,7 +577,18 @@ var AppTree = (function () {
 
     if (folderRow && collapsed === forward) {
       event.preventDefault();
-      toggleFolderCollapse(group.dataset.folderKey);
+      const { folderKey } = group.dataset;
+      toggleFolderCollapse(folderKey);
+      /* And put the focus back on the row that was just opened.
+       *
+       * Opening a folder rebuilds the list, which throws away the button the
+       * key arrived at — with a mouse nobody notices, and with a keyboard the
+       * focus lands on the body and the next arrow key does nothing. The row
+       * is found again by its folder rather than kept, because the element
+       * holding it no longer exists.
+       */
+      /** @type {HTMLElement | null} */ (document.querySelector(
+        `[data-folder-key="${folderKey}"] .tree-row-folder .tree-row-btn`))?.focus();
       return;
     }
 

@@ -74,6 +74,31 @@ module.exports = async (ctx) => {
   expandedGroup.querySelector(".tree-row-folder .tree-row-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   check("clicking again collapses it", doc.querySelector(".tree-group").classList.contains("is-collapsed"), true);
 
+  /* The arrow keys open and close a folder too, and the focus survives it.
+   *
+   * Opening one rebuilds the whole list, which throws away the button the key
+   * arrived at. With a mouse nobody notices. With a keyboard the focus falls
+   * to the body and every arrow key after it does nothing — the tree stops
+   * answering, having just answered, which is the worst kind of broken.
+   */
+  {
+    const press = (node, key) =>
+      node.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
+    const rowBtn = () => doc.querySelector(".tree-group .tree-row-folder .tree-row-btn");
+    const focused = () => doc.activeElement?.classList?.contains("tree-row-btn");
+
+    rowBtn().focus();
+    press(doc.activeElement, "ArrowRight");
+    check("the right arrow opens a folder",
+      doc.querySelector(".tree-group").classList.contains("is-collapsed"), false);
+    check("...and leaves the focus on a row, so the next key still lands", focused(), true);
+
+    press(doc.activeElement, "ArrowLeft");
+    check("the left arrow closes it again",
+      doc.querySelector(".tree-group").classList.contains("is-collapsed"), true);
+    check("...and the focus is still somewhere a key can arrive", focused(), true);
+  }
+
   console.log("=== expand-all / collapse-all ===");
   const collapseAll = doc.getElementById("collapseAllBtn");
   collapseAll.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));

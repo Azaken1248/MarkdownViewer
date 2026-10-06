@@ -82,7 +82,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Chromium, for the one suite that is not jsdom — and for drawing PDF
+      # Chromium, for the two suites that are not jsdom — and for drawing PDF
       # exports, which is the same browser. `--only-shell` is the headless
       # build: 266MB rather than 450MB, and it needs no system packages.
       #

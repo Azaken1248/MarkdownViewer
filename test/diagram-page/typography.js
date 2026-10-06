@@ -445,8 +445,10 @@ module.exports = async (ctx) => {
     press(inline, "Escape");
 
     // The grip is moved with the arrow keys, and a grip that also moved the box
-    // it is beside would be a grip nobody could use.
-    const grip = page.document.querySelector(".ve-diagram-grip-side");
+    // it is beside would be a grip nobody could use. The bar inside it is what
+    // takes the focus — the holder is there so the chevron is not inside the
+    // separator — so it is what a key arrives at.
+    const grip = page.document.querySelector(".ve-diagram-grip-side .ve-diagram-grip-bar");
     const body = page.document.querySelector(".ve-diagram-body");
     const wide = body.style.getPropertyValue("--dd-side");
     const stood = whereIs("A");

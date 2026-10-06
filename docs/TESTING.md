@@ -14,11 +14,11 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Thirty-three suites, about two minutes. All but one need no browser and no
-network, and are deterministic on a runner with no egress. The exception is
-`browser`, which drives a real Chromium and is the only suite that does; with
-none installed it says so and passes, because the step that installs it lives
-in the workflow where its absence is visible.
+Thirty-four suites, about three minutes. All but two need no browser and no
+network, and are deterministic on a runner with no egress. The exceptions are
+`browser` and `accessibility`, which drive a real Chromium; with none installed
+they say so and pass, because the step that installs it lives in the workflow
+where its absence is visible.
 
 | Suite | What it covers |
 | --- | --- |
@@ -39,13 +39,14 @@ in the workflow where its absence is visible.
 | `export` | Taking a copy away: the snapshot's stylesheets, the paginator's arithmetic, the zip a .docx is |
 | `worker` | The Python worker: the message protocol, both output caps, and the network it takes away from itself |
 | `browser` | The five things jsdom cannot answer, in a real browser |
+| `accessibility` | axe over six page states in both themes, reduced motion, and the layout at 200% zoom |
 
-### jsdom, and the one that is not
+### jsdom, and the two that are not
 
-Every client suite but one runs in jsdom, which is a JavaScript implementation
+Every client suite but two runs in jsdom, which is a JavaScript implementation
 of the DOM rather than a browser. That is the right trade for almost
 everything: it is fast, it runs every check in one window against one server,
-and thirty-odd suites in two minutes is worth keeping.
+and thirty-odd suites in three minutes is worth keeping.
 
 It cannot do five things, and they are not small ones. It does not lay
 anything out, so `getBoundingClientRect()` answers zeroes and every
@@ -68,6 +69,33 @@ measures the same claims, so the two have to agree.
 Install the browser with `npx playwright install chromium --only-shell`. It is
 266MB, needs no system packages, and is the same one the server uses to draw
 PDF exports.
+
+### What axe says, and what nothing says
+
+`accessibility` is the other suite that needs the browser, for the same
+reason: the rules it checks are about what was painted. It runs axe-core over
+six page states — signed out, the shell, a document, the editor, the diagram
+editor, the error page — in both themes, against a budget of accepted
+violations that is empty and is written down so that it cannot quietly stop
+being empty. Two more checks go beyond what axe decides: that
+`prefers-reduced-motion` actually stops the motion, measured off computed
+styles rather than read out of a stylesheet, and that the layout at 200% zoom
+has nothing sticking out sideways.
+
+It found four defects on its first run. `--fg-subtle` was 3.8:1 behind
+metadata lines in the dark theme and 4.4:1 in the light one; the share and
+error pages declared no language; two of the five buttons in the mobile dock
+were named something that did not contain the word printed on them, which is
+what a voice-control user says; and the diagram editor's panel separator was
+focusable with a focusable button inside it, so a screen reader reading the
+separator would never have offered the button that brings a shut panel back.
+A keyboard pass beside it found a fifth, which axe cannot see: opening a folder
+with the right arrow rebuilt the list and lost the focus.
+
+What it cannot say is most of it: axe decides perhaps a third of WCAG, and
+nothing in this repository has ever been put in front of a screen reader.
+`docs/ACCESSIBILITY.md` is the honest list of what is checked, what is
+accepted, and what is not known.
 
 ### The Python worker, which is both
 

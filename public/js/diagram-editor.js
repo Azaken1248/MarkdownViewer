@@ -4761,12 +4761,25 @@ var DiagramEditor = (function () {
     }
   }
 
+  /* The bar between two regions: drag it to move the edge, or press the chevron
+   * on it to take the region away.
+   *
+   * Two elements inside a holder rather than a button inside the bar. The bar
+   * is a focusable separator — a splitter, which arrow keys resize — and a
+   * focusable widget may not contain another focusable thing: a screen reader
+   * reading the splitter would never offer the button inside it. So the holder
+   * is what the layout sees, the bar fills it, and the chevron is its sibling
+   * sitting on top.
+   */
   function panelGrip(ed, which, side) {
     const grip = document.createElement("div");
     grip.className = `ve-diagram-grip ve-diagram-grip-${which}`;
-    grip.setAttribute("role", "separator");
-    grip.setAttribute("aria-orientation", "vertical");
-    grip.tabIndex = 0;
+
+    const bar = document.createElement("div");
+    bar.className = "ve-diagram-grip-bar";
+    bar.setAttribute("role", "separator");
+    bar.setAttribute("aria-orientation", "vertical");
+    bar.tabIndex = 0;
 
     const shutKey = `${which}Shut`;
     const what = which === "rail" ? "the shapes" : "the panel";
@@ -4778,8 +4791,8 @@ var DiagramEditor = (function () {
 
     const showGrip = () => {
       const shut = ed.panels[shutKey];
-      grip.setAttribute("aria-valuenow", String(ed.panels[which]));
-      grip.setAttribute("aria-label", `How much room ${what} has`);
+      bar.setAttribute("aria-valuenow", String(ed.panels[which]));
+      bar.setAttribute("aria-label", `How much room ${what} has`);
       button.setAttribute("aria-expanded", shut ? "false" : "true");
       button.title = shut ? `Show ${what}` : `Hide ${what}`;
       button.setAttribute("aria-label", button.title);
@@ -4802,19 +4815,17 @@ var DiagramEditor = (function () {
       showGrip();
     };
 
+    // No guard against a press on the chevron: it is no longer inside the bar,
+    // so a pointer that lands on it never reaches this.
     let dragging = null;
-    grip.addEventListener("pointerdown", (event) => {
-      if (/** @type {Element} */ (event.target).closest(".ve-diagram-grip-shut")) {
-        return;
-      }
-
+    bar.addEventListener("pointerdown", (event) => {
       dragging = { x: event.clientX, from: ed.panels[which] };
-      grip.setPointerCapture?.(event.pointerId);
+      bar.setPointerCapture?.(event.pointerId);
       grip.classList.add("is-dragging");
       event.preventDefault();
     });
 
-    grip.addEventListener("pointermove", (event) => {
+    bar.addEventListener("pointermove", (event) => {
       if (!dragging) {
         return;
       }
@@ -4831,14 +4842,14 @@ var DiagramEditor = (function () {
 
       dragging = null;
       grip.classList.remove("is-dragging");
-      grip.releasePointerCapture?.(event.pointerId);
+      bar.releasePointerCapture?.(event.pointerId);
       rememberPanels(ed);
     };
 
-    grip.addEventListener("pointerup", letGo);
-    grip.addEventListener("pointercancel", letGo);
+    bar.addEventListener("pointerup", letGo);
+    bar.addEventListener("pointercancel", letGo);
 
-    grip.addEventListener("keydown", (event) => {
+    bar.addEventListener("keydown", (event) => {
       const step = { ArrowLeft: -20, ArrowRight: 20 }[event.key];
       if (step === undefined) {
         return;
@@ -4849,7 +4860,9 @@ var DiagramEditor = (function () {
       rememberPanels(ed);
     });
 
-    grip.append(button);
+    // The chevron after the bar, so it paints over it and is what a press on
+    // it hits.
+    grip.append(bar, button);
     showGrip();
     return grip;
   }
