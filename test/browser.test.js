@@ -18,30 +18,16 @@
  */
 
 const { createChecker } = require("./helpers/check.js");
-const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server.js");
+const { startTestServer } = require("./helpers/server.js");
+const { launchBrowser, INSTALL_HINT, theFirstSignIn, signIn } = require("./helpers/browser.js");
 
 const { check, finish } = createChecker("BROWSER");
 
 async function main() {
-  let chromium = null;
-  try {
-    ({ chromium } = require("playwright-core"));
-  } catch {
-    console.log("  SKIP  playwright-core is not installed");
-    process.exit(finish());
-  }
-
-  let browser = null;
-  try {
-    browser = await chromium.launch({ headless: true });
-  } catch (error) {
-    /* A browser is a 266MB install and this suite is the only thing that
-     * needs one. Saying so and passing is better than a red build on a
-     * machine that simply has not downloaded it: the step that installs it
-     * lives in the workflow, where its absence is visible.
-     */
-    console.log(`  SKIP  no browser to drive (${String(error.message).split("\n")[0]})`);
-    console.log("        npx playwright install chromium --only-shell");
+  const { browser, reason } = await launchBrowser();
+  if (!browser) {
+    console.log(`  SKIP  ${reason}`);
+    console.log(`        ${INSTALL_HINT}`);
     process.exit(finish());
   }
 
@@ -82,55 +68,6 @@ function watch(page) {
   });
 
   return problems;
-}
-
-/* Signed in the way a person is, through the form.
- *
- * The seeded admin must change its password before it may do anything, which
- * is the app working as intended and is a thing the other suites do over the
- * API. Here it goes through the dialog, so the forced-change path is driven
- * in a browser too.
- */
-/* The seeded admin must change its password before it may do anything, which
- * is the app working as intended. Done once, in the browser, so the forced
- * change is driven here too — and so every sign-in after it is the ordinary
- * one rather than a guess at which password is current.
- */
-async function theFirstSignIn(browser, server) {
-  const page = await browser.newPage();
-
-  await page.goto(`${server.origin}/`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#loginUsername", { timeout: 20000 });
-  await page.fill("#loginUsername", SEED_USERNAME);
-  await page.fill("#loginPassword", SEED_PASSWORD);
-  await page.click("#loginSubmitBtn");
-
-  await page.waitForSelector("#currentPassword", { timeout: 20000 });
-  await page.fill("#currentPassword", SEED_PASSWORD);
-  await page.fill("#newPassword", TEST_PASSWORD);
-  await page.fill("#confirmPassword", TEST_PASSWORD);
-  await page.click("#passwordSubmitBtn");
-  await waitForTheLibrary(page);
-  await page.close();
-}
-
-async function signIn(page, origin) {
-  await page.goto(`${origin}/`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#loginUsername", { timeout: 20000 });
-  await page.fill("#loginUsername", SEED_USERNAME);
-  await page.fill("#loginPassword", TEST_PASSWORD);
-  await page.click("#loginSubmitBtn");
-  await waitForTheLibrary(page);
-}
-
-// Signed in and the tree filled, rather than merely signed in: an empty tree
-// is what a refused password looks like from the outside.
-function waitForTheLibrary(page) {
-  return page.waitForFunction(
-    () => document.querySelectorAll("#docList .tree-row-folder, #docList .tree-row-doc").length > 1,
-    null,
-    { timeout: 25000 }
-  );
 }
 
 async function runChecks(browser, server) {

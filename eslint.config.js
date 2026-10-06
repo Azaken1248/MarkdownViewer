@@ -434,13 +434,13 @@ module.exports = [
     }
   },
   {
-    /* The browser suite drives a page and runs code inside it.
+    /* The suites that drive a page and run code inside it.
      *
-     * The file is Node — it starts a server and a browser — but the bodies
+     * The files are Node — they start a server and a browser — but the bodies
      * handed to `page.evaluate` run in the page, where `window` and
      * `document` are the whole point. They are linted as what they are.
      */
-    files: ["test/browser.test.js"],
+    files: ["test/browser.test.js", "test/helpers/browser.js"],
     languageOptions: {
       globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS }
     }
