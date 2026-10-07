@@ -140,7 +140,16 @@ var AppSession = (function () {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          /* Usually there is no token here and none is wanted: signing in
+           * from a signed-out page is not a request the CSRF guard examines,
+           * because there is no session to ride. The exception is a sign-out
+           * that never reached the server — the cookie is still live, so the
+           * guard does examine this, and signOut keeps the token for it.
+           */
+          ...(state.csrfToken ? { "X-CSRF-Token": state.csrfToken } : {})
+        },
         body: JSON.stringify({ username, password })
       });
 
@@ -172,13 +181,32 @@ var AppSession = (function () {
   }
 
   async function signOut() {
+    let told = true;
     try {
       await requestJson("/api/auth/logout", { method: "POST" });
     } catch {
       // Even if the call fails, drop local state — the cookie may already be gone.
+      told = false;
     }
 
-    applySession({ authenticated: false, user: null, permissions: [], csrfToken: null });
+    /* The token outlives the session when the server was never told.
+     *
+     * A logout that did not arrive leaves the cookie alive, so the next
+     * request still looks authenticated to the server and the CSRF guard
+     * demands a token for it — including the request that signs in again. The
+     * page had just thrown that token away, so signing in was refused with
+     * "Session token missing or stale", and the only way out was a reload.
+     *
+     * Kept, so the sign-in below can echo it. There is nothing new exposed:
+     * it is the token this page was already holding, for a session that is
+     * still the one the browser is sending.
+     */
+    applySession({
+      authenticated: false,
+      user: null,
+      permissions: [],
+      csrfToken: told ? null : state.csrfToken
+    });
     state.docs = [];
     state.filteredDocs = [];
     state.activeFile = null;

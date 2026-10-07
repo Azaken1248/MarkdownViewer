@@ -194,14 +194,29 @@ module.exports = async (ctx) => {
     /* And what the server thinks is still the truth.
      *
      * The request never arrived, so the session is alive and the cookie is
-     * still being sent. Asking again finds it — which is the honest state of
-     * things, and the reason the local drop is a guess rather than a fact.
+     * still being sent. Asked directly — rather than through the page, which
+     * would change what the next check is about — the server still has it.
      */
-    await run("window.__t.refreshSession()");
-    check("asking the server finds the session it was never told to end",
-      [state().authenticated, state().user?.username], [true, FRESH_USER]);
+    const stillThere = await server.request("GET", "/api/session", undefined,
+      { Cookie: cookieHeader() });
+    check("the server still has the session it was never told to end",
+      stillThere.body.authenticated, true);
 
-    run("window.__t.closeLoginModal()");
+    /* Which is why signing in again has to work from here.
+     *
+     * The live cookie makes the next request an authenticated one as far as
+     * the server is concerned, so the CSRF guard examines it — including the
+     * sign-in. The page had just thrown that token away with the rest of the
+     * session, so this was refused with "Session token missing or stale.
+     * Reload and try again", and a reload was the only way back in. signOut
+     * keeps the token when it could not tell the server, and submitLogin
+     * sends it when it has one.
+     */
+    check("signing in again works without a reload",
+      await signInAs(FRESH_USER, FRESH_CHOSEN), true);
+    check("...and it is a session, not the old one left lying around",
+      [state().authenticated, state().user.username], [true, FRESH_USER]);
+
     await run("window.__t.signOut()");
     check("(and a sign-out that reaches the server ends it)", state().authenticated, false);
   }
