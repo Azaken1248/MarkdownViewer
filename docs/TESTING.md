@@ -110,6 +110,14 @@ That reaches the protocol, both output caps, the error paths, the queue and the
 network guard, with no browser and no twelve megabyte download — the same
 technique `headers` uses to load `dom-html.js`.
 
+It is the one file in this repository at **100%** — every line, every branch,
+every function. That is worth doing here and is not worth doing everywhere: it
+is 291 lines, it is a pure function of the messages it is sent, and it is the
+only place this app runs code somebody else wrote. Getting the last four per
+cent meant naming four real things rather than four lines — a URL the parser
+will not read, a value whose `__repr__` raises, trouble fetching a wheel, and
+a failure in the cleanup that must not stall every cell after it.
+
 What it cannot say is whether Python runs. That is one check in `browser`,
 where a real Worker loads the real thing from the CDN and prints: "the fake
 agrees with the protocol" and "a cell prints" are different claims, and only
@@ -193,7 +201,8 @@ were worth going after and which are thin on purpose.
 `pyodide-worker.js` was the exception and is no longer: it ran in a Web Worker
 that jsdom does not implement, so nothing had executed a line of the one file
 that runs code somebody else wrote. The `worker` suite executes it in a `vm`
-instead, which is where its numbers now come from.
+instead, and it is now the one file here at 100% of lines, branches and
+functions.
 
 ### Which parts of the client are thin on purpose
 
@@ -242,11 +251,23 @@ from not having looked. `public/js/app/` is at 79%, and there is still no
 threshold in CI and should not be one.
 
 Two things make the client's numbers mean something. `test/app-source.js`
-evaluates each script in jsdom with a `//# sourceURL` naming the file, so V8
-attributes what ran to `public/js/…` rather than to an anonymous eval. And the
-`all` option lists every file under `lib/`, `public/js/` and `server.js`
-whether or not anything loaded it, so a module nothing exercises shows as 0%
-instead of not showing.
+evaluates each script with a `//# sourceURL` naming the file, so V8 attributes
+what ran to `public/js/…` rather than to an anonymous eval. And the `all`
+option lists every file under `lib/`, `public/js/` and `server.js` whether or
+not anything loaded it, so a module nothing exercises shows as 0% instead of
+not showing.
+
+The first of those is easy to leave out and expensive to leave out. Four
+suites loaded a client file into a `vm` or a window of their own rather than
+through `loadScript`, and `vm`'s `filename` option is not a URL: V8 recorded
+what ran under an empty one and c8 dropped all of it. The loss was not
+partial. `annotate/geometry.js` read as 40% with every one of its fifty
+functions never called, for a suite that exists to drive it; `export/pdf.js`
+read as 34%, `export/snapshot.js` as 30%. Naming the files — `runAsScript` in
+`test/app-source.js`, beside `loadScript` — moved the repository from 82.7% to
+85.2% without a single new check, because the tests were already there. A
+number that is wrong in this direction is worse than no number: it points
+work at the places that are already covered.
 
 ---
 

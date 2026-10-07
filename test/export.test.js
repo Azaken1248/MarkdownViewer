@@ -12,9 +12,9 @@
 
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 const { JSDOM } = require("jsdom");
 const { createChecker } = require("./helpers/check.js");
+const { runAsScript } = require("./app-source.js");
 const { CSP_DIRECTIVES } = require("../lib/http/headers");
 
 const { check, finish } = createChecker("EXPORT");
@@ -24,7 +24,7 @@ const ROOT = path.join(__dirname, "..", "public", "js");
 // runs them. Neither touches the document until it is called.
 global.window = /** @type {any} */ (globalThis);
 for (const file of ["export/paginate.js", "export/snapshot.js", "export/pdf.js", "export/formats.js"]) {
-  vm.runInThisContext(fs.readFileSync(path.join(ROOT, file), "utf8"), { filename: file });
+  runAsScript(path.join(ROOT, file));
 }
 
 const Snapshot = globalThis.ExportSnapshot;

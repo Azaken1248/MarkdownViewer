@@ -131,6 +131,7 @@ function carried(headers) {
      * why on the line above.
      */
     const vm = require("vm");
+const { pathToFileURL } = require("url");
 
     const config = fs.readFileSync(path.join(__dirname, "..", "eslint.config.js"), "utf8");
     check("the rule is on for the browser's code",
@@ -140,10 +141,14 @@ function carried(headers) {
     check("...with the html tag as the one way past it",
       /taggedTemplates: \["html"\]/.test(config), true);
 
-    // The helper itself, loaded the way the page loads it.
+    // The helper itself, loaded the way the page loads it — named as it goes,
+    // so what this exercises is counted against the file rather than dropped
+    // as having run in a script with no URL.
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(fs.readFileSync(path.join(publicDir, "js", "dom-html.js"), "utf8"), sandbox);
+    const where = path.join(publicDir, "js", "dom-html.js");
+    vm.runInContext(`${fs.readFileSync(where, "utf8")}\n//# sourceURL=${pathToFileURL(where).href}`,
+      sandbox, { filename: where });
     const { html, trusted, escapeHtml } = sandbox.DomHtml;
 
     const attack = '"><script>alert(1)</script>';

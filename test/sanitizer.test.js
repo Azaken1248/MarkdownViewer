@@ -23,6 +23,7 @@ const { JSDOM } = require("jsdom");
 const createDOMPurify = require("dompurify");
 const { cdnPins } = require("../tools/cdn-pins.js");
 const { createChecker } = require("./helpers/check.js");
+const { loadScript } = require("./app-source.js");
 
 const { check, finish } = createChecker("SANITIZER");
 const ROOT = path.join(__dirname, "..");
@@ -47,7 +48,7 @@ const { window } = new JSDOM("", { url: "https://example.test/", runScripts: "ou
 // lazy.js configures marked as it loads. What is wanted out of it is the
 // sanitizer options, so marked only has to be there.
 window.marked = { setOptions() {}, parse: (text) => String(text) };
-window.eval(fs.readFileSync(path.join(ROOT, "public", "js", "md", "lazy.js"), "utf8"));
+loadScript(window, path.join(ROOT, "public", "js", "md", "lazy.js"));
 const OPTIONS = window.MdLazy.MARKDOWN_SANITIZE_OPTIONS;
 
 check("the options came from the app, not from here",

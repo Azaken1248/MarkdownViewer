@@ -12,19 +12,19 @@
  * checked in the DOM suite.
  */
 
-const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 const { createChecker } = require("./helpers/check.js");
+const { runAsScript } = require("./app-source.js");
 
 const { check, finish } = createChecker("ANNOTATE");
 const ROOT = path.join(__dirname, "..", "public", "js");
 
 // Plain scripts whose top-level `var` is the namespace, run the way a page
-// runs them rather than required.
+// runs them rather than required. runAsScript names the file as it goes, so
+// what this suite exercises is counted against it.
 global.window = /** @type {any} */ (globalThis);
 for (const file of ["annotate/geometry.js", "annotate/store.js"]) {
-  vm.runInThisContext(fs.readFileSync(path.join(ROOT, file), "utf8"), { filename: file });
+  runAsScript(path.join(ROOT, file));
 }
 
 const G = globalThis.AnnotateGeometry;

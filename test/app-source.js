@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 const { pathToFileURL } = require("url");
 
 const DEFAULT_PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -125,12 +126,29 @@ function styleSource(publicDir = DEFAULT_PUBLIC_DIR) {
  * what they do.
  */
 function loadScript(window, file) {
-  const source = fs.readFileSync(file, "utf8");
-  window.eval(`${source}\n//# sourceURL=${pathToFileURL(file).href}`);
+  window.eval(sourceOf(file));
+}
+
+/* The same, for a suite with no window: run it as a script in this process.
+ *
+ * Several suites load a client file into the Node global scope instead of a
+ * jsdom one, because what they check is pure — the ink geometry, the
+ * paginator's arithmetic, the block round trip — and a document would only be
+ * scenery. They need the sourceURL for exactly the reason above, and without
+ * it the loss is not partial: c8 attributed nothing inside the file, so every
+ * one of the fifty functions in annotate/geometry.js read as never called and
+ * the file as forty per cent, for a suite that drives it end to end.
+ */
+function runAsScript(file) {
+  vm.runInThisContext(sourceOf(file), { filename: file });
+}
+
+function sourceOf(file) {
+  return `${fs.readFileSync(file, "utf8")}\n//# sourceURL=${pathToFileURL(file).href}`;
 }
 
 module.exports = {
-  loadScript,
+  loadScript, runAsScript,
   pageScriptPaths, sharePageScriptPaths,
   clientScriptPaths, appScriptPaths, appSource,
   coreScriptPaths, coreSource, modelScriptPaths, modelSource,

@@ -11,11 +11,10 @@
 
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "..", "public");
-const { modelScriptPaths, drawScriptPaths, styleSource } = require("./app-source.js");
+const { modelScriptPaths, drawScriptPaths, styleSource, runAsScript } = require("./app-source.js");
 const { createChecker } = require("./helpers/check.js");
 
 // The modules are plain scripts whose top-level `var` is the namespace, the
@@ -23,7 +22,7 @@ const { createChecker } = require("./helpers/check.js");
 // and keep that var to itself, so they are run as the scripts they are, in
 // this process's global scope.
 global.window = /** @type {any} */ (globalThis);
-const loadScript = (file) => vm.runInThisContext(fs.readFileSync(file, "utf8"), { filename: file });
+const loadScript = runAsScript;
 loadScript(path.join(ROOT, "js", "visual-editor.js"));
 const VE = globalThis.VisualEditor;
 
