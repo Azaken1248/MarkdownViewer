@@ -486,11 +486,15 @@ async function run(server) {
    */
   await waitUntil(() => doc.querySelectorAll(".tree-row-doc").length > 0);
 
-  /* The checks themselves, in six files beside this one.
+  /* The checks themselves, in nine files beside this one.
    *
    * Order matters: each leaves the app somewhere the next one starts from, the
    * same way a person using it would. What they share is the context built
    * above, handed over rather than reached for.
+   *
+   * session.js is last because it signs out and signs in as somebody else.
+   * It puts the seeded admin back before it finishes, but anything after it
+   * would be running against whatever the last check happened to leave.
    */
   const ctx = {
     check, waitUntil, get, server, window, doc, ROOT, fs, path,
@@ -504,6 +508,9 @@ async function run(server) {
   await require("./dom/editing.js")(ctx);
   await require("./dom/links-and-roles.js")(ctx);
   await require("./dom/share-page.js")(ctx);
+  await require("./dom/folders.js")(ctx);
+  await require("./dom/accounts.js")(ctx);
+  await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");
   const realErrors = consoleErrors.filter((e) => !/Could not parse CSS|Not implemented/.test(e));

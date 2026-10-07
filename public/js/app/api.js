@@ -67,6 +67,21 @@ var AppApi = (function () {
     return payload;
   }
 
+  /* The status travels with the message.
+   *
+   * A caller that wants to tell "this is gone" from "this is broken" had no
+   * way to: every refusal arrived as a bare Error carrying whatever sentence
+   * the server wrote. Background work in particular needs the difference — a
+   * document deleted while its content was being fetched is not a failure
+   * worth logging, a session that ended halfway through reading the library is
+   * not forty failures, and a 500 is a failure.
+   */
+  function refusal(message, status) {
+    const error = /** @type {Error & { status?: number }} */ (new Error(message));
+    error.status = status;
+    return error;
+  }
+
   /* What a refusal means, before any caller has to think about it.
    *
    * Two of these are about the session rather than about the request, and the
@@ -77,27 +92,16 @@ var AppApi = (function () {
     if (response.status === 401) {
       // The session expired, was revoked, or never existed.
       sessionSignals.ended();
-      throw new Error(payload?.error || "Your session has ended. Sign in again.");
+      throw refusal(payload?.error || "Your session has ended. Sign in again.", 401);
     }
 
     if (response.status === 403 && payload?.code === "password_change_required") {
       sessionSignals.passwordChangeRequired();
-      throw new Error(payload.error);
+      throw refusal(payload.error, 403);
     }
 
     if (!response.ok) {
-      /* The status travels with the message.
-       *
-       * A caller that wants to tell "this is gone" from "this is broken" had
-       * no way to: every refusal arrived as a bare Error carrying whatever
-       * sentence the server wrote. Background work in particular needs the
-       * difference — a document deleted while its content was being fetched
-       * is not a failure worth logging, and a 500 is.
-       */
-      const error = /** @type {Error & { status?: number }} */ (
-        new Error(payload?.error || `Request failed (${response.status})`));
-      error.status = response.status;
-      throw error;
+      throw refusal(payload?.error || `Request failed (${response.status})`, response.status);
     }
   }
 

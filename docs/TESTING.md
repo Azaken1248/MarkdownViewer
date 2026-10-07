@@ -184,15 +184,62 @@ written because it named them:
 | `public/js/share.js` — the entire client a visitor following a share link runs, evaluated by no suite at all | `test/dom/share-page.js` |
 
 That moved `lib/routes/recycle.js` from 55% to 88%, the store from 83% to 92%,
-and the share client from nothing to 87%. What is left low is mostly the app's
-own interface modules, which the `dom` suite reaches only as far as it drives
-them. The security-adjacent code — guards, sessions, the limiter, headers, the
-CSRF check — is in the nineties.
+and the share client from nothing to 87%. The security-adjacent code — guards,
+sessions, the limiter, headers, the CSRF check — is in the nineties. What is
+left low is mostly the app's own interface modules, which the `dom` suite
+reaches only as far as it drives them; the section below says which of those
+were worth going after and which are thin on purpose.
 
 `pyodide-worker.js` was the exception and is no longer: it ran in a Web Worker
 that jsdom does not implement, so nothing had executed a line of the one file
 that runs code somebody else wrote. The `worker` suite executes it in a `vm`
 instead, which is where its numbers now come from.
+
+### Which parts of the client are thin on purpose
+
+The other thing the map named was the interface: `public/js/app/` at 73%, three
+thousand lines nothing reached. That number is not a defect on its own, and the
+honest reading of it took a while to arrive at — the `dom` suite drives the
+paths a person takes, so what it misses is mostly the branches around them: the
+confirmation that was declined, the name that collided, the request the server
+refused, the session that ended halfway through.
+
+So the three worth writing were picked by consequence rather than by
+percentage:
+
+| Area | Why it, and not the lowest number | Now |
+| --- | --- | --- |
+| `app/users.js` | It creates accounts, changes roles, disables people and resets passwords. The `auth` suite covers what the server allows; nothing covered what an administrator is *shown*, or what the table does when the server says no. `test/dom/accounts.js` | 19% → 97% |
+| `app/session.js` | Sign-in, sign-out, the forced change, expiry. The unreached half was the failure half, and a session ending mid-edit is a thing that happens. `test/dom/session.js` | 41% → 96% |
+| `app/folder-ops.js`, `app/folder-modal.js` | Moving and deleting folders is the operation that can lose the most work at once, and the dialog is the way in that the tree checks do not use. `test/dom/folders.js` | 28% → 95% and 94% |
+
+Writing them found a defect on exactly the kind of path they were written for.
+A 401 and a password-change 403 were thrown without the status every other
+refusal carries, so the background hydration that warms the offline search —
+which already skips a 404, because a document deleted while it was being read
+is not a fault — could not do the same for a session ending. One sign-out
+mid-hydrate wrote "Sign in to continue." to the console once per document still
+in the queue, which is how a real error gets buried.
+
+The rest is left where it is, deliberately, and this is the list so the number
+is a decision rather than an oversight:
+
+- **`app/jump.js`** (27%) steps between matches inside the open document and
+  across into the next one that matches. The finding and marking is reached by
+  the search checks; the stepping is geometry against a rendered document,
+  which is the thing jsdom is worst at. It belongs in `browser` or in nothing.
+- **`app/doc-actions.js`** (25%) and **`app/file-actions.js`** (32%) are the
+  two halves of delete and restore — by open document and by name. What they
+  ask of the server is covered thoroughly by `recycle`; what is unreached is
+  which view you are left looking at afterwards.
+- **`app/notebook.js`** (31%) is the glue between a Run button and the output
+  under the cell. The worker it drives is covered by `worker` and run for real
+  once in `browser`; the glue is reached only as far as rendering.
+
+None of that is a promise to leave them alone. It is a statement that the
+numbers were looked at and the answer was "not yet", which is a different thing
+from not having looked. `public/js/app/` is at 79%, and there is still no
+threshold in CI and should not be one.
 
 Two things make the client's numbers mean something. `test/app-source.js`
 evaluates each script in jsdom with a `//# sourceURL` naming the file, so V8

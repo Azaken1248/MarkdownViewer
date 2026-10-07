@@ -264,15 +264,23 @@ var AppDocs = (function () {
    */
   const HYDRATE_CONCURRENCY = 3;
 
-  /* A document that went away while this was fetching it.
+  /* What went away while this was fetching it, which is not a fault.
    *
    * Hydration walks the whole library in the background to warm the offline
-   * search, and a document deleted between the listing and the fetch answers
-   * 404. That is the ordinary course of somebody using the app while it runs,
-   * not a fault: the search index simply will not have a document that no
-   * longer exists. Anything else is still worth saying out loud.
+   * search, so it is the thing most likely to be halfway through when
+   * something changes underneath it. A document deleted between the listing
+   * and the fetch answers 404; a session that expired, was revoked, or was
+   * signed out in another tab answers 401 for every document still in the
+   * queue. Neither is the search index's problem — the first simply will not
+   * be indexed, and the second has already raised the signal that puts the
+   * sign-in dialog on screen.
+   *
+   * The 401 is in here because of what it looked like without it: one sign-out
+   * mid-hydrate wrote "Sign in to continue." to the console once per document
+   * still in the queue, which is how a real error gets buried. Anything else
+   * is still worth saying out loud.
    */
-  const wasDeletedMeanwhile = (error) => error?.status === 404;
+  const raceRatherThanFault = (error) => error?.status === 404 || error?.status === 401;
 
   async function hydrateSearchContent() {
     const queue = state.docs.map((doc) => doc.file);
@@ -282,7 +290,7 @@ var AppDocs = (function () {
         try {
           await loadDocContent(file);
         } catch (error) {
-          if (!wasDeletedMeanwhile(error)) {
+          if (!raceRatherThanFault(error)) {
             console.error(error);
           }
         }
@@ -298,8 +306,9 @@ var AppDocs = (function () {
         try {
           await loadDeletedDocContent(doc.file);
         } catch (error) {
-          // Same race, in the bin: it can be emptied while this is reading it.
-          if (!wasDeletedMeanwhile(error)) {
+          // Same races, in the bin: it can be emptied while this is reading
+          // it, and the session can end under this one too.
+          if (!raceRatherThanFault(error)) {
             console.error(error);
           }
         }
