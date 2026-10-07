@@ -82,6 +82,15 @@ function fakePyodide(behaviour = {}) {
     setStdout(handler) {
       if (!handler.batched) {
         log.cleared += 1;
+        // The worker clears the sinks in a `finally`, which is the one place
+        // a throw escapes execute() rather than being reported by it.
+        if (behaviour.clearingThrows) {
+          throw new Error("the sink would not let go");
+        }
+
+        if (behaviour.clearingThrowsBare) {
+          throw "the sink threw a string";
+        }
       }
 
       sinks.out = handler.batched;
@@ -90,6 +99,13 @@ function fakePyodide(behaviour = {}) {
       sinks.err = handler.batched;
     },
     async loadPackagesFromImports(code, options) {
+      // Pyodide reports progress and trouble through these two while it
+      // fetches wheels; the worker decides what each is worth showing.
+      options?.messageCallback?.("Loading numpy");
+      if (behaviour.wheelTrouble) {
+        options?.errorCallback?.(behaviour.wheelTrouble);
+      }
+
       if (behaviour.packages) {
         await behaviour.packages(options);
       }
@@ -197,6 +213,22 @@ async function theProtocol() {
   await run(quiet, { code: "x = 1" });
   check("a cell that evaluates to nothing has no result to show",
     quiet.of("result")[0].result, null);
+
+  /* And the two streams are kept apart.
+   *
+   * A warning and a print are different things to a reader, and the notebook
+   * shows them differently; a worker that merged them would lose that before
+   * the page ever saw it.
+   */
+  const noisy = loadWorker({
+    behaviour: { prints: ["the answer"], warns: ["DeprecationWarning: old thing"] }
+  });
+
+  await run(noisy, { code: "warn(); print('the answer')" });
+  check("what a cell prints comes back on stdout",
+    noisy.of("result")[0].stdout, ["the answer"]);
+  check("...and what it warns about comes back on stderr, separately",
+    noisy.of("result")[0].stderr, ["DeprecationWarning: old thing"]);
 }
 
 /* --- The caps ------------------------------------------------------------ */
@@ -278,6 +310,89 @@ async function theFailures() {
     noPackage.of("result")[0].ok, true);
   check("...and is mentioned on stderr",
     noPackage.of("result")[0].stderr.some((line) => line.includes("no such wheel")), true);
+
+  /* A value that will not describe itself still comes back.
+   *
+   * The result is `repr(value)`, the way a REPL shows it, and repr is Python
+   * that a class can define and get wrong. Falling back to str() means a cell
+   * whose last expression has a broken __repr__ shows something rather than
+   * failing as though the cell itself had raised.
+   */
+  const badRepr = loadWorker({
+    behaviour: {
+      returns: "the value itself",
+      repr: () => {
+        throw new Error("__repr__ raised");
+      }
+    }
+  });
+
+  await run(badRepr, { code: "Awkward()" });
+  check("a value whose repr raises is still a result", badRepr.of("result")[0].ok, true);
+  check("...shown as str() instead", badRepr.of("result")[0].result, "the value itself");
+
+  /* And a failure that escapes execute() does not stall every cell after it.
+   *
+   * execute() reports its own failures, so the only way it rejects is from
+   * the `finally` that uninstalls the output sinks. The queue is one chained
+   * promise: a rejection there with nobody to catch it would leave every
+   * later run attached to a promise that never settles, and the notebook
+   * would simply stop answering.
+   */
+  const stuck = loadWorker({ behaviour: { clearingThrows: true } });
+  await run(stuck, { id: "first" });
+
+  // The cell's own answer went out before the cleanup ran, so what the catch
+  // adds is a second message rather than the only one — a backstop, not a
+  // contradiction.
+  check("the cell still answered", stuck.of("result")[0].ok, true);
+  check("...and the cleanup failure is said out loud rather than swallowed",
+    stuck.of("result").some((one) => String(one.error || "").includes("would not let go")), true);
+
+  await run(stuck, { id: "second" });
+  check("...and the queue still takes the next cell, rather than stalling on it",
+    stuck.of("result").some((one) => one.id === "second"), true);
+
+  /* Trouble fetching a wheel belongs on the cell's stderr.
+   *
+   * Pyodide reports it through a callback rather than by raising, so without
+   * somewhere to put it the only sign would be a traceback from the import
+   * two lines later with nothing explaining why.
+   */
+  const wheel = loadWorker({ behaviour: { wheelTrouble: "could not build wheel for scipy" } });
+  await run(wheel, { code: "import scipy" });
+  check("what the package loader says goes to the cell's stderr",
+    wheel.of("result")[0].stderr.some((line) => line.includes("could not build wheel")), true);
+
+  /* And what is thrown is not always an Error.
+   *
+   * `raise` in Python arrives as one, but anything inside this worker that
+   * throws a bare string would read as "undefined" if the message were taken
+   * without a fallback — which is the least useful thing an error can say.
+   */
+  const bareString = loadWorker({ behaviour: { raises: "not an Error at all" } });
+  await run(bareString);
+  check("a thrown string is reported as itself",
+    bareString.of("result")[0].error, "not an Error at all");
+
+  // The same fallback on the queue's own backstop.
+  const bareInCleanup = loadWorker({ behaviour: { clearingThrowsBare: true } });
+  await run(bareInCleanup);
+  check("...and on the one the queue keeps",
+    bareInCleanup.of("result").some((one) => one.error === "the sink threw a string"), true);
+
+  /* A PyProxy is freed; a plain value has nothing to free.
+   *
+   * Python objects crossing into JavaScript hold WASM memory that garbage
+   * collection will not reclaim, so the worker destroys what it is handed —
+   * and must not fall over on a number, which has no destroy to call.
+   */
+  let freed = 0;
+  const proxy = loadWorker({
+    behaviour: { returns: { destroy: () => { freed += 1; } } }
+  });
+  await run(proxy, { code: "numpy.zeros(3)" });
+  check("a value that holds WASM memory is let go of", freed, 1);
 }
 
 /* --- One at a time, and starting over ------------------------------------ */
@@ -334,6 +449,30 @@ async function theQueueAndReset() {
   check("...naming what went wrong",
     coldStart.of("status").at(-1).error.includes("offline"), true);
 
+  /* A warm-up that fails with something other than an Error.
+   *
+   * The CDN script can reject with whatever it likes, and the status line is
+   * the only place this is ever reported — "undefined" there would mean a
+   * notebook that simply will not start and says nothing about why.
+   */
+  const coldBare = loadWorker({
+    loader: async () => {
+      throw "the CDN said no";
+    }
+  });
+
+  coldBare.send({ type: "preload" });
+  await coldBare.settle();
+  check("...even when what was thrown is not an Error",
+    coldBare.of("status").at(-1).error, "the CDN said no");
+
+  // A message with nothing in it at all, which is what a `postMessage()` with
+  // no argument looks like from in here.
+  const empty = loadWorker({});
+  empty.send(undefined);
+  await empty.settle();
+  check("a message with no body is ignored rather than thrown on", empty.posted, []);
+
   const ignored = loadWorker({});
   ignored.send({ type: "nonsense" });
   await ignored.settle();
@@ -387,6 +526,25 @@ async function theNetworkGuard() {
       ?.includes("Network access"), true);
   check("...and a URL that is not one",
     (await refused(() => worker.self.fetch("::::")))?.includes("Network access"), true);
+
+  /* Including one the URL parser will not even look at.
+   *
+   * "::::" resolves — it is a relative path, so it becomes a URL on this
+   * origin and is refused by the origin check. A bracket with no address in
+   * it throws out of `new URL` instead, which is the other way through this
+   * function and is the one that has to refuse rather than let the exception
+   * escape into Python as something that is not a refusal.
+   */
+  check("...and one the parser refuses to read at all",
+    (await refused(() => worker.self.fetch("http://[")))?.includes("Network access"), true);
+
+  // fetch takes a Request as readily as a string, and a guard that only read
+  // strings would be a guard with a door beside it.
+  check("...and a Request object rather than a string",
+    (await refused(() => worker.self.fetch({ url: "https://elsewhere.test/" })))
+      ?.includes("Network access"), true);
+  check("...and nothing at all, which resolves to this origin",
+    (await refused(() => worker.self.fetch(null)))?.includes("Network access"), true);
 
   // Pyodide fetches wheels from the CDN on demand, so that one origin stays
   // open or `import numpy` stops working.
