@@ -66,7 +66,7 @@ function installNetworkGuard() {
   );
 
   self.fetch = (input, init) => {
-    let href = "";
+    let href;
     try {
       const asked = typeof input === "string" ? input : (/** @type {Request} */ (input)?.url || String(input || ""));
       href = new URL(asked, self.location.href).href;

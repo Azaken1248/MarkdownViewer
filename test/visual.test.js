@@ -66,7 +66,7 @@ function roundTrips(markdown) {
 // of; this covers what is there.
 function walkDocuments(dir) {
   let out = [];
-  let entries = [];
+  let entries;
 
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });

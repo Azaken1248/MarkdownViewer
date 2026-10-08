@@ -36,7 +36,8 @@ var AppFolderCollapse = (function () {
       const raw = window.localStorage.getItem(COLLAPSED_FOLDERS_STORAGE_KEY);
       stored = raw ? JSON.parse(raw) : null;
     } catch {
-      stored = null;
+      // Somewhere that will not read it back, or a value that is no longer
+      // JSON. Either way there is nothing remembered.
     }
 
     if (Array.isArray(stored)) {

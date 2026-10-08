@@ -58,7 +58,7 @@ var AnnotateStore = (function () {
       return [];
     }
 
-    let raw = null;
+    let raw;
     try {
       raw = window.localStorage.getItem(keyFor(token));
     } catch {
@@ -151,7 +151,7 @@ var AnnotateStore = (function () {
   const isColour = (value) => typeof value === "string" && (/^#[0-9a-f]{6}$/i).test(value);
 
   function loadPalette() {
-    let raw = null;
+    let raw;
     try {
       raw = window.localStorage.getItem(PALETTE_KEY);
     } catch {

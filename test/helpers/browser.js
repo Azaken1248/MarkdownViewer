@@ -22,7 +22,7 @@ const { SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./server.js");
  * workflow, where its absence is visible.
  */
 async function launchBrowser() {
-  let chromium = null;
+  let chromium;
   try {
     ({ chromium } = require("playwright-core"));
   } catch {

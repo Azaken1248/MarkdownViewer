@@ -87,7 +87,7 @@
     try {
       payload = await response.json();
     } catch {
-      payload = null;
+      // A body that is not JSON is no payload.
     }
 
     if (!response.ok) {
@@ -115,7 +115,7 @@
       return null;
     }
 
-    let file = "";
+    let file;
     try {
       file = decodeURIComponent(match[2]);
     } catch {

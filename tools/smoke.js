@@ -106,7 +106,7 @@ async function smoke(origin) {
   try {
     healthy = JSON.parse(health.body).status === "ok";
   } catch {
-    healthy = false;
+    // A health check that will not parse is a health check that failed.
   }
 
   results.push({
@@ -167,7 +167,7 @@ async function smoke(origin) {
   try {
     json = JSON.parse(api.body);
   } catch {
-    json = null;
+    // Not JSON, so there is nothing to look inside.
   }
 
   results.push({

@@ -133,7 +133,7 @@
       return;
     }
 
-    let payload = null;
+    let payload;
     try {
       const response = await fetch(`/api/share/${encodeURIComponent(token)}`, { cache: "no-store" });
       if (!response.ok) {

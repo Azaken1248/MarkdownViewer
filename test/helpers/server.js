@@ -89,7 +89,7 @@ function request(origin, method, pathname, body, headers = {}) {
           try {
             parsed = JSON.parse(data);
           } catch {
-            parsed = null;
+            // Not JSON. The raw body goes back alongside this.
           }
           resolve({ status: res.statusCode, body: parsed, raw: data, headers: res.headers });
         });

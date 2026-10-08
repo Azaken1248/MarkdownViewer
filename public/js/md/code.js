@@ -120,7 +120,7 @@ var MdCode = (function () {
       area.select();
       copied = document.execCommand("copy");
     } catch {
-      copied = false;
+      // Refused, or not implemented. Either way nothing was copied.
     }
 
     area.remove();
@@ -441,7 +441,7 @@ var MdCode = (function () {
       return false;
     }
 
-    let markup = "";
+    let markup;
     try {
       markup = window.hljs.highlight(source, { language: live.language, ignoreIllegals: true }).value;
     } catch (error) {

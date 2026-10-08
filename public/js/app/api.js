@@ -60,7 +60,8 @@ var AppApi = (function () {
     try {
       payload = await response.json();
     } catch {
-      payload = null;
+      // A body that is not JSON — an HTML error page from a proxy, or
+      // nothing at all — is no payload, which is what null means here.
     }
 
     refuseBadAnswer(response, payload);

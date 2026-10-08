@@ -52,7 +52,9 @@ var DmDeclarations = (function () {
         continue;
       }
 
-      let name = "";
+      // The loop always names it before it stops, so there is no default for
+      // the declaration to carry.
+      let name;
       for (let n = 1; ; n += 1) {
         name = `group${n}`;
         if (!taken.has(name)) {

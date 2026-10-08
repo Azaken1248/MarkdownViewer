@@ -86,7 +86,7 @@ var MdNotebook = (function () {
         try {
           formattedText = JSON.stringify(JSON.parse(text), null, 2);
         } catch {
-          formattedText = text;
+          // Not JSON after all. Shown as it was written.
         }
 
         return `<pre class="notebook-output-json">${escapeHtml(formattedText)}</pre>`;

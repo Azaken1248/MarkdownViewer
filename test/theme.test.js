@@ -141,7 +141,40 @@ check("it runs before the stylesheet",
 check("it is not inline (CSP has no unsafe-inline for scripts)", /<script>[\s\S]*dataset\.theme/.test(html), false);
 check("it defaults to dark, not to the system", boot.includes('stored = "dark"'), true);
 check("only auto consults the system", /if \(stored === "auto"\)/.test(boot), true);
-check("the preference survives a storage throw", /catch \(error\) \{[\s\S]{0,120}stored = null/.test(boot), true);
+/* And a browser that refuses storage still gets a theme.
+ *
+ * This read the source for `catch (error) { … stored = null }`, which is a
+ * check about how the code is spelled: tidying the catch — the assignment was
+ * redundant, the comment was not — failed it while the behaviour was
+ * untouched. Run instead, in a window whose localStorage throws, which is what
+ * private mode does and what the catch is for.
+ */
+{
+  const { JSDOM } = require("jsdom");
+  const refusing = new JSDOM("<!doctype html><html><body></body></html>",
+    { runScripts: "outside-only" });
+  Object.defineProperty(refusing.window, "localStorage", {
+    get() {
+      // What Safari and Firefox throw with storage switched off.
+      throw new Error("SecurityError: The operation is insecure.");
+    }
+  });
+
+  // Caught, so a boot that does not survive it reads as a failed check rather
+  // than as this suite crashing.
+  let threw = null;
+  try {
+    refusing.window.eval(boot);
+  } catch (error) {
+    threw = String(error.message).split("\n")[0];
+  }
+
+  check("the preference survives a storage throw", threw, null);
+  check("...and the page is themed anyway",
+    refusing.window.document.documentElement.dataset.theme, "dark");
+  check("...and the preference it shows is the default, not nothing",
+    refusing.window.document.documentElement.dataset.themePreference, "dark");
+}
 
 console.log("=== the toggle ===");
 check("the button exists", html.includes('id="themeToggleBtn"'), true);

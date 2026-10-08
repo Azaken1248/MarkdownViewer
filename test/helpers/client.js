@@ -60,7 +60,8 @@ function makeClient(origin) {
           try {
             parsed = JSON.parse(data);
           } catch {
-            parsed = null;
+            // Not JSON. The raw body goes back alongside this, so a caller that
+            // wants it still has it.
           }
 
           if (parsed?.csrfToken !== undefined) {
@@ -128,7 +129,8 @@ function makeClient(origin) {
           try {
             parsed = JSON.parse(data);
           } catch {
-            parsed = null;
+            // Not JSON. The raw body goes back alongside this, so a caller that
+            // wants it still has it.
           }
           resolve({ status: res.statusCode, body: parsed, raw: data });
         });

@@ -19,9 +19,9 @@ var ThemeSwitch = (function () {
 
   try {
     stored = window.localStorage.getItem(STORAGE_KEY);
-  } catch (error) {
-    // Private mode can throw on access. Fall through to the default.
-    stored = null;
+  } catch {
+    // Private mode can throw on access. Nothing is remembered, which is what
+    // the null above already says.
   }
 
   if (stored !== "light" && stored !== "dark" && stored !== "auto") {
