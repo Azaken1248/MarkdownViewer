@@ -118,7 +118,15 @@ function build() {
     " * Each is the inside of Lucide's own 24x24 file: no size, no viewBox, no",
     " * stroke. Those belong to the box the icon is drawn in.",
     " */",
-    "(function (global) {",
+    /* A namespace module, the shape every other client script has.
+     *
+     * This emitted `(function (global) { global.DiagramIcons = … })(window)`
+     * while the file it maintains had been written as a namespace module by
+     * hand — so running this tool silently changed the module's shape as well
+     * as its icons, which is the one thing its own header warns against.
+     */
+    "/* exported DiagramIcons */",
+    "var DiagramIcons = (function () {",
     '  "use strict";',
     "",
     `  const VERSION = ${JSON.stringify(version)};`,
@@ -135,7 +143,7 @@ function build() {
       `    [${JSON.stringify(title)}, ${JSON.stringify(names)}],`),
     "  ];",
     "",
-    "  global.DiagramIcons = {",
+    "  return {",
     "    VERSION,",
     "    ICONS,",
     "    GROUPS,",
@@ -144,7 +152,7 @@ function build() {
     "    bodyOf: (name) => ICONS[String(name || \"\")] || \"\",",
     "    names: () => Object.keys(ICONS)",
     "  };",
-    "})(typeof window === \"undefined\" ? globalThis : window);",
+    "})();",
     ""
   ];
 
