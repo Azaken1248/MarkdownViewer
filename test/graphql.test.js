@@ -47,11 +47,23 @@ const { check, finish } = createChecker("GRAPHQL");
       check("...with the count /api/docs would give",
         res.body.data.docsCount, (await server.request("GET", "/api/docs", undefined, H)).body.docs.length);
 
-      // The pin. Introspection is off, so ask the only way left: try to
-      // mutate, and expect the schema to say there is no such thing.
+      /* The pin. Introspection is off, so ask the only way left: try to
+       * mutate, and expect the schema to say there is no such thing.
+       *
+       * Matched on what the refusal is about rather than on its wording.
+       * graphql 16 said "Schema is not configured to execute mutation
+       * operation" and 17 says "The mutation operation is not supported by
+       * the schema" — the same answer, and a check that pinned the sentence
+       * failed on the upgrade while the behaviour was untouched. What matters
+       * is that it is the *operation* that is refused: a schema that had
+       * grown a mutation type would complain about the field instead, which
+       * is the failure this is here to catch.
+       */
       const mutate = await gql('mutation { anything(file: "x") }', H);
+      const refusal = String(mutate.body.errors?.[0]?.message || "");
       check("the schema has no mutation type",
-        mutate.body.errors?.[0]?.message.includes("Schema is not configured to execute mutation"), true);
+        [/mutation/i.test(refusal), /not (supported|configured)/i.test(refusal)], [true, true]);
+      check("...and nothing came back with it", mutate.body.data ?? null, null);
     }
 
     console.log("=== it says what /api says ===");
