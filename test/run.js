@@ -89,6 +89,32 @@ if (selected.length === 0) {
  */
 const LANES = serial ? 1 : Math.max(2, Math.min(6, os.cpus().length));
 
+/* Except these two, which never run at the same time as each other.
+ *
+ * A suite waiting on a server it started costs a lane and almost no core. A
+ * suite that launches Chromium costs neither of those things: it is a browser
+ * process, a renderer per page, a GPU process and a few hundred megabytes, and
+ * it will take every core it is offered to lay a page out. Two of them at once
+ * on a four-core machine starved everything else — a jsdom suite's fetch came
+ * back ECONNRESET, and two other suites' servers failed to answer /healthz
+ * inside fifteen seconds. Each passed on its own the moment the machine was
+ * quiet, which is the signature of a resource problem rather than a defect,
+ * and the hour it costs to work that out is the reason this exists.
+ *
+ * They still overlap the jsdom suites, which is where the wall-clock saving
+ * is. They just take turns with each other.
+ */
+const DRIVES_A_BROWSER = new Set(["browser", "accessibility"]);
+
+// One at a time: each caller waits for the previous one to be done with it.
+let theBrowserLane = Promise.resolve();
+function throughTheBrowserLane(run) {
+  const mine = theBrowserLane.then(run, run);
+  // The chain must not reject, or every later caller inherits the rejection.
+  theBrowserLane = mine.then(() => {}, () => {});
+  return mine;
+}
+
 /* A suite killed by this clock looks exactly like a suite whose checks failed
  * — no status, no output of its own, and a runner that says only which it was.
  * So it says which it was, below.
@@ -156,7 +182,11 @@ function runSuite([name, file, description]) {
   const lanes = Array.from({ length: Math.min(LANES, queue.length) }, async (_, lane) => {
     while (queue.length > 0) {
       const suite = lane % 2 === 0 ? queue.pop() : queue.shift();
-      if (!(await runSuite(suite))) {
+      const ok = DRIVES_A_BROWSER.has(suite[0])
+        ? await throughTheBrowserLane(() => runSuite(suite))
+        : await runSuite(suite);
+
+      if (!ok) {
         failed.push(suite[0]);
       }
     }
