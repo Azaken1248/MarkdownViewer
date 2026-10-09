@@ -365,6 +365,88 @@ Now there is a number.
 
 ---
 
+## How many people can use this
+
+Nobody knew. This is a single process on a single event loop, and until
+`tools/load.js` existed nothing had measured what happens when more than one
+person asks at once.
+
+```bash
+node tools/load.js                     # its own server, 60 documents
+node tools/load.js --corpus 1000       # ...and a thousand
+node tools/load.js --origin https://md.example.com --cookie "mdv_session=…"
+```
+
+Measured on an Intel i7-6500U (two cores, four threads, 2015), Node 20, eight
+connections — each one a different signed-in session, which is what "how many
+people" means. A current server will do better. These are not a promise; they
+are the answer to a question that previously had none.
+
+**60 documents**
+
+| Scenario | req/s | p50 | p97.5 | max |
+| --- | --- | --- | --- | --- |
+| `shell` — the page itself | 491 | 14ms | 29ms | 80ms |
+| `listing` — `/api/docs` | 253 | 29ms | 48ms | 59ms |
+| `search` | paced 16 | 25ms | 84ms | 130ms |
+| `document` — one read | 1287 | 5ms | 11ms | 74ms |
+
+**1000 documents**
+
+| Scenario | req/s | p50 | p97.5 | max |
+| --- | --- | --- | --- | --- |
+| `shell` — the page itself | 476 | 11ms | 19ms | 49ms |
+| `listing` — `/api/docs` | **15** | **353ms** | 694ms | 708ms |
+| `search` | paced 12 | **202ms** | 501ms | 803ms |
+| `document` — one read | 800 | 5ms | 16ms | 580ms |
+
+### What that says
+
+**Reading a document does not care how big the library is.** 1287 req/s at
+sixty documents, 800 at a thousand, 5ms either way. The content cache is doing
+its job and the disk is not in the way.
+
+**The listing does care, and it is the ceiling.** `/api/docs` goes from 253
+requests a second to fifteen, and from 29ms to 353ms, for sixteen times the
+library. It reads the organizer and stats the directory on every request, and
+that is linear in the number of documents. At a thousand documents it is the
+slowest thing this server does.
+
+**Which is most of what a search costs.** `searchDocuments` in `server.js`
+calls `getDocs()` before it asks the index, so a query pays for the listing
+first. Measured directly, over a thousand documents with everything warm: the
+listing alone is 106ms, a search through the index is 101ms, and a search
+through the scan the index replaced is 124ms.
+
+`docs/ARCHITECTURE.md` says a query "used to read every document in the library
+to find out which ones matched; it now asks the index and reads none". That is
+exactly true and worth keeping — the `search` suite checks it by counting what
+each path opens, and the index opens **zero** documents against the scan's
+thousand. What the numbers add is where the time actually goes: the index made
+the matching free, and the listing in front of it is what a search now costs.
+
+So the thing to make faster, if a library ever gets big enough to need it, is
+the listing — not the search.
+
+### Rate limits are part of the measurement
+
+Two scenarios cannot be measured the obvious way, and the tool says so rather
+than printing a number that reads like capacity:
+
+- **Searching is capped at 240 a minute per session.** Pointed at one session,
+  a load generator measures that cap: the first version of this harness
+  reported 1194 req/s for search, of which 4537 requests out of 4777 were 429s.
+  It is paced to stay inside the ceiling now, and only its latency is reported.
+- **`/healthz` is capped at 60 a minute by address**, and every connection from
+  one machine is one address. That cap is right — a monitor polling every ten
+  seconds uses a tenth of it — and it makes `/healthz` unmeasurable from a
+  single host. The shell page is the floor instead; nothing rate-limits it.
+
+The tool prints a loud line if any request came back non-2xx, because a
+measurement that met a ceiling is the limiter's arithmetic and not the app's.
+
+---
+
 ## Rate limits
 
 Every ceiling is a fixed window of one minute, and every one is a ceiling

@@ -20,7 +20,8 @@
       "punycode": [
         "./types/punycode.d.ts"
       ]
-    }
+    },
+    "maxNodeModuleJsDepth": 0
   },
   "include": [
     "types/*.d.ts",

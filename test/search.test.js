@@ -22,6 +22,10 @@ const { createChecker } = require("./helpers/check.js");
 
 const { check, finish } = createChecker("SEARCH");
 
+// Big enough that reading all of them is visibly different from reading none,
+// small enough that seeding it is a second.
+const MANY = 1000;
+
 const LIBRARY = {
   "deploy.md": { title: "Deployment", folderName: "Ops", body: "# Deployment\n\nWe deploy with Kubernetes on Fridays.\nRollback is one command.\n" },
   "Ops/runbook.md": { title: "Runbook", folderName: "Ops", body: "# Runbook\n\nWhen the cluster is unhappy, check the deploy log first.\n" },
@@ -51,8 +55,14 @@ function listDocs(dir, files = Object.keys(LIBRARY)) {
   });
 }
 
-function makeSearch(dir, withDb) {
+function makeSearch(dir, withDb, keep = null) {
   const cache = createDocumentCache({ contentMaxBytes: 1 << 20, indexMaxBytes: 1 << 20, snippetMaxBytes: 1 << 20 });
+  // Handed back when a caller wants to ask what the search touched, which is
+  // the only way to tell "asked the index" from "read every document".
+  if (keep) {
+    keep.cache = cache;
+  }
+
   return createSearch({
     db: withDb ? db.open(path.join(dir, "data")) : null,
     readSearchIndexEntry: cache.readSearchIndexEntry,
@@ -223,8 +233,108 @@ const order = (result) => result.matches.map((match) => match.file);
       /\$\{matches\.length\} of \$\{total\}/.test(client), true);
   }
 
+  await theIndexReadsNoDocuments();
+
   fs.rmSync(dir, { recursive: true, force: true });
   process.exit(finish());
+/* --- A thousand documents ------------------------------------------------ */
+
+/* What the index is for, asserted by what it does not do.
+ *
+ * docs/ARCHITECTURE.md says a query "used to read every document in the
+ * library to find out which ones matched; it now asks the index and reads
+ * none". That is the claim, and the honest way to check it is not a stopwatch.
+ * A timing ceiling on a machine this is not running on is a number that either
+ * flakes or is so loose it catches nothing: measured on a loaded four-core
+ * laptop, an indexed search over a thousand documents is 101ms and the scan it
+ * replaces is 124ms — because the listing in front of both costs 106ms and
+ * dominates. Twenty-three milliseconds is not something a build can tell apart
+ * from a busy afternoon.
+ *
+ * What it can tell apart is whether the documents were opened. The content
+ * cache holds what has been read, so an indexed search leaves it where it
+ * found it and a scan fills it with the whole library. That is the claim
+ * itself rather than its symptom, and it cannot flake.
+ *
+ * The generous ceiling is here too, because it guards the other half: the
+ * listing is O(documents) and is most of what a search costs at this size, so
+ * something making *it* slower is the regression a timing check would catch.
+ */
+async function theIndexReadsNoDocuments() {
+  console.log(`=== over ${MANY} documents, the index reads none of them ===`);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-search-many-"));
+  const docsDir = path.join(dir, "docs");
+  fs.mkdirSync(docsDir, { recursive: true });
+
+  // One document in ten mentions the needle, so a match is a real subset.
+  const docs = [];
+  for (let index = 0; index < MANY; index += 1) {
+    const file = `document-${String(index).padStart(4, "0")}.md`;
+    const body = `# Document ${index}
+
+the quick brown fox jumps over the lazy dog`
+      + `${index % 10 === 0 ? " nightingale" : ""}
+`;
+    fs.writeFileSync(path.join(docsDir, file), body);
+    const stat = fs.statSync(path.join(docsDir, file));
+    docs.push({
+      file,
+      title: `Document ${index}`,
+      folderName: "",
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString()
+    });
+  }
+
+  /* Three searches over one library, and the caches are the point.
+   *
+   * Building the index does read every document, once. So the measurement is
+   * made by a *second* search with a cache of its own, against the index the
+   * first one left behind — a cold cache, so what it opens is what this query
+   * needed and nothing it inherited. The scan gets the same treatment, which
+   * is what makes the two numbers comparable.
+   */
+  const building = {};
+  await makeSearch(dir, true, building)({ query: "nightingale", docs, scopeDir: docsDir });
+
+  const viaIndex = {};
+  const began = Date.now();
+  const found = await makeSearch(dir, true, viaIndex)({
+    query: "nightingale", docs, scopeDir: docsDir
+  });
+  const took = Date.now() - began;
+  const indexOpened = viaIndex.cache.cacheStats().content.count;
+
+  const viaScan = {};
+  await makeSearch(dir, false, viaScan)({ query: "nightingale", docs, scopeDir: docsDir });
+  const scanOpened = viaScan.cache.cacheStats().content.count;
+
+  check("it finds the documents that match", found.matches.length > 0, true);
+  check("...and only those", found.total, MANY / 10);
+
+  // The scan is the thing being replaced, and it reads the library to decide.
+  check(`the scan opens the whole library (${scanOpened})`, scanOpened > MANY / 2, true);
+  /* The index opens the ones it is going to show.
+   *
+   * Not none: a match still needs its snippet, and a snippet comes from the
+   * file. What it does not do is open the nine in ten that do not match, which
+   * is the whole difference between the two.
+   */
+  check(`...and the index only what it matched (${indexOpened})`,
+    indexOpened < MANY / 2, true);
+
+  /* Loose on purpose, and the comment is the check.
+   *
+   * 101ms measured on a loaded four-core laptop from 2015. Three seconds is
+   * thirty times that: it means "never", not "slow", which is the same
+   * reasoning the suites' waitUntil ceilings are written to.
+   */
+  check(`...inside a ceiling that means never (${took}ms)`, took < 3000, true);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 })().catch((error) => {
   console.error(error);
   process.exit(1);

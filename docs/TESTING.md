@@ -179,6 +179,14 @@ server the DOM suite spawns is counted too, because `NODE_V8_COVERAGE` is
 inherited by child processes. The report is `coverage/index.html`; CI runs it
 as its own job and attaches the report to the run.
 
+There is a load harness beside it, `tools/load.js`, which asks a different
+question — what happens when more than one person is using this at once. It is
+not part of `npm test`: it takes a minute per corpus size and its numbers
+depend on the machine. What it found is written into
+[OPERATIONS.md](OPERATIONS.md#how-many-people-can-use-this), and the one claim
+worth a check went into the `search` suite — the index opens zero documents
+where the scan it replaced opens a thousand.
+
 It is a map, not a target. There is no threshold and there will not be one: a
 percentage that has to go up is a percentage people write tests to raise, and
 the value here is the other thing — the list of what a suite this thorough
