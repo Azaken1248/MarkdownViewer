@@ -34,7 +34,7 @@
     "icons": "node tools/make-icon-sprite.js"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "graphql": "^17.0.2",
     "multer": "^2.1.1",
