@@ -140,6 +140,11 @@
 <script src="/js/export.js" defer></script>
 <script src="/js/share.js" defer></script>
 
+<!-- As on the library page: the first stop in the tab order, and invisible
+     until it is one. A shared document has an outline beside it that a
+     keyboard would otherwise walk the whole of. -->
+<a class="skip-link" href="#shareMain">Skip to the document</a>
+
 <div class="share-page">
   <header class="share-header">
     <!-- Offered only for a document with headings to list. -->
@@ -202,7 +207,9 @@
       <nav class="doc-index-body" id="shareOutlineBody" aria-labelledby="shareOutlineTitle"></nav>
     </aside>
 
-    <main class="share-main">
+    <!-- tabindex="-1" for the same reason as #docContent on the library page:
+         a skip link whose target cannot take focus only moves the scroll. -->
+    <main class="share-main" id="shareMain" tabindex="-1">
       <div class="share-loading" id="shareLoading">
         <i class="ph ph-circle-notch" aria-hidden="true"></i>
         <p>Loading the document…</p>

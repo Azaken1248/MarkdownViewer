@@ -153,8 +153,10 @@ async function main() {
   try {
     await theFirstSignIn(browser, server);
     await everyStateInBothThemes(browser, server, axe);
+    await thereIsAWayPastTheExplorer(browser, server);
     await motionCanBeTurnedOff(browser, server);
     await itSurvivesTwoHundredPercent(browser, server, axe);
+    await forcedColoursLeaveSomethingToRead(browser, server);
   } finally {
     await browser.close();
     await server.stop();
@@ -272,6 +274,78 @@ async function everyStateInBothThemes(browser, server, axe) {
   const accepted = Object.values(BUDGET).reduce((total, rules) => total
     + Object.values(rules).reduce((sum, nodes) => sum + nodes, 0), 0);
   check("...and the number of accepted violations is still none", accepted, 0);
+}
+
+/* --- The way past the explorer ------------------------------------------- */
+
+/* WCAG 2.4.1, and the one thing a keyboard user here actually needs.
+ *
+ * The page has landmarks, which is what satisfies axe's `bypass` rule and what
+ * a screen reader's landmark navigation uses. Somebody with a keyboard and no
+ * screen reader has neither: every folder row in the explorer is four Tab
+ * stops — the row and its three actions — so an open tree puts dozens of them
+ * between the top of the page and the document.
+ *
+ * Three things have to be true and each was false at some point while this was
+ * written: the link is the first stop, it becomes visible when it is, and it
+ * lands somewhere that can hold the focus. The last is the one that is usually
+ * missed — a skip link whose target is not focusable changes the hash, scrolls
+ * the page, and leaves the focus where it was, so the next Tab goes straight
+ * back into the explorer.
+ */
+async function thereIsAWayPastTheExplorer(browser, server) {
+  console.log("=== there is a way past the explorer, for a keyboard ===");
+
+  const { context, page } = await pageUnder(browser, null);
+  await signIn(page, server.origin);
+  await page.goto(`${server.origin}/beta.md`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#docContent h1", { state: "attached", timeout: 25000 });
+  await page.waitForTimeout(SETTLE_MS);
+
+  const focused = () => page.evaluate(() => {
+    const el = document.activeElement;
+    const box = el?.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+    return {
+      id: el?.id || "",
+      className: typeof el?.className === "string" ? el.className : "",
+      text: (el?.textContent || "").trim().slice(0, 40),
+      // Off the top of the viewport until it has focus, which is how it stays
+      // out of the way without leaving the tab order.
+      onScreen: box.top >= 0 && box.bottom <= 900
+    };
+  });
+
+  // Nothing focused, which is where a page starts before anybody presses Tab.
+  await page.evaluate(() => /** @type {any} */ (document.activeElement)?.blur?.());
+  await page.keyboard.press("Tab");
+  // Long enough for the transition that brings it down from off-screen.
+  await page.waitForTimeout(300);
+
+  const first = await focused();
+  check("the first thing a Tab reaches is the way past", first.className, "skip-link");
+  check("...and taking it brings it onto the screen", first.onScreen, true);
+  check("...saying what it does", first.text, "Skip to the document");
+
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+
+  const landed = await focused();
+  check("following it lands on the document", landed.id, "docContent");
+
+  /* And the view went with the focus.
+   *
+   * Two separate things, and each has been the one that was missing: a target
+   * that cannot hold focus moves only the scroll, and a target that is focused
+   * without being scrolled to leaves the reader looking at the explorer with
+   * the focus somewhere they cannot see.
+   */
+  const heading = await page.evaluate(() => {
+    const box = document.querySelector("#docContent h1")?.getBoundingClientRect();
+    return box ? { top: Math.round(box.top), onScreen: box.top >= 0 && box.top < 900 } : null;
+  });
+  check("...and the document is what is on the screen", heading?.onScreen, true);
+
+  await context.close();
 }
 
 /* --- Motion, and turning it off ------------------------------------------ */
@@ -406,6 +480,80 @@ async function itSurvivesTwoHundredPercent(browser, server, axe) {
     for (const line of zoomedDoc.details) {
       console.log(`          ${line}`);
     }
+  }
+
+  await context.close();
+}
+
+/* --- Forced colours ------------------------------------------------------ */
+
+/* Windows High Contrast, and anyone who has told the OS to pick the colours.
+ *
+ * The whole of this app is painted with custom properties, which forced
+ * colours overrides wholesale: every `color` and `background-color` becomes
+ * the system's, and anything that was carrying meaning in a colour the system
+ * does not know about stops carrying it. What disappears first, in apps built
+ * this way, is a border drawn as a `box-shadow` or a background on a
+ * pseudo-element — neither of which is forced, so both keep a colour nothing
+ * else has any more.
+ *
+ * This is a smoke check and is written down as one in docs/ACCESSIBILITY.md:
+ * it asks whether the page still has readable text and visible controls, not
+ * whether it is good. axe says little here, because contrast is the system's
+ * business in this mode and the rule knows it.
+ */
+async function forcedColoursLeaveSomethingToRead(browser, server) {
+  console.log("=== with the colours taken over by the system ===");
+
+  const { context, page } = await pageUnder(browser, null, { forcedColors: "active" });
+  await signIn(page, server.origin);
+  await page.goto(`${server.origin}/beta.md`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#docContent h1", { state: "attached", timeout: 25000 });
+  await page.waitForTimeout(SETTLE_MS);
+
+  const painted = await page.evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) {
+        return { missing: selector };
+      }
+
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        colour: style.color,
+        background: style.backgroundColor,
+        drawn: box.width > 0 && box.height > 0
+      };
+    };
+
+    return {
+      // The page knows it is in this mode at all, which is what any rule
+      // written for it depends on.
+      mode: window.matchMedia("(forced-colors: active)").matches,
+      heading: read("#docContent h1"),
+      prose: read("#docContent p"),
+      button: read("#newDocBtn"),
+      row: read("#docList .tree-row-btn")
+    };
+  });
+
+  check("the page is in forced-colours mode", painted.mode, true);
+
+  for (const [what, found] of Object.entries(painted)) {
+    if (what === "mode") {
+      continue;
+    }
+
+    check(`  ${what} is still drawn`, found.drawn, true);
+    /* A colour at all, rather than a specific one.
+     *
+     * Which colours the system picks is the reader's business and differs per
+     * machine; what this is about is that the app has not left something
+     * transparent or painted on a background the system has replaced.
+     */
+    check(`  ...and has a colour the system gave it`,
+      /^rgba?\(/.test(found.colour) && !/rgba\(0, 0, 0, 0\)/.test(found.colour), true);
   }
 
   await context.close();

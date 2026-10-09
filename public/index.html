@@ -205,6 +205,13 @@
 </head>
 
 <body>
+  <!-- The first stop in the tab order, and invisible until it is one.
+       The explorer is a long way to tab past: every folder row is four stops
+       — the row and its three actions — so an open tree puts dozens of them
+       between the top of the page and the document. Landmarks answer this for
+       a screen reader; this answers it for somebody who has only a keyboard. -->
+  <a class="skip-link" href="#docContent">Skip to the document</a>
+
   <div class="app-shell" id="appShell">
     <header class="app-header">
       <button class="icon-btn mobile-only" id="toggleSidebar" aria-label="Toggle file list" aria-controls="sidebar"
@@ -565,7 +572,11 @@
         <!-- Deliberately not a live region: an aria-live article re-announces
              the entire document on every load. The breadcrumb trail and the
              toast region carry the "which file is open" news instead. -->
-        <article id="docContent" class="markdown-body"></article>
+        <!-- tabindex="-1" so the skip link can actually land here. Without it
+             the hash changes, the page scrolls, and the focus stays where it
+             was — so the next Tab goes back to the explorer and the link has
+             done nothing for the person who needed it. -->
+        <article id="docContent" class="markdown-body" tabindex="-1"></article>
 
         <!-- Saved links. Its own pane rather than a kind of document: a link is
              not a file, has no content to render, and belongs to no folder. -->

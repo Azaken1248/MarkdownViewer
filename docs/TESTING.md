@@ -39,7 +39,7 @@ where its absence is visible.
 | `export` | Taking a copy away: the snapshot's stylesheets, the paginator's arithmetic, the zip a .docx is |
 | `worker` | The Python worker: the message protocol, both output caps, and the network it takes away from itself |
 | `browser` | The five things jsdom cannot answer, in a real browser |
-| `accessibility` | axe over six page states in both themes, reduced motion, and the layout at 200% zoom |
+| `accessibility` | axe over six page states in both themes, the skip link, reduced motion, 200% zoom and forced colours |
 
 ### jsdom, and the two that are not
 
@@ -77,10 +77,13 @@ reason: the rules it checks are about what was painted. It runs axe-core over
 six page states — signed out, the shell, a document, the editor, the diagram
 editor, the error page — in both themes, against a budget of accepted
 violations that is empty and is written down so that it cannot quietly stop
-being empty. Two more checks go beyond what axe decides: that
+being empty. Four more checks go beyond what axe decides: that
 `prefers-reduced-motion` actually stops the motion, measured off computed
-styles rather than read out of a stylesheet, and that the layout at 200% zoom
-has nothing sticking out sideways.
+styles rather than read out of a stylesheet; that the layout at 200% zoom has
+nothing sticking out sideways; that the first Tab reaches a way past the
+explorer and that following it moves the focus rather than only the scroll; and
+that with the colours taken over by the system there is still something drawn
+to read.
 
 It found four defects on its first run. `--fg-subtle` was 3.8:1 behind
 metadata lines in the dark theme and 4.4:1 in the light one; the share and

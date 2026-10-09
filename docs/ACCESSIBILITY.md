@@ -34,6 +34,10 @@ Two more checks go past what axe decides:
 - **200% zoom**, which is the 1400px layout at 700. Nothing may stick out
   sideways, because a reader zoomed in panning left and right along every line
   has lost the page. axe runs again at that size.
+- **The way past the explorer** (WCAG 2.4.1): the first Tab reaches a skip
+  link, taking it brings the link onto the screen, and following it puts the
+  *focus* on the document rather than only the scroll.
+- **Forced colours**, as a smoke check and no more — see below.
 
 ### The budget
 
@@ -111,12 +115,19 @@ is under it, whether alt text says the useful thing, whether an error message
 tells you what to do, whether the focus order makes sense to somebody who
 cannot see the layout.
 
-**There is no skip link.** The page has landmarks (`<header>`, `<nav>`,
-`<aside>`, `<main>`), which is what satisfies axe's `bypass` rule and what a
-screen reader's landmark navigation uses. A keyboard user with no screen reader
-has neither: each folder row in the sidebar costs four Tab stops (the row and
-its three actions), so reaching the document past an open tree is dozens of
-presses. This is the next thing worth doing.
+**~~There is no skip link.~~** Fixed. The page had landmarks, which is what
+satisfies axe's `bypass` rule and what a screen reader's landmark navigation
+uses — and a keyboard user without a screen reader had neither, with each
+folder row costing four Tab stops (the row and its three actions), so reaching
+the document past an open tree was dozens of presses.
+
+There is one now, on the library page and on the share page: the first stop in
+the tab order, off the top of the screen until it has focus. The part that is
+easy to get wrong and was wrong first time is the landing — `#docContent` and
+`#shareMain` carry `tabindex="-1"`, without which following the link changes
+the hash, scrolls the page, and leaves the focus exactly where it was, so the
+next Tab goes straight back into the explorer. The suite checks the focus, not
+the scroll, for that reason.
 
 **Ink and annotation are pointer-only.** Drawing on a document with a keyboard
 is not a thing this app offers, and it is not obvious what it would mean.
@@ -135,9 +146,19 @@ answer is probably no.
 which is what a screenshot tool gives you. Better than nothing, and nothing
 prompts for better.
 
-**Nothing checks a forced-colours mode** (`prefers-contrast`, Windows High
-Contrast), and the app paints with custom properties throughout, so it is
-likely that some of it disappears.
+**Forced colours is checked, but only as a smoke test.** Windows High Contrast
+and anything else that has the OS pick the colours overrides every `color` and
+`background-color` the app sets — which is most of what it sets, since it
+paints with custom properties throughout. The suite asks whether the headings,
+the prose, the toolbar buttons and the explorer rows are still drawn and still
+have a colour the system gave them. That catches the common failure in an app
+built this way: a border drawn as a `box-shadow`, or a background on a
+pseudo-element, neither of which is forced, both of which then keep a colour
+nothing else has.
+
+What it does not ask is whether the result is *good*. Nobody has looked at this
+app in a real high-contrast theme, and axe is little help here because contrast
+is the system's business in this mode and the rule knows it.
 
 ## Running it
 
