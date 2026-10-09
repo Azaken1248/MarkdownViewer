@@ -186,14 +186,36 @@ console.log("=== the pipeline is pinned, bounded, and boots what gets deployed =
  */
 const workflow = read(".github", "workflows", "ci.yml");
 
-// A tag is mutable: actions/checkout@v4 is whatever that tag points at today,
-// and "pin your actions" means pin to something that cannot move.
-const uses = [...workflow.matchAll(/uses:\s*(\S+)/g)].map(([, one]) => one);
-check("(the workflow uses some actions)", uses.length > 0, true);
-check("every action is pinned to a commit, not to a tag",
-  uses.filter((one) => !/@[0-9a-f]{40}$/.test(one)), []);
-check("...each with the version it is, in a comment beside it",
-  uses.every((one) => new RegExp(`${one}\\s*#\\s*v\\d`).test(workflow)), true);
+/* Pinning is checked across every workflow, not only this one.
+ *
+ * A tag is mutable: actions/checkout@v4 is whatever that tag points at today,
+ * and "pin your actions" means pin to something that cannot move. It was
+ * checked against ci.yml alone, which was right when that was the only
+ * workflow — and release.yml is the one that signs in to a registry and
+ * pushes an image, so it is the one where an action that moved matters most.
+ */
+const workflowDir = path.join(__dirname, "..", ".github", "workflows");
+const workflowFiles = fs.readdirSync(workflowDir).filter((name) => name.endsWith(".yml"));
+check("(there are workflows to check)", workflowFiles.length > 0, true);
+
+/* Read line by line rather than by building a regex out of each action's name.
+ *
+ * A pattern interpolated from a value is a pattern whose shape depends on that
+ * value, which is what the linter objects to and is a real objection: an
+ * action name with a `.` in it already matches more than it looks like. The
+ * rule is anyway about one line — the pin and the version it is — so one
+ * static pattern over each line says it more directly.
+ */
+const PINNED = /^\s*-?\s*uses:\s*\S+@[0-9a-f]{40}\s*#\s*v\d/;
+
+for (const name of workflowFiles) {
+  const lines = fs.readFileSync(path.join(workflowDir, name), "utf8").split("\n");
+  const used = lines.filter((line) => /^\s*-?\s*uses:/.test(line));
+
+  check(`${name} uses some actions`, used.length > 0, true);
+  check(`  each one in ${name} is pinned to a commit with the version beside it`,
+    used.filter((line) => !PINNED.test(line)).map((line) => line.trim()), []);
+}
 
 check("a second push does not run a second pipeline against the same branch",
   /concurrency:[\s\S]{0,200}cancel-in-progress:\s*true/.test(workflow), true);

@@ -1,0 +1,133 @@
+# Tagging a version builds an image and publishes it.
+#
+# CI proves a commit is good. This is what puts it somewhere. Two jobs, and
+# only the first of them works today:
+#
+#   image   builds the Dockerfile and pushes it to this repository's own
+#           container registry. Needs no host, no secret and no third-party
+#           account — GITHUB_TOKEN with `packages: write` is the whole of it.
+#           A tagged, built, pullable image per release is most of what a
+#           deploy is, and it is worth having on its own.
+#
+#   deploy  pulls that image on a host over SSH and smoke-tests it. Correct and
+#           inert: it is gated on a GitHub Environment called `production`,
+#           which does not exist until somebody makes it, and it needs three
+#           secrets that are not set. Until then the job is skipped and says
+#           so. See "Releasing" in docs/OPERATIONS.md.
+#
+# On a tag rather than on every push to main, deliberately. There is no
+# automated rollback here and one person to notice, so the gate is somebody
+# deciding that this commit is a release — not the fact that it merged.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build, for a run started by hand"
+        required: true
+
+# As in ci.yml: nothing granted that is not used. `packages: write` is for
+# ghcr.io and is the only thing here that is not read-only.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The registry is this repository's own, so the only credential is the
+      # token the run already has.
+      - name: Sign in to ghcr.io
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercased, because ghcr.io refuses a path with a capital in it and
+      # this repository has two.
+      - name: Work out what to call it
+        id: meta
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          name=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          ref="${{ github.ref_name }}"
+          tag="${{ inputs.tag }}"
+          version="${tag:-$ref}"
+          echo "image=ghcr.io/$owner/$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      # Two tags: the version, which is what a rollback asks for by name, and
+      # `latest`, which is what `docker compose pull` takes without one.
+      - name: Build and push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          # The layer cache lives in the registry beside the image, so a second
+          # release does not rebuild the dependency tree from nothing.
+          cache-from: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max
+
+      - name: Say what was published
+        run: |
+          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The Environment is the approval gate, and it is also the switch: with no
+    # environment called `production` configured, and no secrets in it, this
+    # job has nothing to do and the `if` below keeps it from pretending it did.
+    environment: production
+
+    # Skipped until somebody sets DEPLOY_HOST. Written as a condition rather
+    # than commented out so that it is a thing that is ready, not a thing
+    # somebody has to reconstruct.
+    if: vars.DEPLOY_HOST != ''
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Two commands on the host. The compose file there names the image this
+      # workflow just pushed; pulling and bringing it up is the whole deploy.
+      - name: Pull and restart
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ${{ vars.DEPLOY_PATH }}
+            docker compose pull
+            docker compose up -d
+
+      # The difference between "the container started" and "the pages work".
+      # The tool already exists and CI already runs it against a
+      # production-mode boot; this points it at the real thing.
+      - name: Smoke-test what is now running
+        run: |
+          sleep 10
+          node tools/smoke.js "${{ vars.DEPLOY_ORIGIN }}"

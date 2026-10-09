@@ -630,6 +630,67 @@ backstop. This matters because organizer writes are read-modify-write behind a
 lock, and killing the process mid-write is exactly the corruption that used to
 wipe every folder assignment.
 
+### Releasing
+
+CI proves a commit is good. `.github/workflows/release.yml` is what puts one
+somewhere.
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+On a tag, not on every push to main. There is no automated rollback here and
+one person to notice, so the gate is somebody deciding that this commit is a
+release rather than the fact that it merged. A run can also be started by hand
+from the Actions tab with a tag typed in.
+
+**What happens, and what does not.** The workflow has two jobs, and only the
+first of them works today.
+
+`image` builds the Dockerfile and pushes it to this repository's own container
+registry, tagged twice — once with the version, which is what a rollback asks
+for by name, and once as `latest`, which is what `docker compose pull` takes
+without one. It needs no host, no third-party account and no secret: the
+`GITHUB_TOKEN` the run already has, with `packages: write`, is the whole of it.
+A tagged, built, pullable image per release is most of what a deploy is, and it
+is worth having on its own.
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:v1.2.3
+```
+
+`deploy` pulls that image on a host over SSH, brings it up, and runs
+`tools/smoke.js` against it — which is the difference between "the container
+started" and "the pages work". It is written and it is inert. It is gated on a
+GitHub Environment called `production`, and skipped entirely while
+`vars.DEPLOY_HOST` is unset, so it does not pretend to have run.
+
+**To turn the deploy half on**, make an Environment called `production` and
+give it:
+
+| | What |
+| --- | --- |
+| `vars.DEPLOY_HOST` | the host to ssh to — also the switch: the job is skipped while this is empty |
+| `vars.DEPLOY_USER` | the account to ssh as |
+| `vars.DEPLOY_PATH` | the directory on that host holding the compose file |
+| `vars.DEPLOY_ORIGIN` | the public origin, for the smoke check |
+| `secrets.DEPLOY_SSH_KEY` | a private key for that account |
+
+The compose file on the host names `ghcr.io/<owner>/<repo>:latest`; the deploy
+is `docker compose pull && docker compose up -d` and nothing else.
+
+**Rolling back** is pulling the previous tag: change the compose file's image
+to `:v1.2.2`, `docker compose up -d`, and run `node tools/smoke.js <origin>`
+against it. There is nothing automatic about this and it is not pretended
+otherwise.
+
+**There is no staging environment**, and that is a decision rather than an
+omission. The production instance is the only instance, so every deploy is the
+first time that code has run anywhere but CI — which is the honest reason the
+release gate is a deliberate tag and the smoke check runs after the deploy
+rather than instead of one.
+
 ---
 
 ---
