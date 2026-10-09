@@ -41,3 +41,7 @@ public/build/
 
 # `npm run coverage` writes its report here
 coverage/
+
+# The bearer token Prometheus scrapes with. deploy/ is configuration anybody
+# can read; this is the one file in it that is a credential.
+deploy/metrics-token

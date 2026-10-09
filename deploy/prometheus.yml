@@ -1,0 +1,51 @@
+# Scraping AzaDocs.
+#
+# /metrics is a 404 unless METRICS_TOKEN is set, and then it wants that token
+# as a bearer. The token goes in a file rather than in this one: this file is
+# committed, and a credential in a committed file is a credential.
+#
+#   echo -n "the-value-of-METRICS_TOKEN" > deploy/metrics-token
+#   chmod 600 deploy/metrics-token
+#
+# deploy/metrics-token is in .gitignore for the same reason.
+#
+# Thirty seconds, because /metrics is rate-limited at sixty a minute by
+# address like /healthz — a scrape every ten seconds would use a sixth of that
+# and leave nothing for a second scraper or a person with curl.
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: mdviewer
+    authorization:
+      credentials_file: /etc/prometheus/metrics-token
+    static_configs:
+      # The app, by its name on the compose network. Change to the host and
+      # port this is actually deployed at.
+      - targets: ["mdviewer:4321"]
+
+  # /healthz is not behind the token and says something /metrics cannot: that
+  # the storage directory is readable. A process that is up with an unreadable
+  # state directory serves 500s and still answers /metrics.
+  - job_name: mdviewer-health
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+      target: ["http://mdviewer:4321/healthz"]
+    static_configs:
+      - targets: ["blackbox:9115"]
+    relabel_configs:
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

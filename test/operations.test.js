@@ -126,6 +126,64 @@ check("...and that the CSRF check no longer depends on it",
 
 check("the README points at it", readme.includes("docs/OPERATIONS.md"), true);
 
+/* The alert rules name metrics this app actually serves.
+ *
+ * An alert on a metric that does not exist never fires, and never firing is
+ * indistinguishable from nothing being wrong. That is the exact failure the
+ * deploy/ directory exists to avoid — monitoring that looks like monitoring —
+ * so the names are checked against lib/metrics.js rather than against a
+ * memory of what they were.
+ *
+ * Only the mdviewer_ ones. The rules also use `up`, `probe_success` and
+ * node-exporter's filesystem gauges, which come from Prometheus and two
+ * exporters and are not this repository's to promise.
+ */
+{
+  const alerts = read("deploy", "alerts.yml");
+
+  /* Rendered, not grepped.
+   *
+   * Half of these names are built rather than written — `mdviewer_cache_` and
+   * `hits_total` are two strings in two places — so searching the source for
+   * the whole name finds nothing and proves nothing. The renderer is right
+   * here; asking it what it writes is the only answer that stays true when
+   * somebody changes how the names are assembled.
+   */
+  const { createMetrics } = require("../lib/metrics");
+  const metrics = createMetrics({ startedAt: Date.now() });
+  metrics.observe({
+    req: { method: "GET" },
+    res: { statusCode: 200 },
+    ms: 12
+  });
+
+  const rendered = metrics.render({
+    cacheStats: () => ({
+      content: { count: 0, usedBytes: 0, maxBytes: 1, hits: 0, misses: 0, evictions: 0 }
+    })
+  });
+  const served = new Set([...rendered.matchAll(/^(mdviewer_[a-z_]+)/gm)].map(([, one]) => one));
+
+  const named = [...new Set([...alerts.matchAll(/\b(mdviewer_[a-z_]+)/g)].map(([, one]) => one))];
+  check("(the rules name some of this app's metrics)", named.length > 0, true);
+  check("(and the renderer wrote some)", served.size > 0, true);
+  check("every metric an alert fires on is one /metrics serves",
+    named.filter((name) => !served.has(name)), []);
+
+  // The label values too: `status="5xx"` only matches because classOf builds
+  // the class that way, and a change there would silence the error-rate alert.
+  check("...and the status label is the class the app writes",
+    rendered.includes('status="2xx"'), true);
+
+  check("the token Prometheus scrapes with is not committed",
+    read(".gitignore").includes("deploy/metrics-token"), true);
+
+  // An alert nobody receives is the thing this is all meant to prevent, so the
+  // file that decides where one goes says out loud that it does not yet.
+  check("...and the receiver that goes nowhere says it does",
+    /delivers nothing|Deliberately empty/.test(read("deploy", "alertmanager.yml")), true);
+}
+
 /* And the backup section describes commands that exist.
  *
  * The state directory is what nothing else takes responsibility for, so a

@@ -1,0 +1,99 @@
+# What is worth waking somebody for.
+#
+# Six rules, and the point of the list being short is that a page nobody acts
+# on is a page nobody reads. The last two are the ones a generic template would
+# not have: they are about this app's own numbers.
+#
+# Every expression here is against metrics /metrics actually serves — see
+# "Metrics" in docs/OPERATIONS.md for the list.
+
+groups:
+  - name: mdviewer
+    rules:
+      # The only one that always matters.
+      - alert: AzaDocsDown
+        expr: up{job="mdviewer"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "AzaDocs is not answering"
+          description: "The scrape has failed for two minutes."
+
+      # The failure that actually happens: the process is up and the state
+      # directory is not readable, so every request 500s and /metrics is fine.
+      - alert: AzaDocsUnhealthy
+        expr: probe_success{job="mdviewer-health"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "AzaDocs is up but unhealthy"
+          description: "/healthz is failing. Usually the state directory: unreadable, full, or not mounted."
+
+      # Something broke and nobody reported it. 1% over five minutes is well
+      # clear of the 401s and 404s an ordinary day produces.
+      - alert: AzaDocsErrorRate
+        expr: |
+          sum(rate(mdviewer_requests_total{status="5xx"}[5m]))
+            / clamp_min(sum(rate(mdviewer_requests_total[5m])), 0.001) > 0.01
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "More than 1% of requests are failing"
+          description: "5xx rate is {{ $value | humanizePercentage }} over five minutes."
+
+      # Search degrading as the library grows, which the load harness says is
+      # the thing that will degrade first — see "How many people can use this".
+      - alert: AzaDocsSlow
+        expr: |
+          histogram_quantile(
+            0.95, sum(rate(mdviewer_request_duration_seconds_bucket[10m])) by (le)
+          ) > 2
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "p95 request duration is over two seconds"
+          description: "p95 is {{ $value | humanizeDuration }}. The listing is the usual cause; it is linear in the number of documents."
+
+      # The one a template would not have. Those three budgets — 32MB, 48MB,
+      # 16MB — were picked once with no data. A cache evicting steadily while
+      # its hit rate falls is a cache that is too small for this library, and
+      # that is a tuning job rather than an incident.
+      - alert: AzaDocsCacheThrash
+        expr: |
+          sum(rate(mdviewer_cache_evictions_total[15m])) by (cache) > 1
+            and
+          (
+            sum(rate(mdviewer_cache_hits_total[15m])) by (cache)
+              / clamp_min(
+                  sum(rate(mdviewer_cache_hits_total[15m])) by (cache)
+                    + sum(rate(mdviewer_cache_misses_total[15m])) by (cache),
+                  0.001)
+          ) < 0.5
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "The {{ $labels.cache }} cache is thrashing"
+          description: "Evicting steadily with a hit rate under 50%. Its byte budget is too small for this library."
+
+      # Documents and uploads only grow, and the thing that fills a disk here
+      # is a library nobody is pruning rather than a leak.
+      #
+      # NEEDS THE REAL PATH. node_exporter labels by mountpoint, and which
+      # mountpoint the state directory is on is a fact about the host this is
+      # deployed to — see MDVIEWER_STATE_DIR. The placeholder below is a
+      # placeholder and this rule will match nothing until it is replaced.
+      - alert: AzaDocsDiskFilling
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/state"}
+            / node_filesystem_size_bytes{mountpoint="/state"} < 0.2
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "The state directory is over 80% full"
+          description: "{{ $value | humanizePercentage }} free. Documents, uploads and the recycle bin only grow."

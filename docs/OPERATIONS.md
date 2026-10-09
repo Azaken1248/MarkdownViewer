@@ -363,6 +363,42 @@ whether they are right is not answerable from the source. A cache that never
 evicts is bigger than it needs to be; one that misses constantly is smaller.
 Now there is a number.
 
+### Something to scrape it
+
+`deploy/` has the rest: a Prometheus job, six alert rules, an Alertmanager
+config and a compose file that brings the lot up beside the app.
+
+```bash
+echo -n "the-value-of-METRICS_TOKEN" > deploy/metrics-token
+chmod 600 deploy/metrics-token
+docker compose -f deploy/docker-compose.monitoring.yml up -d
+```
+
+| Alert | When | Why this one |
+| --- | --- | --- |
+| `AzaDocsDown` | the scrape fails for 2m | the only one that always matters |
+| `AzaDocsUnhealthy` | `/healthz` fails for 2m | the failure that actually happens: the process is up and the state directory is not readable, so every request 500s while `/metrics` answers perfectly well |
+| `AzaDocsErrorRate` | 5xx over 1% for 5m | something broke and nobody reported it |
+| `AzaDocsSlow` | p95 over 2s for 10m | the listing is linear in the number of documents, and the load harness above says it is what degrades first |
+| `AzaDocsCacheThrash` | evicting steadily with a hit rate under 50%, for 30m | the three budgets were picked with no data; this is how you find out they were wrong |
+| `AzaDocsDiskFilling` | under 20% free for 15m | documents, uploads and the recycle bin only grow |
+
+The last two are about this app's own numbers rather than any app's, and both
+are tickets rather than pages: neither is an outage, and a page nobody acts on
+is a page nobody reads.
+
+**Three things that directory cannot supply, and says so:** a host to run it
+on; somewhere for a page to go — `alertmanager.yml` ships a receiver that
+delivers nothing, deliberately and loudly, because an alert firing into the
+void is worse than no alert; and the real mountpoint for `AzaDocsDiskFilling`,
+which is a fact about the host and until it is filled in matches nothing.
+
+The metric names in those rules are checked against what `lib/metrics.js`
+actually renders — by the `operations` suite, which asks the renderer rather
+than searching the source, because half the names are assembled from two
+strings. An alert on a metric that no longer exists never fires, and never
+firing looks exactly like nothing being wrong.
+
 ---
 
 ## How many people can use this

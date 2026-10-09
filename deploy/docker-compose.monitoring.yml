@@ -1,0 +1,86 @@
+# The app, with something watching it.
+#
+# Separate from the compose file in docs/OPERATIONS.md because monitoring is a
+# decision rather than part of running this: a single-user library on a laptop
+# does not need Prometheus, and a deployment somebody depends on does.
+#
+#   docker compose -f deploy/docker-compose.monitoring.yml up -d
+#
+# What it needs before it will do anything useful:
+#
+#   1. deploy/metrics-token, holding the value of METRICS_TOKEN and nothing
+#      else — no newline, no quotes. `chmod 600` it; it is gitignored.
+#   2. An alertmanager receiver. The one below has none, so alerts fire into
+#      nothing. See deploy/alertmanager.yml.
+#   3. The real mountpoint in the AzaDocsDiskFilling rule in alerts.yml.
+#
+# Until (1) the scrape is a 404, and until (2) nothing you are told about ever
+# reaches you — which is the failure this whole directory exists to avoid, so
+# it is written here rather than discovered later.
+
+services:
+  mdviewer:
+    image: ghcr.io/azaken1248/markdownviewer:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4321:4321"
+    environment:
+      MDVIEWER_STATE_DIR: /state
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set this to the origin this is served at}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set this, or /metrics is a 404}
+      TRUST_PROXY: "true"
+    volumes:
+      - mdviewer-state:/state
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4321/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      # The token, read-only and never in an image layer.
+      - ./metrics-token:/etc/prometheus/metrics-token:ro
+      - prometheus-data:/prometheus
+    ports:
+      # Loopback only. Prometheus has no authentication of its own and a
+      # scrape holds everything above.
+      - "127.0.0.1:9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  # /healthz says something /metrics cannot: that the storage directory is
+  # readable. A process that is up with an unreadable state directory serves
+  # 500s and still answers /metrics perfectly well.
+  blackbox:
+    image: prom/blackbox-exporter:v0.26.0
+    restart: unless-stopped
+
+  # For AzaDocsDiskFilling. The host's filesystems, read-only.
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+
+volumes:
+  mdviewer-state:
+  prometheus-data:
+  alertmanager-data:

@@ -256,6 +256,12 @@ is a decision rather than an oversight:
   under the cell. The worker it drives is covered by `worker` and run for real
   once in `browser`; the glue is reached only as far as rendering.
 
+The workflows are read rather than run — nothing here can start a runner — so
+what `operations` checks about them is what can be read: that every action in
+every workflow is pinned to a commit with the version beside it, which is the
+rule that matters most in `release.yml`, the one that signs in to a registry
+and pushes an image.
+
 None of that is a promise to leave them alone. It is a statement that the
 numbers were looked at and the answer was "not yet", which is a different thing
 from not having looked. `public/js/app/` is at 79%, and there is still no
