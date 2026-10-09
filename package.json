@@ -56,9 +56,9 @@
     "eslint-plugin-no-unsanitized": "4.1.5",
     "eslint-plugin-security": "4.2.0",
     "graphql-http": "^1.23.1",
-    "jsdom": "^25.0.1",
+    "jsdom": "^30.1.2",
     "lucide-static": "^1.52.0",
-    "marked": "^15.0.12",
+    "marked": "^18.1.0",
     "typescript": "^7.0.2"
   }
 }
