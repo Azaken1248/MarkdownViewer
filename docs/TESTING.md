@@ -296,6 +296,7 @@ that is not hard to test and had not been tested.
 | `export/snapshot.js` | 65% → 100% lines and functions | The fetching and the building — stylesheets, fonts, pictures, diagrams, the ink laid over each sheet, and every way each of those can fail |
 | `export/pdf.js` | 69% → 100% lines and functions | The page: the typography the sheets have nothing to inherit from, the sheets as XML, and the text layer |
 | `export/formats.js` | 75% → 100% lines, branches and functions | The handing over: the link made and pressed and taken away, the object URL given back a minute later, and the three ways the server can refuse to draw a PDF |
+| `export.js` | 60% → 100% lines and functions | The button itself: the menu, every way of closing it, the one collection at a time, and what it says while it works — including on a share page, which has no toasts and says it in the menu instead |
 
 Four things are stood in for, and they are the four a browser does and Node
 does not: the network as a table of what each URL answers with, the rasteriser

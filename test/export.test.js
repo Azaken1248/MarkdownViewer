@@ -609,5 +609,6 @@ require("./export/pages.js")(check);
   await require("./export/document.js")(check);
   await require("./export/paper.js")(check);
   await require("./export/files.js")(check);
+  await require("./export/button.js")(check);
   process.exit(finish());
 })();
