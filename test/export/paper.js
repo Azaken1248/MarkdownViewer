@@ -85,9 +85,15 @@ module.exports = async (check) => {
     const box = parent.getBoundingClientRect();
     const size = parseFloat(window.getComputedStyle(parent).fontSize) || 16;
 
+    // A word in a box that was never laid out measures as nothing, and a
+    // rectangle of nothing is not a place a word is.
+    const width = parent.hasAttribute("data-unlaid")
+      ? 0
+      : (this.endOffset - this.startOffset) * CHAR;
+
     return /** @type {any} */ ({
       left: box.left + (this.startOffset * CHAR),
-      width: (this.endOffset - this.startOffset) * CHAR,
+      width,
       top: box.top,
       bottom: box.top + size,
       height: size
@@ -189,18 +195,22 @@ module.exports = async (check) => {
      */
     const sheet = sheetOf([
       `<p ${LINE}>shown</p>`,
-      '<span class="katex"><span class="katex-mathml"><math>spoken</math></span>',
+      `<span class="katex"><span class="katex-mathml" ${LINE}>spoken</span>`,
       '<span class="katex-html">x</span></span>',
       '<p style="visibility: hidden">invisible</p>',
       '<p style="display: none">gone</p>',
       "<p>   </p>"
     ].join(""));
     document.body.appendChild(sheet);
+    // Every one of them measurable, so that what keeps a word out of the layer
+    // is the rule meant to keep it out rather than a box jsdom never laid out.
     for (const el of sheet.querySelectorAll("p, span")) {
       sized(/** @type {any} */ (el), 24);
     }
 
     const said = Pdf.textRuns(sheet).map((run) => run.text);
+    check("a word in a box that was never laid out is nowhere, so it is not in the layer",
+      Pdf.textRuns(sheetOf(`<p ${LINE} data-unlaid>somewhere</p>`)), []);
     check("the words that are shown are in the layer", said.includes("shown"), true);
     check("...and the reader's second copy of a formula is not",
       said.includes("spoken"), false);
@@ -227,6 +237,13 @@ module.exports = async (check) => {
     check("...over the whole of it",
       drawn[0].filled, [0, 0, canvas.width, canvas.height]);
     check("...and then the sheets over that", drawn[1].copied, 5);
+
+    // A page that never said what colour it was is drawn on white, which is
+    // what paper is.
+    drawn.splice(0);
+    await Pdf.drawRun(sheets, "", { ...size, background: "" });
+    check("...and a page that never said what colour it is gets white paper",
+      drawn[0].with, "#ffffff");
 
     loadable = false;
     check("a run whose picture will not load draws nothing",

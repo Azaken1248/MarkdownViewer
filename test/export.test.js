@@ -608,5 +608,6 @@ require("./export/pages.js")(check);
 (async () => {
   await require("./export/document.js")(check);
   await require("./export/paper.js")(check);
+  await require("./export/files.js")(check);
   process.exit(finish());
 })();
