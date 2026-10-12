@@ -61,6 +61,12 @@ check("...nor does an escaped quote",
   Snapshot.withoutPrintRules('@media print{.x{content:"\\"}"}}.after{color:red}'), ".after{color:red}");
 check("a stylesheet with no print rules is returned as it was",
   Snapshot.withoutPrintRules("a{color:red}"), "a{color:red}");
+/* A quote nothing closes. The scanner is looking for the end of a string and
+ * the sheet ends first, which is a truncated download rather than CSS — and
+ * the scanner has to stop rather than read past the end of it.
+ */
+check("a string nothing closes ends where the stylesheet ends",
+  Snapshot.withoutPrintRules('@media print{.x{content:"nobody closed this'), "");
 
 console.log("=== a stylesheet that has moved takes its references with it ===");
 
@@ -76,6 +82,12 @@ check("a data uri is left exactly alone",
 check("an absolute url is left alone too",
   Snapshot.absoluteUrls('a{background:url("https://other.example/y.png")}', "https://cdn.example/css/app.css"),
   'a{background:url("https://other.example/y.png")}');
+// A sheet whose own address is not an address — which is what a stylesheet
+// injected by an extension looks like. Rewriting is then impossible, and the
+// reference is left as it was rather than the whole sheet being dropped.
+check("a reference that cannot be resolved is left as it was",
+  Snapshot.absoluteUrls("a{background:url(y.png)}", "not an address"),
+  "a{background:url(y.png)}");
 
 console.log("=== which fonts are worth carrying ===");
 
@@ -585,5 +597,16 @@ check("...and the sheet is sized in the viewBox", svg.includes('viewBox="0 0 10 
  * document here.
  */
 require("./export/sheets.js")(check);
+require("./export/pages.js")(check);
 
-process.exit(finish());
+/* And the half that wants a network, a rasteriser and an image loader as
+ * well. Asynchronous, so it is the last thing the suite does.
+ */
+/* One after another rather than at once: each prints its own section
+ * headings, and two suites printing into the same log is neither of them.
+ */
+(async () => {
+  await require("./export/document.js")(check);
+  await require("./export/paper.js")(check);
+  process.exit(finish());
+})();
