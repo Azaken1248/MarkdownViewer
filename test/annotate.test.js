@@ -386,4 +386,12 @@ check("a version this does not know is not read", Store.loadPalette(), []);
 saved.delete(Store.PALETTE_KEY);
 check("a reader who has mixed nothing has nothing", Store.loadPalette(), []);
 
+/* And the layer it is all drawn on, which wants a document.
+ *
+ * Everything above is pure — points in, points out — and runs in this
+ * process's own scope. The surface turns those numbers into SVG and answers a
+ * pointer, so it gets a jsdom of its own rather than a fake document here.
+ */
+require("./annotate/surface.js")(check);
+
 process.exit(finish());

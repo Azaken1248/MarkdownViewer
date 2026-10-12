@@ -578,4 +578,12 @@ check("the stylesheet rides inside CDATA, inside a comment",
   svg.includes("/*<![CDATA[*/a > b") && svg.includes("/*]]>*/"), true);
 check("...and the sheet is sized in the viewBox", svg.includes('viewBox="0 0 10 20"'), true);
 
+/* And the half of the snapshot that wants a document.
+ *
+ * Everything above is pure enough to run in this process's own scope. The
+ * functions that build elements get a window of their own rather than a fake
+ * document here.
+ */
+require("./export/sheets.js")(check);
+
 process.exit(finish());

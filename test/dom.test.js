@@ -508,6 +508,7 @@ async function run(server) {
   await require("./dom/editing.js")(ctx);
   await require("./dom/links-and-roles.js")(ctx);
   await require("./dom/share-page.js")(ctx);
+  await require("./dom/jump.js")(ctx);
   await require("./dom/folders.js")(ctx);
   await require("./dom/accounts.js")(ctx);
   await require("./dom/session.js")(ctx);

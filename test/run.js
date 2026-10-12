@@ -43,7 +43,7 @@ const SUITES = [
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["worker", "worker.test.js", "The Python worker: the protocol, the caps, and the network it takes away"],
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
-  ["annotate", "annotate.test.js", "Ink on a shared document: smoothing, ink to shape, and where it is kept"],
+  ["annotate", "annotate.test.js", "Ink on a shared document: smoothing, ink to shape, the layer it is drawn on, and where it is kept"],
   ["export", "export.test.js", "Taking a copy away: the snapshot's stylesheets, and the zip a .docx is"],
   ["markdown", "markdown.test.js", "The real marked: heading anchors, and the maths markers passing through"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],

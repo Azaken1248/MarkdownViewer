@@ -244,10 +244,12 @@ in the queue, which is how a real error gets buried.
 The rest is left where it is, deliberately, and this is the list so the number
 is a decision rather than an oversight:
 
-- **`app/jump.js`** (27%) steps between matches inside the open document and
-  across into the next one that matches. The finding and marking is reached by
-  the search checks; the stepping is geometry against a rendered document,
-  which is the thing jsdom is worst at. It belongs in `browser` or in nothing.
+- **`app/jump.js`** (50%) steps between matches inside the open document and
+  across into the next one that matches. The finding and the marking are
+  checked now, in `test/dom/jump.js`: what is skipped, which term wins where
+  two could match, and that clearing puts the document back as it was. The
+  stepping is still geometry against a rendered document, which is the thing
+  jsdom is worst at — that half belongs in `browser` or in nothing.
 - **`app/doc-actions.js`** (25%) and **`app/file-actions.js`** (32%) are the
   two halves of delete and restore — by open document and by name. What they
   ask of the server is covered thoroughly by `recycle`; what is unreached is
@@ -264,8 +266,30 @@ and pushes an image.
 
 None of that is a promise to leave them alone. It is a statement that the
 numbers were looked at and the answer was "not yet", which is a different thing
-from not having looked. `public/js/app/` is at 79%, and there is still no
-threshold in CI and should not be one.
+from not having looked. There is still no threshold in CI and should not be one.
+
+### And three the map kept pointing at
+
+Picked the same way — by what a defect in them would cost, not by their number.
+
+| | | What is checked |
+| --- | --- | --- |
+| `annotate/surface.js` | 53% → 94% | The layer the ink is drawn on, which no suite had opened. The two erasers (whole strokes against points), the laser ageing its own trail rather than capping it, and the resize that collapses the layer before measuring the surface it sits inside. `test/annotate/surface.js` |
+| `export/snapshot.js` | 51% → 65% | The half that wants a document: where the copy's box is once ink drawn in the margins is counted, and how big a sheet is. `test/export/sheets.js` |
+| `app/jump.js` | 27% → 50% | Above. `test/dom/jump.js` |
+
+Two of those files run in a jsdom of their own rather than in the suite's
+process, for the same reason the DOM suites do: they build elements. What they
+measure is supplied rather than asked for, because jsdom lays nothing out —
+which is what makes the arithmetic checkable at all, and is the same trick
+`export.test.js` already used for a diagram's bounds.
+
+One thing was left alone on purpose. `intoSheets` is where the decision "give
+this sheet the ink only if the ink reaches it" is made — the fix that stopped a
+three megabyte export becoming a hundred and six — and it is not exported.
+Exporting it to reach it would be changing the code to suit the test, so what
+is checked is the number the decision is made on. The rest is `browser`'s to
+answer, or nobody's.
 
 Two things make the client's numbers mean something. `test/app-source.js`
 evaluates each script with a `//# sourceURL` naming the file, so V8 attributes
