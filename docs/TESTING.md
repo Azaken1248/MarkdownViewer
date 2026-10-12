@@ -275,7 +275,7 @@ Picked the same way — by what a defect in them would cost, not by their number
 | | | What is checked |
 | --- | --- | --- |
 | `annotate/surface.js` | 53% → 94% | The layer the ink is drawn on, which no suite had opened. The two erasers (whole strokes against points), the laser ageing its own trail rather than capping it, and the resize that collapses the layer before measuring the surface it sits inside. `test/annotate/surface.js` |
-| `export/snapshot.js` | 51% → 65% | The half that wants a document: where the copy's box is once ink drawn in the margins is counted, and how big a sheet is. `test/export/sheets.js` |
+| `export/snapshot.js` | 51% → 65%, and since to 100% | The half that wants a document: where the copy's box is once ink drawn in the margins is counted, and how big a sheet is. `test/export/sheets.js`, and then the four files below |
 | `app/jump.js` | 27% → 50% | Above. `test/dom/jump.js` |
 
 Two of those files run in a jsdom of their own rather than in the suite's
@@ -284,12 +284,60 @@ measure is supplied rather than asked for, because jsdom lays nothing out —
 which is what makes the arithmetic checkable at all, and is the same trick
 `export.test.js` already used for a diagram's bounds.
 
-One thing was left alone on purpose. `intoSheets` is where the decision "give
-this sheet the ink only if the ink reaches it" is made — the fix that stopped a
-three megabyte export becoming a hundred and six — and it is not exported.
-Exporting it to reach it would be changing the code to suit the test, so what
-is checked is the number the decision is made on. The rest is `browser`'s to
-answer, or nobody's.
+### The export path, all four files
+
+The export is the one area taken to the end, and it is worth saying what that
+took, because the four files are the clearest example in the repository of code
+that is not hard to test and had not been tested.
+
+| | | What was missing |
+| --- | --- | --- |
+| `export/paginate.js` | 61% → 100% lines, branches **and** functions | The arithmetic for where pages break was covered. The measuring was not: the margins `getBoundingClientRect` leaves out, the four tries an oversized block is given, the floor under how small it may go, and the correction pass |
+| `export/snapshot.js` | 65% → 100% lines and functions | The fetching and the building — stylesheets, fonts, pictures, diagrams, the ink laid over each sheet, and every way each of those can fail |
+| `export/pdf.js` | 69% → 100% lines and functions | The page: the typography the sheets have nothing to inherit from, the sheets as XML, and the text layer |
+| `export/formats.js` | 75% → 100% lines, branches and functions | The handing over: the link made and pressed and taken away, the object URL given back a minute later, and the three ways the server can refuse to draw a PDF |
+
+Four things are stood in for, and they are the four a browser does and Node
+does not: the network as a table of what each URL answers with, the rasteriser
+as a canvas that answers the same thing every time, the image loader as one
+that answers on the next tick, and the layout as twenty lines of block stacking
+in `test/export/layout.js`.
+
+That last one earns its place rather than being a convenience. `settle` exists
+because a height measured in the frame is now and then a few pixels short of
+the height the block has on the sheet — which is a clipped descender at the
+foot of a page — and it asks each sheet whether what it holds still fits.
+Asking that of a document where nothing has a position is asking nothing.
+
+Writing it taught us something about the code, too. A `zoom` scales the lengths
+inside it, so a block in a wrapper at two thirds has half again as much room to
+lay itself out in — which is why the paginator shrinks, measures again, and
+almost always stops there. The first version of the test had it converging the
+wrong way and the code was right.
+
+#### The two branches left, and why they stay
+
+Lines and functions are at 100% across all four files, and `paginate.js` and
+`formats.js` are at 100% of branches as well. Two branches are not reached, and
+both are unreachable rather than unwritten:
+
+- `intoSheets`, in `snapshot.js`, reads `sheet.dataset.docTop || 0` — and
+  `intoPages`, two lines above, always sets that attribute. The fallback
+  protects nothing.
+- `wordAt`, in `pdf.js`, divides by `natural` and falls back to a scale of 100
+  when it is zero. `natural` is a word's length times a size that is at least
+  one, and the words come from `\S+`, so it cannot be zero.
+
+Both are a guard on something the only caller has already guaranteed. Reaching
+either would mean calling a private function from outside, so they are left
+where they are and written down here instead.
+
+`intoSheets` is worth one more sentence, because it used to be the thing left
+alone on purpose: it is where the decision "give this sheet the ink only if the
+ink reaches it" is made — the fix that stopped a three megabyte export becoming
+a hundred and six — and it is not exported. It is now driven for real, through
+`build({ paged: true })` with ink on the page, rather than only at the number
+the decision is made on.
 
 Two things make the client's numbers mean something. `test/app-source.js`
 evaluates each script with a `//# sourceURL` naming the file, so V8 attributes
