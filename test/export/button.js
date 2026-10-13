@@ -133,6 +133,12 @@ module.exports = async (check) => {
     button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     check("...and closes it again", menu.hidden, true);
 
+    // And whatever else is on the page can close it: a share page shuts it
+    // when the viewer starts dragging the document about.
+    handle.open();
+    handle.close();
+    check("...and whatever else is on the page can shut it", menu.hidden, true);
+
     handle.open();
     menu.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
     check("a press inside the menu leaves it open", menu.hidden, false);
