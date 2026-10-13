@@ -112,10 +112,10 @@ for (const library of DEFERRED) {
 // security that came free with a <script> tag in the head is to forget that a
 // dynamically created one checks nothing unless told to.
 check("every lazy asset carries an integrity hash", lazyAssets.every((asset) => asset.integrity.startsWith("sha384-")), true);
-check("...and the loader sets it on the element", /node\.integrity = asset\.integrity/.test(core), true);
-check("...with crossorigin, or the hash cannot be checked", /node\.crossOrigin = "anonymous"/.test(core), true);
 check("the KaTeX stylesheet comes with the KaTeX script",
   lazyAssets.some((asset) => asset.url.includes("katex") && asset.url.endsWith(".css")), true);
+// What the loader does with those hashes is checked by running it, at the
+// bottom of this file, rather than by reading the line that sets them.
 
 console.log("=== nothing is fetched for a document that does not need it ===");
 // Scoped to the render function: "promoteMermaidCodeBlocks(root)" also occurs
@@ -275,4 +275,150 @@ console.log("=== the app's own assets go out compressed ===");
     MIN_COMPRESS_BYTES, 512);
 }
 
-process.exit(finish());
+/* And the loader itself, run.
+ *
+ * Everything above reads these files as text, because a budget is about what
+ * is in them. This last part evaluates md/lazy.js in a window and hands it a
+ * head that answers: jsdom fetches nothing, so whether an asset arrives is
+ * this suite's to decide, which is what makes the failure path checkable at
+ * all.
+ */
+(async () => {
+  const { JSDOM } = require("jsdom");
+  const { loadScript } = require("./app-source.js");
+
+  console.log("=== the loader, with a network that answers ===");
+
+  const { window } = new JSDOM("", { url: "https://example.test/", runScripts: "outside-only" });
+  // lazy.js configures marked as it loads, so marked has to be there.
+  window.marked = /** @type {any} */ ({ setOptions() {}, parse: (text) => String(text) });
+  loadScript(window, path.join(PUBLIC_DIR, "js", "md", "lazy.js"));
+  const Lazy = window.MdLazy;
+
+  // Which global each library puts itself in, which is what `loaded()` looks
+  // for and therefore what arriving means.
+  const PUTS_ITSELF_IN = [
+    ["mermaid", "mermaid"], ["svg-pan-zoom", "svgPanZoom"], ["highlight", "hljs"],
+    // KaTeX is two scripts and the second of them is what the renderer calls,
+    // so a page with only the first is a page where no formula is typeset.
+    ["katex.min.js", "katex"], ["auto-render", "renderMathInElement"]
+  ];
+
+  const asked = [];
+  let arrives = true;
+
+  const realAppend = window.document.head.appendChild.bind(window.document.head);
+  window.document.head.appendChild = /** @type {any} */ ((node) => {
+    asked.push(node);
+    realAppend(node);
+
+    Promise.resolve().then(() => {
+      if (arrives) {
+        const where = node.src || node.href || "";
+        const found = PUTS_ITSELF_IN.find(([part]) => where.includes(part));
+        if (found) {
+          window[found[1]] = /** @type {any} */ ({});
+        }
+      }
+
+      node.dispatchEvent(new window.Event(arrives ? "load" : "error"));
+    });
+
+    return node;
+  });
+
+  /* What it says when it cannot, before anybody has told it where to say it.
+   * The default goes to the console, which is the right answer on a page that
+   * has not wired a toast up yet — the share page spends its first moments in
+   * exactly that state.
+   */
+  const logged = [];
+  window.console.warn = (message) => logged.push(message);
+  arrives = false;
+  await Lazy.ensureLibrary("highlight");
+  check("a page that has not said where to put a warning gets it in the console",
+    logged, ["Syntax highlighting could not be loaded, "
+      + "so part of this document is shown unformatted."]);
+  arrives = true;
+  asked.length = 0;
+
+  const warnings = [];
+  Lazy.configure({ onWarning: (message) => warnings.push(message) });
+
+  // A library nothing knows about is not a library, and asking for one is not
+  // an error — it is a renderer asking for something this build dropped.
+  check("a library that is not in the table is simply not available",
+    [await Lazy.ensureLibrary("nothing-like-this"), asked.length], [false, 0]);
+
+  check("asking for the diagram engine loads it", await Lazy.ensureLibrary("mermaid"), true);
+  check("...from the one place it is pinned",
+    asked[asked.length - 1].src, lazyAssets.find((asset) => asset.url.includes("mermaid")).url);
+
+  /* The whole point of moving these out of the head was speed, and the
+   * cheapest way to lose the security that came free with a <script> tag
+   * there is to forget that a dynamically created one checks nothing unless
+   * it is told to.
+   */
+  check("...with the hash it is pinned to, and the crossorigin that lets it be checked",
+    [String(asked[0].integrity).startsWith("sha384-"), asked[0].crossOrigin,
+      asked[0].referrerPolicy], [true, "anonymous", "no-referrer"]);
+
+  // Already on the page, so a later render does not fetch it again.
+  check("...and asking again once it is there loads nothing",
+    [await Lazy.ensureLibrary("mermaid"), asked.length], [true, 1]);
+
+  /* One load per page, shared by every render that asks while it is still in
+   * flight — which is the normal case on a document with a diagram, a formula
+   * and a code block in it, all three of which ask at once.
+   */
+  asked.length = 0;
+  const together = await Promise.all([
+    Lazy.ensureLibrary("highlight"), Lazy.ensureLibrary("highlight"),
+    Lazy.ensureLibrary("highlight")
+  ]);
+  check("three renders asking at once share one load", [together, asked.length],
+    [[true, true, true], 1]);
+
+  /* KaTeX is two assets and they are not the same kind of tag: a stylesheet
+   * loaded as a script is a stylesheet that does nothing, silently.
+   */
+  asked.length = 0;
+  check("maths brings its stylesheet as well as its script",
+    await Lazy.ensureLibrary("math"), true);
+  check("...as a stylesheet rather than as a script",
+    asked.map((node) => [node.tagName, node.rel || ""])
+      .filter(([tag]) => tag === "LINK").map(([, rel]) => rel), ["stylesheet"]);
+  check("...and every one of them hashed",
+    [asked.length, asked.every((node) => String(node.integrity).startsWith("sha384-"))],
+    [3, true]);
+  asked.length = 0;
+
+  // Already there, so nothing is fetched — which is the case on every render
+  // after the first.
+  asked.length = 0;
+  check("a library already on the page is not loaded again",
+    [await Lazy.ensureLibrary("math"), asked.length], [true, 0]);
+
+  console.log("=== and with one that does not ===");
+
+  /* A failure degrades the document rather than failing it: the render carries
+   * on exactly as it did when the library was simply absent, and the reader is
+   * told which part of the page is not what it should be.
+   */
+  arrives = false;
+  asked.length = 0;
+  warnings.length = 0;
+  check("a library that will not load is not available", await Lazy.ensureLibrary("panZoom"), false);
+  check("...and the reader is told which part of the document that costs",
+    warnings, ["Diagram pan and zoom could not be loaded, "
+      + "so part of this document is shown unformatted."]);
+
+  /* Not cached, which is the difference between a tab that recovers and a tab
+   * that has to be reloaded: a document opened after the network comes back
+   * tries again.
+   */
+  arrives = true;
+  check("...and the failure is not remembered", await Lazy.ensureLibrary("panZoom"), true);
+
+  process.exit(finish());
+})();

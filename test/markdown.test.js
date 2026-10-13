@@ -51,7 +51,7 @@ window.TextDecoder = TextDecoder;
 
 // Evaluated in the window, the way a page loads them, so each module's
 // top-level `var` becomes the namespace the next one reads.
-for (const file of ["dom-html.js", "doc-kinds.js", "md/lazy.js", "md/text.js"]) {
+for (const file of ["dom-html.js", "doc-kinds.js", "md/lazy.js", "md/text.js", "md/notebook.js"]) {
   loadScript(window, path.join(ROOT, "public", "js", file));
 }
 
@@ -117,5 +117,96 @@ check("the TeX marked would have eaten arrives intact",
 
 check("and a dollar in a code span is still code",
   render("Code `$x$` here.\n").includes("<code>$x$</code>"), true);
+
+console.log("=== a matrix written the way people write one ===");
+
+/* KaTeX wants `\\` between the rows of a matrix. Plenty of people write one
+ * row per line and no separators at all, because that is what a matrix looks
+ * like — and KaTeX renders that as a single row, which is a matrix with the
+ * wrong shape rather than an error anybody would notice.
+ */
+const matrix = window.MdText.normalizeMatrixEnvironments;
+
+check("rows on their own lines are given the separators KaTeX wants",
+  matrix("\\begin{bmatrix}\n1 & 2\n3 & 4\n\\end{bmatrix}"),
+  "\\begin{bmatrix}\n1 & 2 \\\\ \n3 & 4\n\\end{bmatrix}");
+// Already separated, so there is nothing to guess about and nothing is
+// touched: somebody who wrote the separators meant the rows they marked.
+const separated = "\\begin{bmatrix}\n1 & 2 \\\\\n3 & 4\n\\end{bmatrix}";
+check("...and one that already has them is left exactly as it was",
+  matrix(separated), separated);
+// One row is one row however it was written, and adding a separator to it
+// would make it two.
+check("...as is a matrix of a single row",
+  matrix("\\begin{vmatrix}\n1 & 2\n\\end{vmatrix}"), "\\begin{vmatrix}\n1 & 2\n\\end{vmatrix}");
+check("...and a trailing backslash on a row is not counted twice",
+  matrix("\\begin{matrix}\n1 \\\n2\n\\end{matrix}").includes("1 \\\\ \n2"), true);
+check("anything that is not a matrix environment is not an environment",
+  matrix("\\begin{align}\nx = 1\ny = 2\n\\end{align}"), "\\begin{align}\nx = 1\ny = 2\n\\end{align}");
+check("...and nothing at all is an empty string", matrix(null), "");
+
+console.log("=== a diagram file is a document with one diagram in it ===");
+
+/* A .mmd is not markdown, so it is wrapped in the fence that makes it one
+ * rather than given a renderer of its own. The alternative was a second path
+ * through the whole pipeline for one kind of file.
+ */
+const wrapped = window.MdText.toMermaidMarkdown("graph TD\n A --> B");
+check("the source is fenced as mermaid", wrapped.includes("```mermaid"), true);
+check("...with the diagram inside the fence", wrapped.includes("A --> B"), true);
+check("...and an empty file is still a fence rather than nothing",
+  window.MdText.toMermaidMarkdown(null).includes("```mermaid"), true);
+check("and what the engine renders of it is a diagram block",
+  /class="[^"]*mermaid/.test(render(wrapped)), true);
+
+console.log("=== and the corners of the maths walk ===");
+
+/* The walk over a line is a small state machine, and these are the three
+ * things in a line of prose that look like maths and are not.
+ */
+check("an escaped dollar is a dollar, and the backslash is markdown's business",
+  render("Costs \\$5 and \\$6.\n").includes("math-inline"), false);
+check("...a dollar with nothing closing it is a dollar",
+  render("It costs $5 to send.\n").includes("math-inline"), false);
+// A fence opened with tildes is closed by tildes: a line of backticks inside
+// it is content, not the end of it.
+check("...and a fence opened one way is not closed by the other",
+  render("~~~\n```\n$x$\n~~~\n").includes("math-inline"), false);
+
+/* The TeX goes into the attribute base64'd, and comes back out of it the same
+ * way — which is the half of the round trip the app does at render time and
+ * the suite has only ever done by hand.
+ */
+const { encodeBase64Utf8, decodeBase64Utf8 } = window.MdText;
+check("the TeX makes the round trip through base64",
+  decodeBase64Utf8(encodeBase64Utf8("\\alpha \\le \\beta")), "\\alpha \\le \\beta");
+// Not ASCII, which is the reason it is not simply btoa: a Greek letter in a
+// formula is the normal case here.
+check("...including the letters a formula is actually made of",
+  decodeBase64Utf8(encodeBase64Utf8("α ≤ β — ∞")), "α ≤ β — ∞");
+check("...and nothing makes the round trip as nothing",
+  [encodeBase64Utf8(null), decodeBase64Utf8(null)], ["", ""]);
+
+/* Which theme is showing, read off <html>. That attribute is the contract
+ * between theme-boot.js, which writes it before the page paints, and the
+ * stylesheet — and reading it is how the engine joins that without knowing
+ * the app's theme switch exists, since it renders the same documents on the
+ * share page.
+ */
+check("the engine reads the theme off the page rather than being told",
+  window.MdText.activeThemeName(), "dark");
+window.document.documentElement.dataset.theme = "light";
+check("...whichever it is", window.MdText.activeThemeName(), "light");
+// Anything that is not light is dark, which is the app's default and what the
+// page looks like before theme-boot has run.
+window.document.documentElement.dataset.theme = "something else";
+check("...and anything it does not recognise is the dark one",
+  window.MdText.activeThemeName(), "dark");
+delete window.document.documentElement.dataset.theme;
+
+/* And a .ipynb drawn as a document, which is the same engine with a file
+ * format in front of it.
+ */
+require("./markdown/notebook.js")(check, window);
 
 process.exit(finish());

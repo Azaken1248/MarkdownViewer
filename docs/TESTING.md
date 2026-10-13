@@ -316,6 +316,26 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The renderer's own three
+
+| | | What was missing |
+| --- | --- | --- |
+| `md/notebook.js` | 68% → **100%** of lines and functions | A .ipynb drawn as a document: every output kind, every place a notebook says what language it is in, and which cells get a Run button |
+| `md/text.js` | 93% → **100%** of lines and functions | The corners of the maths walk — an escaped dollar, an unclosed one, a fence opened with tildes — and the base64 round trip the TeX makes |
+| `md/lazy.js` | 83% → 87% in its own suite | The loader itself, which nothing had ever run |
+
+The loader is the interesting one, and it changed what `loading` is. That suite
+reads these files as text, because a critical-path budget is about what is *in*
+them — and three of its checks had drifted into reading the loader's source for
+the lines that set `integrity` and `crossOrigin`. They are now checked by
+running it: the suite evaluates `md/lazy.js` in a window and hands it a `head`
+that answers, so whether an asset arrives is the suite's to decide. That is
+what makes the failure path checkable at all, and it is the path that matters —
+a library that will not load has to degrade the document rather than fail it,
+tell the reader which part of the page is not what it should be, and *not*
+remember the failure, so that a document opened after the network comes back
+tries again.
+
 ### Writing on a shared document, all four files
 
 The same treatment, and the one that found a defect.
