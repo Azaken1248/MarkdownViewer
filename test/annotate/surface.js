@@ -219,9 +219,19 @@ module.exports = (check) => {
     check("...and says so when it touched nothing", S.eraseAt(whole, [200, 150]), false);
     whole.svg.remove();
 
-    const points = viewFor({ strokes: [{ ...long }], eraserMode: "point", width: 4 });
+    const points = viewFor({ strokes: [{ ...long }, { ...away }], eraserMode: "point", width: 4 });
     check("the point eraser opens a gap instead", S.eraseAt(points, [200, 50]), true);
-    check("...leaving the two halves either side", points.strokes.length, 2);
+    check("...leaving the two halves either side, and the stroke it missed",
+      points.strokes.length, 3);
+
+    /* And the one it missed comes back untouched rather than re-simplified.
+     * Everything in the document goes through this on every rub, and running
+     * a stroke the eraser never reached through densify and simplify would
+     * move the ink somebody did not touch.
+     */
+    check("...which is the stroke it was, not a tidied copy of it",
+      points.strokes[2].points, away.points);
+    points.strokes = points.strokes.slice(0, 2);
 
     const ends = points.strokes.map((one) => [one.points[0][0], one.points.at(-1)[0]]);
     check("...one before the gap and one after",
@@ -343,6 +353,41 @@ module.exports = (check) => {
     surface.getBoundingClientRect = () => /** @type {any} */ ({ left: 24, top: 60 });
     check("the event is translated out of the viewport",
       S.pointIn(view, { clientX: 124, clientY: 160 }), [100, 100]);
+    view.svg.remove();
+  }
+
+  console.log("=== and a pointer that goes down where nothing is being drawn ===");
+  {
+    /* Every one of these can arrive with no stroke under way: a move whose
+     * pointerdown was eaten by something else, an up after the tool was put
+     * down mid-drag, a layer the document was re-rendered out from under.
+     * None of them is an error and none of them may throw, because a throw in
+     * a pointer handler leaves the layer holding the pointer with nothing
+     * listening.
+     */
+    const view = viewFor({ drawing: null });
+    S.extendStroke(view, [10, 10]);
+    check("extending nothing draws nothing", view.svg.querySelectorAll("path").length, 0);
+    check("...and settling nothing is nothing", S.settleStroke(view), null);
+
+    /* And the layer put back after the document was re-rendered: the share
+     * page calls this every time, and the position on the surface is what
+     * makes an absolutely positioned layer land on the document rather than
+     * on the page.
+     */
+    view.svg.remove();
+    surface.style.position = "";
+    check("a layer taken off the page is put back on it",
+      S.ensureLayer(view).parentNode, surface);
+    check("...and the surface is made something to position against",
+      surface.style.position, "relative");
+
+    // A surface that already says how it is positioned keeps what it said.
+    view.svg.remove();
+    surface.style.position = "absolute";
+    S.ensureLayer(view);
+    check("...unless it already said", surface.style.position, "absolute");
+    surface.style.position = "";
     view.svg.remove();
   }
 };

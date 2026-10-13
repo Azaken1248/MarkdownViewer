@@ -283,6 +283,103 @@ const forces = G.nibWidths(pressed, 6, pressed.map((point) => point[2]));
 check("...and a harder-pressed end draws wider",
   forces[forces.length - 3] > forces[2] * 1.2, true);
 
+console.log("=== and the degenerate strokes every one of these has to survive ===");
+
+/* A pointer can report the same place twice, a tap is one point, and a tool
+ * that was pressed and released without moving is none at all. Every function
+ * above is handed one of those sooner or later, and the answer has to be a
+ * stroke rather than a crash or a NaN in a path — one bad `d` attribute takes
+ * the whole layer with it, because an SVG with an unparseable path draws
+ * nothing from that point on.
+ */
+check("a tap is a dot the size of the nib", G.inkOutline([[10, 10]], 6, null).startsWith("M"), true);
+check("...and nothing at all is nothing", G.inkOutline([], 6, null), "");
+check("one point is a move and no line", G.throughPointsCubic([[5, 5]]), "M 5 5");
+check("...and none is an empty path", G.throughPointsCubic([]), "");
+check("the walk without an opening move still opens one when it has to",
+  G.throughPoints([[0, 0], [10, 0], [20, 10]]), "M 0 0 Q 10 0 15 5 L 20 10");
+check("...and answers the same way for one point and for none",
+  [G.throughPoints([[5, 5]]), G.throughPoints([])], ["M 5 5", ""]);
+
+/* A pointer that reported the same place twice, which every one of these
+ * walks a segment of. A segment of no length has no direction and nowhere to
+ * put a sample on it, and dividing by its length is how NaN gets into a path.
+ */
+check("a repeated point is walked over rather than divided by",
+  G.resample([[0, 0], [0, 0], [10, 0]], 2).every((point) => point.every(Number.isFinite)), true);
+check("...and the stroke still comes back the length it was",
+  Math.round(G.pathLength(G.resample([[0, 0], [0, 0], [10, 0]], 2))), 10);
+
+check("a stroke of one point cannot be made denser", G.densify([[1, 1]], 2), [[1, 1]]);
+check("...nor can one with no spacing to divide by",
+  G.densify([[0, 0], [10, 0]], 0), [[0, 0], [10, 0]]);
+// A pointer that reported the same place twice: a segment of no length has
+// nowhere to put a sample, and dividing by it is how NaN gets into a path.
+check("...and a repeated point adds nothing",
+  G.densify([[0, 0], [0, 0], [10, 0]], 5).every((point) => point.every(Number.isFinite)), true);
+
+check("a stroke too short to simplify comes back as it was",
+  G.simplify([[0, 0], [5, 5]], 1), [[0, 0], [5, 5]]);
+check("a hull of two points is the two points",
+  G.convexHull([[0, 0], [5, 5]]), [[0, 0], [5, 5]]);
+check("a point measured against a segment of no length is measured against the point",
+  G.distanceToSegment([3, 4], [0, 0], [0, 0]), 5);
+
+/* Roundness is a ratio, and both halves of it can be zero: a stroke drawn
+ * along one line has no height, and one drawn on the spot has no radius at
+ * all. Infinity is "not round", which is the answer that stops a straight
+ * line being tidied into a circle.
+ */
+check("a stroke with no height is not round",
+  G.radialSpread([[0, 0], [10, 0], [20, 0]]), Infinity);
+check("...and neither is one drawn on the spot",
+  G.radialSpread([[5, 5], [5, 5]]), Infinity);
+
+// Scaling by nothing is not scaling, and a reflow that changed nothing should
+// not rebuild every stroke in the document.
+const unmoved = [[1, 2], [3, 4]];
+check("a stroke scaled by one is the same stroke", G.scalePoints(unmoved, 1, 1), unmoved);
+// The third value is nib pressure, not a coordinate: a page half as wide does
+// not mean a pen half as hard.
+check("...and a scaled stroke keeps how hard the pen was pressed",
+  G.scalePoints([[10, 20, 0.4]], 2, 3), [[20, 60, 0.4]]);
+
+/* The direction across the stroke, which is what the nib is drawn along. Two
+ * samples in the same place have no direction between them, and a nib drawn
+ * along a normal of NaN is a path the browser throws away whole.
+ */
+check("two samples in the same place have no direction across them",
+  G.normalAt([[5, 5], [5, 5]], 0), [0, 0]);
+
+// A box round nothing has no angle to be off square by.
+check("a box round a single point is square to the page", G.orientedBox([[4, 4]]), 0);
+check("...and so is a box round nothing at all", G.orientedBox([]), 0);
+
+console.log("=== a shape drawn on purpose, in each of its kinds ===");
+
+/* The clean version of what was drawn, which is a different function for each
+ * kind — and the kind a drag asks for directly rather than being recognised.
+ */
+check("a dragged ellipse is a ring", G.shapeFromDrag("ellipse", [0, 0], [40, 20]).length > 8, true);
+check("...inside the box it was dragged in",
+  [Math.round(G.boundsOf(G.shapeFromDrag("ellipse", [0, 0], [40, 20])).width),
+    Math.round(G.boundsOf(G.shapeFromDrag("ellipse", [0, 0], [40, 20])).height)], [40, 20]);
+check("a dragged arrow is a line, with the head drawn separately",
+  G.shapeFromDrag("arrow", [0, 0], [30, 0]).length, 2);
+
+// shapePoints answers for a kind rather than for a drag, and the three it has
+// a special answer for are the three that are not an ellipse.
+check("a recognised line is cleaned to its two ends",
+  G.shapePoints({ kind: "line", ink: [[0, 0], [5, 1], [10, 0]], outline: [] }).length, 2);
+check("...a recognised triangle to its three corners and back to the first",
+  G.shapePoints({
+    kind: "triangle", ink: [], outline: [[0, 0], [10, 0], [5, 10], [0, 0]]
+  }), [[0, 0], [10, 0], [5, 10], [0, 0]]);
+// A triangle whose hull came back with fewer than three corners is not a
+// triangle, and the outline it did come back with is better than nothing.
+check("...and a triangle with no three corners keeps the outline it has",
+  G.shapePoints({ kind: "triangle", ink: [], outline: [[0, 0], [1, 1]] }), [[0, 0], [1, 1]]);
+
 console.log("=== where the marks are kept ===");
 
 /* localStorage, standing in. The real one belongs to a browser; what is under
@@ -386,6 +483,34 @@ check("a version this does not know is not read", Store.loadPalette(), []);
 saved.delete(Store.PALETTE_KEY);
 check("a reader who has mixed nothing has nothing", Store.loadPalette(), []);
 
+console.log("=== and a browser that will not store anything at all ===");
+
+/* Private mode, a blocked origin, or a quota that is gone. Every one of these
+ * is a refusal rather than an exception, because the marks are a convenience
+ * on top of somebody else's document: they stay on screen for this visit, and
+ * nothing about the document itself stops working.
+ */
+const refusing = () => {
+  throw new Error("this browser will not store anything");
+};
+
+globalThis.window.localStorage = /** @type {any} */ ({
+  getItem: refusing, setItem: refusing, removeItem: refusing
+});
+
+check("marks that cannot be read are no marks", Store.load("token-a"), []);
+check("...and marks that cannot be written are a refusal, not a throw",
+  Store.save("token-a", strokes), { saved: false, reason: "refused" });
+check("...as is clearing them", Store.clear("token-a"), { saved: false, reason: "refused" });
+check("a palette that cannot be read is no palette", Store.loadPalette(), []);
+// The colours are still in hand for this visit; only the remembering failed.
+check("...and one that cannot be written comes back anyway",
+  Store.savePalette(["#ff8800"]), { saved: false, reason: "refused", colours: ["#ff8800"] });
+
+// And a document with no token to file them under, which is a page this
+// module was loaded on by some route it does not know about.
+check("marks with nothing to file them under are not looked for", Store.load(""), []);
+
 /* And the layer it is all drawn on, which wants a document.
  *
  * Everything above is pure — points in, points out — and runs in this
@@ -394,4 +519,7 @@ check("a reader who has mixed nothing has nothing", Store.loadPalette(), []);
  */
 require("./annotate/surface.js")(check);
 
-process.exit(finish());
+/* And the part on top of all three: tools, undo and the toolbar. Its own
+ * window too, with a real geometry, a real store and a real surface under it.
+ */
+require("./annotate/tools.js")(check).then(() => process.exit(finish()));

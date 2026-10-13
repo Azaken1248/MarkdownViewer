@@ -170,6 +170,17 @@ var Annotate = (function () {
 
     if (view.tool === "eraser") {
       view.erasedThisDrag = false;
+      /* One drag is one undo step, however many strokes it rubs out — and no
+       * step at all if it crossed nothing, which onUp takes back off.
+       *
+       * Taken here rather than at the first thing actually rubbed out,
+       * because "the first thing rubbed out" never happens on a drag over
+       * empty space: the snapshot was taken on every pointermove instead,
+       * and a drag across a blank margin filled the undo stack with a
+       * hundred identical copies of the document. Undo then did nothing, a
+       * hundred times.
+       */
+      remember(view);
       trackEraser(view, event);
       return;
     }
@@ -217,12 +228,8 @@ var Annotate = (function () {
     }
   }
 
-  // One drag is one undo step, however many strokes it rubs out.
+  // The step this belongs to was put on the stack when the drag began.
   function rubOut(view, at) {
-    if (!view.erasedThisDrag) {
-      remember(view);
-    }
-
     if (Surface.eraseAt(view, at)) {
       view.erasedThisDrag = true;
       paintToolbar(view);

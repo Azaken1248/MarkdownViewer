@@ -316,7 +316,45 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
-#### The two branches left, and why they stay
+### Writing on a shared document, all four files
+
+The same treatment, and the one that found a defect.
+
+| | | What was missing |
+| --- | --- | --- |
+| `annotate.js` | 64% → 99.8% lines and 100% functions | All of it: the toolbar, the tools, the pointer, the history, the palette, the reflow |
+| `annotate/geometry.js` | 94% → 99.8% | The degenerate strokes — a tap, a repeated point, a stroke with no height — which every function in there is handed sooner or later |
+| `annotate/surface.js` | 94% → 99.5% | The layer put back after a re-render, a pointer event with no stroke under way, and the laser's own clock |
+| `annotate/store.js` | 91% → **100%** of lines, branches and functions | A browser that will not store anything: private mode, a blocked origin, a quota that is gone |
+
+The feature is a transparency over somebody else's document, so nothing here
+goes to the server and the whole of it is a browser. What that costs the suite
+is four stand-ins: `PointerEvent`, which jsdom has not got and which is
+assembled out of a `MouseEvent`; `ResizeObserver`, so the page can be made to
+change shape on purpose; `window.confirm`, since erasing everything asks; and
+`setTimeout`, so the two waits in the module can be brought forward. The
+laser's clock is left to run for real — a quarter of a second of wall clock,
+once, for the one part of the feature that *is* a clock.
+
+**The defect it found.** "One drag is one undo step, however many strokes it
+rubs out" was the comment, and the snapshot was taken at the first stroke
+actually rubbed out. On a drag that crosses nothing there is no first stroke
+rubbed out, so the snapshot was taken on *every* `pointermove` instead: one
+drag across a blank margin put a hundred identical copies of the document on
+the undo stack, and undo then did nothing, a hundred times over. The snapshot
+is now taken when the drag begins and taken back off if the drag turned out to
+rub nothing out, which is both correct and one branch shorter.
+
+Eight lines and four branches are left across the four files, and every one is
+a guard on something its only caller has already settled: `say` checks for a
+status line that `buildToolbar` always makes; the keyboard handler defaults
+`document.activeElement?.tagName` when a document always has a body;
+`radialSpread` guards a mean of zero that cannot happen once the bounds are
+non-zero; and the point eraser's "nothing was actually removed" path cannot be
+reached because the `densify` two lines above it guarantees a sample within
+reach of anything `nearPoint` said yes to.
+
+#### The two branches left in the export path, and why they stay
 
 Lines and functions are at 100% across all four files, and `paginate.js` and
 `formats.js` are at 100% of branches as well. Two branches are not reached, and
