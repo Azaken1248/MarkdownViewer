@@ -39,14 +39,10 @@ check("has a ceiling so tall ones fit the window", /max-height:/.test(block), tr
 check("the SVG fills it rather than sizing it", /width:\s*100%[\s\S]*height:\s*100%/.test(rule(".markdown-body .mermaid-block svg")), true);
 check("no height:auto on the SVG (collapses under pan-zoom)", /height:\s*auto/.test(rule(".markdown-body .mermaid-block svg")), false);
 
-console.log("=== the ratio comes from the diagram, not a constant ===");
-check("a sizing helper exists", js.includes("function sizeDiagramContainer("), true);
-check("it reads the viewBox", js.includes("svg.viewBox?.baseVal"), true);
-check("it falls back to a measured bbox", js.includes("svg.getBBox()"), true);
-check("getBBox is guarded (throws when detached)", /try \{[\s\S]{0,200}getBBox\(\)[\s\S]{0,200}\} catch/.test(js), true);
-check("it has a last-resort ratio", js.includes("DIAGRAM_FALLBACK_RATIO"), true);
-check("it runs before pan-zoom takes the SVG over",
-  js.indexOf("sizeDiagramContainer(svg);") < js.indexOf("window.svgPanZoom(`#${id}`"), true);
+/* Where the ratio comes from — the viewBox, then a measured bbox, then a last
+ * resort — is checked by running the sizing at the bottom of this file, which
+ * is where the constants below are read from as well.
+ */
 
 console.log("=== a parse failure is not squeezed into the aspect box ===");
 check("fallback source releases the ratio", /:has\(\.mermaid-fallback-code\)[\s\S]*?aspect-ratio:\s*auto/.test(css), true);
@@ -86,10 +82,8 @@ for (const [label, w, h] of shapes) {
 
 console.log("=== nothing can resolve to zero height ===");
 check("floor is above zero", minH > 0, true);
-check("small diagrams get a width cap, not the full pane", js.includes("block.style.maxWidth"), true);
-check("a diagram with no usable size still gets a ratio",
-  /block\.style\.aspectRatio = DIAGRAM_FALLBACK_RATIO/.test(js), true);
-check("...and a fallback width, so it is not pane-wide", /block\.style\.maxWidth = `\$\{DIAGRAM_FALLBACK_WIDTH\}px`/.test(js), true);
+// What a diagram with no usable size is given, and the width cap that keeps a
+// small one small, are both checked by running the sizing below.
 
 // --- Diagram palette ------------------------------------------------------
 
@@ -165,29 +159,16 @@ for (const themeName of ["dark", "light"]) {
 
 console.log("=== the palette follows the active theme ===");
 check("a light palette exists alongside the dark one", /DIAGRAM_PALETTES = \{[\s\S]*?light: \{/.test(js), true);
-check("init reads the active theme", js.includes("const theme = activeThemeName();"), true);
-check("darkMode is derived, not hardcoded", js.includes('darkMode: theme === "dark"'), true);
-check("the engine keeps the source needed to redraw", js.includes("block.dataset.mermaidSource"), true);
-check("...and exposes a way to invalidate the baked-in palette",
-  js.includes("resetMermaidForThemeChange"), true);
-/* The redraw is the engine's, and both pages ask it for the same one.
+/* Which palette a diagram is drawn with, and the four steps of the repaint in
+ * the order they have to happen in, are checked by running the repaint below.
  *
- * It used to be written out twice — once in app/theme.js, once in share.js —
- * and these checks asserted that both copies existed, which is the wrong thing
- * to hold onto: four steps in an order that matters, written down twice, is
- * two chances to get the order wrong and one place a fix would land. So what
- * is checked now is that there is one of them and that the pages call it.
+ * The redraw is the engine's and both pages ask it for the same one. It used to
+ * be written out twice — once in app/theme.js, once in share.js — and these
+ * checks asserted that both copies existed, which is the wrong thing to hold
+ * onto: four steps in an order that matters, written down twice, is two
+ * chances to get the order wrong and one place a fix would land. What is left
+ * here is that the pages call it rather than writing their own.
  */
-check("the engine redraws diagrams on a theme change",
-  js.includes("async function repaintMermaidForTheme("), true);
-// Inside that function, not anywhere in the engine: destroyPanZoomInstances
-// is called and defined in several places, and what matters is the order of
-// the four steps in the one that redraws.
-const repaint = js.slice(js.indexOf("async function repaintMermaidForTheme("));
-check("...after releasing pan/zoom on the old SVGs",
-  repaint.indexOf("destroyPanZoomInstances();") < repaint.indexOf("block.dataset.mermaidSource"), true);
-check("...and after forgetting the palette it was drawn with",
-  repaint.indexOf("mermaidState.ready = false;") < repaint.indexOf("destroyPanZoomInstances();"), true);
 check("the app asks it to, naming the panels it has",
   /repaintMermaidForTheme\(\[elements\.docContent/.test(appJs), true);
 // The share page renders the same diagrams and has the same theme toggle, so
@@ -515,7 +496,12 @@ console.log("=== rendering a root twice draws the diagram, not its stylesheet ==
     check("a laid-out diagram we cannot read is handed to the engine",
       drawn.slice(beforeHandover), [beyond]);
 
-    process.exit(finish());
+    /* And the rendering path, run rather than read.
+ *
+ * Everything above reads the stylesheet and the engine's source. This drives
+ * the modules themselves, with the four CDN libraries stood in for.
+ */
+require("./diagrams/rendering.js")(check).then(() => process.exit(finish()));
   })().catch((error) => {
     // Without this a throw in here would end the process quietly with a zero
     // status, which is a suite that passes by not running.

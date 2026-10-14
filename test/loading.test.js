@@ -334,6 +334,11 @@ console.log("=== the app's own assets go out compressed ===");
    */
   const logged = [];
   window.console.warn = (message) => logged.push(message);
+  // The loader logs what went wrong as well as warning about it. Captured, so
+  // the suite's own log is its checks rather than its checks and six
+  // stack-free Errors from the failures it asked for.
+  const failures = [];
+  window.console.error = (error) => failures.push(String(error));
   arrives = false;
   await Lazy.ensureLibrary("highlight");
   check("a page that has not said where to put a warning gets it in the console",
@@ -419,6 +424,10 @@ console.log("=== the app's own assets go out compressed ===");
    */
   arrives = true;
   check("...and the failure is not remembered", await Lazy.ensureLibrary("panZoom"), true);
+  // And what went wrong is written down as well as warned about, naming the
+  // asset rather than only the library.
+  check("...with the asset that would not load named",
+    failures.some((line) => line.includes("svg-pan-zoom")), true);
 
   process.exit(finish());
 })();

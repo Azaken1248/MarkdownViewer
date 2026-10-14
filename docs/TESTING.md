@@ -316,6 +316,48 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The rendering path, run rather than read
+
+`diagrams` and `loading` both read these files as text, and for the stylesheet
+and the palettes that is the right thing to do: a rule is a rule, and the
+contrast arithmetic is over the numbers in the palette table. But a dozen
+checks in `diagrams` had drifted into reading the *engine's source* for the
+lines that do the work — `js.includes("svg.viewBox?.baseVal")`,
+`repaint.indexOf("destroyPanZoomInstances();") < repaint.indexOf(…)` — which
+is a test of the text and passes a rename that breaks the page.
+
+Those are gone, replaced by `test/diagrams/rendering.js`, which runs the
+modules. Four libraries are stood in for, and all four are ones the page
+fetches from a CDN when a document turns out to need them: Mermaid,
+svg-pan-zoom, KaTeX and highlight.js. Each answers the smallest thing the app
+asks of it and writes down what it was asked — what Mermaid *draws* is
+Mermaid's business, and whether the block it drew into has a height of its own
+is ours. The CDN is stood in for as well, because jsdom fetches nothing and a
+`<script>` it appends fires neither event: a table says which assets arrive,
+so the paths where one does not are reachable at all.
+
+| | |
+| --- | --- |
+| `md/mermaid.js` | 64% → **100%** of lines and functions |
+| `md/diagram-theme.js` | 99% → **100%** of lines and functions |
+| `md/panzoom.js` | 74% → 99.4% |
+| `md/math.js` | 75% → 98.2% |
+
+What that reaches which reading the source could not: the ER simplifier's
+second attempt (the common failure — Mermaid's ER parser refuses a type it does
+not know and then refuses the whole diagram for it); the box a diagram is given
+before it is drawn, including the three fallbacks when it will not say how big
+it is; the wheel that is on only while Ctrl is held, and is not left stuck on
+when the window loses focus mid-press; the pan-zoom instances being let go of,
+which were once leaked on every re-render; and the four steps of the theme
+repaint in the order they have to happen in.
+
+Two lines are left in the area and both are guards their only caller has
+already settled: `renderLoadedMathBlocks` checks for a root that
+`renderMathBlocks` has already checked, and `applyLoadedPanZoom` skips an SVG
+marked as already initialized, which the `destroyPanZoomInstances` two lines
+above it has just unmarked.
+
 ### The renderer's own three
 
 | | | What was missing |
