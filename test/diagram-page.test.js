@@ -100,8 +100,14 @@ async function boot(dom, { cookie, origin }) {
   return { window, document: window.document, requested };
 }
 
-function openPage({ url, cookie, origin, stash = null, panels = null }) {
+function openPage({ url, cookie, origin, stash = null, panels = null, before = null }) {
   const dom = new JSDOM(pageHtml, { url, runScripts: "outside-only", pretendToBeVisual: true });
+  // Anything that has to be on the window before the page's own scripts read
+  // it — a ResizeObserver, say, which jsdom has not got and which the editor
+  // only reaches for while it is being built.
+  if (before) {
+    before(dom.window);
+  }
   // What the browser was left holding, before the editor is built and reads it.
   if (panels !== null) {
     dom.window.localStorage.setItem("azadocs:diagram:panels", panels);
@@ -205,6 +211,7 @@ async function run(server, cookie) {
   await require("./diagram-page/bar.js")(ctx);
   await require("./diagram-page/arrows.js")(ctx);
   await require("./diagram-page/carrying.js")(ctx);
+  await require("./diagram-page/reaching.js")(ctx);
 
 }
 

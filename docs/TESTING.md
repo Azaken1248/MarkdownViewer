@@ -316,6 +316,40 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The diagram editor's ninth file
+
+`diagram-editor.js` is the biggest file in the repository and was already at
+91%, driven by eight files under `test/diagram-page/`. `reaching.js` is the
+ninth, and takes it to **94.4%**.
+
+It adds no machinery: everything in it is a right-click, a drag or a press on
+something those eight already know how to find. What it reaches is the part of
+the editor that is a gesture rather than a button —
+
+- the band dragged round several boxes at once, in the diagram's own
+  coordinates rather than the page's, since the view is translated and scaled;
+- the corner an arrow was *already* bent at when the diagram was opened, which
+  is the same handle as bending a straight one and a different path through the
+  code, because the gesture starts on a dot rather than on a line;
+- which box is in front of which, which has no z-index to set: an SVG draws in
+  document order, so the only way to put one box in front is to move it in the
+  file;
+- a box drawn by pulling an arrow into empty paper, and the next one moved
+  along rather than dropped exactly on top of it;
+- a shape dragged off the palette, with the ghost that follows the pointer and
+  goes with the gesture when the browser takes it away;
+- a picture chosen from the file dialogue — the dialogue is the browser's, so
+  what is stood in for is the file coming back from it, and the upload runs
+  against the real server from there;
+- and the PNG, which is the same SVG the other button saves put through a
+  canvas. jsdom has no rasteriser and fetches nothing, not even a data URI, so
+  both the canvas and the `<img>` load are the suite's to answer.
+
+One small thing was added to the shared harness: `openPage` takes a `before`
+callback, for anything that has to be on the window before the page's own
+scripts read it. The editor reaches for a `ResizeObserver` while it is being
+built, and jsdom has not got one.
+
 ### The rendering path, run rather than read
 
 `diagrams` and `loading` both read these files as text, and for the stylesheet
