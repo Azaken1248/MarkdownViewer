@@ -316,6 +316,43 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Delete and restore, which is the only place this app can lose work
+
+There are three places a document can be — the library, the recycle bin and the
+archive — and five verbs for moving between them, because getting out of the
+last two is not the same as getting into the first. What the *server* does with
+each is covered thoroughly by `recycle`. What was not covered at all is the
+side a person sees: which view they are left looking at afterwards, what they
+are asked before anything is lost, and what they are told when it could not be
+done.
+
+| | |
+| --- | --- |
+| `app/doc-actions.js` | 25% → **100%** of lines and functions |
+| `app/deletion.js` | 39% → **100%** of lines and functions |
+| `app/file-actions.js` | 32% → **100%** of lines and functions |
+
+`test/dom/discarding.js` drives all five verbs from both entry points — the
+toolbar above the open document, and a row in the tree — because they are
+different functions doing the same job and each has its own refusals. Every
+destructive one is asked about first, and each check answers the dialog both
+ways: a no has to leave the document where it was and say so, because a
+cancelled delete that silently does nothing is indistinguishable from a
+cancelled delete that worked.
+
+**A harness defect came out of it.** The dom suite's `fetch` shim did not send
+`Content-Length`, so Node sent the body chunked — and body-parser reads a
+chunked body on a POST and *not* on a DELETE. `req.body` arrived `undefined`,
+the server saw its field missing and refused with a 400. That made the one app
+path which sends a body with a DELETE — erasing an archived document, which the
+server makes you echo the filename back for — impossible to drive from the
+suite, and it looked exactly like a server refusing a correct request. The shim
+now sends a length for a string body, which is what a browser does.
+
+Two lines in `file-actions.js` are covered and cannot be pinned by a check:
+the `state.activeFile = null` before `refreshDeletedDocs`, which clears the
+same field on the next line. The guard is redundant rather than wrong.
+
 ### The share dialog
 
 A share link publishes one document at an unguessable URL. The token is the

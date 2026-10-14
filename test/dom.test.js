@@ -324,6 +324,20 @@ async function run(server) {
       };
     }
 
+    /* A length, because a browser sends one for a string body and this did
+     * not.
+     *
+     * Without it Node sends the body chunked, and body-parser reads a chunked
+     * body on a POST and *not* on a DELETE: req.body arrives undefined, the
+     * server sees the field missing and refuses. So the one app path that
+     * sends a body with a DELETE — erasing an archived document, which the
+     * server makes you echo the filename back for — could not be driven from
+     * here at all, and looked like a server that refuses a correct request.
+     */
+    if (typeof payload === "string") {
+      extraHeaders = { ...extraHeaders, "Content-Length": Buffer.byteLength(payload) };
+    }
+
     if (method !== "GET") {
       const body = await new Promise((resolve, reject) => {
         const parsed = new URL(target);
@@ -512,6 +526,7 @@ async function run(server) {
   await require("./dom/folders.js")(ctx);
   await require("./dom/accounts.js")(ctx);
   await require("./dom/sharing.js")(ctx);
+  await require("./dom/discarding.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");
