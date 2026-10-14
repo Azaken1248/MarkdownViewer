@@ -235,6 +235,12 @@ const order = (result) => result.matches.map((match) => match.file);
 
   await theIndexReadsNoDocuments();
 
+  /* And the client's own scorer, which is what the library falls back to when
+   * the server cannot be reached — and which is meant to rank a library the
+   * way the scorer above does.
+   */
+  require("./search/client.js")(check);
+
   fs.rmSync(dir, { recursive: true, force: true });
   process.exit(finish());
 /* --- A thousand documents ------------------------------------------------ */

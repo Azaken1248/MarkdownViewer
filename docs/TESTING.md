@@ -316,6 +316,36 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The scorer the library falls back to
+
+`public/js/app/search.js` says at the top that it is "the same idea as the
+server's scorer (lib/docs/search.js) and deliberately the same shape, so the
+offline fallback ranks a library the way the server would". Nothing was holding
+that: the file was at 40%, and the `search` suite was entirely about the
+server's index.
+
+`test/search/client.js` runs it, in the same suite, for the same reason the
+comparison between the scan and the index lives there — these are two answers
+to one question and they have to agree.
+
+| | |
+| --- | --- |
+| `app/search.js` | 40% → **100%** of lines and functions |
+
+The checks are about the ordering, because that is what a scorer *is*: a title
+that starts with the query beats a folder that contains it, which beats a body
+that mentions it; a filename counts as well as a title, since a document
+renamed in the library keeps the name it was uploaded under; and the loose
+match — the letters in order, anywhere in the name — is reached only when
+nothing else matched at all, and looks at the name rather than the text,
+because otherwise every query matches every document that has any.
+
+Two of them are about what goes on the page. The text of a result is escaped,
+*including the part that matched*, which is the half that is easy to forget: a
+document called `<img onerror=…>` found by searching for `<img` would otherwise
+put that inside the mark. And a search term is taken as text rather than as a
+pattern, so searching for `.*` finds documents called `.*`.
+
 ### The diagram editor's ninth file
 
 `diagram-editor.js` is the biggest file in the repository and was already at
