@@ -342,6 +342,7 @@ so the paths where one does not are reachable at all.
 | `md/diagram-theme.js` | 99% → **100%** of lines and functions |
 | `md/panzoom.js` | 74% → 99.4% |
 | `md/math.js` | 75% → 98.2% |
+| `md/code.js` | 90% → 99.6% |
 
 What that reaches which reading the source could not: the ER simplifier's
 second attempt (the common failure — Mermaid's ER parser refuses a type it does
@@ -352,11 +353,21 @@ when the window loses focus mid-press; the pan-zoom instances being let go of,
 which were once leaked on every re-render; and the four steps of the theme
 repaint in the order they have to happen in.
 
-Two lines are left in the area and both are guards their only caller has
+`md/code.js` came with it, in `test/code/edges.js`: the paths a reader only
+meets when something has gone wrong. No highlighter on the page, which is every
+page until a document turns out to have code in it; one that falls over, which
+has its own `try` on the live path because that runs on every keystroke and a
+throw there would take the editor with it; a clipboard that refuses on a secure
+origin, where the older `execCommand` path is not subject to the same policy
+and is tried instead — and gives the reader back the selection it had to take
+to do it; and a caret in a block that was edited out from under it.
+
+Four lines are left in the area and all four are guards their only caller has
 already settled: `renderLoadedMathBlocks` checks for a root that
-`renderMathBlocks` has already checked, and `applyLoadedPanZoom` skips an SVG
-marked as already initialized, which the `destroyPanZoomInstances` two lines
-above it has just unmarked.
+`renderMathBlocks` has already checked, `applyLoadedPanZoom` skips an SVG
+marked as already initialized which the `destroyPanZoomInstances` two lines
+above it has just unmarked, and `highlightLoadedCodeBlocks` checks for a
+highlighter that the loader resolving `true` has already guaranteed.
 
 ### The renderer's own three
 

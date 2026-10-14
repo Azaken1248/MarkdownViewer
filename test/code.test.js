@@ -230,6 +230,13 @@ console.log("=== clicking one puts the code on the clipboard ===");
   runLiveHighlightChecks();
   runSourceChecks();
 
+  /* And the edges: no highlighter, one that refuses, a clipboard that says no,
+   * and a caret in a block that was edited out from under it.
+   */
+  await require("./code/edges.js")(check, {
+    window, document, Core, fixture, putCaret, caretAt, hljsCalls, MdCode: window.MdCode
+  });
+
   process.exit(finish());
 })().catch((error) => {
   console.error(error);
@@ -435,3 +442,4 @@ function runSourceChecks() {
   const print = css.slice(css.indexOf("@media print"));
   check("it is not printed", print.split("display: none")[0].includes(".code-copy"), true);
 }
+
