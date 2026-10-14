@@ -316,6 +316,34 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The share dialog
+
+A share link publishes one document at an unguessable URL. The token is the
+credential, so the server stores only its hash and hands back the full URL
+exactly once — which is the whole reason the dialog is shaped the way it is,
+and none of that shape was held by anything. What the *server* does with a
+share is covered thoroughly by `auth`; `test/dom/sharing.js` is the side a
+person sees.
+
+| | |
+| --- | --- |
+| `app/share.js` | 37.5% → 97.6% lines, **100%** of functions |
+
+The checks worth having are the ones about saying so. The URL is shown once
+with a line saying it is the only time it will be. Sharing an
+already-shared document is a *rotation*, so it asks first — the current link
+stops working immediately and anybody still using it gets a page saying it is
+not valid. And the one switch in the dialog is saved as it is switched rather
+than behind a Save button, so a write the server refuses puts the box back to
+what the server still says: there is no other pending state in this dialog, and
+a button to confirm one checkbox would only be a way to think you had changed
+something and not have.
+
+One thing is deliberately silent. Reading the list of shares is best-effort: if
+it fails the page still works and the share button simply does not show a
+published state. A toast on load about a feature nobody asked for is a toast
+nobody wants, and there is now a check saying so rather than an absence.
+
 ### The scorer the library falls back to
 
 `public/js/app/search.js` says at the top that it is "the same idea as the

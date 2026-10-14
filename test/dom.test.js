@@ -511,6 +511,7 @@ async function run(server) {
   await require("./dom/jump.js")(ctx);
   await require("./dom/folders.js")(ctx);
   await require("./dom/accounts.js")(ctx);
+  await require("./dom/sharing.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");
