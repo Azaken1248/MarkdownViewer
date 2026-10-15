@@ -244,12 +244,11 @@ in the queue, which is how a real error gets buried.
 The rest is left where it is, deliberately, and this is the list so the number
 is a decision rather than an oversight:
 
-- **`app/jump.js`** (50%) steps between matches inside the open document and
-  across into the next one that matches. The finding and the marking are
-  checked now, in `test/dom/jump.js`: what is skipped, which term wins where
-  two could match, and that clearing puts the document back as it was. The
-  stepping is still geometry against a rendered document, which is the thing
-  jsdom is worst at — that half belongs in `browser` or in nothing.
+- **`app/jump.js`** is no longer on this list. The claim that the stepping was
+  "geometry against a rendered document" turned out to be wrong: it is class
+  toggling and index arithmetic, and the one part that *is* geometry —
+  `scrollIntoView` — does nothing in jsdom and nothing is asked of it. See
+  "Stepping between matches" below.
 - **`app/doc-actions.js`** (25%) and **`app/file-actions.js`** (32%) are the
   two halves of delete and restore — by open document and by name. What they
   ask of the server is covered thoroughly by `recycle`; what is unreached is
@@ -315,6 +314,32 @@ inside it, so a block in a wrapper at two thirds has half again as much room to
 lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
+
+### Stepping between matches
+
+`test/dom/jump.js` covers the finding and the marking. `test/dom/stepping.js`
+covers the walk, which this document used to say belonged in a real browser.
+It does not.
+
+| | |
+| --- | --- |
+| `app/jump.js` | 50% → 94.7% lines, **100%** of functions |
+| `app/match-nav.js` | 41% → 86% lines, **100%** of functions |
+
+The walk is two walks. Inside a document it steps between marks and wraps
+round both ends, because a search that stops at the last match is a search you
+have to start again. Past the ends it opens the next document in the list that
+has a match in it — passing over the ones that do not — which is a walk of
+*openings* rather than of searches, since opening a document is what marks it.
+
+Three things in there are easy to get wrong and are now held. The marks are
+reused when the same query is asked of the same document and its marks are
+still attached, because remaking them moves the scroll position for nothing;
+but marks whose document has been redrawn under them are not marks any more,
+and stepping onto one has to answer "not found" rather than lighting up a node
+nobody can see. And moving *within* a document says only where you are, while
+moving *between* documents says which one — the name is worth saying exactly
+once, when it changes.
 
 ### Delete and restore, which is the only place this app can lose work
 
