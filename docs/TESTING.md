@@ -315,6 +315,40 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Running a notebook cell
+
+`pyodide-worker.js` is covered to the line by the `worker` suite, which runs it
+in a `vm`. The other side of that conversation — the Run button, the thing that
+talks to the worker, the output area under the cell — was not.
+
+| | |
+| --- | --- |
+| `notebook-runtime.js` | 47% → **100%** of lines and functions |
+| `app/notebook.js` | 31% → 97% lines, **100%** of functions |
+
+jsdom has no `Worker`, so `test/dom/running.js` has one: it writes down what it
+was sent and lets the suite answer. That makes the two rules in the comment at
+the top of the runtime checkable rather than aspirational. *Nothing runs on its
+own* — opening the notebook starts no worker at all, which is the same check as
+"a document in a library never executes code that came with it". And *the
+runtime is not downloaded until it is needed* — the worker is built on the
+first Run and not before, which is the ten megabytes nobody opening a markdown
+file should pay for.
+
+The rest is what happens when it does not go well, and every one of those paths
+leaves a promise hanging if it is got wrong. A worker that fails to start has
+to answer every queued run, or the cell says "Working…" forever. A restart has
+to answer them too, and say why. A cell that is slow is *told* it is slow
+rather than killed, because terminating somebody's computation for being slow
+is worse than the silence. And a result that arrives after the reader has
+opened another document is dropped, because writing it into a detached node
+would put one notebook's output under another's cell.
+
+Two of the checks make the app log an error on purpose — a status listener that
+throws, and a slow-cell callback that throws — and both assert it was written
+down and then take it off the list the suite's last check reads. A page that
+carries on without saying anything is how somebody's bug stays one.
+
 ### The accounts and sessions a boot before this one left
 
 `db` already covered the JSON import for shares and links. The one for accounts

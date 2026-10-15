@@ -513,7 +513,12 @@ async function run(server) {
   const ctx = {
     check, waitUntil, get, server, window, doc, ROOT, fs, path,
     cookieHeader, absorbCookies, objectUrls, execCommands, clipboardWrites,
-    blobBytes, renderOneBlock, escape, clientSource, styleSource, coreSource
+    blobBytes, renderOneBlock, escape, clientSource, styleSource, coreSource,
+    /* Everything the page logged as an error, which the last check in this
+     * suite expects to be empty. A section that makes the app log one on
+     * purpose asserts it and takes it off this list.
+     */
+    consoleErrors
   };
 
   await require("./dom/tree.js")(ctx);
@@ -529,6 +534,7 @@ async function run(server) {
   await require("./dom/discarding.js")(ctx);
   await require("./dom/stepping.js")(ctx);
   await require("./dom/shell-wiring.js")(ctx);
+  await require("./dom/running.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");
