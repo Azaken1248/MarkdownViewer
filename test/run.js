@@ -48,6 +48,7 @@ const SUITES = [
   ["markdown", "markdown.test.js", "The real marked: heading anchors, and the maths markers passing through"],
   ["search", "search.test.js", "The search index: agrees with the scan, keeps up with the disk"],
   ["recycle", "recycle.test.js", "The recycle bin and the archive: the way out of the library and back"],
+  ["documents", "documents.test.js", "Every way the documents and folders APIs refuse what they are given"],
   ["restore", "restore.test.js", "A backup taken from a running server, restored, and booted against"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
   ["limits", "limits.test.js", "How complicated the code is allowed to get, and the budget for it"],

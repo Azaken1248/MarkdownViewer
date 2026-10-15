@@ -315,6 +315,31 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Every way the documents API refuses what it is given
+
+The happy paths are exercised constantly — by `dom`, by `recycle`, by `auth`,
+by anything that needs a document to exist. What nothing reached was the
+refusals, and there are thirty of them: a name that is not a name, a body over
+the limit, a folder that is not there, a folder that cannot hold the file, a
+name already taken in the destination.
+
+They are each three lines, and each of those three lines is the difference
+between a clear "no" and a document written somewhere nobody will find it. So
+there is a thirty-fifth suite, `documents`, which is the same reasoning as
+`body.test.js` one layer out: that suite checks the reader every route reads
+its input through, and this one checks what each route does with what the
+reader hands back.
+
+Two of its checks are about *not* refusing, and they are the ones worth
+keeping. Filing a document in the folder it is already in is not a move and not
+an error. Renaming a document to the name it already has is not a rename and
+not an error. Both of those are things a client does by accident, and a 400 in
+reply is a dialog somebody has to dismiss for no reason.
+
+And one is about a name being unique within its folder rather than across the
+library: two documents called README.md in two folders are two documents, and
+refusing the second would be refusing the only name it should have.
+
 ### The three endpoints that fetch something
 
 `links.test.js` drives the API over HTTP against a real server, and could only
