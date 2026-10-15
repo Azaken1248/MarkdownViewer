@@ -535,6 +535,7 @@ async function run(server) {
   await require("./dom/stepping.js")(ctx);
   await require("./dom/shell-wiring.js")(ctx);
   await require("./dom/running.js")(ctx);
+  await require("./dom/dragging.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");

@@ -315,6 +315,56 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Dragging a row, and the keys that do the same thing
+
+`app/tree.js` draws the library, and `test/dom/tree.js` covers what it draws
+and what clicking a row does. What nothing reached was the other two ways the
+same move is made: dragging a row onto a folder, and the file-manager keys —
+78% → 96% of lines.
+
+A drag is three events that have to agree, so `test/dom/dragging.js` carries a
+`DataTransfer` of its own (jsdom has none): a `Map` with `setData`, `getData`
+and a `types` getter. The checks are about the agreement rather than the
+mechanics — the pick-up selects the row it started on and announces a move,
+the zone marks itself while the pointer is over it and unmarks itself when the
+pointer leaves but *not* when it crosses to a child inside the zone, and the
+drop lands the document in the folder.
+
+The half that matters is the offer that must not be made. A folder cannot be
+dropped into itself, or into any folder below itself, because that would cut
+the branch off from the tree. The server refuses it as well, but by then the
+row has been dragged, the zone has lit up and a person has been told it would
+work. `canDropOnFolder` is what stops the offer, and it is now driven through
+the real `dragover` with a real ancestor chain, both refusals and the two
+drops that are allowed.
+
+The keyboard is the same operations without the pointer: Ctrl+A, Ctrl+X,
+Ctrl+V, F2, Delete, Shift+Delete, and the arrows that walk the rows and open
+and close a folder.
+
+The last section is the one view where the same row means something else.
+In the recycle bin the two buttons are Restore and Archive; in the archive
+they are Restore and Delete forever, and the dangerous one asks a question
+that says it cannot be undone. One wrong answer to "which view am I in"
+erases a document somebody meant to keep, which is why each button is pressed
+in each view and the sentence it produces is read. Entering those views is
+done with `switchViewMode` and waited on, not by assigning to `state` — the
+tree is redrawn by the switch, and a test that sets the flag itself reads the
+rows the old view left behind.
+
+Two things this cost us, both worth writing down. A binned file is stored
+under a timestamped name, so the row is found by what the document was called
+before it was thrown away, not by `data-file`. And every `waitUntil` on a
+toast matches the whole sentence: "moved to recycle bin" was still on screen
+from the delete three lines above, so a wait for `/recycle bin/` returned at
+once and the check that followed read the silence before the restore as the
+answer.
+
+Twenty-nine lines are left in the file. Most are the row buttons' callbacks,
+which are reached from the context menu in `test/dom/tree.js` and not through
+the button; the rest are the share-only row a reader with `share:manage` and
+no `doc:write` sees, and the focus-walking edges at the two ends of the list.
+
 ### Running a notebook cell
 
 `pyodide-worker.js` is covered to the line by the `worker` suite, which runs it
