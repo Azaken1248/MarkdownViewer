@@ -315,6 +315,34 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The three endpoints that fetch something
+
+`links.test.js` drives the API over HTTP against a real server, and could only
+ever drive the *refusals*: adding a link needs the page to be fetched, and
+nothing in this suite touches the internet.
+
+So `test/links/routes.js` mounts the router in this process, with the preview
+stood in for — `describeUrl` and `iconForUrl` are covered to the line in
+`fetching.js` beside it, and what is left to check is the route: what it asks
+of the store, what it answers with, and the budget it spends.
+
+| | |
+| --- | --- |
+| `lib/routes/links.js` | 76% → 96% |
+| `lib/links.js` | 97% → 98% |
+
+Two things in there are worth knowing. The first is that the icon sweep only
+ever has work for rows written *before* there was an icon column: a link added
+now has its icon already, because `describeUrl` fetches it, and `needingIcons()`
+looks for `icon IS NULL`, which only a migration leaves behind. The suite
+models that by nulling the column, and says so.
+
+The second is about the test's own error handler. It answers 500 for anything
+that reaches it, deliberately: turning a preview's own refusal into its own
+status is the *route's* job, and a handler that passed the status through would
+hide a route that had stopped doing it. That is not a hypothetical — it is
+exactly the mutation that survived until the handler was changed.
+
 ### The link preview's network, which the guard made untestable
 
 `lib/link-preview.js` fetches a page somebody pasted a URL to, reads its

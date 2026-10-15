@@ -458,6 +458,11 @@ function refuses(label, url) {
    */
   await require("./links/fetching.js")(check);
 
+  /* And the three endpoints that make the server fetch something, mounted in
+   * this process so that a successful fetch can be one of the answers.
+   */
+  await require("./links/routes.js")(check);
+
   process.exit(finish());
 })().catch((error) => {
   console.error(error);
