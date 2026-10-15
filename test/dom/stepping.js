@@ -299,7 +299,13 @@ module.exports = async (ctx) => {
     await waitUntil(() => Boolean(state().activeFile));
     check("Enter with nothing open opens the first result",
       state().activeFile, state().searchResults[0].file);
-    check("...with the words already marked in it", marks().length > 0, true);
+    /* The marking happens when the document has been drawn, which is a step
+     * after the file is open. Reading it the moment activeFile is set is
+     * reading it before the answer exists: this passed most of the time and
+     * failed whenever the machine was busy.
+     */
+    check("...with the words already marked in it",
+      await waitUntil(() => marks().length > 0, 4000), true);
 
     /* And in the links pane it does nothing at all: the filtering happened as
      * the words were typed, and there is no document to open.
