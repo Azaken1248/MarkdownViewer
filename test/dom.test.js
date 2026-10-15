@@ -528,6 +528,7 @@ async function run(server) {
   await require("./dom/sharing.js")(ctx);
   await require("./dom/discarding.js")(ctx);
   await require("./dom/stepping.js")(ctx);
+  await require("./dom/shell-wiring.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");

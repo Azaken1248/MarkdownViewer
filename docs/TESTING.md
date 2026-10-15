@@ -315,6 +315,36 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The wiring file itself
+
+`app.js` is where the page is wired together, and a wiring file is only ever
+wrong at the wiring: a handler bound to the wrong element, a shortcut that
+fires while somebody is typing, a menu that cannot be dismissed. None of that
+shows up anywhere else, because every module it calls is tested on its own.
+
+| | |
+| --- | --- |
+| `app.js` | 64% → 88% |
+
+`test/dom/shell-wiring.js` presses it. The slash that focuses the search box
+and the Escape that works back out one rung at a time; the upload menu and the
+two pickers behind it; the three buttons above the document, which mean
+different things in the library, the recycle bin and the archive — the wrong
+answer there archives a document somebody meant to restore; the swipe across a
+document that steps between matches on a phone, and the four gestures that must
+*not* be one; a picture picked or dropped into a document being edited in
+place; the shortcuts that contenteditable does not handle and the browser would
+otherwise take; `beforeunload`, which must ask only when there is something to
+lose; and the back button, which `pushState` does not fire.
+
+Two things in writing it are worth repeating. A check that something did *not*
+happen has to give it a moment to have happened in — five of the swipe checks
+passed against a broken build until they waited, because stepping is a round
+trip and the toast had not arrived yet. And a keystroke dispatched at the
+window is not the same as one dispatched at an element: the second has to
+bubble, so the suite now presses a key on the page as well as at the window,
+or a check can pass by never reaching the handler at all.
+
 ### Stepping between matches
 
 `test/dom/jump.js` covers the finding and the marking. `test/dom/stepping.js`
