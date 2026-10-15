@@ -315,6 +315,37 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The link preview's network, which the guard made untestable
+
+`lib/link-preview.js` fetches a page somebody pasted a URL to, reads its
+`<head>`, and finds its icon. Half of it was covered — what a URL is allowed to
+be, which addresses are refused, what is read out of a page — and the half that
+is a network was not.
+
+Not because it is hard. Because *the guard works*. `guardedLookup` is handed to
+Node as the request's own `lookup`, so whatever it approves is what the socket
+connects to, and it refuses every private address — loopback included. A test
+server on 127.0.0.1 is precisely what the module exists to refuse.
+
+So `test/links/fetching.js` stands in for the transport. `sendRequest` reads
+`http.request` off the module at call time, and the stand-in is handed the same
+options Node would be — *including* the `lookup` function, which it calls. The
+guard is driven for real rather than skipped: a hostname resolving to one
+private and one public address keeps the public one, a hostname resolving only
+inside a private network is refused, and the refusal reaches the person rather
+than being saved as a card saying the site could not be read. That last one is
+the DNS-rebinding case, and it is the reason the lookup is handed in at all.
+
+| | |
+| --- | --- |
+| `lib/link-preview.js` | 84% → **100%** of lines and functions |
+
+Everything else a site can do instead of answering is now a check: a 404, a
+500, a response that never ends (read to the ceiling and no further, because
+everything worth reading is in `<head>`), a video (stopped at the header, so it
+is never pulled into memory), a timeout, a dead domain, a redirect to something
+that is not an address, and a chain that never arrives.
+
 ### The wiring file itself
 
 `app.js` is where the page is wired together, and a wiring file is only ever

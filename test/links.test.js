@@ -452,6 +452,12 @@ function refuses(label, url) {
     await server.stop();
   }
 
+  /* And the half of the preview that is a network, with the transport stood
+   * in for — the guard refuses loopback, so a test server is the one thing
+   * that cannot be used to drive it.
+   */
+  await require("./links/fetching.js")(check);
+
   process.exit(finish());
 })().catch((error) => {
   console.error(error);
