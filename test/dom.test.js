@@ -536,6 +536,7 @@ async function run(server) {
   await require("./dom/shell-wiring.js")(ctx);
   await require("./dom/running.js")(ctx);
   await require("./dom/dragging.js")(ctx);
+  await require("./dom/linking.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");

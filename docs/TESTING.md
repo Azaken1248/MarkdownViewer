@@ -315,6 +315,55 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The links pane, past what a fake row can reach
+
+`test/dom/links-and-roles.js` covers the chips, the filter and the grid, all of
+it against rows put straight into `state`. Everything that waits on an answer
+was unreached: filing a card, re-reading one, removing one, the icon sweep, and
+the four sentences the empty grid picks between — 83% → 99% of lines.
+
+The answers cannot come from the real server here, and that is worth being
+precise about. Adding a link makes the server read the page; the only addresses
+this machine can reach are the ones `link-preview.js` refuses on purpose, and
+the one public address that would work is the internet, which no test may need.
+So `test/dom/linking.js` stands in for the answer rather than the behaviour: a
+table of rows that answers the five link endpoints the way `lib/routes/links.js`
+answers them, using the server's own `normalizeGroups` so the test is not
+inventing a second rule for what "osu, APIs" means. The server's half of this
+is the `links` suite's job, and it does it against the real routes.
+
+What that reaches is the part of the pane that is about recovering:
+
+- A filing the server refuses puts the card back under the groups it had. The
+  optimistic render has already happened by then, and a card quietly showing a
+  group the server rejected is worse than the error.
+- The group field is a chip row that turned into a text box. Enter saves,
+  Escape puts it back, and clicking away saves too — nothing about the box says
+  the typing is provisional, so losing it on a stray click is losing work. It
+  may only save once: Enter and the blur that follows it are two finishes.
+- A card can outlive the list it was drawn from, which is what the two `if
+  (!link) return` guards in `refreshLink` and `removeLink` are for. Driving
+  them is a matter of keeping the button and refreshing the list out from under
+  it.
+- The icon sweep has four answers — found some, found some with more to come,
+  found none, fell over — and the one that matters is the third: a sweep that
+  found nothing still has to be marked as finished, or the next visit runs it
+  again.
+
+One thing the breaks found, which is a note rather than a defect. Deleting
+`link.groups = before` from the failure path in `setLinkGroups` breaks nothing,
+because nothing sets `link.groups` optimistically any more — the comment above
+it still says the drag case renders before the server answers, and the drag
+case does not. The line is a guard on a thing that no longer happens, and the
+check beside it asserts where the card ends up rather than which line put it
+there.
+
+Eight lines are left, and they are four copies of the same one: `renderLinks`,
+`showLinksLoading`, `renderGroupChips` and `syncGroupDatalist` each begin by
+checking that the element they draw into exists. Every one of them is in
+`index.html`, which is the only page that loads this file, so the guard is for a
+page that does not exist yet.
+
 ### Dragging a row, and the keys that do the same thing
 
 `app/tree.js` draws the library, and `test/dom/tree.js` covers what it draws
