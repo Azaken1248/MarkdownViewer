@@ -315,6 +315,27 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The accounts and sessions a boot before this one left
+
+`db` already covered the JSON import for shares and links. The one for accounts
+and sessions was unreached, and it is the one with a *rule* in it: an expired
+session was dropped on load before the database existed, and has to be dropped
+on the way in too — or importing resurrects a session somebody's logout had
+ended.
+
+Three more rules came with it, each now held. A session whose account did not
+survive the import would fail the foreign key and is dead either way, so it is
+skipped rather than attempted. A file whose sessions had *all* expired is still
+set aside, because it has been dealt with and leaving it means reading it again
+on every boot for the life of the install. And a session that expires while it
+is open takes its row with it when it is next asked for, rather than sitting in
+the table until something else happens to notice.
+
+Those assertions are made against the rows rather than through `getSession`,
+because a session's id in the database is a hash of its token and these ids
+came out of a file written by an older build. That is the right level for an
+import test: the question is which rows landed.
+
 ### Every way the documents API refuses what it is given
 
 The happy paths are exercised constantly — by `dom`, by `recycle`, by `auth`,

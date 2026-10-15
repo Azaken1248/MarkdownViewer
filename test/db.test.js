@@ -121,6 +121,127 @@ function runChild(dataDir, tag) {
     }
   }
 
+  console.log("=== and the accounts and sessions a boot before this one left ===");
+  {
+    /* The one import nothing had driven, and the one with a rule in it: an
+     * expired session was dropped on load before the database existed, and has
+     * to be dropped on the way in too, or importing resurrects a session
+     * somebody's logout had ended.
+     */
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-auth-import-"));
+    try {
+      const hour = 60 * 60 * 1000;
+      const future = new Date(Date.now() + hour).toISOString();
+      const past = new Date(Date.now() - hour).toISOString();
+
+      fs.writeFileSync(path.join(dataDir, "users.json"), JSON.stringify({
+        version: 1,
+        users: [
+          { id: "u1", username: "aza", passwordHash: "x", role: "admin",
+            createdAt: past, updatedAt: past },
+          { id: "u2", username: "reader", passwordHash: "y", role: "viewer",
+            disabled: true, mustChangePassword: true, createdAt: past, updatedAt: past }
+        ]
+      }));
+
+      fs.writeFileSync(path.join(dataDir, "sessions.json"), JSON.stringify({
+        version: 1,
+        sessions: [
+          { id: "live", userId: "u1", csrfToken: "t1", createdAt: past, expiresAt: future },
+          { id: "expired", userId: "u1", csrfToken: "t2", createdAt: past, expiresAt: past },
+          { id: "orphan", userId: "nobody", csrfToken: "t3", createdAt: past, expiresAt: future },
+          { id: "", userId: "u1", csrfToken: "t4", createdAt: past, expiresAt: future }
+        ]
+      }));
+
+      const auth = new AuthStore({ dataDir });
+      await auth.load();
+
+      check("the accounts from before are there",
+        auth.listUsers().map((one) => one.username).sort(), ["aza", "reader"]);
+      check("...with what each of them was, not a default",
+        auth.listUsers().find((one) => one.username === "reader").disabled, true);
+
+      /* Asked of the rows rather than through getSession, because a session's
+       * id in the database is a hash of its token and these ids came out of a
+       * file written by an older build.
+       */
+      const landed = auth.db.prepare("SELECT id FROM sessions").all().map((row) => row.id);
+
+      check("a session that had not expired is still a session", landed, ["live"]);
+      // Dropped on load before the database existed, and dropped on the way in
+      // now: importing must not resurrect a session somebody's logout ended.
+      check("...one that had expired is not", landed.includes("expired"), false);
+      // A session whose account did not survive would fail the foreign key,
+      // and is dead either way.
+      check("...nor one whose account is not there", landed.includes("orphan"), false);
+      check("...nor one with no id at all", landed.includes(""), false);
+
+      check("both files were set aside rather than deleted",
+        [fs.existsSync(path.join(dataDir, "users.json.imported")),
+          fs.existsSync(path.join(dataDir, "sessions.json.imported"))], [true, true]);
+
+      // A second boot reads the database rather than the files, which are no
+      // longer where it would look.
+      const again = new AuthStore({ dataDir });
+      await again.load();
+      check("a second boot does not import them twice",
+        again.listUsers().length, 2);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log("=== a file of sessions where every one of them had expired ===");
+  {
+    /* Still set aside: it has been dealt with, and leaving it would mean
+     * reading it again on every boot for the life of the install.
+     */
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "azadocs-stale-import-"));
+    try {
+      const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      fs.writeFileSync(path.join(dataDir, "sessions.json"), JSON.stringify({
+        version: 1,
+        sessions: [{ id: "old", userId: "u1", csrfToken: "t", createdAt: past, expiresAt: past }]
+      }));
+
+      const auth = new AuthStore({ dataDir });
+      await auth.load();
+      check("a file of nothing but expired sessions imports none of them",
+        auth.db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 0);
+      check("...and is still set aside, because it has been dealt with",
+        fs.existsSync(path.join(dataDir, "sessions.json.imported")), true);
+
+      // And a file with no sessions array in it at all is nothing to import,
+      // so there is nothing to set aside either.
+      fs.writeFileSync(path.join(dataDir, "users.json"), JSON.stringify({ version: 1 }));
+      const second = new AuthStore({ dataDir });
+      await second.load();
+      check("a file with no accounts in it is left where it is",
+        fs.existsSync(path.join(dataDir, "users.json")), true);
+
+      /* And a session that expires while it is open: asked for once, it is
+       * gone — and the row goes with it rather than sitting in the table
+       * until something else happens to notice.
+       */
+      const user = await auth.createUser({
+        username: "expiring", password: "a-long-enough-password", role: "admin"
+      });
+      const { token } = await auth.createSession(user.user || user);
+      check("a session just made is a session", Boolean(auth.getSession(token)), true);
+
+      auth.db.prepare("UPDATE sessions SET expires_at = ?")
+        .run(new Date(Date.now() - 1000).toISOString());
+      check("...and one that has expired is not", auth.getSession(token), null);
+      check("...with its row gone rather than left to be tripped over",
+        auth.db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 0);
+      check("...and asking with no token at all is no session",
+        auth.getSession(""), null);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+
   console.log("=== a user row is updated in place, never replaced ===");
   {
     // INSERT OR REPLACE is a delete and an insert, and the sessions table
