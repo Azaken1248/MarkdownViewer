@@ -52,6 +52,18 @@ function tagOf(value) {
   if (tag === "[object RegExp]") return "regexp";
   if (tag === "[object Error]") return "error";
   if (ArrayBuffer.isView(value)) return "bytes";
+  /* A DOM node is the one object here that is not a bag of values.
+   *
+   * Nothing about an element is an own enumerable key, so two different
+   * elements used to compare as two empty objects — equal. Every
+   * `check("...has the focus", doc.activeElement, someField)` in the DOM
+   * suites passed whatever had the focus, including nothing. Compared by
+   * identity instead, which is the only question anyone asks of a node.
+   */
+  if (typeof value.nodeType === "number" && typeof value.nodeName === "string") {
+    return "node";
+  }
+
   return "object";
 }
 
@@ -79,6 +91,10 @@ const COMPARE = {
     (Number.isNaN(actual) && Number.isNaN(expected) ? null : path),
 
   date: (actual, expected, path) => (actual.getTime() === expected.getTime() ? null : path),
+
+  // Two nodes are the same node or they are not; firstDifference has already
+  // tried `===` by the time this is reached, so they are not.
+  node: (actual, expected, path) => path,
 
   regexp: (actual, expected, path) => (String(actual) === String(expected) ? null : path),
 
@@ -239,7 +255,17 @@ const PRINT_FLAT = {
   date: (value) => `Date(${value.toISOString()})`,
   regexp: (value) => String(value),
   error: (value) => `Error(${JSON.stringify(value.message)})`,
-  bytes: (value) => `bytes(${value.byteLength})`
+  bytes: (value) => `bytes(${value.byteLength})`,
+  // Enough of a node to recognise which one it is: <input#newPassword.field>,
+  // or <#document> and <#text> for the ones that have no tag.
+  node: (value) => {
+    const name = String(value.nodeName).toLowerCase();
+    const id = value.id ? `#${value.id}` : "";
+    const classes = typeof value.className === "string" && value.className
+      ? `.${value.className.trim().split(/\s+/).join(".")}`
+      : "";
+    return `<${name}${id}${classes}>`;
+  }
 };
 
 // And of one that does, once its contents have been printed.

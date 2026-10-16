@@ -167,6 +167,17 @@ would not: the DOM suites hold arrays built inside a jsdom window against
 arrays built outside one, and those have different prototypes for the same
 shape.
 
+One kind of value is not a bag of other values, and treating it as one made a
+whole family of checks say nothing. Nothing about a DOM element is an own
+enumerable key, so two different elements compared as two empty objects —
+equal. Every `check("...has the focus", doc.activeElement, theField)` in the
+DOM suites passed whatever had the focus, including nothing at all: eleven
+checks across six files, all of them green and none of them asking anything.
+A node is now compared by identity and printed as `<input#newPassword>`, which
+is both the only question anyone asks of a node and the only answer worth
+reading in a failure line. All eleven were in fact correct — they simply were
+not evidence until now.
+
 ### What the suite never reaches
 
 ```bash
