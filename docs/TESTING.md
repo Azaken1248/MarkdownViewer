@@ -326,6 +326,42 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The sidebar's own furniture
+
+`test/dom/folders.js` drives the folder operations and `test/dom/tree.js` the
+rows. The controls around them had not been pressed: `app/sidebar.js`, 72% →
+99% of lines.
+
+The part that earns a section is the folder dialog's *Move to Ungrouped*
+button, which means three different things depending on why the dialog was
+opened. In move mode it takes a document out of its folder; with no document
+named it does nothing at all, rather than moving whichever one happens to be
+open; and in upload mode it uploads the file the dialog is holding into no
+folder. The first two are one `if` apart, and the third shares the button with
+them, so each is driven and read back from the server rather than from the
+toast.
+
+Refresh is the same shape, one level up: four lists behind one button, and the
+sentence it prints is the only thing on screen that says which one it
+refreshed. All four are checked, and so is the failure — a refresh that falls
+over has to say so rather than leaving the list as it was with nothing said.
+
+The empty space under the rows is the smallest thing here and the most easily
+broken: a mousedown there clears the selection the way a file manager does,
+and a mousedown on a row must be left to the row. Both are checked, in both
+directions.
+
+One guard cannot be reached: the delegated `contextmenu` listener on the list
+checks that the click was not on a row, and a row's own handler calls
+`stopPropagation`, so the delegated one never sees it. It is correct and it is
+second in line.
+
+A helper in this file is worth copying and worth a warning. "Which folder is
+this document in" reads the answer back from `/api/docs`, and `folderName` is
+`null` for a document in none — so `?? "(not there)"` turned "at the top of
+the library" into "not in the library at all", and two checks failed for a
+reason that had nothing to do with the app.
+
 ### The menu everything is reached from
 
 Signing in and out, changing a password, managing accounts and sharing a
