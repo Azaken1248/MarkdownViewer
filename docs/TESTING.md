@@ -326,6 +326,36 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The menu everything is reached from
+
+Signing in and out, changing a password, managing accounts and sharing a
+document are four modules with suites of their own, and every one of those
+suites drives the module by calling into it. The menu a person actually
+reaches them through had never been clicked: none of `app/account-menu.js`
+ran, so an item wired to the wrong function — or to nothing — would have been
+found by somebody using the app. It is now at 100% of lines.
+
+There is not much to say about each check, which is rather the point: the
+button drops the menu and says `aria-expanded`, the first item takes the
+focus, a click inside leaves it open and a click anywhere else closes it, and
+each item opens the thing it is named after and puts the menu away. What the
+file is worth is that it is all of them, in one place, pressed.
+
+Three are worth more than the rest. Every dialog here is a `<form>`, so a
+submit that is not taken off the browser reloads the page and loses the
+session — checked for all three. The share dialog's export toggle is sent as
+it is flipped rather than on a save button, and it is read back through the
+link itself, since the shared page is the only thing that cares. And Copy has
+two answers: jsdom has no clipboard, so the suite's stand-in records what was
+copied, and a clipboard that refuses has to say "press Ctrl+C" rather than
+claiming it worked, with the link already selected so that Ctrl+C does.
+
+The last section signs out through the menu and back in through the form,
+which is the only way to reach the signed-out account button — where it opens
+the sign-in dialog rather than a menu. One branch is left: the menu's identity
+line has a fallback for no user, and the menu cannot be opened while there is
+none.
+
 ### Opening a document, and reading a deleted one
 
 `app/opening.js` puts every document on the screen, so the ordinary path
