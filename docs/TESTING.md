@@ -315,6 +315,36 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Opening a document, and reading a deleted one
+
+`app/opening.js` puts every document on the screen, so the ordinary path
+through it runs in every other file in this suite. The rest had never run —
+77% → 99% of lines — and it is all the parts that are about something going
+wrong, plus the whole of the recycle bin's reader, which is the only way to
+look at a deleted document before deciding whether to restore it.
+
+Two of the checks are races, and they are the reason the request id exists.
+Opening two documents in quick succession must leave the second one on screen:
+the first one's content arriving late must not paint over it, and the first
+one's *failure* arriving late must not put "could not load this" over a
+document that loaded perfectly. Against a local server both answers come back
+in the same millisecond, so the slow one is made slow — a `fetch` that waits
+400ms for that one URL, and for the second check answers 500 after waiting.
+
+The bin's reader is the other half. A row in the bin opens the deleted
+document, rendered through the same sanitizer as anything else, and the title
+and the message say where it is being read from — the buttons on screen mean
+different things in the bin and in the archive, so the two say different
+things. The empty states are the same story: "Recycle bin is empty" and
+"Archive is empty" are two sentences one branch apart, and reading them meant
+emptying both, which is what turned up the archiving defect fixed in the
+commit before this one.
+
+One guard is left unreached and cannot be driven: `searchWhatIsAlreadyOpen`
+checks the request id, and everything it does after that check is synchronous,
+so nothing can move the id underneath it. It mirrors the check in the async
+path beside it, where the race is real.
+
 ### The editor's keyboard, pressed rather than called
 
 `test/dom/editing.js` calls the formatting functions directly and pastes a

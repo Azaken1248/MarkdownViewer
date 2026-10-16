@@ -539,6 +539,7 @@ async function run(server) {
   await require("./dom/linking.js")(ctx);
   await require("./dom/saving.js")(ctx);
   await require("./dom/editor-surface.js")(ctx);
+  await require("./dom/reading.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");
