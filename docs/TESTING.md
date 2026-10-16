@@ -315,6 +315,44 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The folder tree, and the file it will not overwrite
+
+`lib/docs/organizer.js` is two things with one name. Above the factory are
+pure functions over an array of folder records — the names and ids it accepts,
+and the repairs it makes to a tree that is not one. Below it is the only
+record of which document lives in which folder. The `documents` suite covers
+the API around it and `db` covers the three-process write; sixty lines in the
+middle had never run, and they are the ones that decide what a hand-edited or
+half-written state costs somebody. The new `organizer` suite takes the file to
+100%.
+
+The repairs are the interesting half, because each of them is a thing that
+would otherwise hang a walk over the tree: a folder that is its own parent, a
+parent that is not there, a two-folder loop, a three-folder loop, and a chain
+nested past the cap. In every case the parent reference is dropped and the
+folder is kept — a folder whose parent vanished becomes top level rather than
+disappearing with every document filed inside it.
+
+One check here exists because everything else about loops passed without it.
+Deleting the line that breaks a cycle changed nothing the suite could see: the
+depth cap catches a walk that goes round forever and lifts that folder to the
+top, so a two- or three-folder loop comes out the same either way. What tells
+them apart is a folder *hanging off* a loop. Breaking the cycle properly costs
+the one link that closes it, and that folder keeps its parent; leaving it to
+the depth cap lifts the innocent folder to the top as well, which is somebody's
+folder moving out from under them for a loop it was not part of.
+
+The other half is the quarantine, and it is checked on disk rather than in
+principle: a JSON file from before is imported once and renamed `.imported`,
+and a second one put back afterwards is left alone. A file that will not parse
+reads as no folders at all — so the library stays browsable with every
+document unfiled — and refuses every write with a 503 naming the file to fix,
+while the bytes stay exactly where they are. A row in the database that will
+not parse behaves the same way and names the row instead. And a mutator that
+returns a promise is refused rather than awaited, because better-sqlite3
+cannot hold a transaction across an await and the write would land outside the
+lock the whole design rests on.
+
 ### The save that renames, and the one that replaces
 
 `test/dom/editing.js` drives the source editor's keys and one plain save of a

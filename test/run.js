@@ -51,6 +51,7 @@ const SUITES = [
   ["documents", "documents.test.js", "Every way the documents and folders APIs refuse what they are given"],
   ["restore", "restore.test.js", "A backup taken from a running server, restored, and booted against"],
   ["db", "db.test.js", "The metadata database: three processes at once, the JSON import, sessions"],
+  ["organizer", "organizer.test.js", "The folder tree: the names it refuses, the loops it breaks, the file it will not overwrite"],
   ["limits", "limits.test.js", "How complicated the code is allowed to get, and the budget for it"],
   ["operations", "operations.test.js", "The Dockerfile and the deployment notes, against what the server does"],
   ["build", "build.test.js", "The optional bundles, and that they are the same app unbundled"],
