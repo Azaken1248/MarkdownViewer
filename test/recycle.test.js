@@ -179,6 +179,34 @@ async function run(server) {
     check("hard-deleting nothing is a 404", missing.status, 404);
   }
 
+  console.log("=== including one that was deleted out of a folder ===");
+  {
+    /* A bin entry keeps the directory it was deleted from, so Restore knows
+     * where to put it back. The archive is a different directory, and nothing
+     * had made that folder in it: the move landed on a path whose parent did
+     * not exist and the whole thing came back as "the error has been logged",
+     * for the ordinary act of archiving something out of the bin.
+     */
+    const folder = await admin.post("/api/folders", { name: "Archive Folder" });
+    const file = await write("filed-away.md", "# Filed away\n", folder.body.folder.id);
+    check("(the document is in a folder)", file, "Archive Folder/filed-away.md");
+
+    await admin.post(`/api/docs/${file}/delete`, { mode: "soft" });
+    const entry = await binEntryFor(file);
+    check("(and in the bin, under that folder)", entry.file.includes("Archive Folder/"), true);
+
+    const hard = await admin.post(`/api/recycle-bin/${entry.file}/hard-delete`);
+    check("archiving it from the bin works", hard.status, 200);
+    check("...and keeps the folder it was deleted from",
+      String(hard.body.file).startsWith("Archive Folder/"), true);
+
+    const archived = await archiveEntryFor(file);
+    check("...so the archive lists it", Boolean(archived), true);
+    check("...and it is still readable",
+      (await admin.get(`/api/archive/${archived.file}/content`)).body.content, "# Filed away\n");
+    check("...and it is out of the bin", Boolean(await binEntryFor(file)), false);
+  }
+
   console.log("=== a delete may go straight to the archive ===");
   {
     const file = await write("straight-to-archive.md", "# Straight there\n");
