@@ -315,6 +315,38 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The editor's keyboard, pressed rather than called
+
+`test/dom/editing.js` calls the formatting functions directly and pastes a
+picture into the text. The surface around them had never run: the keys as
+somebody presses them, the tabs, a picture dropped rather than pasted, the two
+panes scrolling together, and the six buttons —
+`app/editor-keys.js`, 72% → 100% of lines.
+
+Calling `toggleMarkdownWrap` is not the same test as pressing Ctrl+B, because
+the interesting decision is not in the wrapping. One listener on the modal
+decides what is a shortcut and what belongs to the field it was pressed in:
+Ctrl+S saves from the filename field too — it is at least as likely to be
+pressed there, having just been typed in — while Ctrl+B in that same field is
+the browser's. A key the editor has no use for is left alone, or Ctrl+F would
+stop working inside the editor, and a key pressed at a modal that is closed
+does nothing, because the listener stays on the element after the editor goes
+away.
+
+Ctrl+K is the one shortcut that asks a question, and jsdom has no `prompt`, so
+the suite is the one answering. Both silences are checked — Escape and an
+empty box — because writing `[words]()` for somebody who cancelled leaves a
+broken link in their document.
+
+Two stand-ins carry the rest. A dropped file is a `dataTransfer` built by
+hand, since jsdom has none; the picture goes up for real and comes back as a
+markdown image pointing at a URL the server will serve. And the linked scroll
+is arithmetic over heights that jsdom does not have, so the heights are given:
+a preview twice as long as the text, with halfway down one being halfway down
+the other. The check that matters there is the third — the pane being followed
+must not turn round and follow back, which is what the lock released a frame
+later is for.
+
 ### The folder tree, and the file it will not overwrite
 
 `lib/docs/organizer.js` is two things with one name. Above the factory are
