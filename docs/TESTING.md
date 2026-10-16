@@ -315,6 +315,57 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The save that renames, and the one that replaces
+
+`test/dom/editing.js` drives the source editor's keys and one plain save of a
+document that already exists. The rest of `app/editor-save.js` was unreached —
+87 of its 226 lines — and it is not a quiet file: it renames, it creates, and
+it is the only place in this app where a save can land on top of somebody
+else's document. `test/dom/saving.js` takes it to 100% of lines and branches.
+
+The order inside a save is the part worth writing down. A changed name is a
+rename, and the rename goes first so the write lands on the new path; the
+editor is then told what it is now editing, or the next Ctrl+S writes to a
+file that is no longer there. A save that stays open also turns a create into
+an edit, and without that a second Ctrl+S on a new document asks to replace
+the file it wrote a moment ago.
+
+The collision is the dangerous one. A create the server refuses with "already
+exists" becomes a question with the file's name in it and a button that says
+Replace File; every other refusal is rethrown and shown, because a dialog
+offering to replace a name the server will not accept at all asks a question
+whose yes cannot work. Both answers are driven here, and the "no" is checked
+by reading the file afterwards rather than by trusting the sentence.
+
+Two of the checks here exist because a mutation survived without them. One is
+the rename that lands with a write that does not: the editor has to be holding
+the new name by then, or the next Ctrl+S renames a file that is no longer
+there and the text has nowhere to go. Only the PUT is refused, by a `fetch`
+that passes everything else through, so the rename is real. The other is the
+refusal that is not a collision, which must not open the replace dialog.
+
+That second one taught the more useful lesson. Written as `await` on the save
+and then a check, it did not fail against the broken build — it *hung*, because
+the save was waiting for an answer to a question the test did not know had been
+asked. It now starts the save, waits for either a toast or an open dialog, and
+answers the dialog before awaiting. A check that hangs says nothing about
+anything.
+
+Three things cost a little care:
+
+- The editor is a modal that earlier sections leave open or closed as they
+  please, so every refusal is checked from a closed editor. Reading
+  `editorOpen` without shutting it first is reading the previous section's
+  answer.
+- `getDocByFile` looks in the collection the current view is showing, so the
+  recycle bin's "restore it first" refusal has to be driven with a row that is
+  actually in the bin. A document from the normal library is refused one line
+  earlier, for not existing.
+- Refreshing the library starts a read of the documents in it. Emptying
+  `contentCache` before that read lands puts the text straight back, which is
+  why the one check that needs a document to be missing waits for the cache to
+  stay empty rather than clearing it once.
+
 ### The links pane, past what a fake row can reach
 
 `test/dom/links-and-roles.js` covers the chips, the filter and the grid, all of
