@@ -215,8 +215,13 @@ async function run(server) {
   // a suite where it always fell through to the fallback would never exercise
   // the path a browser actually takes.
   const execCommands = [];
+  // The names on their own are what most checks want; one wants the value
+  // that went with it — the address a link command was given, which is the
+  // only part of it the app chose.
+  const execCommandCalls = [];
   window.document.execCommand = (name, _ui, value) => {
     execCommands.push(name);
+    execCommandCalls.push({ name, value });
 
     if (name !== "insertText") {
       return false;
@@ -512,7 +517,7 @@ async function run(server) {
    */
   const ctx = {
     check, waitUntil, get, server, window, doc, ROOT, fs, path,
-    cookieHeader, absorbCookies, objectUrls, execCommands, clipboardWrites,
+    cookieHeader, absorbCookies, objectUrls, execCommands, execCommandCalls, clipboardWrites,
     blobBytes, renderOneBlock, escape, clientSource, styleSource, coreSource,
     /* Everything the page logged as an error, which the last check in this
      * suite expects to be empty. A section that makes the app log one on
@@ -543,6 +548,7 @@ async function run(server) {
   await require("./dom/account-menu.js")(ctx);
   await require("./dom/sidebar.js")(ctx);
   await require("./dom/uploading.js")(ctx);
+  await require("./dom/page-editing.js")(ctx);
   await require("./dom/session.js")(ctx);
 
   console.log("=== console output ===");

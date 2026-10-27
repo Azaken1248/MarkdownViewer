@@ -326,6 +326,56 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### Every reason the page editor will not start
+
+`test/dom/page-editor.js` drives editing a document on the page: the blocks,
+the history, the save, the handoff to the canvas. The other half of
+`app/page-edit.js` had never run — 88% → 99.6% of lines — and it is almost
+entirely refusals, which is a good sign about where the risk is in that file.
+
+The four reasons it will not start are one list in the source rather than a
+run of guards, and the order is deliberate: the recycle bin comes before
+"nothing is open", because a bin row *is* open and the answer about it is the
+useful one. Each is checked for its own sentence, including the notebook —
+which is refused in a neutral tone rather than as an error, because wanting to
+edit one is a reasonable thing to have wanted.
+
+Two paths are not refusals but look like them. Pressing Edit while already
+editing does nothing at all rather than starting a second editor over the
+first, and leaving an editor nobody opened answers yes rather than refusing.
+
+A `.mmd` file goes somewhere else entirely: the whole file is the diagram, so
+Edit means the canvas — when the canvas can read it. When it cannot, the
+source editor opens instead, because a canvas that opened a diagram it
+half-understood would save a flowchart over somebody's sequence diagram. jsdom
+will not let a test stand in for `window.location` (href is unforgeable) and
+its navigation complaint carries no URL, so what is read here is that a
+navigation was attempted at all and that the two files part company. Where it
+goes is the `diagram-page` suite's half.
+
+The rest is what happens when the ground moves. A document the server will not
+give up does not open an editor. A reader who clicks Edit and then clicks
+another document must not find themselves editing the one they left — the
+content arrives for a file that is no longer on screen, and the check makes
+that race happen rather than hoping for it. A save the server refuses leaves
+the editing where it is, because that is where the work is, with the Save
+button usable again rather than stuck.
+
+And the formatting bar, which exists to be refused. With the cursor nowhere it
+says where to put it rather than formatting whichever block it finds first.
+Code with nothing selected asks for a selection, since marking a whole
+paragraph as code because nothing was selected is a paragraph destroyed by a
+click. A link whose address was not given writes nothing, and one with nothing
+selected writes the address as its own words so the link is visible rather
+than an anchor around no text. jsdom runs no `execCommand`, so the suite's
+stand-in now records the value as well as the name, and that last check reads
+the exact HTML the app asked for.
+
+Two of these checks catch the exception a broken build throws instead of
+letting it through. Without its guard, a block format reaches into a block
+that is not there — and a check that dies on that takes the rest of the file
+with it rather than saying which guard went missing.
+
 ### What an upload says it did
 
 `test/dom/links-and-roles.js` checks what a folder upload *sends* — the
