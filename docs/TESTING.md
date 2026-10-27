@@ -326,6 +326,49 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The share page's pen, its footer and its two silences
+
+`public/js/share.js` is the whole of the client a visitor following a link ever
+runs, and the `share-page` suite covered the document, the outline and the
+theme. The rest of it had never run — 82% → 100% of lines — and all of it is
+what a stranger sees when something is not quite right.
+
+The pen is the largest piece. A shared link is usually something somebody is
+reading, so the tools stay off screen until the button asks for them, and the
+button is also the way back: pressed again it puts them away *and puts the pen
+down*. That second half is the one worth a check — a toolbar that is gone
+while a drag still draws is a document whose words cannot be selected any
+more, with nothing on screen to explain why. What the check reads is the thing
+a reader would feel: whether the ink layer is taking the pointer.
+
+The footer is three clauses and each one can be nothing. A document with no
+bytes in it says its name and nothing about its size; a document the server
+gave no date for, or gave rubbish for, says nothing about when it changed,
+because "Updated Invalid Date" under somebody's document is worse than no date
+at all. Those two needed an answer this server will not give, so the harness
+grew a way to stand in for the network — the same seam that drives the
+request which never arrives at all, as against one the server refuses.
+
+Two silences are now checked. A diagram that will not draw says so, in words
+about this page rather than about the document, which needed the other new
+seam: a callback that runs on the window after the stubs are in and before the
+page's own scripts, so `mermaid.render` can be made to fail. And the copy a
+link may or may not offer is read from the page as published — the server
+decides and the page asks, since a button the client hid would be a permission
+enforced by the client.
+
+One check here was written reading the button the moment the content appeared,
+which is before the offer is made: the export button is the last thing the
+load does, after the diagrams and the ink. It waits for the button now. That
+is the second time this session a check has read its answer too early, and
+both times the symptom was a failure that looked like the app's.
+
+The stand-in for marked in this suite also learnt one thing: a fence now comes
+out as marked leaves one, a `<code>` carrying its language. Promoting a
+mermaid block to a diagram is the app's own work on that element, and a
+stand-in that never produced one meant the app's diagram path was never
+reached from this page.
+
 ### Every reason the page editor will not start
 
 `test/dom/page-editor.js` drives editing a document on the page: the blocks,
