@@ -326,6 +326,49 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### What an upload says it did
+
+`test/dom/links-and-roles.js` checks what a folder upload *sends* — the
+filtering that keeps a folder's images and lock files off the wire. Either
+side of that had never run: `app/uploads.js`, 85% → 100% of lines.
+
+The single-file upload is four lines and one of them matters more than the
+rest. The picker is emptied afterwards, because a file input that still holds
+the last file fires no `change` event when the same file is chosen again — so
+the second upload of a corrected file does nothing at all, and it is the
+`finally` that stops that being a bug. It is checked after a success and
+after a refusal.
+
+A folder gets two refusals before anything is sent: nothing this app holds,
+and more documents than the limit. Both happen in the browser rather than at
+the server, because a real folder is mostly images and a thousand-file folder
+would be a thousand files uploaded before being told no. The server checks
+too; this is the convenience, not the boundary — so the checks here are that
+nothing is sent and the sentence names the limit.
+
+The sentence is the rest of the section. Every clause of it is a different
+thing going not-quite-right — files skipped, files the server refused, a
+document renamed to avoid a clash, a folder name this app had to adjust — and
+it is the only account anybody gets of any of them. A document that arrives
+under a name other than the one it was uploaded as is the clearest case:
+nothing else on screen would say so. Those clauses are driven against a
+stand-in for the server's answer, because what is being read is the sentence
+the app builds, not the route that produced the numbers; the route is the
+`documents` suite's.
+
+The last check is that the folder just uploaded is open in the tree. Uploading
+twenty documents and being left looking at a collapsed row is the upload
+appearing to have done nothing.
+
+Two of these checks only became checks after a mutation walked past them. A
+file input's value cannot be set by a test — no browser lets script put a path
+into one, and jsdom does not either — so "the picker is emptied" was reading an
+emptiness nothing had filled; the element now records being cleared instead.
+And "the uploaded folder is open" was true before the upload as well, since a
+folder that has just been made was never collapsed. What the reveal actually
+does that nothing else does is put the focus on that folder's row, and that is
+what is checked now.
+
 ### The sidebar's own furniture
 
 `test/dom/folders.js` drives the folder operations and `test/dom/tree.js` the
