@@ -239,6 +239,259 @@ module.exports = async (ctx) => {
       outlineBody.querySelector(".doc-index-caret").getAttribute("aria-expanded"), "false");
   }
 
+  console.log("=== jumping from the outline to a heading ===");
+  {
+    /* The outline is only worth having if its entries go somewhere. The share
+     * page scrolls a container of its own rather than the window, which is the
+     * whole reason `scroller` is handed over — so what a click has to do is
+     * scroll *that*, by the distance between the heading and the top of it,
+     * rather than call scrollIntoView and hope.
+     */
+    const { window } = view;
+    const doc = window.document;
+    const content = doc.getElementById("shareContent");
+    const page = doc.querySelector(".share-page");
+
+    // jsdom lays nothing out, so the distances are supplied — which is what
+    // makes the arithmetic checkable at all.
+    const sized = (node, top) => {
+      node.getBoundingClientRect = () => /** @type {DOMRect} */ ({ top, bottom: top + 20,
+        left: 0, right: 100, width: 100, height: 20, x: 0, y: top, toJSON: () => ({}) });
+    };
+
+    const scrolls = [];
+    page.scrollBy = (options) => scrolls.push(options);
+    sized(page, 100);
+
+    const outline = window.DocIndex.create({
+      content,
+      panel: doc.getElementById("shareOutline"),
+      body: doc.getElementById("shareOutlineBody"),
+      toggle: doc.getElementById("shareOutlineToggle"),
+      closeBtn: doc.getElementById("shareOutlineClose"),
+      scroller: page
+    });
+    content.innerHTML = [
+      '<h1 id="jump-top">Top</h1>',
+      '<h2 id="jump-one">One</h2>',
+      '<h2 id="jump-two">Two</h2>'
+    ].join("");
+    for (const [id, top] of new Map([["jump-top", 120], ["jump-one", 600], ["jump-two", 1400]])) {
+      sized(doc.getElementById(id), top);
+    }
+    outline.refresh();
+
+    const linkTo = (id) => /** @type {HTMLElement} */ (
+      doc.querySelector(`.doc-index-link[data-id="${id}"]`));
+    const clicked = (id) => {
+      const event = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+      linkTo(id).dispatchEvent(event);
+      return event;
+    };
+
+    const jumped = clicked("jump-two");
+    check("a click does not follow the anchor itself", jumped.defaultPrevented, true);
+    /* 1400 above the viewport, a container whose own top is 100, and twelve
+     * pixels of room left above the heading so it is not flush with the edge.
+     */
+    check("...it scrolls the container the page actually scrolls",
+      scrolls.at(-1), { top: 1400 - 100 - 12, behavior: "smooth" });
+    check("...and the heading it went to is the one marked as being read",
+      [linkTo("jump-two").classList.contains("is-active"),
+        linkTo("jump-two").getAttribute("aria-current")], [true, "true"]);
+    check("...while the one that was marked before is not",
+      linkTo("jump-top").hasAttribute("aria-current"), false);
+
+    /* Somebody who has asked for less movement gets none: the jump still
+     * happens, without the animation. The query is the browser's answer, so
+     * this is the app's half of it.
+     */
+    const realMatchMedia = window.matchMedia;
+    const asking = (reduce) => {
+      window.matchMedia = () => /** @type {MediaQueryList} */ ({
+        matches: reduce, media: "", onchange: null,
+        addEventListener() {}, removeEventListener() {},
+        addListener() {}, removeListener() {}, dispatchEvent: () => false
+      });
+    };
+
+    asking(true);
+    clicked("jump-one");
+    check("a reader who has asked for less movement is not animated at",
+      scrolls.at(-1), { top: 600 - 100 - 12, behavior: "auto" });
+    window.matchMedia = realMatchMedia;
+
+    /* And where the outline is handed no scroller, the heading is asked to
+     * bring itself into view — which is what the window-scrolling page gets.
+     */
+    const brought = [];
+    doc.getElementById("jump-one").scrollIntoView = (options) => brought.push(options);
+    window.DocIndex.create({
+      content,
+      panel: doc.getElementById("shareOutline"),
+      body: doc.getElementById("shareOutlineBody"),
+      toggle: doc.getElementById("shareOutlineToggle")
+    }).refresh();
+    clicked("jump-one");
+    check("with no container to scroll, the heading brings itself into view",
+      brought.at(-1), { block: "start", behavior: "smooth" });
+  }
+
+  console.log("=== and the heading you are reading says so as you scroll ===");
+  {
+    /* The spy is an IntersectionObserver, which jsdom has not got. What stands
+     * in for it hands the callback back so the suite can say what came into
+     * view — the arithmetic over those entries is the part that decides which
+     * heading a reader is at, and it is not obvious: the *last* heading that
+     * is showing wins, because that is the one scrolled furthest up the page.
+     */
+    const { window } = view;
+    const doc = window.document;
+    const content = doc.getElementById("shareContent");
+
+    const watchers = [];
+    const tops = new Map([["spy-top", -200], ["spy-one", -40], ["spy-two", 500]]);
+    window.IntersectionObserver = class {
+      constructor(callback, options) {
+        this.callback = callback;
+        this.options = options;
+        this.watching = [];
+        watchers.push(this);
+      }
+
+      observe(node) { this.watching.push(node); }
+      disconnect() { this.watching = []; }
+    };
+
+    content.innerHTML = [
+      '<h1 id="spy-top">Top</h1>',
+      '<h2 id="spy-one">One</h2>',
+      '<h2 id="spy-two">Two</h2>'
+    ].join("");
+    for (const [id, top] of tops) {
+      doc.getElementById(id).getBoundingClientRect = () => /** @type {DOMRect} */ ({
+        top, bottom: top + 20, left: 0, right: 100, width: 100, height: 20,
+        x: 0, y: top, toJSON: () => ({})
+      });
+    }
+
+    window.DocIndex.create({
+      content,
+      panel: doc.getElementById("shareOutline"),
+      body: doc.getElementById("shareOutlineBody"),
+      toggle: doc.getElementById("shareOutlineToggle"),
+      scroller: doc.querySelector(".share-page")
+    }).refresh();
+
+    const spy = watchers.at(-1);
+    check("the headings are watched", spy.watching.map((node) => node.id),
+      ["spy-top", "spy-one", "spy-two"]);
+    /* The bottom margin is what makes "the heading being read" mean the one
+     * near the top of the window rather than any heading on screen at all.
+     */
+    check("...through a window that is the top of the page, not all of it",
+      spy.options.rootMargin, "0px 0px -80% 0px");
+
+    const marked = () => /** @type {HTMLElement[]} */ (
+      [...doc.querySelectorAll(".doc-index-link[aria-current]")]).map((link) => link.dataset.id);
+    const showing = (...ids) => spy.callback(ids.map((id) => ({
+      target: doc.getElementById(id), isIntersecting: true
+    })));
+    const gone = (...ids) => spy.callback(ids.map((id) => ({
+      target: doc.getElementById(id), isIntersecting: false
+    })));
+
+    showing("spy-top");
+    check("the heading on screen is the one marked as being read", marked(), ["spy-top"]);
+
+    showing("spy-one");
+    check("...and with two of them showing it is the later one",
+      marked(), ["spy-one"]);
+
+    /* Scrolled past both: nothing is in the band at the top, so the next
+     * heading below the fold is the answer. Without that, a reader in the
+     * middle of a long section sees nothing marked at all.
+     */
+    gone("spy-top", "spy-one");
+    check("with none of them in the band, the next one below is marked",
+      marked(), ["spy-two"]);
+
+    /* Past every heading — all of them above the top of the window now — and
+     * nothing is marked, rather than the first one being marked again as
+     * though the reader had gone back to it.
+     */
+    for (const id of tops.keys()) {
+      doc.getElementById(id).getBoundingClientRect = () => /** @type {DOMRect} */ ({
+        top: -500, bottom: -480, left: 0, right: 100, width: 100, height: 20,
+        x: 0, y: -500, toJSON: () => ({})
+      });
+    }
+    gone("spy-two");
+    check("scrolled past every heading, nothing is marked", marked(), []);
+  }
+
+  console.log("=== the outline a browser will not remember ===");
+  {
+    /* Whether the reader wants the outline is per-viewer taste, so a browser
+     * that refuses storage means "not remembered" rather than an error on a
+     * page somebody is only trying to read.
+     */
+    const { window } = view;
+    const doc = window.document;
+
+    const realStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() { throw new Error("the browser refuses to store anything"); }
+    });
+
+    const toggle = doc.getElementById("shareOutlineToggle");
+    const panel = doc.getElementById("shareOutline");
+    const outline = window.DocIndex.create({
+      content: doc.getElementById("shareContent"),
+      panel,
+      body: doc.getElementById("shareOutlineBody"),
+      toggle,
+      closeBtn: doc.getElementById("shareOutlineClose")
+    });
+
+    /* Caught rather than let through: a build without those two try/catches
+     * throws out of here, and a check that dies on the exception takes the
+     * rest of the file with it instead of saying which one went.
+     */
+    const tried = (what) => {
+      try {
+        what();
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+
+    check("a browser that will not say what was remembered starts it shut",
+      [tried(() => outline.refresh()), panel.hidden], [null, true]);
+
+    check("...and one that will not remember still opens it now",
+      [tried(() => toggle.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))),
+        panel.hidden, toggle.getAttribute("aria-expanded")],
+      [null, false, "true"]);
+
+    if (realStorage) {
+      Object.defineProperty(window, "localStorage", realStorage);
+    }
+
+    /* Closing it from the panel's own button puts the focus back on the
+     * control that opens it. Without that, closing the outline with the
+     * keyboard leaves the focus on an element that is now hidden.
+     */
+    check("(it is still open, which is what the close button is for)",
+      panel.hidden, false);
+    doc.getElementById("shareOutlineClose")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    check("the panel's own close button shuts it", panel.hidden, true);
+    check("...and hands the focus back to what opens it", doc.activeElement, toggle);
+  }
+
   console.log("=== writing on it stays on this machine ===");
   {
     const { window, sent: requests } = view;

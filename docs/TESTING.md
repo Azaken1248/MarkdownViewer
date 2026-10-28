@@ -331,6 +331,51 @@ lay itself out in — which is why the paginator shrinks, measures again, and
 almost always stops there. The first version of the test had it converging the
 wrong way and the code was right.
 
+### The outline, and the heading you are reading
+
+`doc-index.js` draws a document's headings as a tree you can collapse and jump
+from, and the existing checks covered the drawing: one entry per heading, the
+nesting, what starts collapsed. What nothing reached was the jumping and the
+following — 88% → 100% of lines.
+
+A click has to scroll the right thing. The share page scrolls a container of
+its own rather than the window, which is the whole reason the module is handed
+a `scroller`: the jump is the distance between the heading and the top of that
+container, less twelve pixels so the heading is not flush with the edge. Handed
+no scroller it asks the heading to bring itself into view instead, which is
+what a window-scrolling page gets. Both are checked, and so is the reader who
+has asked for less movement: the jump still happens, without the animation.
+
+The scroll-spy is the part worth the most. It is an `IntersectionObserver`,
+which jsdom has not got, so what stands in for it hands the callback back and
+the suite says what came into view. The arithmetic over those entries is not
+obvious and it is the whole feature:
+
+- The *last* heading showing wins, because that is the one scrolled furthest up
+  the page — mark the first and the outline lags a section behind the reader.
+- With none of them in the band at the top, the next heading *below* the fold
+  is the answer. Without that, a reader in the middle of a long section sees
+  nothing marked at all.
+- Scrolled past every heading, nothing is marked — rather than the first one
+  being marked again as though the reader had gone back to it.
+- The band is the top fifth of the window (`0px 0px -80% 0px`), which is what
+  makes "the heading being read" mean the one near the top rather than any
+  heading on screen.
+
+The last piece is a browser that refuses to store anything. Whether the reader
+wants the outline is per-viewer taste, so private mode means "not remembered"
+rather than an error on a page somebody is only trying to read: the outline
+starts shut and still opens when asked. Driving that meant making
+`window.localStorage` throw on access, which is closer to what a blocked
+origin actually does than an empty store is. And the panel's own close button
+hands the focus back to the control that opens it — without which closing the
+outline from the keyboard leaves the focus on an element that is now hidden.
+
+Two of these checks catch the exception instead of letting it through, for the
+same reason as the page editor's: without its `try`, a browser that refuses
+storage throws out of `refresh()`, and a check that dies on that takes the rest
+of the file with it rather than naming the guard that went.
+
 ### The share page's pen, its footer and its two silences
 
 `public/js/share.js` is the whole of the client a visitor following a link ever
