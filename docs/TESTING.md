@@ -14,7 +14,7 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Thirty-four suites, about three minutes. All but two need no browser and no
+Thirty-six suites, about four minutes. All but two need no browser and no
 network, and are deterministic on a runner with no egress. The exceptions are
 `browser` and `accessibility`, which drive a real Chromium; with none installed
 they say so and pass, because the step that installs it lives in the workflow
@@ -252,21 +252,26 @@ is not a fault — could not do the same for a session ending. One sign-out
 mid-hydrate wrote "Sign in to continue." to the console once per document still
 in the queue, which is how a real error gets buried.
 
-The rest is left where it is, deliberately, and this is the list so the number
-is a decision rather than an oversight:
+This list used to be the rest, left where it was deliberately, so that the
+number was a decision rather than an oversight. Every entry on it has since
+been written, and what each one says now is where it went and what the original
+reasoning got wrong — which is more useful to keep than to delete, because the
+reasoning is the part that was mistaken:
 
 - **`app/jump.js`** is no longer on this list. The claim that the stepping was
   "geometry against a rendered document" turned out to be wrong: it is class
   toggling and index arithmetic, and the one part that *is* geometry —
   `scrollIntoView` — does nothing in jsdom and nothing is asked of it. See
   "Stepping between matches" below.
-- **`app/doc-actions.js`** (25%) and **`app/file-actions.js`** (32%) are the
-  two halves of delete and restore — by open document and by name. What they
-  ask of the server is covered thoroughly by `recycle`; what is unreached is
-  which view you are left looking at afterwards.
-- **`app/notebook.js`** (31%) is the glue between a Run button and the output
-  under the cell. The worker it drives is covered by `worker` and run for real
-  once in `browser`; the glue is reached only as far as rendering.
+- **`app/doc-actions.js`** and **`app/file-actions.js`** are no longer on this
+  list either. They were 25% and 32% when it was written — the two halves of
+  delete and restore, by open document and by name — and the thing left
+  unreached was which view you are left looking at afterwards. Both are now at
+  100%, driven through the rows in the bin and the archive. See "Dragging a
+  row" and "Opening a document" below.
+- **`app/notebook.js`** has gone the same way, from 31% to 97%: the glue
+  between a Run button and the output under the cell. See "Running a notebook
+  cell".
 
 The workflows are read rather than run — nothing here can start a runner — so
 what `operations` checks about them is what can be read: that every action in
