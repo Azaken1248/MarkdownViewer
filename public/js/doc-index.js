@@ -9,8 +9,9 @@
  *
  * Standalone on purpose. It takes the elements it works on rather than
  * reaching for a namespace, so the page it is on is the page's business: the
- * share view scrolls the window and has no sidebar, and anything else that
- * wants an outline can hand over different elements.
+ * share view hands over the container it scrolls and the panel it draws into,
+ * and anything else that wants an outline can hand over different elements —
+ * including nothing to scroll, which means the window.
  *
  * A nav of nested lists, not an ARIA tree. Nested lists are what a screen
  * reader already understands and links are already reachable with Tab, where
