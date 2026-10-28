@@ -374,6 +374,16 @@ mermaid block to a diagram is the app's own work on that element, and a
 stand-in that never produced one meant the app's diagram path was never
 reached from this page.
 
+Twelve of the thirteen deliberate breaks on this file fail a check. The
+thirteenth is worth recording rather than chasing: deleting `if (!value)
+return ""` from `formatDate` changes nothing, because a missing date reaches
+`new Date(undefined)` and the `Number.isNaN(date.getTime())` guard two lines
+below answers for it. "A document with no date says nothing about when it
+changed" is true and is checked; it is simply pinned by the second guard. That
+is the third line found this way — the others are in `setLinkGroups` and
+`intoSheets` — and all three are guards on something another line has already
+settled.
+
 ### Every reason the page editor will not start
 
 `test/dom/page-editor.js` drives editing a document on the page: the blocks,
