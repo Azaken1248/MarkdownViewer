@@ -593,10 +593,16 @@ function renderBlocks(text) {
      * language — because the promotion of a mermaid block to a diagram is the
      * app's own work, done on that element afterwards.
      */
-    const fence = trimmed.match(/^```(\w+)?\n([\s\S]*?)\n?```$/);
-    if (fence) {
-      const language = fence[1] ? ` class="language-${escape(fence[1])}"` : "";
-      return `<pre><code${language}>${escape(fence[2])}</code></pre>`;
+    if (trimmed.startsWith("```")) {
+      // Split rather than matched: a lazy wildcard between two fences is the
+      // shape the linter's unsafe-regex rule is there to refuse, and the
+      // `limits` census would have to carry it for ever.
+      const lines = trimmed.split("\n");
+      const language = lines[0].slice(3).trim();
+      const last = lines.length - 1;
+      const body = lines.slice(1, lines[last].startsWith("```") ? last : undefined).join("\n");
+      const named = language ? ` class="language-${escape(language)}"` : "";
+      return `<pre><code${named}>${escape(body)}</code></pre>`;
     }
 
     return `<p>${escape(trimmed)}</p>`;
