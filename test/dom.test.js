@@ -505,7 +505,7 @@ async function run(server) {
    */
   await waitUntil(() => doc.querySelectorAll(".tree-row-doc").length > 0);
 
-  /* The checks themselves, in nine files beside this one.
+  /* The checks themselves, in the files beside this one.
    *
    * Order matters: each leaves the app somewhere the next one starts from, the
    * same way a person using it would. What they share is the context built
