@@ -152,6 +152,14 @@ async function saveAndWait(page) {
  * is busy". Forty-five is still the first of those: nothing here waits on
  * anything but a server in the same process tree.
  */
+/**
+ * @param {Window} window
+ * @param {() => unknown} done
+ * @param {string | (() => string)} what what it was waiting for, or a function
+ *   that says so once it is known to have failed — the state to describe is
+ *   the state at the deadline, not the one when the wait began.
+ * @param {number} [timeoutMs]
+ */
 async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 45000) {
   const started = Date.now();
   while (!done()) {
