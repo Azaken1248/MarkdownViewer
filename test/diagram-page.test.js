@@ -67,10 +67,23 @@ async function boot(dom, { cookie, origin }) {
     const target = new URL(String(input), origin);
     requested.push({ url: target.pathname, method: String(options.method || "GET").toUpperCase() });
 
-    const response = await fetch(target.href, {
-      ...options,
-      headers: { ...(options.headers || {}), Cookie: cookie }
-    });
+    /* A request that does not arrive at all — the server gone, the socket
+     * reset — used to surface as a bare "socket hang up" with no stack of
+     * ours in it and nothing about what was being asked for. Under a full
+     * `npm test` on a machine short of memory that is the whole failure
+     * report, so it says which request now.
+     */
+    let response;
+    try {
+      response = await fetch(target.href, {
+        ...options,
+        headers: { ...(options.headers || {}), Cookie: cookie }
+      });
+    } catch (error) {
+      throw new Error(`the page's ${
+        String(options.method || "GET").toUpperCase()} ${target.pathname} never arrived: ${
+        error.message}`, { cause: error });
+    }
 
     return {
       ok: response.ok,
@@ -100,6 +113,28 @@ async function boot(dom, { cookie, origin }) {
   return { window, document: window.document, requested };
 }
 
+/* Every page this suite has opened and not yet closed.
+ *
+ * A page is a jsdom window, and this suite opens fifty-five of them. They were
+ * never closed: the suite finished holding all fifty-five, which is most of
+ * the eight hundred megabytes it peaked at — the largest lane in the run, on a
+ * machine where every other suite wants memory at the same time. Nothing needs
+ * them after the file that opened them, so each file's are put down when it
+ * is done.
+ *
+ * Not for the CPU: fifty-five idle windows cost twenty milliseconds of it over
+ * two seconds, which was measured before this was written and is nothing.
+ */
+const openPages = [];
+
+function closeOpenPages() {
+  for (const dom of openPages.splice(0)) {
+    if (!dom.window.closed) {
+      dom.window.close();
+    }
+  }
+}
+
 function openPage({ url, cookie, origin, stash = null, panels = null, before = null }) {
   const dom = new JSDOM(pageHtml, { url, runScripts: "outside-only", pretendToBeVisual: true });
   // Anything that has to be on the window before the page's own scripts read
@@ -117,6 +152,7 @@ function openPage({ url, cookie, origin, stash = null, panels = null, before = n
     dom.window.sessionStorage.setItem(`azadocs:diagram:${new URL(url).pathname.replace(/^\/diagram\/(?:doc|file)\//, "")}`, stash);
   }
 
+  openPages.push(dom);
   return boot(dom, { cookie, origin }).then((page) => ({ ...page, dom }));
 }
 
@@ -224,14 +260,23 @@ async function run(server, cookie) {
   };
 
   await require("./diagram-page/documents.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/furniture.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/moving.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/dressing.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/typography.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/bar.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/arrows.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/carrying.js")(ctx);
+  closeOpenPages();
   await require("./diagram-page/reaching.js")(ctx);
+  closeOpenPages();
 
 }
 
