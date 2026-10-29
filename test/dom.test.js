@@ -54,8 +54,19 @@ function get(pathname) {
         receiveCookies(res);
         resolve({ status: res.statusCode, body: data });
       });
-    }).on("error", reject);
+    }).on("error", (error) => reject(named("GET", pathname, error)));
   });
+}
+
+/* A request that never arrived, said in a way a failing run can use.
+ *
+ * The page logs whatever message the rejection carries — so a reset socket
+ * reached the suite's last check as "read ECONNRESET" and nothing else, in a
+ * run of three hundred checks. It says which request now.
+ */
+function named(method, pathname, error) {
+  return new Error(`the page's ${method} ${pathname} never arrived: ${error.message}`,
+    { cause: error });
 }
 
 (async () => {
@@ -386,7 +397,7 @@ async function run(server) {
             resolve({ status: res.statusCode, body: data });
           });
         });
-        req.on("error", reject);
+        req.on("error", (error) => reject(named(method, parsed.pathname, error)));
         if (payload) req.write(payload);
         req.end();
       });
