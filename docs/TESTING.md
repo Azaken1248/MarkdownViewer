@@ -1517,7 +1517,7 @@ looked at one of them:
 | | version | loaded by | when |
 | --- | --- | --- | --- |
 | marked | 15.0.12 | index, share | eagerly — nothing renders without it |
-| DOMPurify | 3.4.16 | index, share | eagerly — same |
+| DOMPurify | 3.4.17 | index, share | eagerly — same |
 | @phosphor-icons/web | 2.1.2 | every page | eagerly, as CSS |
 | mermaid | 11.16.1 | `md/lazy.js` | first diagram |
 | KaTeX | 0.16.47 | `md/lazy.js` | first equation |
@@ -1578,7 +1578,7 @@ against:
 | Library | Version | Loaded |
 | --- | --- | --- |
 | marked | 15.0.12 | on every page |
-| DOMPurify | 3.1.6 | on every page |
+| DOMPurify | 3.4.17 | on every page |
 | Phosphor icons | 2.1.2 | on every page |
 | Mermaid | 11.16.1 | only when a document has a diagram |
 | KaTeX | 0.16.11 | only when a document has maths |
