@@ -124,10 +124,13 @@ function openPage({ url, cookie, origin, stash = null, panels = null, before = n
 // racing a real HTTP round trip, and the race is won often enough to make a
 // broken check look like a passing one.
 async function saveAndWait(page) {
+  const before = page.requested.length;
   page.document.getElementById("diagramSave").click();
   await waitFor(page.window,
     () => /^Saved/.test(page.document.getElementById("diagramStatus").textContent),
-    `the save never finished: the page says "${page.document.getElementById("diagramStatus").textContent}"`);
+    () => `the save never finished: the page says "${
+      page.document.getElementById("diagramStatus").textContent}"; requests since the click: ${
+      JSON.stringify(page.requested.slice(before))}`);
 }
 
 /* Wait for something to have happened, with a ceiling that means "this is
@@ -140,11 +143,20 @@ async function saveAndWait(page) {
  * does not catch anything a loose one misses — the loop returns the moment the
  * condition holds — it only turns a busy machine into a failing run.
  */
-async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 15000) {
+/* Fifteen seconds was too tight, and the failure was always the same one:
+ * "the save never finished: the page says Saving…", from a save that is one
+ * local HTTP round trip. It passed alone every time and failed about one run
+ * in three under `npm test`, where this suite shares a machine with
+ * thirty-five others — which is the signature of a ceiling that has stopped
+ * meaning "this is never going to happen" and started meaning "this machine
+ * is busy". Forty-five is still the first of those: nothing here waits on
+ * anything but a server in the same process tree.
+ */
+async function waitFor(window, done, what = "the page never finished starting up", timeoutMs = 45000) {
   const started = Date.now();
   while (!done()) {
     if (Date.now() - started > timeoutMs) {
-      throw new Error(what);
+      throw new Error(typeof what === "function" ? what() : what);
     }
 
     await settle();
