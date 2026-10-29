@@ -80,9 +80,14 @@ async function boot(dom, { cookie, origin }) {
         headers: { ...(options.headers || {}), Cookie: cookie }
       });
     } catch (error) {
+      /* With the cause, because undici says "fetch failed" for every one of
+       * them and the cause is the whole difference: a socket the server
+       * reset, a connection that timed out trying, a port with nothing
+       * listening. Those are three different faults.
+       */
       throw new Error(`the page's ${
         String(options.method || "GET").toUpperCase()} ${target.pathname} never arrived: ${
-        error.message}`, { cause: error });
+        because(error)}`, { cause: error });
     }
 
     return {
@@ -159,6 +164,19 @@ function openPage({ url, cookie, origin, stash = null, panels = null, before = n
 // Click Save and wait for it to have happened. A fixed pause here is a pause
 // racing a real HTTP round trip, and the race is won often enough to make a
 // broken check look like a passing one.
+/* What a transport error actually was. `fetch failed` is undici's wrapper for
+ * all of them; the cause underneath carries the code.
+ */
+function because(error) {
+  const cause = error.cause;
+  if (!cause) {
+    return error.message;
+  }
+
+  const code = cause.code ? ` (${cause.code})` : "";
+  return `${error.message}: ${cause.message}${code}`;
+}
+
 async function saveAndWait(page) {
   const before = page.requested.length;
   page.document.getElementById("diagramSave").click();

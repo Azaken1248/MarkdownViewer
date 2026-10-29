@@ -65,7 +65,10 @@ function get(pathname) {
  * run of three hundred checks. It says which request now.
  */
 function named(method, pathname, error) {
-  return new Error(`the page's ${method} ${pathname} never arrived: ${error.message}`,
+  // The code as well as the message: "read ECONNRESET" and "connect
+  // ETIMEDOUT" are different faults with the same shape.
+  const code = error.code ? ` (${error.code})` : "";
+  return new Error(`the page's ${method} ${pathname} never arrived: ${error.message}${code}`,
     { cause: error });
 }
 
