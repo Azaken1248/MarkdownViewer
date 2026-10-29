@@ -214,6 +214,10 @@ async function run(server) {
   // it is how the app inserts into a textarea without wiping the undo stack, so
   // a suite where it always fell through to the fallback would never exercise
   // the path a browser actually takes.
+  // Every 5xx the page was answered with, so a failing run can name the
+  // request rather than only the sentence the server gives a reader.
+  const serverFailures = [];
+
   const execCommands = [];
   // The names on their own are what most checks want; one wants the value
   // that went with it — the address a link command was given, which is the
@@ -287,8 +291,21 @@ async function run(server) {
   window.fetch = /** @type {any} */ (async (url, options = {}) => {
     const target = String(url).startsWith("http") ? String(url) : `${ORIGIN}${url}`;
     const method = (options.method || "GET").toUpperCase();
+    /* Anything the server answered with a 500. The page says "the error has
+     * been logged" and nothing else — which is right for a reader and no use
+     * to a failing run, because that sentence is the same whichever request
+     * produced it. The last check in this suite names them.
+     */
+    const makeResponse = (status, body) => {
+      if (status >= 500) {
+        serverFailures.push({ method, url: String(url), status });
+      }
+
+      return responseOf(status, body);
+    };
+
     // jsdom has no Response constructor, so hand back the shape requestJson uses.
-    const makeResponse = (status, body) => ({
+    const responseOf = (status, body) => ({
       status,
       ok: status >= 200 && status < 300,
       async json() { return JSON.parse(body); },
@@ -554,4 +571,8 @@ async function run(server) {
   console.log("=== console output ===");
   const realErrors = consoleErrors.filter((e) => !/Could not parse CSS|Not implemented/.test(e));
   check("no errors logged during load", realErrors, []);
+  /* And which request, if one of them was a 500. The page logs the server's
+   * own sentence, which says nothing about what was asked for.
+   */
+  check("...and nothing the page asked for answered with a 500", serverFailures, []);
 }

@@ -8,7 +8,7 @@
 // is typing, a menu that cannot be dismissed. None of that shows up anywhere
 // else, because every module it calls is tested on its own.
 module.exports = async (ctx) => {
-  const { check, waitUntil, window, doc, server, cookieHeader } = ctx;
+  const { check, waitUntil, window, doc, server, cookieHeader, clipboardWrites } = ctx;
 
   const run = (source) => window.eval(source);
   const state = () => run("window.__t.state");
@@ -174,6 +174,22 @@ module.exports = async (ctx) => {
     run("window.__t.closeFolderModal()");
     run("window.__t.state.pendingUploadFile = null");
 
+    /* With no folders in the library there is nothing to ask, so the same
+     * file goes straight up. The question is about what the library holds
+     * rather than about the file, which is why the state is what moves.
+     */
+    const folders = state().folders;
+    run("window.__t.state.folders = []");
+    clearToasts();
+    Object.defineProperty(el("uploadInput"), "files",
+      { configurable: true, value: [fileLike("unasked.md")] });
+    el("uploadInput").dispatchEvent(new window.Event("change", { bubbles: true }));
+    check("...and with no folders to choose between, it does not ask at all",
+      state().folderModalOpen, false);
+    await waitUntil(() => saidThat("Uploaded unasked.md"));
+    check("...it just puts the file in the library", saidThat("Uploaded unasked.md"), true);
+    run(`window.__t.state.folders = ${JSON.stringify(folders)}`);
+
     // A folder picker that comes back empty is the same kind of nothing.
     Object.defineProperty(el("uploadFolderInput"), "files", { configurable: true, value: [] });
     el("uploadFolderInput").dispatchEvent(new window.Event("change", { bubbles: true }));
@@ -184,6 +200,18 @@ module.exports = async (ctx) => {
      */
     check("...and the picker is emptied so the same one can be picked again",
       el("uploadFolderInput").value, "");
+
+    // ...and one that comes back with something sends it, without asking.
+    const inFolder = fileLike("carried.md");
+    Object.defineProperty(inFolder, "webkitRelativePath",
+      { value: "Picked Folder/carried.md" });
+    Object.defineProperty(el("uploadFolderInput"), "files",
+      { configurable: true, value: [inFolder] });
+    clearToasts();
+    el("uploadFolderInput").dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitUntil(() => saidThat("Uploaded 1 document"), 12000);
+    check("a folder that was picked is uploaded, and asks nothing",
+      [saidThat("Uploaded 1 document"), state().folderModalOpen], [true, false]);
   }
 
   console.log("=== the buttons above the document, in each of the three views ===");
@@ -246,6 +274,80 @@ module.exports = async (ctx) => {
     check("...and the delete button erases from it",
       saidThat("Select an archived document to delete."), true);
     run('window.__t.state.viewMode = "docs"');
+
+    // The two that are one line each and go to the two editors.
+    run(`window.__t.state.activeFile = ${JSON.stringify(file)}`);
+    press(el("newDocBtn"));
+    await waitUntil(() => state().editorOpen);
+    check("New opens the editor on nothing in particular",
+      [state().editorOpen, state().editorMode], [true, "create"]);
+    run("window.__t.closeEditor()");
+
+    press(el("editDocBtn"));
+    await waitUntil(() => state().editorOpen);
+    check("Edit opens it on the document that is open", state().editorFile, file);
+    run("window.__t.closeEditor()");
+  }
+
+  console.log("=== and the one that takes the document away ===");
+  {
+    /* Copy has four answers and had none of them checked. The copy is the
+     * markdown the page was made from, read out of the same cache the
+     * renderer read — not a second fetch that could disagree with what is on
+     * screen.
+     */
+    const body = "# Copied\n\nThe words that were on the page.\n";
+    const file = await made("copied.md", body);
+    await run(`window.__t.openDocument(${JSON.stringify(file)}, true, { forceReload: true })`);
+    await waitUntil(() => state().activeFile === file);
+
+    clipboardWrites.splice(0);
+    clearToasts();
+    press(el("copyDocBtn"));
+    await waitUntil(() => said().length > 0);
+    check("Copy copies the markdown the page was made from",
+      clipboardWrites.at(-1), body);
+    check("...and says which document it took", saidThat("Copied copied.md as markdown."), true);
+
+    // With the cache gone it is read again, which is the path a document
+    // opened before a reload takes.
+    clipboardWrites.splice(0);
+    clearToasts();
+    run(`window.__t.state.contentCache.delete(${JSON.stringify(file)})`);
+    press(el("copyDocBtn"));
+    await waitUntil(() => said().length > 0);
+    check("...and reads it from the server when the cache has gone",
+      clipboardWrites.at(-1), body);
+
+    clearToasts();
+    run("window.__t.state.activeFile = null");
+    press(el("copyDocBtn"));
+    await waitUntil(() => said().length > 0);
+    check("with nothing open it says to open something",
+      saidThat("Open a document first."), true);
+
+    // A clipboard the browser refuses, which is the one failure where the
+    // app has nowhere else to put the text.
+    clearToasts();
+    run(`window.__t.state.activeFile = ${JSON.stringify(file)}`);
+    run(`window.__realCopy = window.MarkdownCore.copyText;
+      window.MarkdownCore.copyText = () => Promise.reject(new Error("refused"));`);
+    press(el("copyDocBtn"));
+    await waitUntil(() => said().length > 0);
+    check("a clipboard the browser refuses says so",
+      saidThat("Your browser would not let this page use the clipboard."), true);
+    run("window.MarkdownCore.copyText = window.__realCopy; delete window.__realCopy;");
+
+    // ...and a document the server will not give up, with nothing cached.
+    clearToasts();
+    run(`window.__t.state.contentCache.delete(${JSON.stringify(file)})`);
+    await server.request("POST", `/api/docs/${file}/delete`, { mode: "soft" },
+      { Cookie: cookieHeader(), "X-CSRF-Token": state().csrfToken });
+    press(el("copyDocBtn"));
+    await waitUntil(() => said().length > 0);
+    check("a document that cannot be read says that instead",
+      saidThat("Could not read this document."), true);
+    await run("window.__t.refreshDocs({ preserveSearch: true })");
   }
 
   console.log("=== a swipe across the document steps through the matches ===");

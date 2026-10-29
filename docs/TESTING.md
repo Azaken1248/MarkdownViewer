@@ -479,6 +479,48 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### Copy, New, Edit, and the two pickers that hand something back
+
+`app.js` is the wiring between a person's finger and the operations every other
+file in this suite calls directly, and `test/dom/shell-wiring.js` already
+presses most of it. Five things it did not: 88% → 91% of lines.
+
+Copy had four answers and none of them were checked. It takes the markdown the
+page was made from, read out of the same cache the renderer read rather than
+fetched again — so what is on the clipboard cannot disagree with what is on
+screen — and when the cache has gone it reads it back, which is the path a
+document opened before a reload takes. The other two are the failures: nothing
+open, and a clipboard the browser refuses, which is the one case where the app
+has nowhere else to put the text.
+
+The pickers were covered for both cancellations and for the question a file
+asks when there are folders to choose between. What was left was each one
+actually handing something back: a folder, which asks nothing because the tree
+it carries is the answer, and a file when the library has no folders at all,
+where there is nothing to ask. That last one is about what the library holds
+rather than about the file, which is why the state is what the check moves.
+
+New and Edit are one line each and go to the two editors. They are here
+because a line each is exactly the kind of thing that gets wired to the wrong
+one, and because swapping them in the source is a mutation this suite could
+not see until now.
+
+Writing this found something worth saying about the suite's shape rather than
+the app's. The first version was a new file of its own, and two thirds of it
+turned out to be checks `shell-wiring.js` and `editing.js` already made — the
+upload menu, the pickers, Back into unsaved work. The deliberate breaks are
+what showed it: each one failed two checks with different wording, in two
+files. The file is gone and what was left of it is in the section that owns
+that area, which is where CONTRIBUTING says to put it.
+
+One more thing came out of a full run rather than this file. The suite's last
+check said an error had been logged — "The error has been logged. Trying again
+is usually worth a shot.", which is the sentence the server gives a reader and
+says nothing about what was asked for. The shim now records every 5xx the page
+is answered with, and the check beside that one names them. It has not fired
+since, which is its own small problem: the run it was written for passed on
+every retry.
+
 ### What an upload says it did
 
 `test/dom/links-and-roles.js` checks what a folder upload *sends* — the
