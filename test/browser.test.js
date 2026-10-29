@@ -243,6 +243,77 @@ async function aDocumentRenders(browser, server) {
   check("...and so did DOMPurify", rendered.purify, true);
   check("rendering it complained about nothing", problems, []);
 
+  /* And maths, which no suite had ever rendered for real.
+   *
+   * Every jsdom suite stubs KaTeX — `katex.render` becomes a function that
+   * writes the TeX into the node — so what has never been checked anywhere is
+   * whether the pinned version typesets, with this app's options, from the
+   * bytes the hash admits. That is the one thing a version bump can break
+   * that reading the diff cannot catch, and the bump is also where the
+   * stylesheet and the two scripts have to arrive in the right order.
+   *
+   * The document is written through the app's own API, with the session the
+   * page already has, rather than seeded on disk where every other suite
+   * would have to agree about it.
+   */
+  const made = await page.evaluate(async () => {
+    const session = await (await fetch("/api/session")).json();
+    const answer = await fetch("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
+      body: JSON.stringify({
+        fileName: "typeset.md",
+        overwrite: true,
+        content: "# Typeset\n\n$$\\frac{a}{b} = \\sqrt{c}$$\n\nAnd $x^2$ inline.\n"
+      })
+    });
+
+    return answer.status;
+  });
+  check("(a document with maths in it)", made, 201);
+
+  await page.goto(`${server.origin}/typeset.md`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#docContent .katex", { state: "attached", timeout: 30000 });
+
+  const maths = await page.evaluate(() => {
+    /* The visible half only. KaTeX puts the original TeX in an
+     * <annotation> inside the MathML it hides for screen readers, so the
+     * document's textContent contains "\frac" whether it typeset or not —
+     * which is what this check got wrong the first time it was written.
+     */
+    const visible = [...document.querySelectorAll("#docContent .katex-html")]
+      .map((one) => one.textContent).join(" ");
+    // KaTeX's own block wrapper, not the app's: the app's is a span and
+    // measures nothing.
+    const display = document.querySelector("#docContent .katex-display");
+
+    return {
+      katex: typeof window.katex !== "undefined",
+      autoRender: typeof window.renderMathInElement !== "undefined",
+      typeset: document.querySelectorAll("#docContent .katex").length,
+      // The hidden MathML is what a screen reader reads and what the export
+      // strips; it is also the half of the output that the visible one is
+      // measured against.
+      spoken: document.querySelectorAll("#docContent .katex-mathml").length,
+      // Laid out, which is the thing jsdom cannot answer: a fraction is taller
+      // than the line it sits on.
+      tall: display ? display.getBoundingClientRect().height : 0,
+      raw: visible.includes("\\frac") || visible.includes("\\sqrt"),
+      // The stylesheet arrived too: without it every glyph is unspaced.
+      styled: getComputedStyle(document.querySelector("#docContent .katex")).fontFamily
+    };
+  });
+
+  check("KaTeX arrived from the CDN and passed its hash", maths.katex, true);
+  check("...and the auto-render contrib script with it", maths.autoRender, true);
+  check("...and typeset both the block and the inline maths", maths.typeset >= 2, true);
+  check("...leaving the MathML a screen reader reads", maths.spoken >= 2, true);
+  check("...with no raw TeX left in what a reader sees", maths.raw, false);
+  check("...the formula is laid out rather than a line of text", maths.tall > 20, true);
+  check("...and its stylesheet arrived, so it is set in the maths font",
+    /katex|Main|Math/i.test(maths.styled), true);
+  check("typesetting it complained about nothing", problems, []);
+
   await page.close();
 }
 

@@ -104,6 +104,36 @@ check("...with its TeX still base64 in the attribute",
 const display = render("$$\nx = 1\n$$\n");
 check("a display marker survives too", /class="math-block"/.test(display), true);
 
+/* ...and written on one line, which is how GitHub, Obsidian and Jupyter all
+ * write display maths. This fell through to the inline rule, which read the
+ * opening `$$` as an empty formula and the closing `$$` as another, and left
+ * the TeX between them as prose: a formula silently turned into the text of
+ * itself. Found by rendering maths in a real browser for the first time.
+ */
+const oneLine = render("$$\\frac{a}{b} = \\sqrt{c}$$\n");
+check("a display formula written on one line is a block",
+  /class="math-block"/.test(oneLine), true);
+check("...and not two empty inline ones",
+  oneLine.includes('class="math-inline"'), false);
+
+const oneLineBox = window.document.createElement("div");
+oneLineBox.innerHTML = oneLine;
+check("...with its TeX intact",
+  Buffer.from(oneLineBox.querySelector(".math-block").getAttribute("data-math-tex"), "base64")
+    .toString("utf8"),
+  "\\frac{a}{b} = \\sqrt{c}");
+
+// The bracket spelling of the same thing, which has the same shape.
+const bracketed = render("\\[ x = 1 \\]\n");
+check("the bracket spelling on one line is a block too",
+  /class="math-block"/.test(bracketed), true);
+
+/* And `$$` on its own is still what opens a block over several lines, rather
+ * than an empty one-line formula.
+ */
+check("a lone $$ still opens a block rather than closing an empty one",
+  /class="math-block"/.test(render("$$\ny = 2\n$$\n")), true);
+
 /* The whole fix rests on this: markdown never sees the TeX, so it cannot
  * apply its own escaping to it. `\\` and `\{` are what it used to eat.
  */

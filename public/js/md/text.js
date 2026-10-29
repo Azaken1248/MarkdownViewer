@@ -97,6 +97,28 @@ var MdText = (function () {
     ? trimmed === "$$"
     : trimmed === "]" || trimmed === "\\]");
 
+  /* A display formula written on one line, which is how GitHub, Obsidian and
+   * Jupyter all write one. Only the two unambiguous spellings: a line of
+   * `[ x ]` is a markdown link reference far more often than it is maths.
+   *
+   * Without this the line fell through to the inline rule, which read the
+   * opening `$$` as an empty formula and the closing `$$` as another, and left
+   * the TeX between them as prose — a formula turned into the text of itself,
+   * on the page, with nothing said about it.
+   */
+  const ONE_LINE_MATHS = [["$$", "$$"], ["\\[", "\\]"]];
+
+  const oneLineMaths = (trimmed) => {
+    for (const [open, close] of ONE_LINE_MATHS) {
+      if (trimmed.startsWith(open) && trimmed.endsWith(close)
+        && trimmed.length > open.length + close.length) {
+        return trimmed.slice(open.length, -close.length);
+      }
+    }
+
+    return null;
+  };
+
 /* Inline maths, taken out of the line before markdown can read it.
  *
  * `$...$` used to be left in the text for KaTeX's own scanner to find after
@@ -243,6 +265,13 @@ function extractInlineMath(line, mark) {
       const trimmed = line.trim();
 
       if (!mode) {
+        const alone = oneLineMaths(trimmed);
+        if (alone !== null) {
+          held = [alone];
+          flush();
+          return true;
+        }
+
         if (!MATH_OPENERS.includes(trimmed)) {
           return false;
         }
