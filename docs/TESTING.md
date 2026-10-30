@@ -1562,7 +1562,7 @@ looked at one of them:
 | DOMPurify | 3.4.17 | index, share | eagerly — same |
 | @phosphor-icons/web | 2.1.2 | every page | eagerly, as CSS |
 | mermaid | 11.16.1 | `md/lazy.js` | first diagram |
-| KaTeX | 0.16.47 | `md/lazy.js` | first equation |
+| KaTeX | 0.19.1 | `md/lazy.js` | first equation |
 | highlight.js | 11.11.1 | `md/lazy.js` | first code block |
 | svg-pan-zoom | 3.6.1 | `md/lazy.js` | first diagram |
 | pyodide | 314.0.3 | `pyodide-worker.js` | first Python cell |
@@ -1584,7 +1584,19 @@ document, so the noise is bounded and the blast radius is not.
 The first run was not academic. DOMPurify was pinned at 3.1.6 with **twenty
 XSS advisories** outstanding against it — in the one library whose entire job
 here is refusing a document's script — and KaTeX at 0.16.11, where `\htmlData`
-did not validate attribute names. Both are now on the fixed versions.
+did not validate attribute names. Both have been on the fixed versions since,
+and both have been moved again by this check: DOMPurify to 3.4.17 for a
+critical advisory, KaTeX to 0.19.1 for a low one.
+
+One note stays after that last bump, and it is worth writing down so the next
+person does not chase it. `audit:cdn` at `--level=low` still reports a KaTeX
+advisory, and it is not ours: `mermaid` depends on its own KaTeX and bundles
+it into the three and a half megabytes the browser downloads, so the tree has
+two copies — ours at 0.19.1, mermaid's at 0.16.47. Nothing here can move
+mermaid's; the version that does is mermaid 12, which is a major bump of the
+diagram engine and a piece of work in its own right. The threshold is
+moderate, so it does not fail the build, and the advisory needs `trust`
+enabled, which neither copy has.
 
 ---
 
@@ -1623,7 +1635,7 @@ against:
 | DOMPurify | 3.4.17 | on every page |
 | Phosphor icons | 2.1.2 | on every page |
 | Mermaid | 11.16.1 | only when a document has a diagram |
-| KaTeX | 0.16.11 | only when a document has maths |
+| KaTeX | 0.19.1 | only when a document has maths |
 | highlight.js | 11.11.1 | only when a document has code |
 | svg-pan-zoom | 3.6.1 | only when a diagram is drawn |
 | Pyodide | 314.0.3 | only when a notebook cell is run |
