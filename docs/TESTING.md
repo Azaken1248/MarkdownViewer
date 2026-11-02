@@ -1626,19 +1626,16 @@ looks wrong until you find the layer that actually stops it:
 The libraries the browser loads from a CDN are not in `package.json`, so
 `npm audit` never sees them. They are pinned to exact versions and checked by
 SRI hash, which defends against a compromised CDN but not against a
-vulnerability in the library itself. This is the list to check an advisory
-against:
+vulnerability in the library itself.
 
-| Library | Version | Loaded |
-| --- | --- | --- |
-| marked | 15.0.12 | on every page |
-| DOMPurify | 3.4.17 | on every page |
-| Phosphor icons | 2.1.2 | on every page |
-| Mermaid | 11.16.1 | only when a document has a diagram |
-| KaTeX | 0.19.1 | only when a document has maths |
-| highlight.js | 11.11.1 | only when a document has code |
-| svg-pan-zoom | 3.6.1 | only when a diagram is drawn |
-| Pyodide | 314.0.3 | only when a notebook cell is run |
+Which versions those are is not written here. It was, in a second table that
+said the same thing as the one in [Dependencies](#dependencies-and-the-ones-npm-audit-cannot-see)
+above, and the second copy is the one that went stale: it still claimed
+DOMPurify 3.1.6 and KaTeX 0.16.11 long after both had moved, which is the
+failure `tools/cdn-pins.js` argues against in its own header — "a list
+somebody maintains beside the pins is a list that is wrong the first time
+somebody bumps one and forgets". `npm run audit:cdn` prints the versions it
+reads out of the source, which is the answer that cannot drift.
 
 Bumping one means changing the version in the tag and recomputing the hash —
 `public/index.html` says how, beside the tags.
