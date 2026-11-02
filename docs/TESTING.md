@@ -479,6 +479,77 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### Renaming in place, and the four ways it comes to nothing
+
+`app/inline-rename.js` is F2: the label becomes a text box where it sits,
+which is what makes renaming feel like a filesystem rather than a document
+workflow. The tree suite already renamed a document and watched it land — and
+that one check had already earned its keep, catching a request that sent
+`name` where the endpoint reads `fileName`, so every rename typed into the
+tree came back "Invalid document file name" and had since the tree was built.
+
+What nothing reached was the rest of the module, which is the part a person
+meets by making a mistake: 72% → 100% of lines and branches.
+
+A second F2 while a box is open has to leave it alone, because the first thing
+opening one does is empty the label — a second pass would throw away whatever
+had been typed and reseed the box with the old name. Escape settles the edit,
+and the blur that follows it (the box leaving the document *is* a blur) must
+not then commit what Escape just refused; the listener answers both, so only
+the settled flag stands between them. A blur on its own does commit, because
+the alternative is losing what was typed to a click somewhere else on the
+page. And a keystroke in the box is the box's: the tree's own shortcuts listen
+on the same path, Delete among them, and the box sits inside the row Delete
+would send to the bin.
+
+Both lookups walk the rendered rows and can come back empty — the menu that
+offers Rename was built from a list that may have been refetched since, and
+F2 arrives at whatever has the focus — so both are asked for a row that is not
+there. Both refusals are driven by the real endpoints: a colon in a filename
+and `con` as a folder name are refused by the path sanitiser, so the words in
+the toast are the server's own, and the row is drawn again under the name it
+still has with no box left open on it.
+
+The one case that has to follow the rename is the document that is open: the
+refetch has to be told to open it under its new name, or the page is left
+showing a document that no longer exists. Renaming anything else leaves the
+open document where it is.
+
+The folder half of the module had nothing at all. It is driven through F2 on a
+focused folder row, so the one shortcut that reaches a folder is pressed at
+least once, and against a folder made for the test and taken away again
+afterwards — a folder's name is its directory, so renaming a seeded one would
+move the documents inside it, and the checks that follow still use their
+paths. A folder name has no extension, which is the other half of the
+preselection rule: all of it is selected, there being no dot to hold back.
+
+Twenty-four deliberate breaks, twenty caught. The four that survive are each a
+redundancy or a distinction without a difference, and they are worth naming
+because the first reading of each was that a check was missing.
+
+Both entry points check the row they found before calling `beginInlineEdit`,
+which checks it again — either guard alone makes a row that is not there do
+nothing, and the second of them guards a row drawn from a list the folder has
+since left, which is a stale tree rather than anything a person can do here.
+The box stops a keystroke propagating *and* the tree's own handler returns at
+once for an event from a rename input, so Delete pressed in the box cannot
+reach the bin even with one of them gone; what that check pins is that the
+document survives the keystroke, not which guard saved it. And the
+preselection's `dot > 0` differs from a bare `dot` only for a name beginning
+with a dot, which the path sanitiser refuses, so no such name is ever in the
+tree to select.
+
+Two of the first pass survived for a better reason: nothing checked that a
+commit which changes nothing stays quiet. The endpoint answers an unchanged
+name with a 200 and an empty one with a 400, so either would put a toast on
+screen — one that lies about having renamed something, or one that reports a
+failure nobody asked for. Both have a check now, and both are made on a
+document this file has not renamed: a toast replaces one that says the same
+thing, so "Renamed to alpha.md." already being on screen would have hidden
+exactly the toast the check was looking for. The first version of that check
+counted the toasts instead, and a toast expiring mid-check could move the
+count on its own.
+
 ### What a path may be, which is the layer under everything that takes one
 
 A document is identified by its path relative to the documents directory, and

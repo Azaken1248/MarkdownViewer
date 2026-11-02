@@ -7,7 +7,7 @@
 // only because that file had grown past a thousand lines.
 module.exports = async (ctx) => {
   const {
-    check, server, window, doc
+    check, server, window, doc, waitUntil
   } = ctx;
 
   console.log("=== startup is quiet ===");
@@ -233,6 +233,266 @@ module.exports = async (ctx) => {
     restoring.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await new Promise((r) => setTimeout(r, 600));
     check("(restored for the checks below)", Boolean(rowFor(D("alpha.md"))), true);
+
+    /* Renaming in place, and the four ways it comes to nothing.
+     *
+     * The block above renames a document and watches it land, which was all
+     * of app/inline-rename.js anything reached. The rest of the module is a
+     * folder renamed the same way, a second F2 on a box already open, the two
+     * rows that are not there, and a name the server refuses — most of the
+     * file, and all of it the part a person meets by making a mistake.
+     */
+    console.log("=== F2 on a box that is already open ===");
+    {
+      const said = () => [...doc.querySelectorAll("#toastStack .toast, #toastStackUrgent .toast")]
+        .map((one) => one.querySelector(".toast-message")?.textContent || "");
+      // What was said since, rather than how many are on screen: a toast from
+      // earlier work expires on its own, and a count would call that a change.
+      const saidSince = (before) => said().filter((one) => !before.includes(one));
+      const boxIn = (file) => rowFor(file)?.querySelector(".tree-rename-input");
+
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+      const open = boxIn(D("alpha.md"));
+      open.value = "half-typed.md";
+
+      /* A second F2 while one box is open must not replace it: the first
+       * thing it does is empty the label, so a second pass throws away
+       * whatever had been typed and reseeds the box with the old name.
+       */
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+      check("a second F2 leaves the box that is open alone", boxIn(D("alpha.md")), open);
+      check("...and what had been typed into it", boxIn(D("alpha.md")).value, "half-typed.md");
+
+      /* Escape settles the edit, and the blur that follows it — the box
+       * leaving the document is a blur — must not then commit what Escape
+       * just refused. The listener answers both, so only the flag stops it.
+       */
+      const beforeEscape = said();
+      open.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await waitUntil(() => !boxIn(D("alpha.md")), 6000);
+      open.dispatchEvent(new window.Event("blur", { bubbles: false }));
+      await new Promise((r) => setTimeout(r, 300));
+      check("the blur after Escape commits nothing", Boolean(rowFor(D("alpha.md"))), true);
+      check("...and says nothing either", saidSince(beforeEscape), []);
+
+      // Caught rather than thrown: without the guard this is a TypeError
+      // inside a click handler, and a check that dies on it takes the rest
+      // of the file with it instead of saying which guard went missing.
+      /* The two ways a commit means "never mind". Both close the box quietly
+       * rather than sending anything: the endpoint answers an unchanged name
+       * with a 200 and an empty one with a 400, so either would put a toast
+       * on screen — one that lies about having renamed something, or one
+       * that reports a failure the person did not ask for.
+       */
+      {
+        /* On a document this file has not renamed, because a toast replaces
+         * one that says the same thing: "Renamed to alpha.md." is already on
+         * screen from the restore above, so a second one would be invisible
+         * here and the check would pass on a module that had sent the
+         * request anyway.
+         */
+        const quiet = D("beta.md");
+        const before = said();
+        window.eval(`window.__t.beginInlineRename(${JSON.stringify(quiet)})`);
+        boxIn(quiet).dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        await new Promise((r) => setTimeout(r, 400));
+        check("a name that was not changed is not sent anywhere", saidSince(before), []);
+        check("...and the row is just itself again",
+          [Boolean(rowFor(quiet)), Boolean(boxIn(quiet))], [true, false]);
+
+        window.eval(`window.__t.beginInlineRename(${JSON.stringify(quiet)})`);
+        const emptied = boxIn(quiet);
+        emptied.value = "   ";
+        emptied.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        await new Promise((r) => setTimeout(r, 400));
+        check("an emptied box is not sent either", saidSince(before), []);
+        check("...and the document still has the name it had",
+          [Boolean(rowFor(quiet)), Boolean(boxIn(quiet))], [true, false]);
+      }
+
+      check("a label that is not there is not edited",
+        window.eval(`(() => {
+          try {
+            window.__t.beginInlineEdit(null, "x", () => {});
+            return "no throw";
+          } catch (error) {
+            return error.message;
+          }
+        })()`),
+        "no throw");
+
+      /* A key pressed in the box is the box's. The tree's own shortcuts are
+       * listening on the same path — Delete sends documents to the bin, and
+       * the box sits inside the row it would delete. Two guards stand there:
+       * the box stops the key propagating, and the tree's handler returns at
+       * once for an event from a rename input. Either alone is enough, which
+       * is why removing one does not fail this check; what it checks is that
+       * the document survives the keystroke.
+       */
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+      const typing = boxIn(D("alpha.md"));
+      typing.value = "alpha-typed";
+      typing.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      check("Delete pressed while renaming does not delete the document",
+        Boolean(rowFor(D("alpha.md"))), true);
+      check("...and the box is still open, with what was typed in it",
+        boxIn(D("alpha.md"))?.value, "alpha-typed");
+      typing.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await waitUntil(() => !boxIn(D("alpha.md")), 6000);
+    }
+
+    console.log("=== and on rows that are not there ===");
+    {
+      // Both lookups walk the rendered rows and can come back empty: the
+      // menu that offers Rename is built from a list that may have been
+      // refetched since, and F2 arrives at whatever has the focus.
+      check("a document that is not in the tree has no row",
+        window.eval('window.__t.findDocRow("no-such-file.md")'), null);
+      check("...and a folder that is not in the tree has none either",
+        window.eval('window.__t.findFolderRow("no-such-folder")'), null);
+
+      window.eval('window.__t.beginInlineRename("no-such-file.md")');
+      window.eval('window.__t.beginInlineFolderRename("no-such-folder")');
+      check("renaming either opens no box anywhere",
+        doc.querySelectorAll(".tree-rename-input").length, 0);
+    }
+
+    console.log("=== a document rename the library refuses ===");
+    {
+      const said = () => [...doc.querySelectorAll("#toastStackUrgent .toast")]
+        .map((one) => one.querySelector(".toast-message")?.textContent || "");
+
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+      const box = rowFor(D("alpha.md")).querySelector(".tree-rename-input");
+      // A colon is refused by the path sanitiser, so this is the server's
+      // answer rather than a stand-in's: see test/paths.test.js.
+      box.value = "alpha:md";
+      box.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      await waitUntil(() => said().some((one) => one.includes("file name")), 8000);
+      check("the refusal is said in the words the server used",
+        said().some((one) => one === "Invalid document file name"), true);
+      check("...and the row is drawn again under the name it still has",
+        Boolean(rowFor(D("alpha.md"))), true);
+      check("...with no box left open on it",
+        Boolean(rowFor(D("alpha.md")).querySelector(".tree-rename-input")), false);
+    }
+
+    console.log("=== renaming the document that is open ===");
+    {
+      // The one case that has to follow the rename: the viewer is showing
+      // this file, so the refetch has to be told to open it under its new
+      // name or the page is left on a document that no longer exists.
+      await window.eval(`window.__t.openDocument(${JSON.stringify(D("alpha.md"))}, true, { forceReload: true })`);
+      await waitUntil(() => window.eval("window.__t.state.activeFile") === D("alpha.md"), 8000);
+
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(D("alpha.md"))})`);
+      const box = rowFor(D("alpha.md")).querySelector(".tree-rename-input");
+      box.value = "alpha-open.md";
+      box.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      const renamed = `${D("alpha.md").slice(0, D("alpha.md").lastIndexOf("/") + 1)}alpha-open.md`;
+      await waitUntil(() => window.eval("window.__t.state.activeFile") === renamed, 8000);
+      check("the open document is still the open document afterwards",
+        window.eval("window.__t.state.activeFile"), renamed);
+      check("...and the trail over the page is showing its new name",
+        doc.querySelector("#breadcrumbs .crumb-current").textContent.trim(), "alpha-open.md");
+
+      // Back, so everything after this still finds alpha.md.
+      window.eval(`window.__t.beginInlineRename(${JSON.stringify(renamed)})`);
+      const back = rowFor(renamed).querySelector(".tree-rename-input");
+      back.value = "alpha.md";
+      back.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await waitUntil(() => Boolean(rowFor(D("alpha.md"))), 8000);
+      check("(restored for the checks below)", Boolean(rowFor(D("alpha.md"))), true);
+    }
+
+    console.log("=== and a folder renamed the same way ===");
+    {
+      const said = () => [...doc.querySelectorAll("#toastStack .toast, #toastStackUrgent .toast")]
+        .map((one) => one.querySelector(".toast-message")?.textContent || "");
+      const folderRowFor = (id) => doc.querySelector(`.tree-row-folder[data-folder-id="${id}"]`);
+
+      /* A folder of its own, made for this, because a folder's name is its
+       * directory: renaming one of the seeded folders would move the
+       * documents inside it, and the checks after this one still use their
+       * paths. It is made through the app's own call and taken away again at
+       * the end, so the corpus is the same afterwards.
+       */
+      const spare = { name: "Spare for F2" };
+      spare.id = await window.eval(`(async () => {
+        const made = await window.__t.createFolderOnServer("Spare for F2");
+        await window.__t.refreshDocs({ preserveSearch: true });
+        return made.folder ? made.folder.id : made.id;
+      })()`);
+      check("(a folder was made to rename)", typeof spare.id, "string");
+
+      // Through the keyboard rather than the call, so the one shortcut that
+      // reaches a folder is pressed at least once.
+      const row = folderRowFor(spare.id);
+      row.querySelector(".tree-row-btn").focus();
+      doc.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: "F2", bubbles: true }));
+
+      const box = () => folderRowFor(spare.id)?.querySelector(".tree-rename-input");
+      check("F2 on a folder row opens a box too", Boolean(box()), true);
+      check("...seeded with the folder's name", box().value, spare.name);
+      // A folder name has no extension, so the whole of it is preselected —
+      // the stem rule only holds back a dot that a filename has.
+      check("...with all of it selected, there being no extension to keep",
+        box().selectionEnd, spare.name.length);
+
+      box().value = "Renamed by F2";
+      box().dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await waitUntil(() => said().includes("Renamed folder to Renamed by F2."), 8000);
+      check("the folder is renamed, and says so",
+        window.eval(`window.__t.getFolderRecord(${JSON.stringify(spare.id)}).name`), "Renamed by F2");
+      check("...and the tree is showing the new name",
+        folderRowFor(spare.id).querySelector(".tree-label").textContent, "Renamed by F2");
+
+      // And the refusal, which is the same shape as the document's.
+      window.eval(`window.__t.beginInlineFolderRename(${JSON.stringify(spare.id)})`);
+      const refused = folderRowFor(spare.id).querySelector(".tree-rename-input");
+      refused.value = "con";
+      refused.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await waitUntil(() => said().includes("Invalid folder name"), 8000);
+      check("a folder name the library refuses is said in its words",
+        said().includes("Invalid folder name"), true);
+      check("...and the folder is still called what it was",
+        window.eval(`window.__t.getFolderRecord(${JSON.stringify(spare.id)}).name`), "Renamed by F2");
+
+      // Back to the name the corpus gave it.
+      window.eval(`window.__t.beginInlineFolderRename(${JSON.stringify(spare.id)})`);
+      const putBack = folderRowFor(spare.id).querySelector(".tree-rename-input");
+      putBack.value = spare.name;
+      // Through the blur this time: clicking away from the box accepts what
+      // is in it, the same as Enter, because the alternative is losing what
+      // was typed to a click somewhere else on the page.
+      putBack.dispatchEvent(new window.Event("blur", { bubbles: false }));
+      await waitUntil(() =>
+        window.eval(`window.__t.getFolderRecord(${JSON.stringify(spare.id)}).name`) === spare.name, 8000);
+      check("(restored for the checks below)",
+        window.eval(`window.__t.getFolderRecord(${JSON.stringify(spare.id)}).name`), spare.name);
+
+      /* And away again, so the tree the checks below read is the seeded one.
+       *
+       * The record check in beginInlineFolderRename is not driven here. It
+       * guards a row drawn from a list the folder has since left — a tree
+       * somebody else changed — and reaching it means faking that stale
+       * state, which would be a check about the inside of the module rather
+       * than about anything a person can do. The row check above it already
+       * makes a folder that is not there do nothing.
+       */
+      await window.eval(`(async () => {
+        await window.__t.requestJson("/api/folders/" + encodeURIComponent(${JSON.stringify(spare.id)}),
+          { method: "DELETE" });
+        await window.__t.refreshDocs({ preserveSearch: true });
+      })()`);
+      check("(and taken away again)",
+        [window.eval(`Boolean(window.__t.getFolderRecord(${JSON.stringify(spare.id)}))`),
+          Boolean(folderRowFor(spare.id))],
+        [false, false]);
+    }
 
     console.log("=== breadcrumbs ===");
     const nav = doc.getElementById("breadcrumbs");
