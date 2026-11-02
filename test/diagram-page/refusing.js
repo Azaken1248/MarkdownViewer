@@ -68,7 +68,13 @@ module.exports = async (ctx) => {
 
     tap(shape);
     tap(canvas, 900, 700);
-    await settle();
+    /* Waited for rather than slept through: a fixed pause long enough for a
+     * loaded two-core runner is a pause everywhere else, and one short enough
+     * to be quick is a check that passes because nothing has happened yet.
+     * Either answer ends the wait, and the checks below say which it was.
+     */
+    await waitFor(window, () => saidIn(document) !== "" || boxes() !== many,
+      "the editor neither put a box down nor said why not");
 
     check("asking for one more says the diagram is as big as it goes",
       saidIn(document), "That is as many steps as this can hold.");
@@ -129,7 +135,8 @@ module.exports = async (ctx) => {
       .dispatchEvent(new window.MouseEvent("pointerdown", at(x1, y1)));
     canvas.dispatchEvent(new window.MouseEvent("pointermove", at(x2, y2)));
     canvas.dispatchEvent(new window.MouseEvent("pointerup", at(x2, y2)));
-    await settle();
+    await waitFor(window, () => saidIn(document) !== "" || arrows() !== many,
+      "the editor neither drew an arrow nor said why not");
 
     check("asking for one more arrow says the diagram is as tangled as it goes",
       saidIn(document), "That is as many arrows as this can hold.");
@@ -193,10 +200,14 @@ module.exports = async (ctx) => {
     const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box.getAttribute("transform"));
     const x = Number(spot[1]) + 20;
     const y = Number(spot[2]) + 20;
+    const placed = () => canvas.querySelector('.dd-node[data-id="A"]').getAttribute("transform");
+    const was = placed();
     box.dispatchEvent(new window.MouseEvent("pointerdown", { clientX: x, clientY: y, bubbles: true }));
     canvas.dispatchEvent(new window.MouseEvent("pointermove", { clientX: x + 40, clientY: y, bubbles: true }));
     canvas.dispatchEvent(new window.MouseEvent("pointerup", { clientX: x + 40, clientY: y, bubbles: true }));
-    await settle();
+    // The save below needs the edit to have landed, or Save has nothing to do
+    // and the wait for "Saved" is a wait for something nobody started.
+    await waitFor(window, () => placed() !== was, "the box never moved");
 
     await saveAndWait(page);
     await waitFor(window, () => status().startsWith("Saved"),
@@ -206,7 +217,7 @@ module.exports = async (ctx) => {
     // Nothing held, so the paste below has an empty clipboard to work from.
     canvas.dispatchEvent(new window.MouseEvent("pointerdown", { clientX: 5, clientY: 5, bubbles: true }));
     canvas.dispatchEvent(new window.MouseEvent("pointerup", { clientX: 5, clientY: 5, bubbles: true }));
-    await settle();
+    await waitFor(window, () => held() === 0, "pressing the paper never let go of the box");
     check("(nothing is held again)", held(), 0);
 
     press("v");
@@ -262,6 +273,8 @@ module.exports = async (ctx) => {
 
     tap(tool);
     tap(canvas, 500, 300);
+    await waitFor(window, () => Boolean(document.querySelector(".ve-diagram-picker")),
+      "choosing the picture tool never asked for a file");
 
     const picker = document.querySelector(".ve-diagram-picker");
     check("choosing it asks for a file", Boolean(picker), true);
