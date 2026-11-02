@@ -489,6 +489,229 @@ module.exports = async (ctx) => {
     await window.eval('window.__t.applySearch("")');
   }
 
+  console.log("=== the four places, reached by their own controls ===");
+  {
+    /* Everything above drives the switcher by calling it. These are the
+     * controls: two real links, so they can be copied and opened in a new
+     * tab, and two toggles for the detours. A link that is handled in-page
+     * has to let a modified click through, or the one thing an address is
+     * good for stops working.
+     */
+    const run = (source) => window.eval(source);
+    const state = () => run("window.__t.state");
+    const where = () => state().viewMode;
+    const press = (id, init = {}) => {
+      const event = new window.MouseEvent("click",
+        { bubbles: true, cancelable: true, button: 0, ...init });
+      doc.getElementById(id).dispatchEvent(event);
+      return event;
+    };
+
+    await run('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs", 6000);
+
+    const plain = press("placeLinksBtn");
+    await waitUntil(() => where() === "links", 6000);
+    check("clicking Links goes there in-page", where(), "links");
+    check("...taking the click off the browser, so nothing reloads",
+      plain.defaultPrevented, true);
+
+    /* Ctrl-click, middle-click and the rest are the browser's: they open the
+     * address in a new tab, which is the whole reason this is a link.
+     */
+    for (const [label, init] of [
+      ["a ctrl-click is the browser's", { ctrlKey: true }],
+      ["...and a meta-click", { metaKey: true }],
+      ["...and a shift-click", { shiftKey: true }],
+      ["...and an alt-click", { altKey: true }],
+      ["...and the middle button", { button: 1 }]
+    ]) {
+      const modified = press("placeDocsBtn", init);
+      check(label, [modified.defaultPrevented, where()], [false, "links"]);
+    }
+
+    press("placeDocsBtn");
+    await waitUntil(() => where() === "docs", 6000);
+    check("...while an ordinary click on Files comes back", where(), "docs");
+
+    // The two detours, which are toggles: pressing one twice is the way out.
+    press("toggleRecycleBinBtn");
+    await waitUntil(() => where() === "recycle", 6000);
+    check("the recycle bin button opens the bin", where(), "recycle");
+    press("toggleRecycleBinBtn");
+    await waitUntil(() => where() === "docs", 6000);
+    check("...and pressing it again is the way back", where(), "docs");
+
+    press("toggleArchiveBtn");
+    await waitUntil(() => where() === "archive", 6000);
+    check("the archive button opens the archive", where(), "archive");
+    press("toggleArchiveBtn");
+    await waitUntil(() => where() === "docs", 6000);
+    check("...and the same again", where(), "docs");
+  }
+
+  console.log("=== and none of them leave with unsaved work ===");
+  {
+    /* Moving between places takes the document being edited off the screen,
+     * so it has to ask what closing the editor would ask — and before
+     * anything else, so nothing is written back from a view that moved while
+     * the question was on screen.
+     */
+    const run = (source) => window.eval(source);
+    const state = () => run("window.__t.state");
+    const where = () => state().viewMode;
+    const file = state().docs[0].file;
+    await run(`window.__t.openDocument(${JSON.stringify(file)}, true, { forceReload: true })`);
+    await waitUntil(() => state().activeFile === file, 6000);
+
+    const editing = async () => {
+      await run("window.__t.startPageEdit()");
+      await waitUntil(() => run("window.__t.pageEditActive()"), 6000);
+      const block = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+      block.innerHTML = "<h1>Half written</h1>";
+      block.dispatchEvent(new window.Event("input", { bubbles: true }));
+    };
+
+    await editing();
+    const refused = run('window.__t.goToPlace("links")');
+    await waitUntil(() => state().confirmOpen, 6000);
+    run("window.__t.resolveConfirmDialog(false)");
+    check("keeping the edits refuses the move", await refused, false);
+    check("...and stays where it was, still editing",
+      [where(), run("window.__t.pageEditActive()")], ["docs", true]);
+
+    const allowed = run('window.__t.goToPlace("links")');
+    await waitUntil(() => state().confirmOpen, 6000);
+    run("window.__t.resolveConfirmDialog(true)");
+    check("discarding them makes the move", await allowed, true);
+    await waitUntil(() => where() === "links", 6000);
+    check("...and it happened", where(), "links");
+
+    await run('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs", 6000);
+    await run(`window.__t.openDocument(${JSON.stringify(file)}, true, { forceReload: true })`);
+    await waitUntil(() => state().activeFile === file, 6000);
+
+    // The detours ask the same question, and the answer is the same.
+    await editing();
+    const detour = run('window.__t.switchViewMode("recycle")');
+    await waitUntil(() => state().confirmOpen, 6000);
+    run("window.__t.resolveConfirmDialog(false)");
+    await detour;
+    check("the recycle bin asks it too, and takes no for an answer",
+      [where(), run("window.__t.pageEditActive()")], ["docs", true]);
+    await run("window.__t.cancelPageEdit({ confirm: false })");
+    await waitUntil(() => run("window.__t.pageEditActive()") === false, 6000);
+  }
+
+  console.log("=== a move that cannot be made puts everything back ===");
+  {
+    /* The move writes the mode, the address and the search box before it
+     * knows whether the library will answer. If it does not, every one of
+     * those has to go back to what it was — read before the await that
+     * failed, because reading them afterwards would be reading what the
+     * failed move had already written.
+     */
+    const run = (source) => window.eval(source);
+    const state = () => run("window.__t.state");
+    const where = () => state().viewMode;
+    const said = () => [...doc.querySelectorAll("#toastStack .toast, #toastStackUrgent .toast")]
+      .map((one) => one.querySelector(".toast-message")?.textContent || "");
+    const clearToasts = () => doc.querySelectorAll(".toast").forEach((one) => one.remove());
+
+    const realFetch = window.fetch;
+    const useFetch = (fn) => { window.fetch = fn; };
+    const refuse = (what) => useFetch(async (url, options = {}) => (
+      String(url).startsWith(what)
+        ? { status: 500, ok: false, async json() { return { error: "The library is not answering." }; },
+          async text() { return "{}"; } }
+        : realFetch(url, options)));
+
+    await run('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs", 6000);
+    doc.getElementById("searchInput").value = "before the move";
+    run('window.__t.state.linksLoaded = false');
+
+    clearToasts();
+    refuse("/api/links");
+    const failed = await run('window.__t.goToPlace("links")');
+    useFetch(realFetch);
+
+    check("a move the server refuses answers no", failed, false);
+    check("...and leaves the view where it was", where(), "docs");
+    check("...with the search box as it was",
+      doc.getElementById("searchInput").value, "before the move");
+    check("...and says why", said().at(-1), "The library is not answering.");
+
+    // The same for a detour, which has its own rollback.
+    clearToasts();
+    refuse("/api/recycle-bin");
+    await run('window.__t.switchViewMode("recycle")');
+    useFetch(realFetch);
+    check("a detour that cannot load puts the mode back", where(), "docs");
+    check("...and says why", said().length > 0, true);
+
+    doc.getElementById("searchInput").value = "";
+    await run('window.__t.applySearch("")');
+  }
+
+  console.log("=== coming back to the documents, three ways ===");
+  {
+    const run = (source) => window.eval(source);
+    const state = () => run("window.__t.state");
+    const where = () => state().viewMode;
+    const shown = () => doc.getElementById("docContent").textContent;
+
+    const first = state().docs[0].file;
+    const second = state().docs.find((one) => one.file !== first
+      && !one.file.endsWith(".ipynb")).file;
+
+    await run(`window.__t.openDocument(${JSON.stringify(first)}, true, { forceReload: true })`);
+    await waitUntil(() => state().activeFile === first, 6000);
+
+    /* Into the links and straight back: the library is loaded and the
+     * document is still rendered underneath, so there is nothing to fetch and
+     * nothing to draw twice.
+     */
+    await run('window.__t.goToPlace("links")');
+    await waitUntil(() => where() === "links", 6000);
+    const asked = [];
+    const realFetch = window.fetch;
+    const useFetch = (fn) => { window.fetch = fn; };
+    useFetch((url, options) => {
+      asked.push(String(url));
+      return realFetch(url, options);
+    });
+    await run('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs", 6000);
+    useFetch(realFetch);
+
+    check("coming back puts the document that was open back on the screen",
+      [state().activeFile, shown().length > 0], [first, true]);
+    check("...without asking the server for anything",
+      asked.filter((one) => one.startsWith("/api/docs")), []);
+
+    // ...unless Back landed on a different document, which is one request.
+    await run('window.__t.goToPlace("links")');
+    await waitUntil(() => where() === "links", 6000);
+    await run(`window.__t.goToPlace("docs", { openFile: ${JSON.stringify(second)} })`);
+    await waitUntil(() => state().activeFile === second, 8000);
+    check("...and a different one is opened instead", state().activeFile, second);
+
+    /* And with nothing open at all, the panel says so rather than showing the
+     * last document's markup with no document behind it.
+     */
+    await run('window.__t.goToPlace("links")');
+    await waitUntil(() => where() === "links", 6000);
+    run("window.__t.state.activeFile = null");
+    await run('window.__t.goToPlace("docs")');
+    await waitUntil(() => where() === "docs", 6000);
+    check("coming back with nothing open says so",
+      [doc.getElementById("emptyState").style.display !== "none",
+        doc.getElementById("docContent").classList.contains("visible")],
+      [true, false]);
+  }
+
   console.log("=== warming the search cache does not take the whole connection ===");
   {
     // The offline search fallback matches on document text, so every document

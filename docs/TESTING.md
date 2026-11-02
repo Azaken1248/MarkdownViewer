@@ -479,6 +479,41 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### The four places, and what a move puts back when it fails
+
+`app/places.js` moves between the two halves of the library and the two
+detours — documents, links, the recycle bin, the archive. Everything above
+drove it by calling it; what nothing reached was the controls, the question a
+move has to ask, and the rollback — 87% → 99% of lines.
+
+The switcher's two halves are real links, so they can be copied, bookmarked
+and opened in a new tab, and an ordinary click is handled in-page because
+nothing about the move needs a reload. That makes the modifier guard the
+interesting line: a ctrl-, meta-, shift- or alt-click, and a middle-click,
+have to be left to the browser, or the one thing an address is good for stops
+working. All five are checked, and so is the plain click they are the
+exception to.
+
+Moving takes the document being edited off the screen, so it asks what closing
+the editor would ask — and takes no for an answer, which is the half that
+matters: the move is refused, the editing is still running, and the view has
+not changed. The detours ask the same question with the same answer.
+
+The rollback is the rest. A move writes the mode, the address and the search
+box before it knows whether the library will answer; when it does not, every
+one of those goes back to what it was. Which is why `rollbackPlace` takes them
+as arguments rather than reading them: everything it restores was read before
+the await that failed, and reading them afterwards would be reading what the
+failed move had already written. Both rollbacks are driven by refusing the
+request the move depends on.
+
+The three ways back to the documents are worth their own checks because two of
+them are about *not* doing work: coming back from the links with the same
+document open asks the server for nothing at all — the library is loaded and
+the article is still rendered underneath — while Back landing on a different
+document is one request, and coming back with nothing open says so rather than
+leaving the last document's markup on screen with no document behind it.
+
 ### Copy, New, Edit, and the two pickers that hand something back
 
 `app.js` is the wiring between a person's finger and the operations every other
