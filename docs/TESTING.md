@@ -479,6 +479,45 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### A name that is not a name, in the address
+
+`documents` already drove every refusal a name meets in a request *body*:
+creating one called `..`, renaming to `/etc/passwd`, a name that is only an
+extension. What nothing asked was the same question one layer out, where the
+name is the address itself.
+
+That layer is not the same code. These routes take the path as a wildcard —
+`/api/docs/*file` — rather than one percent-encoded segment, because `%2F` is
+the kind of thing a reverse proxy rewrites on the way through, and a library
+that stops resolving its own URLs depending on what is in front of it is not
+worth the tidier route pattern. The consequence is that `..%2Fsecret.md`
+reaches the handler already decoded and already split, as `../secret.md`, and
+every route that takes a path has to ask the sanitiser about it — not just the
+ones somebody remembered to think about.
+
+So both suites now ask every one of them. In `documents`: reading, writing,
+renaming and filing, against a climb out, the same climb with its dots
+encoded, a character no filesystem here will take, and a reserved device name.
+In `recycle`: restoring and erasing, in the bin and in the archive, against
+the same names plus one that is simply not the shape this app stamps on a
+deleted file. Each has to answer 400 and say which kind of name it wanted, and
+afterwards nothing may have been written outside the library.
+
+Reading an entry out had been the only one of those with a check, which is the
+wrong one to have if you only get one: restore *writes* a file back into the
+library under a name it read out of the entry, and erase deletes the file it
+resolves. Those are the two that cost something when the name is taken on
+trust.
+
+The rules themselves are checked in `test/paths.test.js`, one layer further
+in. These checks are not about which names are legal; they are about every
+route asking.
+
+One route in that list answers differently on purpose. The way *into* the bin
+is a document path rather than an entry name, so parentheses are an ordinary
+thing to call a document there, and a name that is merely not in the library
+is a 404 rather than a refusal — a 404 invites a retry and a 400 does not.
+
 ### Renaming in place, and the four ways it comes to nothing
 
 `app/inline-rename.js` is F2: the label becomes a text box where it sits,

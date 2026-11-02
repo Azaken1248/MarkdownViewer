@@ -96,6 +96,57 @@ async function run(server) {
     check("...and the document keeps the name it had", await exists(file), true);
   }
 
+  console.log("=== and a name that is not a name in the address ===");
+  {
+    /* The same refusals one layer out: in the URL rather than in the body.
+     *
+     * These routes take the path as a wildcard — /api/docs/*file — rather
+     * than one percent-encoded segment, because %2F is the kind of thing a
+     * reverse proxy rewrites on the way through. So the path arrives already
+     * decoded and already split: "..%2Fsecret.md" reaches the handler as
+     * "../secret.md", and every route that takes a path has to refuse it,
+     * not just the ones somebody remembered to think about.
+     *
+     * It is the same sanitiser each time — see test/paths.test.js for what it
+     * refuses and why — but a route that forgets to ask it is a route that
+     * reads and writes wherever the address says.
+     */
+    const IN_THE_ADDRESS = [
+      "..%2Fsecret.md",       // the separator a proxy may have normalised
+      "%2E%2E%2Fsecret.md",   // ...and with the dots encoded too
+      "a%3Ab.md",             // a character no filesystem here will take
+      "con.md"                // a reserved device name
+    ];
+
+    for (const address of IN_THE_ADDRESS) {
+      const asked = [
+        ["reading", await admin.get(`/api/docs/${address}`)],
+        ["writing", await admin.put(`/api/docs/${address}`, { content: "x" })],
+        ["renaming", await admin.post(`/api/docs/${address}/rename`, { fileName: "ok.md" })],
+        ["filing", await admin.put(`/api/docs/${address}/folder`, { folderId: null })]
+      ];
+
+      check(`${address} is refused by every route that takes a path`,
+        asked.map(([what, answer]) => `${what}:${answer.status}`),
+        asked.map(([what]) => `${what}:400`));
+      check("...each saying so rather than answering nothing",
+        asked.every(([, answer]) => typeof answer.body.error === "string" && answer.body.error), true);
+    }
+
+    check("...and nothing was written outside the library",
+      [await exists("../secret.md"), await exists("../../secret.md")], [false, false]);
+
+    /* An upload carries its name in the form rather than the address, and it
+     * is the one creation path where the name was chosen by whoever is on the
+     * other end of the browser rather than typed into this app.
+     */
+    const uploaded = await admin.postMultipart("/api/docs/upload",
+      [{ field: "markdownFile", name: "fine.md", content: "# Fine\n" }],
+      { fileName: "con" });
+    check("an upload named after a device is refused", uploaded.status, 400);
+    check("...and nothing of it is kept", await exists("con.md"), false);
+  }
+
   console.log("=== a document that is not there ===");
   {
     check("writing to a document that does not exist is a 404",

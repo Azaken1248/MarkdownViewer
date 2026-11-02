@@ -329,5 +329,51 @@ async function run(server) {
       check(`${what} refuses a name that climbs out`, escape.status >= 400, true);
       check(`...without serving anything`, /require\(/.test(escape.raw), false);
     }
+
+    /* And by every route that takes one, not only the one that serves it.
+     *
+     * Reading an entry out is the obvious place to look for this, which is
+     * why it was the only place that had a check. But restore writes a file
+     * back into the library under the name it reads out of the entry, and
+     * erase deletes the file it resolves — those are the two that cost
+     * something if the name is taken on trust. The wildcard hands them the
+     * path already decoded, so "..%2F" arrives as a climb out; the entry
+     * sanitiser is what refuses it, and test/paths.test.js is where the rule
+     * itself is checked.
+     */
+    const NOT_AN_ENTRY = [
+      "..%2F..%2Fserver.js",                  // a climb out of the bin
+      "a%3Ab.md",                             // a character no filesystem takes
+      "20260101000000-abcdef--no(te).md"      // not the shape this app stamps
+    ];
+
+    for (const entry of NOT_AN_ENTRY) {
+      const asked = [
+        ["bin restore", await admin.post(`/api/recycle-bin/${entry}/restore`, {})],
+        ["bin erase", await admin.post(`/api/recycle-bin/${entry}/hard-delete`, {})],
+        ["archive restore", await admin.post(`/api/archive/${entry}/restore`, {})],
+        ["archive erase", await admin.del(`/api/archive/${entry}`)]
+      ];
+
+      check(`${entry} is refused by every route that acts on an entry`,
+        asked.map(([what, answer]) => `${what}:${answer.status}`),
+        asked.map(([what]) => `${what}:400`));
+      check("...each saying which kind of name it wanted",
+        asked.every(([, answer]) => typeof answer.body.error === "string" && answer.body.error), true);
+    }
+
+    /* The way in is a document path rather than an entry name, so it holds to
+     * the other rule: parentheses are an ordinary thing to call a document,
+     * and a name that is merely not there is a 404 rather than a refusal.
+     */
+    for (const address of ["..%2F..%2Fserver.js", "a%3Ab.md"]) {
+      const deleted = await admin.post(`/api/docs/${address}/delete`, { mode: "soft" });
+      check(`deleting ${address} is refused rather than looked up`, deleted.status, 400);
+    }
+
+    // And none of it took anything out of the library or put anything back.
+    const after = await admin.get("/api/recycle-bin");
+    check("...and the bin is still readable, holding what it held",
+      [after.status, Array.isArray(after.body.docs)], [200, true]);
   }
 }
