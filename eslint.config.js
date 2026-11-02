@@ -194,6 +194,9 @@ const NODE_GLOBALS = {
   // Node has had a global fetch since 18, and the test suites use it to talk to
   // a server they started.
   fetch: "readonly",
+  // ...and the faults suite puts a deadline on a request that may never be
+  // answered, because waiting for one of those is how a suite hangs.
+  AbortSignal: "readonly",
   TextEncoder: "readonly",
   TextDecoder: "readonly"
 };

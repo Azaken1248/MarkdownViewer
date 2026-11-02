@@ -42,6 +42,7 @@ const SUITES = [
   ["body", "body.test.js", "What an endpoint accepts, and every way it refuses what it does not"],
   ["doc-kinds", "doc-kinds.test.js", "What a document is: one list, loaded by the server and the client alike"],
   ["paths", "paths.test.js", "What a path may be: every name, folder and bin entry the filesystem is not given"],
+  ["faults", "faults.test.js", "Every API route against a library that will not answer, so none of them hangs"],
   ["worker", "worker.test.js", "The Python worker: the protocol, the caps, and the network it takes away"],
   ["sanitizer", "sanitizer.test.js", "The real DOMPurify, the app's own options, and what each layer stops"],
   ["annotate", "annotate.test.js", "Ink on a shared document: smoothing, ink to shape, the layer it is drawn on, and where it is kept"],

@@ -14,7 +14,7 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Thirty-seven suites, about four minutes. All but two need no browser and no
+Thirty-eight suites, about four minutes. All but two need no browser and no
 network, and are deterministic on a runner with no egress. The exceptions are
 `browser` and `accessibility`, which drive a real Chromium; with none installed
 they say so and pass, because the step that installs it lives in the workflow
@@ -478,6 +478,60 @@ Two of these checks catch the exception a broken build throws instead of
 letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
+
+### Every route against a library that will not answer
+
+Each API router is built from a bag of dependencies the server hands it: read
+the organizer, move a file, find a share. Any of those can fail for reasons
+that have nothing to do with the request — a full disk, a database locked by
+another process, a file somebody removed between the check and the read. The
+routes are written for it: every handler is a `try` around its body and a
+`next(error)` under it, and that line was unreached in ten route files,
+thirty-eight times.
+
+The line is not the interesting part; the promise it makes is. A request whose
+dependencies fail has to get an *answer*. The alternative is not a wrong
+answer, it is no answer at all — a fetch that never settles, a spinner that
+spins until the tab is closed, and a server holding a connection open for a
+request it stopped working on. That is the one failure mode a person cannot
+work around and cannot report usefully.
+
+`test/faults.test.js` mounts each of the nine routers on an app of its own,
+with every dependency replaced by one that throws, and asks for every route it
+registers. The routes come from the router rather than from a list in the
+suite: Express knows what it mounted, and a list kept here would go stale the
+first time somebody adds a handler — which is exactly the handler this suite
+is for. Forty routes, and every request carries a five-second deadline,
+because a test that waits for a request that never answers does not fail, it
+hangs, and takes the run with it.
+
+Three answers are acceptable and one is not. Handing the failure to the error
+handler is the case under test, and thirty-nine of the forty do that. Refusing
+the request before the library is touched is not under test at all — one
+route does that, `GET /api/assets/:name`, which turns a missing image into
+"that image is not here" rather than an error, on purpose. Answering with a
+500 of its own is honest too. What fails the suite is a 2xx: the library
+failed and the route said it went fine, which is how a person is told their
+document was saved when it was not.
+
+The guards are let through, since "may this person do this" is answered before
+the library is touched, and they also stand in for what the real ones leave
+on the request — a handler that reads the signed-in account would fall over on
+the way to the library otherwise. The three routes behind multer are sent a
+real multipart body, with real PNG magic bytes for the image one, because the
+store sniffs the file rather than trusting its name: without that, those are
+the routes this suite would never actually ask anything of. That is why the
+counts are printed and why one check insists the library was reached by at
+least one route per router.
+
+Five deliberate breaks, three caught: swallowing the error (the request hangs),
+answering 200 (a failure called a success), and a handler replaced by one that
+answers without doing the work. The two that survive are properties of the
+design rather than holes. A route that catches its own failure and answers 500
+is allowed, as above. And a route that is deleted outright is simply not asked
+for — the suite checks every route that exists, which is what makes it total
+for new handlers and blind to removed ones; that a route is *there* is what
+the `documents`, `recycle` and `dom` suites are for.
 
 ### A name that is not a name, in the address
 
