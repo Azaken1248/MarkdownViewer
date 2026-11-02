@@ -265,7 +265,7 @@ async function waitFor(window, done, what = "the page never finished starting up
 async function run(server, cookie) {
   const origin = server.origin;
 
-  /* The checks themselves, in eight files beside this one.
+  /* The checks themselves, in ten files beside this one.
    *
    * Each boots its own page or reuses the one the last left open, in this
    * order, the way somebody working on a diagram would. What they share is the
@@ -294,6 +294,8 @@ async function run(server, cookie) {
   await require("./diagram-page/carrying.js")(ctx);
   closeOpenPages();
   await require("./diagram-page/reaching.js")(ctx);
+  closeOpenPages();
+  await require("./diagram-page/refusing.js")(ctx);
   closeOpenPages();
 
 }

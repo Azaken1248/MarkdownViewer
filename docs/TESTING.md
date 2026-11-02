@@ -479,6 +479,58 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### What the diagram editor will not do
+
+`diagram-editor.js` is the largest file in the client and the one with the
+most lines nothing reaches — not because the editor is untested (nine files
+drive it) but because what they drive is the editor *doing* things. The lines
+left over are mostly the places it declines, and they are reached by trying
+something perfectly reasonable rather than by anything exotic.
+
+`test/diagram-page/refusing.js` takes four of them.
+
+The two caps are the grammar's rather than the editor's: sixty boxes and a
+hundred and twenty arrows are what the parser will read back, so a diagram
+grown past either would be one the editor could no longer open. The checks
+open a diagram already at each cap and ask for one more — through the palette
+for a box, through the arrow tool for an arrow, which are the two gestures
+that do not go through a menu — and the editor has to say so and change
+nothing. The paper still looks like it has room, which is why the message
+matters: without it the gesture simply does nothing and the person tries
+again.
+
+The clipboard is three keys people press out of habit at a moment when they
+have not selected anything. All three have to be nothing-happens rather than
+something-breaks. What makes the guards worth having is not the boxes — an
+empty paste puts nothing down either way — it is that every edit tells the
+page, and the page clears the line it was using to talk and starts the clock
+on an autosave. So the check saves, waits for the page to say "Saved", lets go
+of everything, and presses Ctrl+V: the word on screen is what somebody is
+reading, and the save it would schedule is a write of a document nobody
+changed.
+
+A picture is the one that fails for real. The paper takes any file that says
+it is an image, because it has no way to know better; the store sniffs the
+bytes and refuses what is not one. So the check drops eight bytes called
+`pretend.png` and the refusal comes back from the real asset endpoint, through
+the real upload, to the hint line — which is the only place this page can say
+anything, there being no toast on it. And the other way in is the file
+dialogue, where the commonest thing anybody does is close it again: choosing
+nothing has to add nothing and say nothing.
+
+Seven deliberate breaks, six caught. The survivor is the usual pair: the copy
+refuses to fill the clipboard from an empty selection *and* the paste refuses
+to work from an empty clipboard, so either guard alone is enough and no check
+can say which one answered.
+
+What this suite cannot catch is a break that throws rather than returns.
+Nothing on the diagram page collects what the page logs, the way the DOM suite
+fails on an unexpected `console.error`, so a guard removed in a way that
+raises a TypeError inside a handler is invisible here — one of the seven was
+caught only because a `waitFor` ran out, which says the right thing but says
+it as a stopped suite rather than a failed check. Collecting the page's own
+errors is worth doing on its own rather than worked around in each check.
+
 ### Every route against a library that will not answer
 
 Each API router is built from a bag of dependencies the server hands it: read
