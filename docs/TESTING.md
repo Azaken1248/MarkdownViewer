@@ -14,7 +14,7 @@ For contributing conventions see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 npm test
 ```
 
-Thirty-six suites, about four minutes. All but two need no browser and no
+Thirty-seven suites, about four minutes. All but two need no browser and no
 network, and are deterministic on a runner with no egress. The exceptions are
 `browser` and `accessibility`, which drive a real Chromium; with none installed
 they say so and pass, because the step that installs it lives in the workflow
@@ -478,6 +478,48 @@ Two of these checks catch the exception a broken build throws instead of
 letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
+
+### What a path may be, which is the layer under everything that takes one
+
+A document is identified by its path relative to the documents directory, and
+that path arrives from outside: a URL, an upload, a folder name somebody
+typed. `lib/docs/paths.js` is the one place that decides whether a string may
+become a filesystem path at all — it rebuilds the path segment by segment out
+of characters known to be safe, then confirms the result is still inside the
+directory it is supposed to be in.
+
+Every refusal in it was unreached. The routes above it are covered: the
+`documents` and `recycle` suites drive the paths an API accepts and the ones it
+turns into a 400. What nothing asked was what this module itself refuses, and
+it is worth asking separately, because the cost of being wrong here is reading
+and writing arbitrary files — `test/paths.test.js`, 100% of lines and
+branches.
+
+It is the shape of `body.test.js` and `organizer.test.js`: a leaf module whose
+refusals are the whole point, so the suite is a list of them. A name with a
+separator in it, or two dots anywhere in it; one longer than the limit, or
+empty; the characters a filesystem will not take, and the control characters
+that are the entire reason that guard exists; a leading dot or a trailing dot
+or space, which some filesystems silently drop, so that the file written would
+not be the file asked for; the Windows device names, refused on every platform
+because a library is copied between them and a name that works here and not
+there is a document somebody loses on the way. Then the same list again for a
+folder segment, and again for a recycle-bin entry, which has the narrower rule
+of all: only the stamped shape this app writes itself.
+
+Twenty-eight deliberate breaks, one per guard. Three of them pass the suite,
+and they are the same break three times: a leading "/" always produces an
+empty first segment, and an empty segment is refused by the per-segment
+sanitiser regardless. Either guard alone catches an absolute path, which is
+what belt and braces means here — the pair is deliberate, and no check can
+tell them apart without asserting the implementation rather than the
+behaviour.
+
+The one guard that does not refuse anything is the extension list, which is
+why `sanitizeNewFilename` is separate: creation and upload take a bare name
+and default it to markdown, and a lookup does not. Letting `/api/docs/foo`
+resolve to `foo.md` would give one file two addresses and make `.mmd` and
+`.ipynb` documents unaddressable by their real names.
 
 ### The four places, and what a move puts back when it fails
 
