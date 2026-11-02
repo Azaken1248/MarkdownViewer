@@ -201,9 +201,22 @@ function runSuite([name, file, description]) {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`\n${"=".repeat(72)}`);
 
+  /* Said by setting the status rather than by exiting on it.
+   *
+   * process.exit() throws away whatever is still queued on stdout, and stdout
+   * is only written synchronously when it is a file or a terminal. On CI it is
+   * a pipe — `npm test | tee` — so exiting here discarded the last thing
+   * written, which is the whole output of the suite that finished last plus
+   * the summary line. A failing run reported "exit code 1" and nothing else,
+   * and the step that turns FAIL lines into annotations had nothing to read.
+   *
+   * Nothing is left running by now: every lane has been awaited and every
+   * child has exited, so the process ends as soon as stdout has drained.
+   */
   if (failed.length === 0) {
     console.log(`All ${selected.length} suite(s) passed in ${seconds}s.`);
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // In the order they are listed, not the order they finished, so a failing
@@ -212,5 +225,5 @@ function runSuite([name, file, description]) {
   failed.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 
   console.log(`${failed.length} of ${selected.length} suite(s) FAILED in ${seconds}s: ${failed.join(", ")}`);
-  process.exit(1);
+  process.exitCode = 1;
 })();

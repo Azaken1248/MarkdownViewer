@@ -120,8 +120,18 @@ jobs:
       - name: Say which checks failed
         if: failure()
         run: |
-          grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log \
-            | head -40 \
+          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log | head -40 || true)
+
+          # A run that failed without naming a check is a run that died rather
+          # than one that disagreed: killed, or out of memory, or exiting on a
+          # status before it said why. The last lines are then the only thing
+          # there is, so they become the annotation instead of nothing at all.
+          if [ -z "$picked" ]; then
+            printf '::error::%s\n' "The suite failed without naming a check. The last lines of the run:"
+            picked=$(tail -12 /tmp/test.log)
+          fi
+
+          printf '%s\n' "$picked" \
             | while IFS= read -r line; do
                 printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
               done

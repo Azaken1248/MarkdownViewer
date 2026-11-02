@@ -479,6 +479,38 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### A failing run that said nothing
+
+Two pushes failed CI with no sign of what failed: the step said "Process
+completed with exit code 1", the annotations the workflow builds out of the
+FAIL lines were empty, and the same commit passed `npm test` locally every
+time. The log that was supposed to explain it was missing its last page.
+
+The cause is in the runner, not in any suite. `test/run.js` printed the output
+of the suite that finished last, then the summary line, then called
+`process.exit`. Node writes to stdout synchronously when it is a file or a
+terminal and **asynchronously when it is a pipe**, and `process.exit`
+abandons whatever is still queued. Locally the suite is run into a file or a
+terminal, so nothing is lost. CI pipes it — `npm test | tee` — so the tail
+went in the bin, and the tail is exactly where a failing run says what
+happened: a suite's output is buffered and printed when it finishes, so the
+whole report of the slowest suite, plus the summary, is written in the last
+moment before the exit.
+
+Measured rather than reasoned about: `node -e 'console.log("x".repeat(300000));
+process.exit(1)'` writes 300,001 bytes to a file and 65,536 bytes — one pipe
+buffer — through a pipe.
+
+So the runner now sets `process.exitCode` and returns. Every lane has been
+awaited and every child has exited by then, so the process ends as soon as
+stdout drains, which is the same exit status a moment later with the output
+intact.
+
+The workflow has the other half: a failing run with no FAIL line in it is a
+run that *died* rather than one that disagreed — killed, out of memory, or
+exiting on a status before saying why — so instead of annotating nothing, it
+annotates the last lines of the log and says that is what it is doing.
+
 ### And what those pages logged
 
 The DOM suite has read its own console since it was written: an error the page
