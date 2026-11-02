@@ -479,6 +479,30 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### And what those pages logged
+
+The DOM suite has read its own console since it was written: an error the page
+logged is the page saying something went wrong somewhere it had no other way
+to report, and a suite that ignores them can pass while the page throws a
+TypeError on every pointer move.
+
+The diagram-page suite was not reading anything. It opens dozens of pages
+across ten files, each a jsdom window with the default console, which prints
+to the runner's output and is read by nobody. So every page now gets a
+virtual console that collects `console.error` and jsdom's own errors, tagged
+with the page it came from, and one check at the end says the list is empty —
+jsdom's two standing complaints aside, which are about its missing CSS parser
+and its missing layout rather than about this app.
+
+Today the list is empty, so this finds nothing of its own. What it adds is
+that an exception thrown inside a handler is no longer invisible: jsdom
+reports one as a `jsdomError` on the page's console, so a guard removed from
+the editor in a way that throws without changing any answer the checks read
+now fails the suite instead of passing it. Both halves of that — a logged
+error and an uncaught throw in a listener — were confirmed to arrive before
+this went in, since a collector nothing has ever caught anything with is a
+collector nobody knows is wired up.
+
 ### What the diagram editor will not do
 
 `diagram-editor.js` is the largest file in the client and the one with the

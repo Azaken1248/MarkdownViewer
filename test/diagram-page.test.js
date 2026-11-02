@@ -14,7 +14,7 @@ const path = require("path");
 const {
   appSource: readAppSource, pageScriptPaths, loadScript
 } = require("./app-source.js");
-const { JSDOM } = require("jsdom");
+const { JSDOM, VirtualConsole } = require("jsdom");
 const { startTestServer, SEED_USERNAME, SEED_PASSWORD, TEST_PASSWORD } = require("./helpers/server");
 const { createChecker } = require("./helpers/check.js");
 
@@ -132,6 +132,26 @@ async function boot(dom, { cookie, origin }) {
  */
 const openPages = [];
 
+/* What the pages logged, gathered from all of them.
+ *
+ * Every error here is the page saying something went wrong in a place it
+ * could not report any other way — a draw that threw, a fetch nothing was
+ * waiting for, a handler that fell over on a guard that is no longer there.
+ * Nothing collected them, so a check could pass while the page was logging a
+ * TypeError on every pointer move. The DOM suite has read its own console
+ * since it was written; this is the same thing one page over, and each entry
+ * says which page it came from, because this suite opens dozens.
+ */
+const pageErrors = [];
+
+function watchedConsole(url) {
+  const where = String(url).replace(/^https?:\/\/[^/]+/, "");
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", (error) => pageErrors.push(`${where} jsdomError: ${error.message}`));
+  virtualConsole.on("error", (...args) => pageErrors.push(`${where} console.error: ${args.join(" ")}`));
+  return virtualConsole;
+}
+
 function closeOpenPages() {
   for (const dom of openPages.splice(0)) {
     if (!dom.window.closed) {
@@ -141,7 +161,9 @@ function closeOpenPages() {
 }
 
 function openPage({ url, cookie, origin, stash = null, panels = null, before = null }) {
-  const dom = new JSDOM(pageHtml, { url, runScripts: "outside-only", pretendToBeVisual: true });
+  const dom = new JSDOM(pageHtml, {
+    url, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: watchedConsole(url)
+  });
   // Anything that has to be on the window before the page's own scripts read
   // it — a ResizeObserver, say, which jsdom has not got and which the editor
   // only reaches for while it is being built.
@@ -297,6 +319,14 @@ async function run(server, cookie) {
   closeOpenPages();
   await require("./diagram-page/refusing.js")(ctx);
   closeOpenPages();
+
+  console.log("=== what the pages logged ===");
+  /* jsdom's own two complaints are not the page's: it has no CSS parser for
+   * everything the stylesheet uses and no layout, and it says so. Anything
+   * else came from the page's own code.
+   */
+  const itsOwn = pageErrors.filter((one) => !/Could not parse CSS|Not implemented/.test(one));
+  check("no page logged an error of its own", itsOwn, []);
 
 }
 
