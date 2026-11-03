@@ -8,7 +8,7 @@
 // because that file had grown well past a thousand lines.
 module.exports = async (ctx) => {
   const {
-    check, server, cookie, origin, openPage, saveAndWait, waitFor, csrfFor
+    check, server, cookie, origin, openPage, saveAndWait, waitFor, csrfFor, until
   } = ctx;
 
   console.log("=== the editor is a bar, two rails and the paper between them ===");
@@ -755,6 +755,126 @@ module.exports = async (ctx) => {
       /2\.0:i/.test(back), false);
 
     page.window.close();
+  }
+
+  console.log("=== which way the diagram runs, which is the bar's own control ===");
+  {
+    /* The one control on the bar that changes the file rather than the view.
+     * Nothing had used it: the direction was read from the file and written
+     * back, and the select that changes it was drawn and never touched.
+     */
+    const wrote = async (name, lines) => server.request("POST", "/api/docs",
+      { fileName: name, overwrite: true, content: `${lines.join("\n")}\n` },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    await wrote("running.mmd", [
+      "flowchart TD",
+      "    %% layout v1",
+      "    %% @ A 100,100 80x40",
+      "    %% @ B 100,300 80x40",
+      "    A[One]",
+      "    B[Two]",
+      "    A --> B"
+    ]);
+
+    const page = await openPage({ url: `${origin}/diagram/file/running.mmd`, cookie, origin });
+    const { window, document } = page;
+    const flow = document.querySelector(".ve-diagram-flow select");
+    const written = async () => (await server.request("GET", "/api/docs/running.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    check("the bar offers the direction", Boolean(flow), true);
+    check("...showing the one the file is written in", flow.value, "TD");
+    check("...and the four a flowchart can run in",
+      [...flow.options].map((one) => one.value), ["TD", "LR", "BT", "RL"]);
+
+    flow.value = "LR";
+    flow.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    /* Asked before the save, because an edit that never reached the page is a
+     * Save button that stays disabled — and then the wait for "Saved" is a
+     * wait for something nobody started, which stops the suite instead of
+     * failing this check.
+     */
+    const saveable = () => !document.getElementById("diagramSave").disabled;
+    await until(window, saveable);
+    check("...and choosing another is an edit the page knows it has to keep",
+      saveable(), true);
+
+    await saveAndWait(page);
+    check("choosing another is written to the file as the flowchart's own direction",
+      /^flowchart LR$/m.test(await written()), true);
+    check("...and the old one is gone rather than left above it",
+      /^flowchart TD$/m.test(await written()), false);
+
+    page.window.close();
+
+    /* A direction that is on the menu but is not the first thing on it.
+     *
+     * Without this the control can be right by accident: a select with no
+     * value set shows its first option, which is the direction most diagrams
+     * are written in, so a control that never reads the file at all looks
+     * correct on almost every file there is.
+     */
+    await wrote("sideways.mmd", [
+      "flowchart LR",
+      "    %% layout v1",
+      "    %% @ A 100,100 80x40",
+      "    A[One]"
+    ]);
+
+    const sideways = await openPage({ url: `${origin}/diagram/file/sideways.mmd`, cookie, origin });
+    check("a diagram written another way is shown that way",
+      sideways.document.querySelector(".ve-diagram-flow select").value, "LR");
+    sideways.window.close();
+
+    /* TB and TD mean the same thing to Mermaid and only one of them is on the
+     * menu. A file written with the other has to keep it: opening a diagram
+     * and saving it without touching anything is not an edit, and a diff that
+     * says otherwise is a diff nobody asked for.
+     */
+    await wrote("the-other-one.mmd", [
+      "flowchart TB",
+      "    %% layout v1",
+      "    %% @ A 100,100 80x40",
+      "    A[One]"
+    ]);
+
+    const other = await openPage({ url: `${origin}/diagram/file/the-other-one.mmd`, cookie, origin });
+    const theirs = other.document.querySelector(".ve-diagram-flow select");
+    check("a direction the menu does not offer is still what is shown", theirs.value, "TB");
+    check("...on the menu beside the four, rather than instead of one of them",
+      [...theirs.options].map((one) => one.value), ["TB", "TD", "LR", "BT", "RL"]);
+
+    /* Saved after an edit that has nothing to do with the direction — a box
+     * nudged — because that is how the word gets rewritten: the whole file is
+     * written out again, direction and all, by any change at all.
+     */
+    const canvas = other.document.querySelector(".ve-diagram-canvas");
+    const box = other.document.querySelector('.dd-node[data-id="A"]');
+    const placed = () => other.document
+      .querySelector('.dd-node[data-id="A"]').getAttribute("transform");
+    const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(box.getAttribute("transform"));
+    const x = Number(spot[1]) + 10;
+    const y = Number(spot[2]) + 10;
+    const was = placed();
+
+    box.dispatchEvent(new other.window.MouseEvent("pointerdown",
+      { clientX: x, clientY: y, bubbles: true }));
+    canvas.dispatchEvent(new other.window.MouseEvent("pointermove",
+      { clientX: x + 60, clientY: y, bubbles: true }));
+    canvas.dispatchEvent(new other.window.MouseEvent("pointerup",
+      { clientX: x + 60, clientY: y, bubbles: true }));
+    await until(other.window, () => placed() !== was);
+    check("(the box moved, so there is something to save)", placed() !== was, true);
+    await saveAndWait(other);
+
+    const kept = (await server.request("GET", "/api/docs/the-other-one.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...and saving the diagram keeps the word the file used",
+      /^flowchart TB$/m.test(kept), true);
+
+    other.window.close();
   }
 
 };

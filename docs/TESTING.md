@@ -479,6 +479,34 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### Which way the diagram runs
+
+The one control on the bar that changes the file rather than the view, and
+nothing had touched it: the direction was read out of the file and written
+back, and the select that changes it was drawn and never used.
+
+Four checks are about the control telling the truth. It shows the direction
+the file is written in — tested on a file written `LR` as well as the usual
+`TD`, because a select with no value set shows its first option, which *is*
+`TD`, so a control that never reads the file at all looks right on almost
+every diagram there is. It offers the four a flowchart can run in. Choosing
+another has to be an edit the page knows it has to keep, which is asked before
+the save rather than after it: an edit that never reached the page is a Save
+button that stays disabled, and the wait for "Saved" would then be a wait for
+something nobody started. And the file afterwards says `flowchart LR`, with
+the old line gone rather than left above it.
+
+The fifth is about fidelity. `TB` and `TD` mean the same thing to Mermaid and
+only one of them is on the menu, so a file written with the other keeps it:
+the direction shows as `TB`, the menu carries it beside the four rather than
+instead of one of them, and saving the diagram after an unrelated edit writes
+`flowchart TB` back. Opening somebody's diagram and nudging a box is not a
+reason to rewrite the first line of their file.
+
+Four deliberate breaks, all four caught. Two of them were caught twice over,
+once the save-is-possible check went in: without it they stopped the suite at
+a wait instead of failing a check that says what it wanted.
+
 ### An arrow, changed from the panel
 
 Everything in the arrows file changes an arrow on the paper: dragged, bent,
