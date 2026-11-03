@@ -599,6 +599,20 @@ run that *died* rather than one that disagreed — killed, out of memory, or
 exiting on a status before saying why — so instead of annotating nothing, it
 annotates the last lines of the log and says that is what it is doing.
 
+Which found the next layer of the same problem. With the output intact, CI
+said "1 of 38 suite(s) FAILED in 86.5s: diagram-page" and no more, because
+there was no FAIL line to annotate: the suite had thrown. Annotating the tail
+as well then annotated the wrong tail — a suite's output is printed when it
+finishes, and the one that finishes last is rarely the one that failed, so the
+end of the run was another suite's passing checks.
+
+So the runner keeps the last dozen lines of each failing suite and reprints
+them after everything else, under "the last of what *name* said". A suite
+that failed a check has already said so in its own output and saying it twice
+is cheap; a suite that threw, or was killed, said it in a line nothing else
+repeats. The end of a run is what gets read, and now it is the part worth
+reading.
+
 ### And what those pages logged
 
 The DOM suite has read its own console since it was written: an error the page

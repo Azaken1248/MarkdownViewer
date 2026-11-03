@@ -169,7 +169,18 @@ function runSuite([name, file, description]) {
       }
 
       console.log(lines.join("\n"));
-      resolve(status === 0 && !failure);
+
+      /* Kept so a failing run can end with the failing suite's own words.
+       *
+       * A suite's output is printed when it finishes, and the one that
+       * finishes last is rarely the one that failed — so the end of the run
+       * is some other suite's passing checks. That is what anybody reading a
+       * log reads first, and on CI the annotations are built from the tail.
+       */
+      resolve({
+        ok: status === 0 && !failure,
+        tail: Buffer.concat(chunks).toString().trimEnd().split("\n").slice(-12).join("\n")
+      });
     });
   });
 }
@@ -186,12 +197,12 @@ function runSuite([name, file, description]) {
   const lanes = Array.from({ length: Math.min(LANES, queue.length) }, async (_, lane) => {
     while (queue.length > 0) {
       const suite = lane % 2 === 0 ? queue.pop() : queue.shift();
-      const ok = DRIVES_A_BROWSER.has(suite[0])
+      const answer = DRIVES_A_BROWSER.has(suite[0])
         ? await throughTheBrowserLane(() => runSuite(suite))
         : await runSuite(suite);
 
-      if (!ok) {
-        failed.push(suite[0]);
+      if (!answer.ok) {
+        failed.push({ name: suite[0], tail: answer.tail });
       }
     }
   });
@@ -222,8 +233,20 @@ function runSuite([name, file, description]) {
   // In the order they are listed, not the order they finished, so a failing
   // run reads the same however the lanes happened to fall.
   const order = SUITES.map(([name]) => name);
-  failed.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  failed.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
 
-  console.log(`${failed.length} of ${selected.length} suite(s) FAILED in ${seconds}s: ${failed.join(", ")}`);
+  /* Last of all, what the failing suites said on the way out.
+   *
+   * A suite that fails a check has already said so in its own output, and
+   * saying it twice is cheap. A suite that threw, or was killed, said it in a
+   * line nothing else repeats — and it is the end of the run that gets read,
+   * and that CI turns into annotations.
+   */
+  for (const { name, tail } of failed) {
+    console.log(`\nthe last of what ${name} said:\n${tail}`);
+  }
+
+  console.log(`\n${failed.length} of ${selected.length} suite(s) FAILED in ${seconds}s: `
+    + failed.map(({ name }) => name).join(", "));
   process.exitCode = 1;
 })();
