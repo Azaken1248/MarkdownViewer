@@ -122,13 +122,14 @@ jobs:
         run: |
           picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log | head -40 || true)
 
-          # A run that failed without naming a check is a run that died rather
-          # than one that disagreed: killed, or out of memory, or exiting on a
-          # status before it said why. The last lines are then the only thing
-          # there is, so they become the annotation instead of nothing at all.
-          if [ -z "$picked" ]; then
-            printf '::error::%s\n' "The suite failed without naming a check. The last lines of the run:"
-            picked=$(tail -12 /tmp/test.log)
+          # A suite that fails without a FAIL line in it did not disagree with
+          # anything: it threw, or was killed, or ran out of a wait. The
+          # summary names which suite, and the reason is in what it printed on
+          # the way out — so the tail is annotated too, rather than leaving a
+          # failure whose only description is which file it was in.
+          if ! printf '%s' "$picked" | grep -qE '^[[:space:]]+FAIL'; then
+            told="The suite named above failed without a FAIL line, so it threw rather than disagreed. The last lines of the run:"
+            picked="$picked"$'\n'"$told"$'\n'"$(tail -20 /tmp/test.log)"
           fi
 
           printf '%s\n' "$picked" \
@@ -220,9 +221,9 @@ jobs:
         run: |
           picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/coverage.log | head -40 || true)
 
-          if [ -z "$picked" ]; then
-            printf '::error::%s\n' "The suite failed under c8 without naming a check. The last lines of the run:"
-            picked=$(tail -12 /tmp/coverage.log)
+          if ! printf '%s' "$picked" | grep -qE '^[[:space:]]+FAIL'; then
+            told="The suite named above failed without a FAIL line, so it threw rather than disagreed. The last lines of the run:"
+            picked="$picked"$'\n'"$told"$'\n'"$(tail -20 /tmp/coverage.log)"
           fi
 
           printf '%s\n' "$picked" \
