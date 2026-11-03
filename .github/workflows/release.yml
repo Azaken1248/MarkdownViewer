@@ -114,7 +114,7 @@ jobs:
       # Two commands on the host. The compose file there names the image this
       # workflow just pushed; pulling and bringing it up is the whole deploy.
       - name: Pull and restart
-        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ vars.DEPLOY_HOST }}
           username: ${{ vars.DEPLOY_USER }}
