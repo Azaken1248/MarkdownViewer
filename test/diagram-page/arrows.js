@@ -9,7 +9,7 @@
 // because that file had grown well past a thousand lines.
 module.exports = async (ctx) => {
   const {
-    check, server, cookie, origin, openPage, saveAndWait, csrfFor, dragBox
+    check, server, cookie, origin, openPage, saveAndWait, csrfFor, dragBox, until
   } = ctx;
 
   console.log("=== an arrow goes where it is dragged ===");
@@ -481,6 +481,113 @@ module.exports = async (ctx) => {
 
     dragBox(window, "A", 500, 360);
     check("...and it comes back again", at("A"), startedAt);
+  }
+
+  console.log("=== an arrow, changed from the panel ===");
+  {
+    /* Everything above changes an arrow on the paper: dragged, bent, pulled
+     * out of a box. The panel has the same arrow as a row of controls — where
+     * it starts, where it ends, what it says, and a button to take it away —
+     * and that row is the only way to move an arrow's end to a box that is
+     * nowhere near it, or to label one at all. None of it was reached.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "panelled.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 300,100 80x40",
+        "    %% @ C 500,100 80x40",
+        "    A[One]",
+        "    B[Two]",
+        "    C[Three]",
+        "    A --> B"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/panelled.mmd`, cookie, origin });
+    const { window, document } = page;
+    const canvas = document.querySelector(".ve-diagram-canvas");
+    const inspector = document.querySelector(".ve-diagram-inspector");
+
+    const joined = () => [...canvas.querySelectorAll(".dd-edge")]
+      .map((one) => `${one.dataset.from}->${one.dataset.to}`);
+    const labels = () => [...canvas.querySelectorAll(".dd-edge .dd-label-text")]
+      .map((one) => one.textContent);
+    const written = async () => (await server.request("GET", "/api/docs/panelled.mmd",
+      undefined, { Cookie: cookie })).body.content;
+
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    const row = () => inspector.querySelector(".ve-diagram-arrow");
+    const picks = () => [...row().querySelectorAll("select.ve-diagram-pick")];
+    const labelField = () => row().querySelector("input.ve-diagram-text");
+    const change = (control, value) => {
+      control.value = value;
+      control.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+
+    tap("A");
+    check("a box's own arrow is a row in the panel", Boolean(row()), true);
+    check("...with both of its ends to choose from, and the boxes to choose",
+      picks().map((one) => [one.value, [...one.options].map((o) => o.value).sort().join("")]),
+      [["A", "ABC"], ["B", "ABC"]]);
+    check("...and its label, which is empty", labelField().value, "");
+
+    /* The far end moved to a box the arrow does not touch. On the paper this
+     * is a drag onto that box; here it is a different thing — the arrow stays
+     * where it is and the diagram is rebuilt around the choice.
+     */
+    change(picks()[1], "C");
+    await until(window, () => joined().includes("A->C"));
+    check("choosing a different box moves that end of the arrow", joined(), ["A->C"]);
+
+    // And the near end, which is the one that decides where it starts.
+    change(picks()[0], "B");
+    await until(window, () => joined().includes("B->C"));
+    check("...and the other end is chosen the same way", joined(), ["B->C"]);
+
+    /* The label is typed rather than chosen, so it lands on every keystroke
+     * rather than on a change event — anything else loses the last word typed
+     * when the panel is closed.
+     */
+    const typed = labelField();
+    typed.value = "then";
+    typed.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await until(window, () => labels().includes("then"));
+    check("a label typed into the panel is drawn on the arrow", labels(), ["then"]);
+
+    await saveAndWait(page);
+    check("...and the file says what the arrow now is and what it says",
+      /B\s*-->\s*\|then\|\s*C/.test(await written()), true);
+
+    // Taken away from the panel, which is the only place an arrow can be
+    // removed without going near it.
+    tap("B");
+    check("(the arrow is still listed, now under the box it starts from)",
+      Boolean(row()), true);
+    row().querySelector("button.ve-diagram-drop")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await until(window, () => joined().length === 0);
+    check("the button on the row takes the arrow away", joined(), []);
+    check("...and the panel stops offering a row for it", Boolean(row()), false);
+    check("...while the boxes it joined are still there",
+      canvas.querySelectorAll(".dd-node").length, 3);
+
+    await saveAndWait(page);
+    check("...and the file has no arrow left in it",
+      /-->/.test(await written()), false);
+
+    page.window.close();
   }
 
   console.log("=== boxes can be carried about ===");

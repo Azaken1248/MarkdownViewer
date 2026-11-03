@@ -249,6 +249,32 @@ async function waitFor(window, done, what = "the page never finished starting up
   return done();
 }
 
+/* The same wait, for when a check is about to say what it found.
+ *
+ * waitFor throws, which is right when the page never got far enough for any
+ * check to mean anything — a page that never booted. It is wrong just before
+ * a check: a throw stops the suite with a sentence, so the run says "it
+ * failed" and names the file, while a check says what it wanted and what it
+ * got. Eight deliberate breaks against the arrow panel showed the difference:
+ * every one of them stopped the suite without a FAIL line in it.
+ *
+ * So this one returns instead, and the check that follows does the talking.
+ * The ceiling is lower for the same reason: nothing after it is waiting on
+ * the condition, so there is no cost to finding out sooner.
+ */
+async function until(window, done, timeoutMs = 10000) {
+  const started = Date.now();
+  while (!done()) {
+    if (Date.now() - started > timeoutMs) {
+      return false;
+    }
+
+    await settle();
+  }
+
+  return true;
+}
+
 (async () => {
   const server = await startTestServer();
   console.log(`  (test server on ${server.origin})`);
@@ -295,7 +321,7 @@ async function run(server, cookie) {
    */
   const ctx = {
     check, server, cookie, origin, fs, path, ROOT, JSDOM, pageHtml, pagesSource,
-    DIAGRAM_DOC, SETTLE, settle, boot, openPage, saveAndWait, waitFor,
+    DIAGRAM_DOC, SETTLE, settle, boot, openPage, saveAndWait, waitFor, until,
     csrfFor, addressOf, dragBox, readAppSource
   };
 

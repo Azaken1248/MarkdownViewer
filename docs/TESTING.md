@@ -479,6 +479,57 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### An arrow, changed from the panel
+
+Everything in the arrows file changes an arrow on the paper: dragged, bent,
+pulled out of a box, carried with the box it touches. The panel has the same
+arrow as a row of controls — where it starts, where it ends, what it says, and
+a button to take it away — and that row is the only way to move an arrow's end
+to a box nowhere near it, or to give one a label at all. None of it had been
+reached.
+
+Both ends are chosen from a list of every box in the diagram, so the check
+reads the options as well as the value: a select that offers only the box it
+is already on is a control that cannot do the one thing it is for. The far end
+is moved to a third box, then the near end to another, and each has to land on
+the paper and in the file.
+
+The label is typed rather than chosen, and it is wired to `input` rather than
+`change` — it has to land on every keystroke, because anything else loses the
+last word typed when the panel is repainted under you. The check types and
+then waits for the words to appear on the arrow itself, and the file afterwards
+says `B -->|then| C`.
+
+The button on the row is the only way to remove an arrow without going near
+it. Afterwards the arrow is off the paper, out of the file, and gone from the
+panel, and both boxes it joined are still there — a break that filters the
+list the other way round takes away every arrow *except* the one asked for,
+which is the kind of mistake that looks right until there are two arrows.
+
+Nine deliberate breaks, all nine caught. Eight of them, though, stopped the
+suite rather than failing a check, which is what prompted the harness's second
+wait.
+
+### A wait that returns, beside the one that throws
+
+`waitFor` throws when what it is waiting for never happens, which is right
+when the page never got far enough for any check to mean anything. It is
+wrong immediately before a check: a throw stops the suite with a sentence, so
+the run says which file failed and no more, while the check it was standing in
+front of would have said what it wanted and what it got.
+
+That is not hypothetical. The breaks above were all caught, and eight of the
+nine were caught as a stopped suite with no FAIL line in it — and the same
+shape turned up in CI, where a `diagram-page` failure arrived as a summary
+line naming the suite and nothing else.
+
+So the harness has `until` as well: the same loop, returning false at the
+deadline instead of throwing, for the places where the next line is a check.
+The ceiling is lower too, because nothing after it depends on the condition
+holding, so there is no cost to finding out sooner. `waitFor` keeps the jobs
+it is right for — a page booting, a save finishing — where there is nothing
+useful to check if it never happens.
+
 ### Tab, in a dialog
 
 `app/modal.js` is the smallest security-relevant file in the client and it
