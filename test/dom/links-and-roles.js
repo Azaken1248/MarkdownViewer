@@ -564,10 +564,21 @@ module.exports = async (ctx) => {
     await run(`window.__t.openDocument(${JSON.stringify(file)}, true, { forceReload: true })`);
     await waitUntil(() => state().activeFile === file, 6000);
 
+    /* Waiting for the block rather than for the flag.
+     *
+     * pageEditActive() is true as soon as the editor is on, which is before
+     * it has painted anything to type into — so this read the first block
+     * while there were none and set innerHTML on null. It passed on this
+     * machine and threw under c8, where everything is slower, which is how
+     * CI found it and a plain run did not.
+     */
+    const typedInto = '#docContent .ve-block[contenteditable="true"]';
     const editing = async () => {
       await run("window.__t.startPageEdit()");
-      await waitUntil(() => run("window.__t.pageEditActive()"), 6000);
-      const block = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+      await waitUntil(() => Boolean(doc.querySelector(typedInto)), 6000);
+
+      const block = doc.querySelector(typedInto);
+      check("(the editor has something to type into)", Boolean(block), true);
       block.innerHTML = "<h1>Half written</h1>";
       block.dispatchEvent(new window.Event("input", { bubbles: true }));
     };

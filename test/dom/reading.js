@@ -164,9 +164,13 @@ module.exports = async (ctx) => {
     await run('window.__t.openDocument("reading-one.md", false, { forceReload: true })');
     await waitUntil(() => shown().includes("First document"), 4000);
     await run("window.__t.startPageEdit()");
-    await waitUntil(() => run("window.__t.pageEditActive()"), 4000);
+    /* The block, not the flag: pageEditActive() is true as soon as the editor
+     * is on, which is before it has painted anything to type into.
+     */
+    await waitUntil(() => Boolean(doc.querySelector('#docContent .ve-block[contenteditable="true"]')), 4000);
 
     const block = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
+    check("(the editor has something to type into)", Boolean(block), true);
     block.innerHTML = "<h1>Half written</h1>";
     block.dispatchEvent(new window.Event("input", { bubbles: true }));
 
