@@ -177,9 +177,28 @@ function runSuite([name, file, description]) {
        * is some other suite's passing checks. That is what anybody reading a
        * log reads first, and on CI the annotations are built from the tail.
        */
+      const said = Buffer.concat(chunks).toString().trimEnd().split("\n");
+
+      /* The lines worth repeating, which are not always the last ones.
+       *
+       * A suite that threw says so wherever its stderr happened to interleave
+       * with its own output, which on a busy runner is not the end — the
+       * first attempt at this printed twelve passing checks and left the
+       * exception just outside the window. So the lines that look like a
+       * failure are picked out by name, and the tail comes after them for
+       * whatever context it carries.
+       */
+      const saysWhy = /^[A-Za-z]*Error\b|Error:|never |timed out|was cut off|out of memory/;
+      // Stack frames are not the sentence, and ten of them are the whole
+      // window. The line that says what happened is what is wanted.
+      const aStackFrame = /^\s+at\s/;
+
       resolve({
         ok: status === 0 && !failure,
-        tail: Buffer.concat(chunks).toString().trimEnd().split("\n").slice(-12).join("\n")
+        tail: [...new Set([
+          ...said.filter((line) => saysWhy.test(line) && !aStackFrame.test(line)).slice(0, 6),
+          ...said.slice(-8).filter((line) => !aStackFrame.test(line))
+        ])].join("\n")
       });
     });
   });

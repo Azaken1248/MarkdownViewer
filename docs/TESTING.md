@@ -707,6 +707,14 @@ is cheap; a suite that threw, or was killed, said it in a line nothing else
 repeats. The end of a run is what gets read, and now it is the part worth
 reading.
 
+And it reprints the right lines, which took one more go. A suite that threw
+says so wherever its stderr happened to interleave with its own output, which
+on a busy runner is not the end: the first version printed twelve passing
+checks with the exception just outside the window, and the ten stack frames
+after it filled the next attempt. So the lines that say *why* are picked out
+by what they look like — an `Error`, a wait that says "never", a cut-off — the
+stack frames are dropped, and the tail follows for context.
+
 ### And what those pages logged
 
 The DOM suite has read its own console since it was written: an error the page
