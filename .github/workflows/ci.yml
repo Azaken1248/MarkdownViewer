@@ -120,7 +120,7 @@ jobs:
       - name: Say which checks failed
         if: failure()
         run: |
-          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log | head -40 || true)
+          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off|^[A-Za-z]*Error|Error:|never finished|never arrived|timed out|out of memory' /tmp/test.log | head -40 || true)
 
           # A suite that fails without a FAIL line in it did not disagree with
           # anything: it threw, or was killed, or ran out of a wait. The
@@ -140,7 +140,7 @@ jobs:
             echo '### Failing checks'
             echo
             echo '```'
-            grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/test.log \
+            grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off|^[A-Za-z]*Error|Error:|never finished|never arrived|timed out|out of memory' /tmp/test.log \
               | head -60 || true
             echo '```'
             echo
@@ -219,7 +219,7 @@ jobs:
       - name: Say which checks failed
         if: failure()
         run: |
-          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/coverage.log | head -40 || true)
+          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off|^[A-Za-z]*Error|Error:|never finished|never arrived|timed out|out of memory' /tmp/coverage.log | head -40 || true)
 
           if ! printf '%s' "$picked" | grep -qE '^[[:space:]]+FAIL'; then
             told="The suite named above failed without a FAIL line, so it threw rather than disagreed. The last lines of the run:"
