@@ -330,7 +330,7 @@ async function signIn(server, password) {
 async function run(server, freshCookie) {
   const origin = server.origin;
 
-  /* The checks themselves, in ten files beside this one, in this order — the
+  /* The checks themselves, in eleven files beside this one, in this order — the
    * way somebody working on a diagram would. What they share is the harness
    * above, handed over rather than reached for.
    *
@@ -347,7 +347,8 @@ async function run(server, freshCookie) {
     require("./diagram-page/arrows.js"),
     require("./diagram-page/carrying.js"),
     require("./diagram-page/reaching.js"),
-    require("./diagram-page/refusing.js")
+    require("./diagram-page/refusing.js"),
+    require("./diagram-page/embedded.js")
   ];
 
   const shared = {

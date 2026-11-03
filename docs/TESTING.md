@@ -514,6 +514,41 @@ The checks open such a file, and the box beside it that is in no group, so
 the offer appears for one and not the other. Typing in the field renames the
 group on the paper and in the file, under the id it has always had.
 
+### The editor mounted somewhere that is not this page
+
+The file's own first paragraph says what it is for: "it is handed a string and
+hands back a string. That is what lets one canvas serve a fence inside a
+document and a .mmd file on its own." Only the second of those exists today —
+a fence in a document is handed over to the diagram page rather than edited in
+place — so the host options for the first had never been passed by anything,
+and every part of the editor that depends on them had never been built.
+
+That is thirty-eight lines, the largest block left in the file, and it is an
+API rather than a feature: `mount(host, { viewport: false, onDone })`. So the
+suite drives it as one. A second editor is mounted into a plain element in the
+page's own window, with the options a host other than this page would pass,
+and then asked the questions that only make sense of an editor inside
+something else.
+
+It says on its bar which document it is editing, which matters only when it is
+embedded — on a page of its own the address bar and the heading have said so
+already, and a name on the bar as well is the same word three times. The check
+counts the names across the whole document, which now holds two editors, so a
+break that shows the name everywhere fails rather than passing on the one that
+wanted it.
+
+It offers a way out, because the host asked for one: the page has no Done
+button, since leaving is the Back button and the save. Pressing it tells the
+host and does nothing else. It has no zoom and no step-through, because those
+are about looking at a diagram too big for the screen and a strip in a
+document is as big as the diagram. It is still an editor: the string it hands
+back is the string it was handed until something is dragged, and then it is
+not. And it can be taken away — a host that swaps one block for another would
+otherwise leave a redraw queued against an element nobody holds, once per
+block opened.
+
+Six deliberate breaks, all six caught.
+
 ### The other half of the shape menu
 
 The shape menu's "No frame" was driven and the rest of it was not, which is
