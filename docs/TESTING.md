@@ -502,6 +502,37 @@ It is worth saying plainly that this was a real bug in the suite, found only
 because CI is faster than this machine: a test that passes because it is slow
 is a test that will fail somewhere quicker.
 
+### The other half of the shape menu
+
+The shape menu's "No frame" was driven and the rest of it was not, which is
+backwards: "no frame" is the unusual choice and a shape is the ordinary one.
+Thirteen lines, the largest unreached block in the file.
+
+Choosing a shape is not only setting a shape. The frame is not a shape, so
+choosing one has to put the frame back — which is checked on the fixture's
+frameless box that carries a picture, since that one keeps its menu where
+words lose theirs. And a table is on the same menu, because to a file a table
+is a kind of box, so choosing it sets the kind, and choosing anything else
+over it takes the kind off again: a table chosen by mistake would otherwise
+be a table for good.
+
+A box of one word becomes a table of one cell, which has no rules in it to
+look at — the lines are drawn *between* rows and columns — so the check reads
+the node's own kind instead, which is the thing the drawing and the file agree
+on. It also has to grow, because a grid in a box the size of a label is a grid
+nobody can read. That one is measured out of the file rather than off the
+paper: a table is drawn to fit its grid whatever the layout says, so the
+rectangle on screen is the wrong thing to look at. What has to grow is the box
+itself, which is the size that gets written down and the size it will be when
+the file is opened again.
+
+Six deliberate breaks, five caught. The sixth removes the `grow` call, and the
+box grows anyway — the written size is the same with it and without it, so
+something else on the redraw-and-save path sizes a table too. The check is
+still worth having: it pins that the box grows, which is what a person sees,
+rather than which line did the growing. Two places arriving at the same number
+is worth knowing about on its own.
+
 ### Which way the diagram runs
 
 The one control on the bar that changes the file rather than the view, and

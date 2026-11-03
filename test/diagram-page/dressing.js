@@ -10,7 +10,7 @@
 module.exports = async (ctx) => {
   const {
     check, server, cookie, origin, settle, openPage, saveAndWait, waitFor, csrfFor,
-    dragBox
+    dragBox, until
   } = ctx;
 
   console.log("=== everything you can do to what is under the pointer ===");
@@ -476,6 +476,107 @@ module.exports = async (ctx) => {
     check("...and are read back as words rather than as boxes",
       reopened.nodes.filter((one) => one.kind === "text").map((one) => one.id),
       ["T", "O"]);
+
+    /* And the other half of that same menu, which nothing had chosen: a box
+     * being given a different shape. Words have no shape menu — that is what
+     * the button above is for — so this is asked of the box the fixture
+     * starts with, which has one.
+     */
+    tap("A");
+    const shapeNow = () => inspector.querySelector(".ve-diagram-shape").value;
+    const choices = () => [...inspector.querySelector(".ve-diagram-shape").options]
+      .map((one) => one.value);
+
+    check("a box has a shape menu, which words do not", Boolean(shapeNow()), true);
+    check("...offering a table and a bare shape beside the shapes",
+      [choices().includes("table"), choices().includes("none")], [true, true]);
+
+    const chooseShape = (value) => {
+      const menu = inspector.querySelector(".ve-diagram-shape");
+      menu.value = value;
+      menu.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+
+    chooseShape("round");
+    await waitFor(window, () => /round/.test(groupOf("A").getAttribute("class") || "")
+      || groupOf("A").querySelector("rect[rx]"), "choosing a shape never redrew the box");
+    check("...and the menu says which shape it now is", shapeNow(), "round");
+
+    await saveAndWait(page);
+    const roundFile = await written();
+    check("...and the file writes the box in that shape",
+      /A\(One\)/.test(roundFile), true);
+    check("...read back as the shape that was chosen",
+      window.DiagramModel.parseFlowchart(roundFile)
+        .nodes.find((one) => one.id === "A").shape, "round");
+
+    /* A table is on the same menu, because to a file it is a kind of box —
+     * and it is the one choice that changes the size of what is drawn, so the
+     * box is grown to hold a grid rather than left the size of a label.
+     */
+    /* Read out of the file rather than off the paper. A table is drawn to
+     * fit its grid whatever the layout says, so the rectangle on screen is
+     * the wrong thing to measure: what the editor has to do is grow the box
+     * itself, which is the size that gets written down and the size it will
+     * be when the file is opened again.
+     */
+    const sizeInFile = async (id) => {
+      const where = window.DiagramModel.parseFlowchart(await written()).layout[id];
+      return [where.w, where.h];
+    };
+    const wasSized = await sizeInFile("A");
+
+    chooseShape("table");
+    /* A box of one word becomes a table of one cell, which has no rules in it
+     * to see — the lines are drawn between rows and between columns. So this
+     * is the node's own kind, which is what the drawing and the file agree
+     * on.
+     */
+    await until(window, () => groupOf("A").classList.contains("dd-node-table"));
+    check("choosing a table draws the box as one",
+      groupOf("A").classList.contains("dd-node-table"), true);
+    await saveAndWait(page);
+    const tableFile = await written();
+    const nowSized = await sizeInFile("A");
+    check("...in a box grown to hold a grid rather than left the size of a label",
+      [nowSized[0] > wasSized[0] || nowSized[1] > wasSized[1], nowSized],
+      [true, nowSized]);
+    check("...and the file says it is a table",
+      window.DiagramModel.parseFlowchart(tableFile)
+        .nodes.find((one) => one.id === "A").kind, "table");
+
+    // And back, because a table chosen by mistake is a table for good
+    // otherwise: the kind has to come off when a shape is chosen over it.
+    chooseShape("rect");
+    await until(window, () => !groupOf("A").classList.contains("dd-node-table"));
+    check("choosing a shape over a table stops it being one",
+      groupOf("A").classList.contains("dd-node-table"), false);
+
+    await saveAndWait(page);
+    check("...and the file stops saying it is one",
+      window.DiagramModel.parseFlowchart(await written())
+        .nodes.find((one) => one.id === "A").kind, undefined);
+
+    /* A frameless box that is not words — this one carries a picture — keeps
+     * its shape menu, and choosing a shape on it is what puts the frame back.
+     * That is the line the comment in the handler is about: the frame is not
+     * a shape, so choosing one has to undo "no frame" rather than sit beside
+     * it.
+     */
+    tap("P");
+    check("(a frameless box with a picture in it still has a shape menu)",
+      Boolean(inspector.querySelector(".ve-diagram-shape")), true);
+    check("...showing that it has no frame", shapeNow(), "none");
+
+    chooseShape("rect");
+    await until(window, () => Boolean(groupOf("P").querySelector(".dd-shape")));
+    check("choosing a shape for it puts the frame back",
+      Boolean(groupOf("P").querySelector(".dd-shape")), true);
+
+    await saveAndWait(page);
+    check("...and the file stops saying it has none",
+      /frame=none/.test((await written()).split("\n")
+        .find((line) => line.includes("@ P")) || ""), false);
   }
 
   console.log("=== a line is a style and two ends, chosen one at a time ===");
