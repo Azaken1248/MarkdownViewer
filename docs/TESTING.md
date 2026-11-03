@@ -479,6 +479,43 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### Tab, in a dialog
+
+`app/modal.js` is the smallest security-relevant file in the client and it
+had the largest hole in it: the layer stack and the inertness were checked,
+and the focus trap — the reason the file exists — had never been pressed.
+A quarter of the module was unreached, all of it `trapModalTab`.
+
+The trap is what makes `aria-modal="true"` true. Without it Tab walks out of
+an open dialog into the page behind, which is inert, so the focus lands
+somewhere nothing can be done with and getting back in takes a mouse. Four
+behaviours, each now pressed in `test/dom/chrome.js`: Tab on the last control
+goes back to the first, Shift+Tab on the first goes round to the last,
+Shift+Tab when the focus is not in the dialog at all brings it back in, and a
+Tab anywhere in the middle is left alone — taking every Tab would mean
+reimplementing the order the page already has, and getting it wrong for
+anything the stylesheet reorders.
+
+Two more are about the edges of the stack. A dialog with nothing a browser
+would focus still swallows Tab, because the dialog is the only live thing on
+the page and the key has nowhere to go. And a dialog that is no longer the
+top layer keeps its own listener, since it will be the top again, so a Tab
+arriving there has to be left alone: wrapping the focus round a dialog nobody
+is looking at would move it out of the one they are.
+
+One jsdom gap is filled rather than worked around. The trap asks each
+candidate whether it is visible — `offsetParent`, or failing that a box — and
+jsdom has neither for anything, so the dialog's own controls are told they
+have a box. That is the single thing a browser knows and jsdom does not;
+everything else is the real module, and a mutation that drops the visibility
+test fails the suite.
+
+Eight deliberate breaks, all eight caught. One branch is left uncovered on purpose: the opener
+is only remembered when it is an HTMLElement, and the editor's SVG canvas is
+not one — but jsdom does not move the focus out of an inert subtree, so both
+sides of that condition look identical from outside, and a check that cannot
+fail is worse than a line that is not covered.
+
 ### A failing run that said nothing
 
 Two pushes failed CI with no sign of what failed: the step said "Process

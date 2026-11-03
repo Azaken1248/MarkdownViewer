@@ -212,6 +212,24 @@ jobs:
           set -o pipefail
           npm run coverage 2>&1 | tee /tmp/coverage.log
 
+      # The same as the check job's, for the same reason: this job runs the
+      # whole suite too, and a failure in it was reported as "exit code 1" and
+      # nothing else to anyone who cannot download the log.
+      - name: Say which checks failed
+        if: failure()
+        run: |
+          picked=$(grep -E '^[[:space:]]+FAIL|suite\(s\) FAILED|was cut off' /tmp/coverage.log | head -40 || true)
+
+          if [ -z "$picked" ]; then
+            printf '::error::%s\n' "The suite failed under c8 without naming a check. The last lines of the run:"
+            picked=$(tail -12 /tmp/coverage.log)
+          fi
+
+          printf '%s\n' "$picked" \
+            | while IFS= read -r line; do
+                printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
+              done
+
       - name: Summarise
         if: always()
         run: |

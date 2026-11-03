@@ -121,6 +121,75 @@ module.exports = async (ctx) => {
     check("focus returns to whatever opened it", doc.activeElement === opener, true);
   }
 
+  console.log("=== and Tab goes round the dialog rather than out of it ===");
+  {
+    /* aria-modal="true" is a claim to a screen reader and nothing to a Tab
+     * key: without a trap, Tab walks out of the dialog into the page behind
+     * it, which is inert — so the focus lands somewhere nothing can be done
+     * with, and getting back in takes a mouse.
+     *
+     * jsdom lays nothing out, and the trap asks each candidate whether it is
+     * visible: offsetParent, or failing that a box. Both are empty here for
+     * everything, so the dialog's own controls are told they have a box —
+     * which is the one thing a browser knows and jsdom does not. Everything
+     * else is the real module.
+     */
+    const modal = doc.getElementById("folderModal");
+    window.__t.enterModalLayer(modal);
+
+    const tab = (from, shiftKey = false) => {
+      const event = new window.KeyboardEvent("keydown",
+        { key: "Tab", bubbles: true, cancelable: true, shiftKey });
+      from.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+
+    /* With nothing in the dialog a browser would focus, Tab still may not
+     * leave: the dialog is the only live thing on the page, so the key has
+     * nowhere to go and is swallowed rather than handed to the inert page.
+     */
+    check("in a dialog with nothing to focus, Tab is swallowed", tab(modal), true);
+
+    const seen = [...modal.querySelectorAll("button, input")];
+    for (const node of seen) {
+      Object.defineProperty(node, "getClientRects",
+        { configurable: true, value: () => [{ width: 10, height: 10 }] });
+    }
+
+    const first = seen[0];
+    const last = seen[seen.length - 1];
+    check("(the dialog has more than one control to move between)", seen.length > 1, true);
+
+    // Tab at the end goes back to the beginning rather than out.
+    last.focus();
+    check("Tab on the last control is taken", tab(last), true);
+    check("...and the focus goes back to the first", doc.activeElement, first);
+
+    // And backwards, which is the half that is usually forgotten.
+    first.focus();
+    check("Shift+Tab on the first control is taken", tab(first, true), true);
+    check("...and the focus goes round to the last", doc.activeElement, last);
+
+    /* In the middle it is the browser's key. Taking every Tab would mean
+     * reimplementing the order the page already has, and getting it wrong for
+     * anything the stylesheet reorders.
+     */
+    seen[1].focus();
+    check("...while in the middle the key is left alone", tab(seen[1]), false);
+    check("...and the focus has not been moved for it", doc.activeElement, seen[1]);
+
+    /* Focus that is not in the dialog at all is Shift+Tab's problem too: a
+     * click on the page behind puts it elsewhere, and the first backwards key
+     * has to bring it back in rather than walk further away.
+     */
+    doc.getElementById("createFolderBtn").focus();
+    check("Shift+Tab from outside the dialog is taken", tab(modal, true), true);
+    check("...and brings the focus back into it", doc.activeElement, last);
+
+    window.__t.exitModalLayer(modal);
+    check("(and the dialog is closed again)", doc.getElementById("appShell").inert, false);
+  }
+
   console.log("=== stacked dialogs only free the background once ===");
   {
     const outer = doc.getElementById("editorModal");
@@ -130,12 +199,35 @@ module.exports = async (ctx) => {
     check("the dialog underneath goes inert too", outer.inert, true);
     check("only the top one is live", inner.inert, false);
 
+    /* The one underneath keeps its own Tab listener, because it is still on
+     * the stack and will be the top layer again. So a Tab that arrives there
+     * while something is open over it has to be left alone: wrapping the
+     * focus round a dialog nobody is looking at would move it out of the one
+     * they are.
+     */
+    {
+      const belowTab = new window.KeyboardEvent("keydown",
+        { key: "Tab", bubbles: true, cancelable: true });
+      outer.dispatchEvent(belowTab);
+      check("a Tab in the dialog underneath is not the top one's business",
+        belowTab.defaultPrevented, false);
+    }
+
     window.__t.exitModalLayer(inner);
     check("closing the top one revives the one below", outer.inert, false);
     check("but not the whole app", doc.getElementById("appShell").inert, true);
 
     window.__t.exitModalLayer(outer);
     check("closing the last one frees the app", doc.getElementById("appShell").inert, false);
+
+    /* What opened it is only remembered when it is something the focus can be
+     * given back to — the diagram editor focuses its own canvas, which is an
+     * SVG element rather than an HTMLElement. That arm of the guard is left
+     * unchecked on purpose: jsdom does not move the focus out of an inert
+     * subtree, so the focus is still on the opener either way, and both sides
+     * of the condition look the same from outside. A check that cannot fail
+     * is worse than a line that is not covered.
+     */
   }
 
   console.log("=== the document is not a live region ===");
