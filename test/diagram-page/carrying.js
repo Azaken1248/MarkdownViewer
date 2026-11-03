@@ -8,7 +8,7 @@
 // because that file had grown well past a thousand lines.
 module.exports = async (ctx) => {
   const {
-    check, server, cookie, origin, ROOT, openPage, saveAndWait, csrfFor, readAppSource
+    check, server, cookie, origin, ROOT, openPage, saveAndWait, csrfFor, readAppSource, until
   } = ctx;
 
   {
@@ -986,5 +986,77 @@ module.exports = async (ctx) => {
       /removeItem\(diagramStashKey\(file\)\)/.test(appSource), true);
     check("a .mmd file opens on the page rather than in a text box",
       /\/diagram\/file\/\$\{docUrl\(state\.activeFile\)\}/.test(appSource), true);
+  }
+
+  console.log("=== a group of one, which a file can say and this cannot make ===");
+  {
+    /* Grouping needs two boxes to be a group of, so the editor will not make
+     * one of these. Mermaid will: a subgraph with a single node in it is
+     * ordinary, and somebody else's diagram is full of things this editor
+     * would not have done. A name you cannot change is a name you cannot
+     * correct, so the panel offers it for a group of one as well — which was
+     * the branch nothing reached.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "alone.mmd", overwrite: true, content: [
+        "flowchart TD",
+        "    %% layout v1",
+        "    %% @ A 100,100 80x40",
+        "    %% @ B 400,100 80x40",
+        "    subgraph only [On its own]",
+        "        A[One]",
+        "    end",
+        "    B[Two]"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const page = await openPage({ url: `${origin}/diagram/file/alone.mmd`, cookie, origin });
+    const { window, document } = page;
+    const canvas = document.querySelector(".ve-diagram-canvas");
+    const inspector = document.querySelector(".ve-diagram-inspector");
+
+    const legends = () => [...inspector.querySelectorAll(".ve-diagram-field-name")]
+      .map((one) => one.textContent);
+    const nameField = () => inspector.querySelector(".ve-diagram-group-name");
+    const nameOn = () => canvas.querySelector(".dd-group .dd-group-name")?.textContent;
+    const groupOf = (id) => canvas.querySelector(`.dd-node[data-id="${id}"]`);
+    const tap = (id) => {
+      const spot = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(groupOf(id).getAttribute("transform"));
+      const x = Number(spot[1]) + 10;
+      const y = Number(spot[2]) + 10;
+      groupOf(id).dispatchEvent(new window.MouseEvent("pointerdown",
+        { clientX: x, clientY: y, bubbles: true }));
+      canvas.dispatchEvent(new window.MouseEvent("pointerup",
+        { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    check("a subgraph of one box is drawn as a group", Boolean(nameOn()), true);
+    check("...under the name the file gave it", nameOn(), "On its own");
+
+    tap("A");
+    check("holding the only box in it offers the group's name too",
+      legends().includes("Group name"), true);
+    check("...with the name in it", nameField()?.value, "On its own");
+
+    // The box beside it is not in a group, so there is nothing to offer.
+    tap("B");
+    check("...which a box in no group is not offered",
+      legends().includes("Group name"), false);
+
+    tap("A");
+    nameField().value = "Just this";
+    nameField().dispatchEvent(new window.Event("input", { bubbles: true }));
+    await until(window, () => nameOn() === "Just this");
+    check("typing in it renames the group on the paper", nameOn(), "Just this");
+
+    await saveAndWait(page);
+    const written = (await server.request("GET", "/api/docs/alone.mmd",
+      undefined, { Cookie: cookie })).body.content;
+    check("...and the file says so, with the id it has always had",
+      written.includes("subgraph only [Just this]"), true);
+    check("...still holding the one box it holds",
+      /subgraph only[^]*A\[One\][^]*end/.test(written), true);
+
+    page.window.close();
   }
 };

@@ -502,6 +502,18 @@ It is worth saying plainly that this was a real bug in the suite, found only
 because CI is faster than this machine: a test that passes because it is slow
 is a test that will fail somewhere quicker.
 
+### A group of one, which a file can say and this cannot make
+
+Grouping needs two boxes to be a group of, so the editor will not make one of
+these. Mermaid will, and somebody else's diagram is full of things this editor
+would not have done: a subgraph with a single node in it is ordinary. A name
+you cannot change is a name you cannot correct, so the panel offers it for a
+group of one as well — and that was the branch nothing reached.
+
+The checks open such a file, and the box beside it that is in no group, so
+the offer appears for one and not the other. Typing in the field renames the
+group on the paper and in the file, under the id it has always had.
+
 ### The other half of the shape menu
 
 The shape menu's "No frame" was driven and the rest of it was not, which is
