@@ -275,31 +275,48 @@ async function until(window, done, timeoutMs = 10000) {
   return true;
 }
 
+/* Signing in, which this suite does more than once.
+ *
+ * Writes are rate limited per session — a hundred and twenty a minute — and
+ * this suite is eleven files of a page that saves. Locally they are spread
+ * over four minutes and nothing notices; on CI the whole suite is a hundred
+ * seconds, so they land inside one window and the page starts answering "Too
+ * many saves just now", which arrives as a save that never finishes.
+ *
+ * The limit is not what is being tested here (the `limiter` suite owns it)
+ * and it is not wrong: a person saving by hand cannot reach it. So each file
+ * signs in for itself instead, which is eleven budgets rather than one, and
+ * which is also what eleven people would be.
+ */
+async function signIn(server, password) {
+  const login = await server.request("POST", "/api/auth/login",
+    { username: SEED_USERNAME, password });
+  const jar = new Map();
+
+  const absorb = (headers) => {
+    for (const raw of headers["set-cookie"] || []) {
+      const [pair] = raw.split(";");
+      const at = pair.indexOf("=");
+      jar.set(pair.slice(0, at).trim(), pair.slice(at + 1));
+    }
+  };
+
+  absorb(login.headers);
+  return { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), login, absorb, jar };
+}
+
 (async () => {
   const server = await startTestServer();
   console.log(`  (test server on ${server.origin})`);
 
-  let cookie = "";
   try {
-    const login = await server.request("POST", "/api/auth/login",
-      { username: SEED_USERNAME, password: SEED_PASSWORD });
-    const jar = new Map();
-    const absorb = (headers) => {
-      for (const raw of headers["set-cookie"] || []) {
-        const [pair] = raw.split(";");
-        const at = pair.indexOf("=");
-        jar.set(pair.slice(0, at).trim(), pair.slice(at + 1));
-      }
-      cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
-    };
-
-    absorb(login.headers);
+    const first = await signIn(server, SEED_PASSWORD);
     const changed = await server.request("POST", "/api/auth/password",
       { currentPassword: SEED_PASSWORD, newPassword: TEST_PASSWORD },
-      { Cookie: cookie, "X-CSRF-Token": login.body.csrfToken });
-    absorb(changed.headers);
+      { Cookie: first.cookie, "X-CSRF-Token": first.login.body.csrfToken });
+    first.absorb(changed.headers);
 
-    await run(server, cookie);
+    await run(server, () => signIn(server, TEST_PASSWORD).then((one) => one.cookie));
   } finally {
     await server.stop();
   }
@@ -310,41 +327,39 @@ async function until(window, done, timeoutMs = 10000) {
   process.exit(1);
 });
 
-async function run(server, cookie) {
+async function run(server, freshCookie) {
   const origin = server.origin;
 
-  /* The checks themselves, in ten files beside this one.
+  /* The checks themselves, in ten files beside this one, in this order — the
+   * way somebody working on a diagram would. What they share is the harness
+   * above, handed over rather than reached for.
    *
-   * Each boots its own page or reuses the one the last left open, in this
-   * order, the way somebody working on a diagram would. What they share is the
-   * harness above, handed over rather than reached for.
+   * Each gets a session of its own, for the write budget rather than for
+   * anything it does with it: see signIn below.
    */
-  const ctx = {
-    check, server, cookie, origin, fs, path, ROOT, JSDOM, pageHtml, pagesSource,
+  const PARTS = [
+    require("./diagram-page/documents.js"),
+    require("./diagram-page/furniture.js"),
+    require("./diagram-page/moving.js"),
+    require("./diagram-page/dressing.js"),
+    require("./diagram-page/typography.js"),
+    require("./diagram-page/bar.js"),
+    require("./diagram-page/arrows.js"),
+    require("./diagram-page/carrying.js"),
+    require("./diagram-page/reaching.js"),
+    require("./diagram-page/refusing.js")
+  ];
+
+  const shared = {
+    check, server, origin, fs, path, ROOT, JSDOM, pageHtml, pagesSource,
     DIAGRAM_DOC, SETTLE, settle, boot, openPage, saveAndWait, waitFor, until,
     csrfFor, addressOf, dragBox, readAppSource
   };
 
-  await require("./diagram-page/documents.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/furniture.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/moving.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/dressing.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/typography.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/bar.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/arrows.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/carrying.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/reaching.js")(ctx);
-  closeOpenPages();
-  await require("./diagram-page/refusing.js")(ctx);
-  closeOpenPages();
+  for (const part of PARTS) {
+    await part({ ...shared, cookie: await freshCookie() });
+    closeOpenPages();
+  }
 
   console.log("=== what the pages logged ===");
   /* jsdom's own two complaints are not the page's: it has no CSS parser for

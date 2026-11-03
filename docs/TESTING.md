@@ -479,6 +479,29 @@ letting it through. Without its guard, a block format reaches into a block
 that is not there — and a check that dies on that takes the rest of the file
 with it rather than saying which guard went missing.
 
+### Eleven sessions, not one
+
+The diagram-page suite started failing on CI and nowhere else, as a save that
+never finished. What the page actually said, once the runner stopped
+truncating it, was "Too many saves just now. Wait a minute and try again."
+
+Writes are rate limited per session — a hundred and twenty a minute — and
+this suite is eleven files of a page that saves, with one session between
+them. Locally the suite takes about four minutes, so the saves are spread
+over four windows and nothing notices. On CI it takes a hundred seconds, so
+they land in one.
+
+The limit is not what is being tested here; the `limiter` suite owns it, and
+it is not wrong either — a person saving by hand cannot reach it, and the
+editor's autosave is debounced. So each part file signs in for itself, which
+is eleven budgets instead of one and also what eleven people would be. The
+ten requires became a list and a loop while that went in, because the cookie
+is now per file rather than per run.
+
+It is worth saying plainly that this was a real bug in the suite, found only
+because CI is faster than this machine: a test that passes because it is slow
+is a test that will fail somewhere quicker.
+
 ### Which way the diagram runs
 
 The one control on the bar that changes the file rather than the view, and
