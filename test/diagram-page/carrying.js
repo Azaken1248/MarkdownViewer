@@ -1034,6 +1034,7 @@ module.exports = async (ctx) => {
     check("...under the name the file gave it", nameOn(), "On its own");
 
     tap("A");
+    await until(window, () => legends().includes("Group name"));
     check("holding the only box in it offers the group's name too",
       legends().includes("Group name"), true);
     check("...with the name in it", nameField()?.value, "On its own");
@@ -1044,6 +1045,7 @@ module.exports = async (ctx) => {
       legends().includes("Group name"), false);
 
     tap("A");
+    await until(window, () => Boolean(nameField()));
     nameField().value = "Just this";
     nameField().dispatchEvent(new window.Event("input", { bubbles: true }));
     await until(window, () => nameOn() === "Just this");

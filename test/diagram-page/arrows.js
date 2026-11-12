@@ -529,14 +529,19 @@ module.exports = async (ctx) => {
     };
 
     const row = () => inspector.querySelector(".ve-diagram-arrow");
-    const picks = () => [...row().querySelectorAll("select.ve-diagram-pick")];
-    const labelField = () => row().querySelector("input.ve-diagram-text");
+    const picks = () => [...(row()?.querySelectorAll("select.ve-diagram-pick") || [])];
+    const labelField = () => row()?.querySelector("input.ve-diagram-text");
     const change = (control, value) => {
       control.value = value;
       control.dispatchEvent(new window.Event("change", { bubbles: true }));
     };
 
+    /* Waited for, not assumed: the panel is repainted after the selection
+     * lands, and reading the row before it exists is a null the suite dies
+     * on rather than a check that says what was missing. CI found this one.
+     */
     tap("A");
+    await until(window, () => Boolean(row()));
     check("a box's own arrow is a row in the panel", Boolean(row()), true);
     check("...with both of its ends to choose from, and the boxes to choose",
       picks().map((one) => [one.value, [...one.options].map((o) => o.value).sort().join("")]),
@@ -550,11 +555,14 @@ module.exports = async (ctx) => {
     change(picks()[1], "C");
     await until(window, () => joined().includes("A->C"));
     check("choosing a different box moves that end of the arrow", joined(), ["A->C"]);
+    // The panel is rebuilt around the choice, so the row below is a new one.
+    await until(window, () => picks().length === 2);
 
     // And the near end, which is the one that decides where it starts.
     change(picks()[0], "B");
     await until(window, () => joined().includes("B->C"));
     check("...and the other end is chosen the same way", joined(), ["B->C"]);
+    await until(window, () => Boolean(labelField()));
 
     /* The label is typed rather than chosen, so it lands on every keystroke
      * rather than on a change event — anything else loses the last word typed
@@ -573,6 +581,7 @@ module.exports = async (ctx) => {
     // Taken away from the panel, which is the only place an arrow can be
     // removed without going near it.
     tap("B");
+    await until(window, () => Boolean(row()));
     check("(the arrow is still listed, now under the box it starts from)",
       Boolean(row()), true);
     row().querySelector("button.ve-diagram-drop")

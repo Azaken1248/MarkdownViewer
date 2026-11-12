@@ -483,7 +483,10 @@ module.exports = async (ctx) => {
      * starts with, which has one.
      */
     tap("A");
-    const shapeNow = () => inspector.querySelector(".ve-diagram-shape").value;
+    // The panel repaints after the selection, so the menu is waited for
+    // rather than read: reading it early is a null, not a failed check.
+    await until(window, () => Boolean(inspector.querySelector(".ve-diagram-shape")));
+    const shapeNow = () => inspector.querySelector(".ve-diagram-shape")?.value;
     const choices = () => [...inspector.querySelector(".ve-diagram-shape").options]
       .map((one) => one.value);
 
@@ -493,6 +496,11 @@ module.exports = async (ctx) => {
 
     const chooseShape = (value) => {
       const menu = inspector.querySelector(".ve-diagram-shape");
+      if (!menu) {
+        check("(the shape menu is there to choose from)", false, true);
+        return;
+      }
+
       menu.value = value;
       menu.dispatchEvent(new window.Event("change", { bubbles: true }));
     };
@@ -564,6 +572,7 @@ module.exports = async (ctx) => {
      * it.
      */
     tap("P");
+    await until(window, () => Boolean(inspector.querySelector(".ve-diagram-shape")));
     check("(a frameless box with a picture in it still has a shape menu)",
       Boolean(inspector.querySelector(".ve-diagram-shape")), true);
     check("...showing that it has no frame", shapeNow(), "none");
