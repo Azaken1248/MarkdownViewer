@@ -8,7 +8,7 @@
 // only because that file had grown past a thousand lines.
 module.exports = async (ctx) => {
   const {
-    check, waitUntil, get, server, window, doc, execCommands, clientSource
+    check, waitUntil, get, server, window, doc, execCommands, execCommandCalls, clientSource
   } = ctx;
 
   console.log("=== the source editor answers to the same keys ===");
@@ -456,6 +456,151 @@ module.exports = async (ctx) => {
     const withBoth = JSON.parse((await get("/api/docs/pictures.md")).body).content;
     check("both pictures are in the file now",
       (withBoth.match(/!\[[^\]]*\]\(\/api\/assets\//g) || []).length, 2);
+
+    console.log("  -- and what is pasted that is not a picture at all --");
+    {
+      /* Rich text. Pasting from a web page or a word processor brings the
+       * source's markup with it — fonts, colours, spans, classes — and none
+       * of it is the formatting this document uses. So the paste is taken
+       * over and the plain text is inserted instead.
+       *
+       * jsdom has no editing commands at all, so the one the app asks the
+       * browser for is provided here and recorded. What is checked is what
+       * the app asked for: insertText with the plain text and nothing else.
+       */
+      /* The page editor again: the block above saved and closed it, and these
+       * are about what a paste does while it is open. Waited for by the block
+       * rather than by the flag, which is true before anything is painted.
+       */
+      await window.eval('window.__t.openDocument("pictures.md", false, { forceReload: true })');
+      await waitUntil(() => window.eval("window.__t.state.activeFile") === "pictures.md", 6000);
+      await window.eval("window.__t.startPageEdit()");
+      const editable = () => [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')];
+      await waitUntil(() => editable().length > 0, 6000);
+      check("(the editor is open with something to type into)", editable().length > 0, true);
+
+      const richText = (target, text) => {
+        const event = new window.Event("paste", { bubbles: true, cancelable: true });
+        event.clipboardData = { files: [], items: [], getData: () => text };
+        target.dispatchEvent(event);
+        return event;
+      };
+
+      const into = editable().find((one) => one.querySelector("p")) || editable()[0];
+      const styled = richText(into, "plain words");
+      check("a pasted run of text is taken over from the browser",
+        styled.defaultPrevented, true);
+      // The suite's own stand-in for the one editing command jsdom has not
+      // got records what it was asked; what matters is that the app asked
+      // for the text and nothing about the markup that came with it.
+      check("...and put in as text, through the browser's own insert",
+        execCommandCalls.at(-1), { name: "insertText", value: "plain words" });
+
+      /* A clipboard with no text on it and no picture either — a file manager
+       * puts all sorts of things there. Nothing to insert is nothing to do,
+       * and the browser can have it back.
+       */
+      const nothing = new window.Event("paste", { bubbles: true, cancelable: true });
+      nothing.clipboardData = { files: [], items: [], getData: () => undefined };
+      into.dispatchEvent(nothing);
+      check("a clipboard with nothing on it is left to the browser",
+        nothing.defaultPrevented, false);
+
+      // And a paste that lands outside the text: the page is a document again
+      // everywhere else, and taking over a paste there would take over a
+      // paste into the search box.
+      const outside = new window.Event("paste", { bubbles: true, cancelable: true });
+      outside.clipboardData = { files: [], items: [], getData: () => "elsewhere" };
+      doc.getElementById("docContent").dispatchEvent(outside);
+      check("a paste outside the text is not this page's business",
+        outside.defaultPrevented, false);
+    }
+
+    console.log("  -- a picture dropped lands where it was dropped --");
+    {
+      /* Dropping is the same act as pasting, with one difference: it says
+       * where. The caret is moved to the point the file was let go of, so a
+       * picture dropped at the end of a paragraph does not arrive wherever
+       * the cursor happened to be left.
+       *
+       * jsdom has no layout and so no point-to-caret mapping. The test
+       * provides one — the only thing a browser knows here that jsdom does
+       * not — and the check is that the app moved the selection to what it
+       * was given.
+       */
+      const blocks = [...doc.querySelectorAll('#docContent .ve-block[contenteditable="true"]')];
+      const target2 = blocks.find((one) => one.querySelector("p")) || blocks[0];
+      const landing = target2.querySelector("p") || target2;
+      target2.dataset.dropHere = "true";
+      /* Installed for this block only. It is the browser's answer to "what
+       * is at this point", and jsdom has no points — but a stand-in left on
+       * the document outlives the element it was told to aim at, and then
+       * throws inside a handler somewhere else entirely. Which is how the
+       * console check at the end of this suite caught it.
+       */
+      window.eval(`document.caretRangeFromPoint = (x, y) => {
+        window.__caretAsked = [x, y];
+        const where = document.querySelector('[data-drop-here="true"]');
+        if (!where) {
+          return null;
+        }
+
+        const range = document.createRange();
+        range.selectNodeContents(where.querySelector("p") || where);
+        range.collapse(true);
+        return range;
+      }`);
+
+      // Somewhere else entirely, so the move is visible.
+      const away = doc.createRange();
+      away.selectNodeContents(blocks.find((one) => one !== target2) || blocks[0]);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(away);
+
+      const dropped = (files, at = { clientX: 220, clientY: 410 }) => {
+        const event = new window.Event("drop", { bubbles: true, cancelable: true });
+        event.dataTransfer = { files, items: [] };
+        Object.assign(event, at);
+        doc.getElementById("docContent").dispatchEvent(event);
+        return event;
+      };
+
+      const landed = dropped([pngFile("dropped.png", [7, 7, 7, 7])]);
+      check("a picture dropped on the page is taken over from the browser",
+        landed.defaultPrevented, true);
+      check("...asking where it was let go of", window.eval("JSON.stringify(window.__caretAsked)"),
+        "[220,410]");
+      check("...and putting the caret there rather than where it was",
+        window.getSelection().getRangeAt(0).startContainer === landing
+        || landing.contains(window.getSelection().getRangeAt(0).startContainer), true);
+
+      await waitUntil(() => [...target2.querySelectorAll("img")]
+        .some((one) => one.getAttribute("src")?.startsWith("blob:")), 6000);
+      check("...and the picture is on the page",
+        [...target2.querySelectorAll("img")].some(
+          (one) => one.getAttribute("src")?.startsWith("blob:")), true);
+
+      // A drop of something that is not a picture is the browser's business:
+      // it knows what to do with a .txt file and this page does not.
+      const text = dropped([new window.File(["x"], "notes.txt", { type: "text/plain" })]);
+      check("dropping something that is not a picture is left to the browser",
+        text.defaultPrevented, false);
+
+      /* And put away without keeping any of it. An editor left open with
+       * unsaved work in it means the next thing that opens a document gets
+       * the "discard your edits?" question instead of a document — which is
+       * a suite waiting for an answer nobody is there to give.
+       */
+      await window.eval('window.__t.cancelPageEdit({ confirm: false })');
+      await waitUntil(() => window.eval("window.__t.pageEditActive()") === false, 6000);
+      check("(the editor is put away again, keeping none of it)",
+        window.eval("window.__t.pageEditActive()"), false);
+
+      // And the stand-in with it, so nothing after this is answering a
+      // question about a point with an element that has been redrawn since.
+      window.eval("delete document.caretRangeFromPoint");
+    }
 
     console.log("  -- what is not a picture --");
     await window.eval("window.__t.openEditorForCurrentDoc()");

@@ -514,6 +514,44 @@ The checks open such a file, and the box beside it that is in no group, so
 the offer appears for one and not the other. Typing in the field renames the
 group on the paper and in the file, under the id it has always had.
 
+### A paste that is words, and a drop that says where
+
+The pasted-pictures story in `editing.js` stopped at pictures. What a paste
+usually is — a run of text from somewhere else — went through `app.js`
+untested, and so did the whole of dropping.
+
+Pasting rich text into a contenteditable brings the source site's markup with
+it: fonts, colours, spans, classes, none of it the formatting this document
+uses. So the paste is taken over and the plain text is inserted instead,
+through the browser's own `insertText` rather than by writing into the block
+— which keeps it one undo step rather than something the undo stack has
+never heard of. jsdom has no editing commands at all, and the suite already
+keeps a stand-in for the one the app uses, so the check reads what the app
+asked for: `insertText` with the plain text and nothing about the markup.
+
+Two refusals beside it. A clipboard with no text and no picture on it — a file
+manager puts all sorts of things there — is nothing to insert and nothing to
+do, so the browser can have it back. And a paste that lands outside the text
+is not this page's business at all: taking over every paste on the page would
+take over a paste into the search box.
+
+Dropping is the same act as pasting with one difference: it says where. The
+caret is moved to the point the file was let go of, so a picture dropped at
+the end of a paragraph does not arrive wherever the cursor was left half an
+hour ago. That needs the browser's point-to-caret mapping, which jsdom has
+not got, so the test provides one and checks the app asked it about the right
+point and moved the selection to what it was given.
+
+The stand-in is installed for that block and taken away with it. Left on the
+document it outlives the element it was told to aim at and throws inside some
+other handler — which is exactly what happened, and what the suite's own
+console check caught on the next run.
+
+Six deliberate breaks, all six caught. One line of that handler is left: the
+message for a picture picked while the editor has no block to put it in. The
+editor always has one once it has painted, so that is the paint window again
+rather than anything a person can arrange.
+
 ### The editor mounted somewhere that is not this page
 
 The file's own first paragraph says what it is for: "it is handed a string and
