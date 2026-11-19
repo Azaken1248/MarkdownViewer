@@ -42,6 +42,17 @@
     scroller: document.querySelector(".share-page")
   });
 
+  /* Ticking the boxes in it.
+   *
+   * Filed under the share token like the ink, and for the same reason: a
+   * checklist somebody is working through is their business, and the
+   * document belongs to whoever sent the link.
+   */
+  const ticks = ShareTicks.create({
+    content: elements.content,
+    token: shareTokenFromLocation()
+  });
+
   /* Writing on it.
    *
    * Filed under the share token, so two shared documents open in the same
@@ -181,6 +192,13 @@
 
     elements.meta.textContent = parts.join("  ·  ");
     elements.footer.hidden = false;
+
+    /* The task lists, which marked renders as pictures of checkboxes.
+     *
+     * Before the diagrams, because it is the words the reader is already
+     * looking at — and it does not wait on a 3.5MB engine arriving.
+     */
+    ticks.bind();
 
     // Diagrams, code and math, exactly as the app renders them.
     await MarkdownCore.renderMermaidBlocks(elements.content);

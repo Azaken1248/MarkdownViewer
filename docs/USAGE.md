@@ -757,6 +757,26 @@ there is now a PNG: see [Link preview images](#link-preview-images).
 Revoking a link takes the preview with it: a dead token renders a generic
 "not found" page that names neither the document nor its contents.
 
+### What a reader can do with it
+
+A shared document is still a document, so the things you can do *to* a page
+rather than to a file work: the outline, the code copy buttons, diagram pan
+and zoom, `<details>` sections, and ticking the boxes in a task list. A
+checklist that cannot be ticked is a picture of a checklist, and a checklist
+is one of the things people share.
+
+None of it reaches the document. Ticks and pen marks are kept in the reader's
+own browser, filed under the share token, and are never sent anywhere — the
+person who shared it cannot see them, and two shared documents open in one
+browser keep their own. That is a deliberate limit rather than a missing
+feature: the alternative is writing to a document you do not own.
+
+Ticks are remembered against the list they were made on — the words beside
+each box and what the document itself says about them. If the owner edits the
+list while somebody is reading it, the remembered ticks are dropped rather
+than put against the wrong jobs, and a tick the owner has taken back is not
+put back by somebody else's copy.
+
 ---
 
 ---

@@ -551,6 +551,42 @@ answer `undefined` rather than throwing if it is not there yet. That is the
 third time this stretch the same mistake has appeared — wait for the thing,
 not for the flag, and not for nothing at all.
 
+### A checklist somebody was sent
+
+marked renders task lists disabled, which is the right default for a renderer
+and the wrong one for a checklist. The app makes its own boxes live and writes
+each click straight to the file; the share page did not, so a document shared
+as a list of jobs arrived as a picture of one.
+
+It cannot write to the file — the document belongs to whoever sent the link —
+so the boxes are live here and the ticks stay in the reader's browser, under
+the share token. That is the rule the ink already follows, written down in
+`annotate/store.js`: marking up somebody else's document is the reader's own
+business, and the alternative is writing to a document you do not own.
+
+The checks drive it as a stranger, in the share page's own window with no
+cookie on it. A tick changes the box, raises no request, and leaves the
+document on the server exactly as it was — read back afterwards as the account
+that owns it, which is the check that matters. What is stored is read back
+into a second window, because a tick nobody keeps is a tick lost on the first
+scroll.
+
+Two of them are about the document changing underneath. Ticks are remembered
+as *which boxes are on*, so they are filed against a fingerprint of the list
+they were made on: the words beside each box, and what the document itself
+says about each one. A list that has changed is a list those ticks are not
+about, and they are dropped rather than put against the wrong jobs.
+
+Including what the document says about them is not an ornament. Without it,
+the first run of these checks showed the stored list as `[0, 2]` — the
+reader's tick and the document's own — which is correct, and then the owner
+unticking that line would have had the reader's copy quietly put it back. The
+document would be reported as saying something it does not. The fingerprint
+is taken before anything is restored, because measuring it afterwards would
+measure the reader's own ticks and match anything.
+
+Six deliberate breaks, all six caught.
+
 ### A paste that is words, and a drop that says where
 
 The pasted-pictures story in `editing.js` stopped at pictures. What a paste

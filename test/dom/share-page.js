@@ -805,6 +805,119 @@ module.exports = async (ctx) => {
       doc.getElementById("shareErrorMessage").textContent, "The address is missing its share token.");
     check("...without a request behind it", sent, []);
   }
+
+  console.log("=== a checklist in a shared document can be worked through ===");
+  {
+    /* marked renders task lists disabled, which is right for a renderer and
+     * wrong for a checklist somebody was sent. The app makes its own boxes
+     * live and writes each click to the file; a share link cannot do that,
+     * because the document belongs to whoever sent it — so the boxes are
+     * live here and the ticks stay in this browser.
+     */
+    const jobs = [
+      "# Before the release",
+      "",
+      "- [ ] run the tests",
+      "- [ ] write the notes",
+      "- [x] tell everyone",
+      ""
+    ].join("\n");
+
+    const listed = await asAdmin("POST", "/api/docs", { fileName: "checklist.md", content: jobs });
+    check("(a document with a checklist in it)", listed.status, 201);
+    const listedFile = listed.body.file;
+
+    const listShare = await asAdmin("POST", `/api/docs/${listedFile}/share`);
+    check("(and a link to it)", listShare.status, 201);
+    const listToken = listShare.body.url.split("/").pop();
+
+    const boxesIn = (doc) => [...doc.querySelectorAll('#shareContent li input[type="checkbox"]')];
+    const openShared = async (options) => {
+      const made = shareWindow(`${ORIGIN}/s/${listToken}`, options);
+      await waitUntil(() => made.window.document
+        .getElementById("shareContent").classList.contains("visible"));
+      return made;
+    };
+
+    const first = await openShared();
+    const boxes = boxesIn(first.window.document);
+
+    check("the checklist arrives with its boxes", boxes.length, 3);
+    check("...and none of them is a picture of a checkbox",
+      boxes.map((box) => box.disabled), [false, false, false]);
+    check("...showing what the document says, ticked and unticked",
+      boxes.map((box) => box.checked), [false, false, true]);
+
+    const sentBefore = first.sent.length;
+    boxes[0].checked = true;
+    boxes[0].dispatchEvent(new first.window.Event("change", { bubbles: true }));
+
+    check("a reader can tick one", boxesIn(first.window.document)[0].checked, true);
+    check("...without a request behind it", first.sent.length, sentBefore);
+
+    /* The document is somebody else's, and this is the check that says so: it
+     * is read back from the server as the account that owns it.
+     */
+    const onDisk = await asAdmin("GET", `/api/docs/${listedFile}`);
+    check("...and the document it came from is untouched",
+      onDisk.body.content.includes("- [ ] run the tests"), true);
+
+    /* What a second visit will read, which is the only place a tick is kept.
+     * It is every box that is on, the document's own included: what is
+     * remembered is the state of the list, not the reader's edit to it.
+     */
+    const kept = first.window.localStorage.getItem(`mdviewer.ticks.${listToken}`);
+    // Parsed only if it is there: a record that was never written is a check
+    // that says so, rather than a TypeError that stops the file.
+    check("the tick is kept in this browser, under this link",
+      kept === null ? null : JSON.parse(kept).on, [0, 2]);
+    check("...and nowhere else",
+      first.window.localStorage.getItem(`mdviewer.ticks.${token}`), null);
+
+    /* A second visit. jsdom gives each window its own storage, so what the
+     * first one wrote is handed to the second — which is what a browser does
+     * for two visits to the same link, and lets the check say the page reads
+     * what it writes.
+     */
+    const again = await openShared({
+      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, kept)
+    });
+    check("coming back finds the tick where it was left",
+      boxesIn(again.window.document).map((box) => box.checked), [true, false, true]);
+
+    /* And a document that has changed since. The owner can edit while
+     * somebody is reading, and a tick is only a number — the first box. If
+     * the list is not the list those ticks were made against, they are
+     * dropped rather than put against the wrong jobs.
+     */
+    const moved = JSON.stringify({ v: 1, of: "3:deadbeef", on: [0, 1] });
+    const stale = await openShared({
+      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, moved)
+    });
+    check("ticks made against a different list are not put against this one",
+      boxesIn(stale.window.document).map((box) => box.checked), [false, false, true]);
+    check("...and are forgotten rather than left to be wrong again",
+      stale.window.localStorage.getItem(`mdviewer.ticks.${listToken}`), null);
+
+    /* The owner editing the document while somebody is reading it, which is
+     * the case the stored list has to notice. Unticking a line changes no
+     * words, so remembering by the words alone would put the owner's tick
+     * back and report the document as saying something it does not.
+     */
+    const edited = jobs.replace("- [x] tell everyone", "- [ ] tell everyone");
+    const written = await asAdmin("PUT", `/api/docs/${listedFile}`, { content: edited });
+    check("(the owner unticks a line while it is being read)", written.status, 200);
+
+    const after = await openShared({
+      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, kept)
+    });
+    check("a tick the owner has taken back is not put back by the reader's copy",
+      boxesIn(after.window.document).map((box) => box.checked), [false, false, false]);
+
+    check("none of it logged an error",
+      [...first.problems, ...again.problems, ...stale.problems, ...after.problems]
+        .filter((one) => !/Could not parse CSS/.test(one)), []);
+  }
 };
 
 // A GET with no cookies at all, which is what a visitor following a link is.
@@ -835,6 +948,19 @@ function renderBlocks(text) {
     const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       return `<h${heading[1].length}>${escape(heading[2])}</h${heading[1].length}>`;
+    }
+
+    /* A task list, as marked renders one: an unordered list of disabled
+     * checkboxes. Disabled is the part that matters here — it is what the
+     * share page has to undo before a reader can tick anything.
+     */
+    if (/^- \[[ xX]\] /.test(trimmed)) {
+      const items = trimmed.split("\n").map((line) => {
+        const done = /^- \[[xX]\] /.test(line);
+        const words = line.replace(/^- \[[ xX]\] /, "");
+        return `<li><input${done ? ' checked=""' : ""} disabled="" type="checkbox"> ${escape(words)}</li>`;
+      });
+      return `<ul>\n${items.join("\n")}\n</ul>`;
     }
 
     const image = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);

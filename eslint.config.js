@@ -135,6 +135,8 @@ const BROWSER_GLOBALS = {
   DocKinds: "readonly",
   DomHtml: "readonly",
   DocIndex: "readonly",
+  // Ticking a box on a shared document, kept in the reader's own browser.
+  ShareTicks: "readonly",
   // Annotating a shared document: the maths, where it is kept, and the ink.
   AnnotateGeometry: "readonly",
   AnnotateStore: "readonly",
