@@ -298,4 +298,77 @@ module.exports = async (ctx) => {
       saved.includes("shadow=soft"), true);
   }
 
+  console.log("=== every way the page cannot open a diagram, and what it says ===");
+  {
+    /* Four ways in, four ways to be wrong, and the page has a sentence for
+     * each of them. None of them had been opened: the suite always arrived
+     * with a diagram that was there. What a person sees when it is not is the
+     * only part of this page they cannot work around, so it says what
+     * happened and takes the Save button away rather than offering to save an
+     * empty canvas over their document.
+     */
+    const refusal = (page) => {
+      const box = page.document.querySelector(".diagram-page-empty");
+      return box
+        ? [box.querySelector("h2")?.textContent, Boolean(box.querySelector("p")?.textContent)]
+        : [null, false];
+    };
+    const saveable = (page) => !page.document.getElementById("diagramSave").disabled;
+
+    // An address that names no diagram at all.
+    const nothing = await openPage({ url: `${origin}/diagram/`, cookie, origin });
+    check("an address that names no diagram says so",
+      refusal(nothing), ["Nothing to edit", true]);
+    check("...and offers nothing to save", saveable(nothing), false);
+    nothing.window.close();
+
+    // A document that is not there.
+    const missing = await openPage({ url: `${origin}/diagram/file/never-written.mmd`, cookie, origin });
+    check("a document that is not there says that instead",
+      refusal(missing), ["That document is not here", true]);
+    check("...and says why, in the words the server used",
+      missing.document.querySelector(".diagram-page-empty p").textContent.length > 0, true);
+    missing.window.close();
+
+    /* A diagram this editor cannot draw. Mermaid has many kinds and this page
+     * draws one of them; the rest are still valid diagrams, so the sentence
+     * sends the person to the source rather than telling them their file is
+     * broken.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "sequence.mmd", overwrite: true, content: [
+        "sequenceDiagram",
+        "    Alice->>Bob: Hello",
+        "    Bob-->>Alice: Hi"
+      ].join("\n") + "\n" },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const other = await openPage({ url: `${origin}/diagram/file/sequence.mmd`, cookie, origin });
+    check("a diagram of a kind this page cannot draw says so",
+      refusal(other), ["This diagram cannot be opened here yet", true]);
+    check("...and points at the source rather than calling the file broken",
+      other.document.querySelector(".diagram-page-empty p").textContent.includes("source"), true);
+    check("...and offers nothing to save over it", saveable(other), false);
+    other.window.close();
+
+    /* And a fence that has gone. The address of a diagram inside a document
+     * is the block it was in; the document can be edited from somewhere else
+     * while this page is open, and then the block is not there any more.
+     */
+    await server.request("POST", "/api/docs",
+      { fileName: "deploy.md", content: DIAGRAM_DOC, overwrite: true },
+      { Cookie: cookie, "X-CSRF-Token": await csrfFor(server, cookie) });
+
+    const gone = await openPage({
+      url: `${origin}/diagram/doc/deploy.md#never-a-block-here`,
+      cookie,
+      origin
+    });
+    check("a fence that is not in the document any more says so",
+      refusal(gone), ["That diagram is not in this document", true]);
+    check("...telling them it changed rather than that it never existed",
+      gone.document.querySelector(".diagram-page-empty p").textContent.includes("changed"), true);
+    gone.window.close();
+  }
+
 };

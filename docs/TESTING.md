@@ -514,6 +514,43 @@ The checks open such a file, and the box beside it that is in no group, so
 the offer appears for one and not the other. Typing in the field renames the
 group on the paper and in the file, under the id it has always had.
 
+### Every way the page cannot open a diagram
+
+The diagram page has four ways in and four ways to be wrong, and a sentence
+for each. The suite had always arrived with a diagram that was there, so none
+of them had been seen — fifty-three lines of `diagram-page.js`, including the
+whole of the thing that draws a refusal.
+
+An address that names no diagram. A document that is not there. A diagram of a
+kind this page cannot draw — Mermaid has many and this one draws flowcharts,
+so the sentence sends the person to the source rather than telling them their
+file is broken. And a fence that has gone: the address of a diagram inside a
+document is the block it was in, the document can be edited from somewhere
+else while this page is open, and then the block is not there any more — which
+the page says changed rather than never existed.
+
+Each one has to say what happened *and* take the Save button away. A refusal
+that leaves Save enabled is a page offering to write an empty canvas over
+somebody's document, which is the one outcome worse than not opening.
+
+Six deliberate breaks, all six caught.
+
+The four reads that were not waited for
+---------------------------------------
+
+Adding these turned up something else: three of the panel checks written
+earlier in this stretch read the panel immediately after tapping a box. The
+panel is repainted *after* the selection lands, so on a machine that paints a
+moment later there is no row yet, and `row().querySelector` is a null the
+suite dies on rather than a check that says what was missing. CI caught it as
+`TypeError: Cannot read properties of null (reading 'querySelector')`, which
+is exactly what the annotation work was for.
+
+All of them now wait for the thing they are about to read, and the helpers
+answer `undefined` rather than throwing if it is not there yet. That is the
+third time this stretch the same mistake has appeared — wait for the thing,
+not for the flag, and not for nothing at all.
+
 ### A paste that is words, and a drop that says where
 
 The pasted-pictures story in `editing.js` stopped at pictures. What a paste
