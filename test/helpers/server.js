@@ -103,7 +103,21 @@ function request(origin, method, pathname, body, headers = {}) {
   });
 }
 
-async function waitForHealth(origin, timeoutMs = 15000) {
+/* Long enough to mean "this server is never coming up".
+ *
+ * Fifteen seconds was not. Every suite starts a server of its own, the runner
+ * starts four at once, and a boot that takes 200ms on an idle machine takes
+ * seconds when three other node processes are reading the same disk and
+ * building the same index — so the failure was always the same sentence, in
+ * whichever suite happened to be fourth, and never anything to do with the
+ * server. The ceiling is for a server that will not start, which is a
+ * different thing from one that is slow, and this is the same reasoning the
+ * diagram page's own waits were loosened under.
+ *
+ * It costs nothing when the server is healthy: the loop returns on the first
+ * answer.
+ */
+async function waitForHealth(origin, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
