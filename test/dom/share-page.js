@@ -810,9 +810,14 @@ module.exports = async (ctx) => {
   {
     /* marked renders task lists disabled, which is right for a renderer and
      * wrong for a checklist somebody was sent. The app makes its own boxes
-     * live and writes each click to the file; a share link cannot do that,
-     * because the document belongs to whoever sent it — so the boxes are
-     * live here and the ticks stay in this browser.
+     * live and writes each click to the file; a share link cannot, because
+     * the document belongs to whoever sent it.
+     *
+     * So a reader's ticks are a layer of their own, over the document rather
+     * than in it: kept in this browser under the share token, never sent
+     * anywhere, and nothing to do with the document's own ticks. The owner
+     * can tick, untick, add and remove lines; what the reader did to the
+     * lines they touched is still what the reader did.
      */
     const jobs = [
       "# Before the release",
@@ -831,12 +836,17 @@ module.exports = async (ctx) => {
     check("(and a link to it)", listShare.status, 201);
     const listToken = listShare.body.url.split("/").pop();
 
+    const keyFor = (token) => `mdviewer.ticks.${token}`;
     const boxesIn = (doc) => [...doc.querySelectorAll('#shareContent li input[type="checkbox"]')];
     const openShared = async (options) => {
       const made = shareWindow(`${ORIGIN}/s/${listToken}`, options);
       await waitUntil(() => made.window.document
         .getElementById("shareContent").classList.contains("visible"));
       return made;
+    };
+    const tick = (window, box, wanted) => {
+      box.checked = wanted;
+      box.dispatchEvent(new window.Event("change", { bubbles: true }));
     };
 
     const first = await openShared();
@@ -849,8 +859,7 @@ module.exports = async (ctx) => {
       boxes.map((box) => box.checked), [false, false, true]);
 
     const sentBefore = first.sent.length;
-    boxes[0].checked = true;
-    boxes[0].dispatchEvent(new first.window.Event("change", { bubbles: true }));
+    tick(first.window, boxes[0], true);
 
     check("a reader can tick one", boxesIn(first.window.document)[0].checked, true);
     check("...without a request behind it", first.sent.length, sentBefore);
@@ -862,60 +871,151 @@ module.exports = async (ctx) => {
     check("...and the document it came from is untouched",
       onDisk.body.content.includes("- [ ] run the tests"), true);
 
-    /* What a second visit will read, which is the only place a tick is kept.
-     * It is every box that is on, the document's own included: what is
-     * remembered is the state of the list, not the reader's edit to it.
+    /* What is kept is the reader's own choice and nothing else. Not which
+     * boxes are on — the document's own tick on "tell everyone" is not the
+     * reader's and is not this page's to remember — and keyed by the words
+     * beside the box, so a line that moves takes the tick with it.
      */
-    const kept = first.window.localStorage.getItem(`mdviewer.ticks.${listToken}`);
-    // Parsed only if it is there: a record that was never written is a check
-    // that says so, rather than a TypeError that stops the file.
-    check("the tick is kept in this browser, under this link",
-      kept === null ? null : JSON.parse(kept).on, [0, 2]);
+    const kept = first.window.localStorage.getItem(keyFor(listToken));
+    check("what is kept is the reader's own choice, by the words beside the box",
+      kept === null ? null : JSON.parse(kept).mine, { "0:run the tests": true });
     check("...and nowhere else",
-      first.window.localStorage.getItem(`mdviewer.ticks.${token}`), null);
+      first.window.localStorage.getItem(keyFor(token)), null);
+
+    // Putting a box back to what the document says is not a choice to keep.
+    tick(first.window, boxesIn(first.window.document)[0], false);
+    check("a box put back to what the document says is forgotten",
+      first.window.localStorage.getItem(keyFor(listToken)), null);
+
+    tick(first.window, boxesIn(first.window.document)[0], true);
+    tick(first.window, boxesIn(first.window.document)[2], false);
+    const both = JSON.parse(first.window.localStorage.getItem(keyFor(listToken))).mine;
+    check("unticking one the document had ticked is a choice too",
+      both, { "0:run the tests": true, "0:tell everyone": false });
 
     /* A second visit. jsdom gives each window its own storage, so what the
      * first one wrote is handed to the second — which is what a browser does
      * for two visits to the same link, and lets the check say the page reads
      * what it writes.
      */
+    const carried = first.window.localStorage.getItem(keyFor(listToken));
     const again = await openShared({
-      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, kept)
+      tweak: (window) => window.localStorage.setItem(keyFor(listToken), carried)
     });
-    check("coming back finds the tick where it was left",
-      boxesIn(again.window.document).map((box) => box.checked), [true, false, true]);
+    check("coming back finds the ticks where they were left",
+      boxesIn(again.window.document).map((box) => box.checked), [true, false, false]);
 
-    /* And a document that has changed since. The owner can edit while
-     * somebody is reading, and a tick is only a number — the first box. If
-     * the list is not the list those ticks were made against, they are
-     * dropped rather than put against the wrong jobs.
+    /* And now the owner edits the document while it is being read. A line the
+     * reader never touched follows the document; the lines they did are
+     * still theirs, which is the whole point of the layer being a layer.
      */
-    const moved = JSON.stringify({ v: 1, of: "3:deadbeef", on: [0, 1] });
-    const stale = await openShared({
-      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, moved)
-    });
-    check("ticks made against a different list are not put against this one",
-      boxesIn(stale.window.document).map((box) => box.checked), [false, false, true]);
-    check("...and are forgotten rather than left to be wrong again",
-      stale.window.localStorage.getItem(`mdviewer.ticks.${listToken}`), null);
-
-    /* The owner editing the document while somebody is reading it, which is
-     * the case the stored list has to notice. Unticking a line changes no
-     * words, so remembering by the words alone would put the owner's tick
-     * back and report the document as saying something it does not.
-     */
-    const edited = jobs.replace("- [x] tell everyone", "- [ ] tell everyone");
+    const edited = [
+      "# Before the release",
+      "",
+      "- [ ] run the tests",
+      "- [x] write the notes",
+      "- [x] tell everyone",
+      ""
+    ].join("\n");
     const written = await asAdmin("PUT", `/api/docs/${listedFile}`, { content: edited });
-    check("(the owner unticks a line while it is being read)", written.status, 200);
+    check("(the owner ticks a line while it is being read)", written.status, 200);
 
     const after = await openShared({
-      tweak: (window) => window.localStorage.setItem(`mdviewer.ticks.${listToken}`, kept)
+      tweak: (window) => window.localStorage.setItem(keyFor(listToken), carried)
     });
-    check("a tick the owner has taken back is not put back by the reader's copy",
-      boxesIn(after.window.document).map((box) => box.checked), [false, false, false]);
+    check("a line the reader never touched follows the document",
+      boxesIn(after.window.document)[1].checked, true);
+    check("...and the lines they did are still as they left them",
+      [boxesIn(after.window.document)[0].checked, boxesIn(after.window.document)[2].checked],
+      [true, false]);
+
+    /* A line that has gone takes the reader's choice about it with it, rather
+     * than sitting in storage for ever against words nobody can see.
+     */
+    const shorter = ["# Before the release", "", "- [ ] run the tests", ""].join("\n");
+    check("(the owner deletes two of the lines)",
+      (await asAdmin("PUT", `/api/docs/${listedFile}`, { content: shorter })).status, 200);
+
+    const trimmed = await openShared({
+      tweak: (window) => window.localStorage.setItem(keyFor(listToken), carried)
+    });
+    tick(trimmed.window, boxesIn(trimmed.window.document)[0], true);
+    check("a choice about a line that has gone goes with it",
+      JSON.parse(trimmed.window.localStorage.getItem(keyFor(listToken))).mine,
+      { "0:run the tests": true });
 
     check("none of it logged an error",
-      [...first.problems, ...again.problems, ...stale.problems, ...after.problems]
+      [...first.problems, ...again.problems, ...after.problems, ...trimmed.problems]
+        .filter((one) => !/Could not parse CSS/.test(one)), []);
+  }
+
+  console.log("=== and only what the link was published to allow ===");
+  {
+    /* Which of these a reader may use is the owner's call, made in the share
+     * dialog and carried on the share itself. The page asks the server and
+     * does as it is told: a control hidden by the client is a permission
+     * enforced by the client.
+     *
+     * Neither of them reaches the document, so there is nothing to enforce on
+     * a route — what the server says is what the owner chose to offer.
+     */
+    const boxesIn = (doc) => [...doc.querySelectorAll('#shareContent li input[type="checkbox"]')];
+    const jobs = ["# Read only", "", "- [ ] nothing to do here", ""].join("\n");
+    const made = await asAdmin("POST", "/api/docs", { fileName: "read-only.md", content: jobs });
+    check("(a document with a box in it)", made.status, 201);
+    const file = made.body.file;
+
+    const shared = await asAdmin("POST", `/api/docs/${file}/share`);
+    const readToken = shared.body.url.split("/").pop();
+
+    const open = async () => {
+      const page = shareWindow(`${ORIGIN}/s/${readToken}`);
+      await waitUntil(() => page.window.document
+        .getElementById("shareContent").classList.contains("visible"));
+      return page;
+    };
+
+    const asPublished = await open();
+    check("a new link allows both, which is how they behaved before there was a switch",
+      [boxesIn(asPublished.window.document)[0].disabled,
+        asPublished.window.document.getElementById("shareAnnotateToggle").hidden],
+      [false, false]);
+
+    const off = await asAdmin("PATCH", `/api/docs/${file}/share`,
+      { allowTicks: false, allowInk: false });
+    check("the owner can turn both off in one request", off.status, 200);
+    check("...and the share says so",
+      [off.body.share.allowTicks, off.body.share.allowInk], [false, false]);
+
+    const refused = await open();
+    check("the boxes are then left as the renderer drew them",
+      boxesIn(refused.window.document)[0].disabled, true);
+    check("...and the pen is not offered at all",
+      refused.window.document.getElementById("shareAnnotateToggle").hidden, true);
+
+    const back = await asAdmin("PATCH", `/api/docs/${file}/share`, { allowTicks: true });
+    check("turning one back on leaves the other alone",
+      [back.body.share.allowTicks, back.body.share.allowInk], [true, false]);
+
+    const half = await open();
+    check("...which is what the page offers",
+      [boxesIn(half.window.document)[0].disabled,
+        half.window.document.getElementById("shareAnnotateToggle").hidden],
+      [false, true]);
+
+    // Replacing the link is republishing the same document, so what it allows
+    // is not quietly reset by it.
+    const rotated = await asAdmin("POST", `/api/docs/${file}/share`);
+    check("replacing the link keeps what it allows",
+      [rotated.body.share.allowTicks, rotated.body.share.allowInk], [true, false]);
+
+    check("a switch has to be true or false",
+      (await asAdmin("PATCH", `/api/docs/${file}/share`, { allowTicks: "yes" })).status, 400);
+    check("...and a request has to name one",
+      (await asAdmin("PATCH", `/api/docs/${file}/share`, {})).status, 400);
+
+    check("none of it logged an error",
+      [...asPublished.problems, ...refused.problems, ...half.problems]
         .filter((one) => !/Could not parse CSS/.test(one)), []);
   }
 };

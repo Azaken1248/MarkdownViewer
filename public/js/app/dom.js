@@ -188,6 +188,12 @@ var AppDom = (function () {
     shareOnceHint: element("shareOnceHint"),
     shareExportField: element("shareExportField"),
     shareExportToggle: /** @type {HTMLInputElement} */ (element("shareExportToggle")),
+    // What a reader may do to their own copy of the page, which never reaches
+    // the document: see the dialog's own comment in index.html.
+    shareTicksField: element("shareTicksField"),
+    shareTicksToggle: /** @type {HTMLInputElement} */ (element("shareTicksToggle")),
+    shareInkField: element("shareInkField"),
+    shareInkToggle: /** @type {HTMLInputElement} */ (element("shareInkToggle")),
     shareCloseBtn: button("shareCloseBtn"),
     revokeShareBtn: button("revokeShareBtn"),
     createShareBtn: button("createShareBtn"),

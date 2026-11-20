@@ -841,6 +841,29 @@
         </span>
       </label>
 
+      <!-- What a reader may do to their own copy of the page. Neither reaches
+           the document or leaves the library: a tick and a pen mark are kept
+           in the reader's own browser and nobody else ever sees them. Still
+           the owner's call, because a document can be sent to be read exactly
+           as it is. On unless they are turned off. -->
+      <label class="share-permit" id="shareTicksField" hidden>
+        <input type="checkbox" id="shareTicksToggle" />
+        <span class="share-permit-text">
+          <strong>Let readers tick the boxes</strong>
+          <span class="field-hint">Task lists work for whoever opens the link, in their browser only. Their
+            ticks are never sent anywhere, you cannot see them, and the document is unchanged.</span>
+        </span>
+      </label>
+
+      <label class="share-permit" id="shareInkField" hidden>
+        <input type="checkbox" id="shareInkToggle" />
+        <span class="share-permit-text">
+          <strong>Let readers write on it</strong>
+          <span class="field-hint">The pen, the highlighter and the shapes, kept in their browser the same
+            way. Turning this off also hides marks somebody has already made.</span>
+        </span>
+      </label>
+
       <div class="dialog-actions">
         <button class="btn" id="shareCloseBtn" type="button">Close</button>
         <button class="btn danger" id="revokeShareBtn" type="button" hidden>Revoke link</button>

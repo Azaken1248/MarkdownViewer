@@ -12,7 +12,7 @@ const { elements } = AppDom;
 const { state } = AppState;
 const { notify } = AppNotify;
 const { openShareModal, closeShareModal, createShareLink, revokeShareLink,
-  setExportAllowed } = AppShare;
+  setExportAllowed, setTicksAllowed, setInkAllowed } = AppShare;
 const {
   openLoginModal, submitLogin, signOut,
   openPasswordModal, closePasswordModal, submitPasswordChange
@@ -118,6 +118,14 @@ function bindAccountMenu() {
 
   elements.shareExportToggle.addEventListener("change", () => {
     void setExportAllowed(elements.shareExportToggle.checked);
+  });
+
+  elements.shareTicksToggle.addEventListener("change", () => {
+    void setTicksAllowed(elements.shareTicksToggle.checked);
+  });
+
+  elements.shareInkToggle.addEventListener("change", () => {
+    void setInkAllowed(elements.shareInkToggle.checked);
   });
 
   elements.copyShareUrlBtn.addEventListener("click", async () => {

@@ -576,33 +576,50 @@ each click straight to the file; the share page did not, so a document shared
 as a list of jobs arrived as a picture of one.
 
 It cannot write to the file — the document belongs to whoever sent the link —
-so the boxes are live here and the ticks stay in the reader's browser, under
-the share token. That is the rule the ink already follows, written down in
-`annotate/store.js`: marking up somebody else's document is the reader's own
-business, and the alternative is writing to a document you do not own.
+so a reader's ticks are a layer of their own, over the document rather than in
+it, kept in their browser under the share token. That is the rule the ink
+already follows, written down in `annotate/store.js`: marking up somebody
+else's document is the reader's own business, and the alternative is writing
+to a document you do not own.
 
-The checks drive it as a stranger, in the share page's own window with no
-cookie on it. A tick changes the box, raises no request, and leaves the
-document on the server exactly as it was — read back afterwards as the account
-that owns it, which is the check that matters. What is stored is read back
-into a second window, because a tick nobody keeps is a tick lost on the first
-scroll.
+The layer holds the reader's own choices and nothing else, which is the part
+that took two goes to get right. The first version remembered *which boxes
+were on* — the document's own among them — so the owner unticking a line
+would have had a reader's copy quietly put it back, and any edit at all threw
+the reader's work away. Now the document's ticks are never stored, and a
+choice is filed against the words beside the box rather than its position.
 
-Two of them are about the document changing underneath. Ticks are remembered
-as *which boxes are on*, so they are filed against a fingerprint of the list
-they were made on: the words beside each box, and what the document itself
-says about each one. A list that has changed is a list those ticks are not
-about, and they are dropped rather than put against the wrong jobs.
+That makes the interesting checks the ones about the two drifting apart. The
+owner ticks a line while it is being read: the line the reader never touched
+follows the document, and the lines they did are still as they left them. The
+owner deletes two lines: the choices about them go with them, rather than
+sitting in storage for ever against words nobody can see. A box put back to
+what the document says stops being a choice and is forgotten. And unticking
+something the document had ticked *is* a choice, which is the case a
+"which boxes are on" record cannot express at all.
 
-Including what the document says about them is not an ornament. Without it,
-the first run of these checks showed the stored list as `[0, 2]` — the
-reader's tick and the document's own — which is correct, and then the owner
-unticking that line would have had the reader's copy quietly put it back. The
-document would be reported as saying something it does not. The fingerprint
-is taken before anything is restored, because measuring it afterwards would
-measure the reader's own ticks and match anything.
+The rest is driven as a stranger, in the share page's own window with no
+cookie on it: a tick changes the box, raises no request, and leaves the
+document on the server exactly as it was — read back afterwards as the
+account that owns it, which is the check that matters.
 
-Six deliberate breaks, all six caught.
+### And only what the link was published to allow
+
+Which of these a reader may use is the owner's call. The share record carries
+a switch for each beside the export one, the dialog shows them once a link
+exists, and the page asks the server rather than deciding: a control hidden by
+the client is a permission enforced by the client. For ticks and marks there
+is nothing to enforce on a route either — they never leave the reader's
+machine — so what the server says is what the owner chose to offer, which is
+exactly what the checks read.
+
+Both default to on. They worked that way before there was a switch, and a
+migration is not the place to take something away from every link that already
+exists; export stays off until it is turned on, because it hands over the
+file. The checks cover a new link allowing both, one request turning both off,
+turning one back on leaving the other alone, and replacing the link keeping
+what it allowed — rotating a URL is republishing the same document. A switch
+has to be true or false, and a request has to name at least one.
 
 ### A paste that is words, and a drop that says where
 

@@ -759,23 +759,47 @@ Revoking a link takes the preview with it: a dead token renders a generic
 
 ### What a reader can do with it
 
-A shared document is still a document, so the things you can do *to* a page
+A shared document is still a document, so the things you can do *to a page*
 rather than to a file work: the outline, the code copy buttons, diagram pan
-and zoom, `<details>` sections, and ticking the boxes in a task list. A
-checklist that cannot be ticked is a picture of a checklist, and a checklist
-is one of the things people share.
+and zoom, `<details>` sections, ticking the boxes in a task list, and writing
+on it with the pen. A checklist that cannot be ticked is a picture of a
+checklist, and a checklist is one of the things people share.
 
-None of it reaches the document. Ticks and pen marks are kept in the reader's
-own browser, filed under the share token, and are never sent anywhere — the
-person who shared it cannot see them, and two shared documents open in one
-browser keep their own. That is a deliberate limit rather than a missing
-feature: the alternative is writing to a document you do not own.
+None of it reaches the document. A reader's ticks and pen marks are a layer
+of their own, kept in their browser under the share token and never sent
+anywhere — you cannot see them, and two shared documents open in one browser
+keep their own. That is a deliberate limit rather than a missing feature: the
+alternative is writing to a document you do not own.
 
-Ticks are remembered against the list they were made on — the words beside
-each box and what the document itself says about them. If the owner edits the
-list while somebody is reading it, the remembered ticks are dropped rather
-than put against the wrong jobs, and a tick the owner has taken back is not
-put back by somebody else's copy.
+The layer is the reader's own choices and nothing else. The document's ticks
+stay the document's: you can tick, untick, add and remove lines while
+somebody is reading, and a line they never touched follows what you wrote
+while the lines they did are still as they left them. A choice is remembered
+against the words beside the box rather than its position, so a line that
+moves takes it with it and a line you delete takes it away.
+
+**Which of them a link offers is your choice.** The share dialog has a switch
+for each, beside the export one:
+
+| Switch | What it allows |
+| --- | --- |
+| Allow exporting | taking the file away as PDF, HTML, Markdown or Word |
+| Let readers tick the boxes | task lists work, in their browser only |
+| Let readers write on it | the pen, the highlighter and the shapes |
+
+Exporting is off until you turn it on, because it hands over the file. The
+other two are on, because both worked that way before there was a switch and
+a new setting is not a reason to take something away from every link that
+already exists. Turning the pen off also hides marks somebody has already
+made. Replacing a link keeps whatever it allowed: rotating a URL is
+republishing the same document, and a permission that quietly came back when
+a link was replaced is one nobody could rely on.
+
+The page asks the server what the link allows and does as it is told. A
+control hidden by the browser is a permission enforced by the browser — and
+for ticks and marks there is nothing to enforce on a server anyway, since
+they never leave the reader's machine. What the server says is what you chose
+to offer.
 
 ---
 

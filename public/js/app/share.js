@@ -72,6 +72,15 @@ var AppShare = (function () {
       elements.createShareBtn.textContent = "Replace link";
       elements.shareExportField.hidden = false;
       elements.shareExportToggle.checked = Boolean(share.allowExport);
+
+      /* On unless the owner has turned them off, which is also what a link
+       * made before these existed does. `!== false` rather than Boolean(),
+       * so a payload from an older server reads as on rather than off.
+       */
+      elements.shareTicksField.hidden = false;
+      elements.shareTicksToggle.checked = share.allowTicks !== false;
+      elements.shareInkField.hidden = false;
+      elements.shareInkToggle.checked = share.allowInk !== false;
     } else {
       elements.shareStatus.innerHTML = html`
         <p class="share-live"><i class="ph ph-lock-simple" aria-hidden="true"></i>
@@ -83,6 +92,8 @@ var AppShare = (function () {
       // Nothing to permit until there is a link to permit it on.
       elements.shareExportField.hidden = true;
       elements.shareExportToggle.checked = false;
+      elements.shareTicksField.hidden = true;
+      elements.shareInkField.hidden = true;
     }
   }
 
@@ -153,22 +164,50 @@ var AppShare = (function () {
    * have. If the write fails the box goes back to what the server still says.
    */
   async function setExportAllowed(allowed) {
+    return setLinkAllows({ allowExport: allowed }, allowed
+      ? "Anyone with the link can now export this document."
+      : "Exporting from the link is off.");
+  }
+
+  /* The switches a link carries, each saved as it is switched.
+   *
+   * One function because they are one request and one failure path: if the
+   * write fails the box goes back to what the server still says, which is the
+   * only honest thing a toggle with no Save button can do.
+   */
+  async function setLinkAllows(asked, said) {
     const file = state.shareFile;
+    const [[name, allowed]] = Object.entries(asked);
+    const toggles = {
+      allowExport: elements.shareExportToggle,
+      allowTicks: elements.shareTicksToggle,
+      allowInk: elements.shareInkToggle
+    };
 
     try {
       const payload = await requestJson(`/api/docs/${docUrl(file)}/share`, {
         method: "PATCH",
-        body: JSON.stringify({ allowExport: allowed })
+        body: JSON.stringify(asked)
       });
 
       state.shares.set(file, { ...state.shares.get(file), ...payload.share, file });
-      notify(allowed
-        ? "Anyone with the link can now export this document."
-        : "Exporting from the link is off.", "success");
+      notify(said, "success");
     } catch (error) {
-      elements.shareExportToggle.checked = !allowed;
+      toggles[name].checked = !allowed;
       notify(error.message, "error");
     }
+  }
+
+  async function setTicksAllowed(allowed) {
+    return setLinkAllows({ allowTicks: allowed }, allowed
+      ? "Readers can tick the boxes in their own copy."
+      : "The boxes are shown as they are written, and cannot be ticked.");
+  }
+
+  async function setInkAllowed(allowed) {
+    return setLinkAllows({ allowInk: allowed }, allowed
+      ? "Readers can write on their own copy."
+      : "Writing on the link is off, including marks already made.");
   }
 
   // The button carries the state, so you can see at a glance whether the open
@@ -203,6 +242,8 @@ var AppShare = (function () {
     createShareLink,
     revokeShareLink,
     setExportAllowed,
+    setTicksAllowed,
+    setInkAllowed,
     updateShareButton
   };
 })();

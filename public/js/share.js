@@ -164,6 +164,20 @@
 
     document.title = `${payload.title} | AzaDocs`;
 
+    /* What the link allows, settled before anything is drawn: a control that
+     * appears and then takes itself away is worse than one that was never
+     * there. Held in a local because the element is read after an await, and
+     * the only thing being decided is this one button.
+     */
+    const penButton = elements.annotateToggle;
+
+    /* `!== false` rather than a truth test, so a server that has not been
+     * restarted since these switches existed still offers what it always
+     * offered. A payload with nothing to say about them is one from before
+     * there was anything to say, and both were on then.
+     */
+    penButton.hidden = payload.allowInk === false;
+
     // The one page a stranger is served, so this is the assignment that
     // matters most: renderDocumentContent runs marked and then DOMPurify with
     // this app's allowlist (md/text.js), and nothing else here touches markup.
@@ -193,12 +207,17 @@
     elements.meta.textContent = parts.join("  ·  ");
     elements.footer.hidden = false;
 
-    /* The task lists, which marked renders as pictures of checkboxes.
+    /* The task lists, which marked renders as pictures of checkboxes — if
+     * the link was published with ticking allowed.
      *
      * Before the diagrams, because it is the words the reader is already
-     * looking at — and it does not wait on a 3.5MB engine arriving.
+     * looking at, and it does not wait on a 3.5MB engine arriving. Left as
+     * marked rendered them when it is not allowed: a box that cannot be
+     * ticked looks like one that cannot be ticked.
      */
-    ticks.bind();
+    if (payload.allowTicks !== false) {
+      ticks.bind();
+    }
 
     // Diagrams, code and math, exactly as the app renders them.
     await MarkdownCore.renderMermaidBlocks(elements.content);
@@ -207,9 +226,16 @@
     // built from what is actually on the page rather than from the markdown.
     outline.refresh();
 
-    // ...and so does the document the ink sits on, which has to be its final
-    // size before a stroke drawn at the bottom of it lands in the right place.
-    ink.restore();
+    /* The pen, if the link was published with writing on it allowed. The
+     * button is the only way to the tools, so hiding it is enough — and a
+     * document that may not be written on has nothing restored onto it
+     * either, including marks made before the owner turned it off.
+     */
+    if (payload.allowInk !== false) {
+      // The document the ink sits on has to be its final size before a stroke
+      // drawn at the bottom of it lands in the right place.
+      ink.restore();
+    }
 
     /* Exporting, if the link was published with it allowed.
      *

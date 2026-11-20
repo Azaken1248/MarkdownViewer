@@ -5,13 +5,21 @@
  * app makes its own boxes live and writes each click straight to the file; a
  * share link cannot do that, because the document belongs to whoever sent it.
  *
- * So the boxes are live here and the ticks stay in this browser — the same
- * rule the ink follows, for the same reason. Nothing is sent anywhere, and the
- * person who shared the document cannot see them. A reader working through a
- * checklist gets to keep their place; the document is untouched.
+ * So a reader's ticks are a layer of their own, over the document rather than
+ * in it. They are kept in this browser, under the share token, and they are
+ * never sent anywhere — the person who shared the document cannot see them,
+ * and two shared documents open in one browser keep their own.
  *
- * Keyed by share token, so two shared documents open in the same browser keep
- * their own ticks.
+ * The layer is what the *reader* chose and nothing else. The document's own
+ * ticks are not stored, because they are not the reader's and they are not
+ * this page's business to remember: the owner can tick, untick, add and
+ * remove lines, and what the reader did to the lines they touched is still
+ * what the reader did. The two have nothing to do with each other, which is
+ * the whole point of the layer being a layer.
+ *
+ * Which means a reader's choice is remembered against the words beside the
+ * box rather than against its position. A line that moves takes the tick with
+ * it; a line that is deleted takes it away.
  */
 
 /* exported ShareTicks */
@@ -19,70 +27,65 @@ var ShareTicks = (function () {
   "use strict";
 
   const PREFIX = "mdviewer.ticks.";
-  const VERSION = 1;
+
+  /* Version 2. Version 1 remembered which boxes were on — the document's own
+   * among them — which made the owner unticking a line something a reader's
+   * copy would quietly undo. A v1 record is not readable as a v2 one and is
+   * left where it is rather than guessed at.
+   */
+  const VERSION = 2;
 
   const keyFor = (token) => `${PREFIX}${token}`;
 
   const boxesIn = (content) =>
     [...content.querySelectorAll('li input[type="checkbox"]')];
 
-  /* What the list said when these ticks were made.
+  const wordsBeside = (box) => (box.closest("li")?.textContent || "").trim();
+
+  /* A name for each box that survives the document being edited around it.
    *
-   * The owner can edit the document while somebody is reading it, and a tick
-   * is only a number — the third box. If the list has changed underneath, the
-   * third box is a different line, so remembered ticks would be put against
-   * the wrong jobs. Cheaper than storing the text and enough to notice: the
-   * count, and a hash of the words beside each box.
+   * The words, and which of the boxes with those words it is — a list can
+   * legitimately say "review" twice, and the second one is not the first.
    */
-  function fingerprint(boxes) {
-    /* The words *and* what the document itself says about each one. Ticks
-     * are remembered as "which boxes are on", so if the owner unticks a line
-     * while somebody is reading, a remembered tick would quietly put it back
-     * — which is the document being misreported rather than annotated.
-     */
-    const words = boxes
-      .map((box) => `${box.checked ? 1 : 0}:${(box.closest("li")?.textContent || "").trim()}`)
-      .join("\u0000");
+  function namesFor(boxes) {
+    const seen = new Map();
 
-    // FNV-1a, which is a few lines and good enough to tell one list from
-    // another. Nothing here is a security question.
-    let hash = 0x811c9dc5;
-    for (let at = 0; at < words.length; at += 1) {
-      hash ^= words.charCodeAt(at);
-      hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-
-    return `${boxes.length}:${hash.toString(16)}`;
+    return boxes.map((box) => {
+      const words = wordsBeside(box);
+      const nth = seen.get(words) || 0;
+      seen.set(words, nth + 1);
+      return `${nth}:${words}`;
+    });
   }
 
   /* Storage can refuse: private browsing, a full quota, a browser with it
    * switched off. None of that is worth an error on a page somebody is only
-   * reading, so a refusal means the ticks are not kept — the boxes still
-   * work for as long as the page is open.
+   * reading, so a refusal means the ticks are not kept — the boxes still work
+   * for as long as the page is open.
    */
   function read(token) {
     try {
       const raw = window.localStorage.getItem(keyFor(token));
       const saved = raw ? JSON.parse(raw) : null;
-      return saved && saved.v === VERSION && Array.isArray(saved.on) ? saved : null;
+      return saved && saved.v === VERSION && saved.mine && typeof saved.mine === "object"
+        ? saved.mine
+        : null;
     } catch {
       return null;
     }
   }
 
-  function write(token, body) {
+  function write(token, mine) {
     try {
-      window.localStorage.setItem(keyFor(token), JSON.stringify(body));
+      if (Object.keys(mine).length === 0) {
+        // Nothing of the reader's own left to remember.
+        window.localStorage.removeItem(keyFor(token));
+        return;
+      }
+
+      window.localStorage.setItem(keyFor(token), JSON.stringify({ v: VERSION, mine }));
     } catch {
       // Nothing to do and nothing worth saying.
-    }
-  }
-
-  function forget(token) {
-    try {
-      window.localStorage.removeItem(keyFor(token));
-    } catch {
-      // As above.
     }
   }
 
@@ -100,67 +103,62 @@ var ShareTicks = (function () {
       }
     }
 
-    function save(boxes, asWritten) {
-      const on = boxes
-        .map((box, index) => (box.checked ? index : -1))
-        .filter((index) => index >= 0);
-
-      if (on.length === 0) {
-        // Nothing ticked is the document as it was written, which needs no
-        // record — and leaves nothing behind for a reader who unticks.
-        forget(token);
-        return;
-      }
-
-      write(token, { v: VERSION, of: asWritten, on });
-    }
-
-    function restore(boxes, asWritten) {
-      const saved = read(token);
-      if (!saved) {
-        return;
-      }
-
-      // A list that has changed since is a list these ticks are not about.
-      if (saved.of !== asWritten) {
-        forget(token);
-        return;
-      }
-
-      for (const index of saved.on) {
-        const box = boxes[index];
-        if (box) {
-          box.checked = true;
-        }
-      }
-    }
-
-    /* Called once the document is on the page.
-     *
-     * The ticks are restored before the boxes are made live, so the restore
-     * cannot be read as somebody ticking them — and the listener is on the
-     * list rather than on each box, since the boxes are not replaced.
-     */
     function bind() {
       const boxes = boxesIn(content);
       if (boxes.length === 0) {
         return 0;
       }
 
-      /* Taken before anything is restored: this is the list as the document
-       * wrote it, which is what the ticks are remembered against. Measuring
-       * it later would measure the reader's own ticks and match anything.
-       */
-      const asWritten = fingerprint(boxes);
+      const names = namesFor(boxes);
 
-      restore(boxes, asWritten);
+      /* What the document says, before the reader's layer goes over it. Kept
+       * so a reader can put a box back to what the document said, and have
+       * that stop being a choice of theirs rather than become the opposite
+       * one.
+       */
+      const asWritten = new Map(names.map((name, index) => [name, boxes[index].checked]));
+
+      const mine = read(token) || {};
+
+      // Only the names still in the document: a line that has gone takes the
+      // reader's choice about it with it, rather than sitting in storage for
+      // ever against words nobody can see.
+      const kept = {};
+      for (const name of names) {
+        if (Object.prototype.hasOwnProperty.call(mine, name)) {
+          kept[name] = Boolean(mine[name]);
+        }
+      }
+
+      for (let index = 0; index < boxes.length; index += 1) {
+        const name = names[index];
+        if (Object.prototype.hasOwnProperty.call(kept, name)) {
+          boxes[index].checked = kept[name];
+        }
+      }
+
       enable(boxes);
 
       content.addEventListener("change", (event) => {
         const box = /** @type {HTMLInputElement} */ (event.target);
-        if (box instanceof window.HTMLInputElement && box.type === "checkbox") {
-          save(boxesIn(content), asWritten);
+        if (!(box instanceof window.HTMLInputElement) || box.type !== "checkbox") {
+          return;
         }
+
+        const at = boxes.indexOf(box);
+        if (at === -1) {
+          return;
+        }
+
+        const name = names[at];
+        if (box.checked === asWritten.get(name)) {
+          // Back to what the document says, which is not a choice to keep.
+          delete kept[name];
+        } else {
+          kept[name] = box.checked;
+        }
+
+        write(token, kept);
       });
 
       return boxes.length;
