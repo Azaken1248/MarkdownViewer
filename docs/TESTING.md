@@ -33,12 +33,13 @@ where its absence is visible.
 | `code` | Copy buttons, both clipboard paths, and the live-highlighting policy |
 | `visual` | The block round trip, over fixtures and over every real document |
 | `recycle` | The recycle bin and the archive: delete, restore, erase, and who may do which |
+| `access` | Who may do what and where: the decision table, the spaces, and the one migration |
 | `limits` | How complicated the code is allowed to get, and the budget that keeps it a decision |
 | `dom` | The real `index.html` + `app.js` in jsdom against a real server, and the share view in a window of its own |
 | `diagram-page` | The diagram editor page, its address, and the document handoff |
 | `export` | Taking a copy away: the snapshot's stylesheets, the paginator's arithmetic, the zip a .docx is |
 | `worker` | The Python worker: the message protocol, both output caps, and the network it takes away from itself |
-| `browser` | The five things jsdom cannot answer, in a real browser |
+| `browser` | The six things jsdom cannot answer, in a real browser |
 | `accessibility` | axe over six page states in both themes, the skip link, reduced motion, 200% zoom and forced colours |
 
 ### jsdom, and the two that are not
@@ -620,6 +621,63 @@ file. The checks cover a new link allowing both, one request turning both off,
 turning one back on leaving the other alone, and replacing the link keeping
 what it allowed — rotating a URL is republishing the same document. A switch
 has to be true or false, and a request has to name at least one.
+
+### A decision table, because a scenario cannot show this
+
+`access` checks `lib/access.js`, and it is in two halves on purpose.
+
+The decision is a pure function — statements in, a decision and its reason out,
+no database and no clock of its own — so it is checked as a **table**: forty-odd
+rows, each naming the statements that exist, the account asking, the document,
+the action, and the one answer. That is how AWS documents its own evaluation
+logic, and it is the only shape in which "an explicit deny beats everything,
+wherever it sits" can be *read off the page* rather than inferred from a
+scenario. Two rows differ only in the order the statements are written in, and
+both expect the same answer; a scenario-shaped suite would not have thought to
+say that.
+
+The reason is checked alongside the verdict, not instead of it. A decision
+nobody can trace is the thing this design exists to avoid, so
+`"denied by: deny read group:everyone on Contra NES Extension"` is as much the
+behaviour as the `false` beside it.
+
+The store is checked as storage: the migration that makes a space per top-level
+directory, the reserved space for documents in no directory, the one statement
+that keeps the library behaving exactly as it did, and the cache — which is
+keyed on SQLite's `data_version` as well as this store's own writes, because a
+cache that only noticed its own would answer from memory for ever while another
+process had taken the permission away. The suite opens a second connection,
+deletes through it, and requires the first to notice.
+
+**Three defects were found by writing it**, which is the argument for the table
+rather than for scenarios:
+
+- the store wrote a group's **id** into a statement while the decision worked
+  in **names**, so every group statement silently applied to nobody;
+- SQLite treats NULLs as distinct in a UNIQUE constraint, and the root scope,
+  the whole-space scope and the public principal are all spelled NULL — so
+  "the same statement cannot be written twice" was not being enforced at all.
+  It is a unique index over `COALESCE` now;
+- `effectiveLevel` probed each level with the last action the level implies,
+  which after `doc:erase` was added to `manage` meant every editor's `manage`
+  was reported as `write`.
+
+Twelve deliberate breaks, none of which survived: deny stops beating allow, the
+role boundary stops intersecting, deny is read downwards like allow, a disabled
+account is let through, a path prefix matches as a string rather than a segment,
+expiry is ignored, the public principal becomes an account with no groups, the
+baseline is written at the wrong level, the cache ignores another process, the
+`everyone` group becomes a stored membership, the migration writes a statement
+every boot, and a group is decided by id. One of them — the migration writing
+every time — is caught by the unique index raising rather than by a check
+failing, which is the suite being held up by the schema rather than by itself,
+and worth knowing.
+
+`lib/access.js` is at **100% of lines, branches and functions.** Four of those
+branches were reached only after the first measurement said so: a statement
+stored for the public principal, a statement written at the root through the
+store rather than as a literal, one written with an expiry, and the store's own
+`effectiveLevel`.
 
 ### A diagram a reader can actually look at
 

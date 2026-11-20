@@ -231,6 +231,48 @@ stable identity that survives being renamed. But it does not record where any
 document lives: the directory a file sits in *is* the answer, so the two can
 never disagree. Folders nest up to 8 levels.
 
+### Who may do what, and where
+
+`lib/access.js` answers that, and `spaces`, `groups`, `group_members` and
+`grants` are what it reads. **Nothing consults it yet** — the routes still
+decide by role alone — so what exists today is the model and its migration.
+
+A **space** owns exactly one top-level directory, and a statement in `grants`
+is scoped by a path prefix inside one. Which is the same principle as the
+paragraph above: the directory a file sits in is the answer. It is also why
+scoping by *folder id* was rejected — the folder tree lives in a row the
+organizer is allowed to quarantine when it will not parse, and a permission
+scoped by folder id would resolve, in that state, to the root. A damaged file
+would have silently un-scoped the library.
+
+The evaluation order is AWS IAM's, for the one reason that matters here: it is
+explicit enough to be traced rather than argued about.
+
+1. **Deny by default.** Nothing is permitted unless something permits it.
+2. **An explicit deny beats everything**, wherever it sits. Not "the nearest
+   statement wins" — there is no ordering by specificity, which is what makes
+   the answer independent of how the statements happen to be arranged.
+3. **A boundary intersects rather than grants.** The three roles are one: a
+   viewer granted `write` on a space still cannot write, so the role table
+   keeps meaning exactly what it says.
+
+Two consequences are worth knowing before reading the code. **Admin is not a
+branch**: it is an implicit `allow manage` at the root, so one algorithm
+explains every decision, there is no bypass to audit separately, and locking
+yourself out is not possible. And the **levels are a ladder read in two
+directions** — an allow at `manage` implies the lesser actions, while a deny at
+`read` refuses everything above it, because "may not read this" is not a
+sentence that leaves writing available.
+
+The migration writes one statement — `allow manage to group:everyone` at the
+root — which is how deny-by-default arrives without taking anything away:
+afterwards every account can do exactly what its role could do before. At
+`manage` rather than at `write` deliberately, because an editor could always
+manage a share link, and `write` would have quietly removed that.
+
+`PERMISSIONS_PLAN.md` records the twenty decisions behind this and what is
+built next.
+
 Folders and documents are listed **alphabetically**, case-insensitively, with
 numbers compared as numbers so `page-2.md` comes before `page-10.md`. There is
 no manual ordering and nothing to drag: the list is wherever the alphabet puts

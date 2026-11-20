@@ -33,14 +33,20 @@ const DB_NAME = "azadocs.db";
  * Not every table lib/db.js creates: document_index is a search index the app
  * rebuilds from the documents themselves, and login_attempts is a rate-limit
  * window that is meaningless an hour later. Restoring without those two costs
- * nothing; restoring without these five loses accounts, sessions, share links,
- * saved links or the folder tree.
+ * nothing; restoring without these nine loses accounts, sessions, share links,
+ * saved links, the folder tree — or the policy, which is the newest and the
+ * one whose absence would be least obvious. A library restored without its
+ * grants is a library where the first boot writes the one statement for
+ * everyone again and every space somebody had closed is open.
  *
  * The list is checked against what lib/db.js actually creates by the `restore`
  * suite, because the first version of it was written from memory and named a
  * `folders` table this app has never had.
  */
-const WANTED_TABLES = ["users", "sessions", "shares", "links", "organizer"];
+const WANTED_TABLES = [
+  "users", "sessions", "shares", "links", "organizer",
+  "spaces", "groups", "group_members", "grants"
+];
 const REBUILDABLE_TABLES = ["document_index", "login_attempts"];
 
 function options(argv) {
