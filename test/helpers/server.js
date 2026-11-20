@@ -229,6 +229,25 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
       PORT: String(port),
       MDVIEWER_STATE_DIR: stateDir,
       SEED_ADMIN_PASSWORD: SEED_PASSWORD,
+
+      /* The rate limits, raised out of the way.
+       *
+       * They are a real rule and the `limiter` suite is what checks them. For
+       * every other suite they are a client that is not a person: one file
+       * drives a page through, in a hundred seconds, what somebody would
+       * spend an hour doing, and the hundred-and-twenty-first save in a
+       * minute is answered "Too many saves just now". That failure says
+       * nothing about the thing under test, and CI found it twice.
+       *
+       * A suite that wants the limits can pass its own values through `env`,
+       * which is what `limiter` does.
+       */
+      MDVIEWER_RATE_API: "100000",
+      MDVIEWER_RATE_API_PER_ADDRESS: "100000",
+      MDVIEWER_RATE_UPLOADS: "100000",
+      MDVIEWER_RATE_WRITES: "100000",
+      MDVIEWER_RATE_SEARCHES: "100000",
+      MDVIEWER_RATE_PUBLIC: "100000",
       ...env,
       // The suite prints its own output; per-request lines just bury it.
       LOG_REQUESTS: "false"

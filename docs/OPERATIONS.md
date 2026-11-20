@@ -490,6 +490,27 @@ against a runaway rather than a security boundary — the guards are the
 boundary. They are set in one place at the top of `server.js` and mounted in
 one place beside it, so what is limited is answerable without reading a route.
 
+The budgets below are what a deployment that configures nothing gets. Each has
+a variable in front of it, for a deployment behind a shared address where one
+account is several people, or one where it is a script:
+
+| Variable | Budget it sets |
+| --- | --- |
+| `MDVIEWER_RATE_API` | state changes per account |
+| `MDVIEWER_RATE_API_PER_ADDRESS` | ...and per address with no session |
+| `MDVIEWER_RATE_WRITES` | saves |
+| `MDVIEWER_RATE_UPLOADS` | uploads |
+| `MDVIEWER_RATE_SEARCHES` | searches |
+| `MDVIEWER_RATE_PUBLIC` | `/healthz` and `/graphql`, per address |
+
+Anything that is not a positive number — unset, empty, nonsense — means the
+default. The test suite is the reason these exist: one of its files drives a
+page through, in a hundred seconds, what somebody would spend an hour doing,
+and the hundred-and-twenty-first save in a minute is refused. That is the
+limit working correctly on a client that is not a person, so the suite's own
+server raises them, and the `limiter` suite asks for the defaults back to
+check the numbers in the table.
+
 | What | Per | Budget |
 | --- | --- | --- |
 | State changes on `/api/*` (POST, PUT, PATCH, DELETE) | account, or address with no session | 300, or 60 |

@@ -116,12 +116,30 @@ const SNIPPET_CACHE_MAX_BYTES = 16 * 1024 * 1024;
  * index, a write that re-indexes — and on the two addresses anyone may ask.
  */
 const RATE_WINDOW_MS = 60_000;
-const RATE_API_PER_SESSION = 300;
-const RATE_API_PER_ADDRESS = 60;
-const RATE_UPLOADS_PER_SESSION = 30;
-const RATE_WRITES_PER_SESSION = 120;
-const RATE_SEARCHES_PER_SESSION = 240;
-const RATE_PUBLIC_PER_ADDRESS = 60;
+
+/* The numbers are a deployment's business, so each has an environment
+ * variable in front of it — and the defaults below are what a deployment that
+ * sets none of them gets.
+ *
+ * They are here because the test suite needed them. One suite drives a page
+ * through, in a hundred seconds, what a person would spend an hour doing, and
+ * on CI it was hitting "Too many saves just now" — the limit working
+ * correctly on a client that is not a person. The limit itself is not what
+ * those suites are about (`limiter` owns it), so the test server raises them
+ * rather than every suite being written around them. A deployment behind a
+ * shared address may want to raise them too.
+ */
+const fromEnv = (name, fallback) => {
+  const asked = Number(process.env[name]);
+  return Number.isFinite(asked) && asked > 0 ? Math.floor(asked) : fallback;
+};
+
+const RATE_API_PER_SESSION = fromEnv("MDVIEWER_RATE_API", 300);
+const RATE_API_PER_ADDRESS = fromEnv("MDVIEWER_RATE_API_PER_ADDRESS", 60);
+const RATE_UPLOADS_PER_SESSION = fromEnv("MDVIEWER_RATE_UPLOADS", 30);
+const RATE_WRITES_PER_SESSION = fromEnv("MDVIEWER_RATE_WRITES", 120);
+const RATE_SEARCHES_PER_SESSION = fromEnv("MDVIEWER_RATE_SEARCHES", 240);
+const RATE_PUBLIC_PER_ADDRESS = fromEnv("MDVIEWER_RATE_PUBLIC", 60);
 // A browser start apiece, so this is counted in documents rather than in
 // requests: ten a minute is more than anybody exports and far less than
 // anybody could use to tie the machine up.

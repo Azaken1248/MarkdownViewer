@@ -71,7 +71,24 @@ console.log("=== who is who ===");
 
 (async () => {
   console.log("=== the buckets as the server mounts them ===");
-  const server = await startTestServer();
+  /* With the ceilings as a deployment gets them.
+   *
+   * The suite's own server raises them out of the way for every other file,
+   * because a test client is not a person and "Too many saves just now" says
+   * nothing about the thing under test. The numbers are what *this* file is
+   * about, so it asks for them: an empty value means "whatever the default
+   * is", which is the number a deployment that configures nothing runs with.
+   */
+  const server = await startTestServer({
+    env: {
+      MDVIEWER_RATE_API: "",
+      MDVIEWER_RATE_API_PER_ADDRESS: "",
+      MDVIEWER_RATE_UPLOADS: "",
+      MDVIEWER_RATE_WRITES: "",
+      MDVIEWER_RATE_SEARCHES: "",
+      MDVIEWER_RATE_PUBLIC: ""
+    }
+  });
   try {
     const login = await server.request("POST", "/api/auth/login", { username: SEED_USERNAME, password: SEED_PASSWORD });
     let cookie = login.headers["set-cookie"].map((c) => c.split(";")[0]).join("; ");
