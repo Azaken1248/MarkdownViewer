@@ -1111,6 +1111,42 @@ module.exports = async (ctx) => {
     check("none of it logged an error",
       opened.problems.filter((one) => !/Could not parse CSS/.test(one)), []);
   }
+
+  console.log("=== a diagram-only document is exported only when the link says so ===");
+  {
+    /* A .mmd file is a document whose whole content is one diagram, and
+     * exporting one is the document's export: the same four formats, the same
+     * switch on the link. Worth a check of its own all the same, because it
+     * is the one kind of document where the export is nothing but a drawing.
+     */
+    const made = await asAdmin("POST", "/api/docs",
+      { fileName: "only.mmd", content: "flowchart LR\n    A[One] --> B[Two]\n" });
+    check("(a document that is only a diagram)", made.status, 201);
+    const onlyFile = made.body.file;
+
+    const onlyShare = await asAdmin("POST", `/api/docs/${onlyFile}/share`);
+    const onlyToken = onlyShare.body.url.split("/").pop();
+
+    const first = shareWindow(`${ORIGIN}/s/${onlyToken}`);
+    await waitUntil(() => first.window.document
+      .getElementById("shareContent").classList.contains("visible"));
+    check("a new link does not offer to export it",
+      first.window.document.getElementById("shareExportBtn").hidden, true);
+
+    const allowed = await asAdmin("PATCH", `/api/docs/${onlyFile}/share`, { allowExport: true });
+    check("(exporting is allowed)", allowed.status, 200);
+
+    const second = shareWindow(`${ORIGIN}/s/${onlyToken}`);
+    await waitUntil(() => second.window.document
+      .getElementById("shareContent").classList.contains("visible"));
+    await waitUntil(() => !second.window.document.getElementById("shareExportBtn").hidden);
+    check("...and then it does", second.window.document.getElementById("shareExportBtn").hidden, false);
+
+    check("the drawing is what was shared",
+      Boolean(second.window.document.querySelector("#shareContent .mermaid-block")), true);
+    check("none of it logged an error",
+      [...first.problems, ...second.problems].filter((one) => !/Could not parse CSS/.test(one)), []);
+  }
 };
 
 // A GET with no cookies at all, which is what a visitor following a link is.

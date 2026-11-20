@@ -646,6 +646,10 @@ from, holds the page behind it still, closes on `Esc` and on a click on the
 page behind but not on a click inside the drawing — which is how a pan ends —
 and opens again afterwards with nothing of the last drawing left in it.
 
+A diagram-only document has a check beside those, because it is the one kind
+of document whose export is nothing but a drawing: a `.mmd` share offers the
+export only once the link allows it, the same switch as everything else.
+
 ### A paste that is words, and a drop that says where
 
 The pasted-pictures story in `editing.js` stopped at pictures. What a paste
