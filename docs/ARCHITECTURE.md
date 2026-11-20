@@ -270,6 +270,32 @@ afterwards every account can do exactly what its role could do before. At
 `manage` rather than at `write` deliberately, because an editor could always
 manage a share link, and `write` would have quietly removed that.
 
+Four properties exist because the first version of this module did not have
+them, and a review before anything was wired found each one:
+
+- **A path it cannot reduce is a path it refuses.** `..` and `.` are not names:
+  `Public/../Secret/notes.md` names a document in Secret and would have been
+  attributed to the space called Public, walking around a deny. Nothing routes
+  such a path here — `lib/docs/paths.js` rebuilds every path segment by segment
+  long before a permission is asked about — and this layer declines it anyway,
+  because a boundary that is only correct while its callers are correct is one
+  bug away from not being one.
+- **A statement cannot outlive what it names.** `subject_id` holds a user id, a
+  group id or nothing, so it cannot have a foreign key; two triggers in
+  `lib/db.js` do what one would have. Without them, deleting a group left
+  statements naming an id nothing resolves — and an unresolvable statement
+  applies to nobody, so an allow silently stops allowing and a deny silently
+  stops denying. `unresolved()` reports any that appear by another route, such
+  as a restore from an older backup.
+- **A space you can read part of is a space you can see.** A space granted at
+  one folder and nowhere wider used to be invisible, which made the one thing
+  somebody could read unreachable. Visibility is asked of the scopes statements
+  actually name.
+- **Every change to the policy is written down**, in the same words the
+  statements list shows: `allow read public on Elections`. Decisions are not
+  logged — a line per permission check is a line per request — which is what
+  the explain endpoint is for instead.
+
 `PERMISSIONS_PLAN.md` records the twenty decisions behind this and what is
 built next.
 

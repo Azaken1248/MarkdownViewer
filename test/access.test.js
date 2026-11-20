@@ -81,6 +81,44 @@ console.log("=== the scopes a document is subject to ===");
     ["Elections|a.md", "Elections|null", "null|null"]);
 }
 
+console.log("=== a path this will not decide about ===");
+{
+  /* `..` is not a name. `Public/../Secret/notes.md` names a document in
+   * Secret and would be attributed to the space called Public, which is a
+   * deny on Secret walked around. Nothing routes such a path here —
+   * lib/docs/paths.js refuses it long before — and this layer declines it
+   * anyway, because a boundary that is only correct while its callers are
+   * correct is one bug away from not being one.
+   */
+  const asked = (docPath) => decide({
+    user: editor,
+    groups: ["everyone"],
+    statements: [EVERYONE_AT_ROOT, stmt("deny", "read", group("everyone"), "Secret")],
+    docPath,
+    action: "doc:read"
+  });
+
+  check("a document in a space closed to everyone is refused",
+    asked("Secret/notes.md").allowed, false);
+  check("...and the same document reached through its neighbour is refused too",
+    [asked("Public/../Secret/notes.md").allowed, asked("Public/../Secret/notes.md").reason],
+    [false, "the path is not one this can decide about: Public/../Secret/notes.md"]);
+  check("...however many steps it takes",
+    asked("a/b/../../Secret/notes.md").allowed, false);
+  check("a single dot is refused as well, being equally not a name",
+    asked("./Public/a.md").allowed, false);
+  check("...and nothing is read before the refusal",
+    asked("Public/../Secret/notes.md").considered, []);
+  check("no path at all is not a path it will decide about either",
+    decide({ user: editor, groups: ["everyone"], statements: [EVERYONE_AT_ROOT],
+      docPath: null, action: "doc:read" }).allowed,
+    true);
+  check("a name that merely starts with dots is a name",
+    [access.unreducible("..hidden/a.md"), access.unreducible("Public/...rc")], [false, false]);
+  check("...and is decided normally",
+    asked("..hidden/a.md").allowed, true);
+}
+
 console.log("=== the decision table: statements in, a decision and a reason out ===");
 
 /* Each row is: what the library says, who is asking, about what, for which
@@ -651,6 +689,251 @@ console.log("=== groups, and the membership that is not stored ===");
     store.addMember(everyone.id, "u_edit");
     return store.groupsOf("u_edit").filter((one) => one === "everyone").length;
   })(), 1);
+}
+
+console.log("=== every change to the policy is written down ===");
+{
+  /* A change to who may read what is a security event. A policy that changes
+   * without a trace is the one kind of change an incident review cannot
+   * reconstruct — so each of these writes one line, in the same words the
+   * statements list shows.
+   *
+   * Decisions are deliberately not logged: a line per permission check is a
+   * line per request, which is a log nobody reads and a disk nobody expected
+   * to fill. `explain` is how a single decision is accounted for.
+   */
+  const lines = [];
+  const watched = new AccessStore({
+    db: db.open(path.join(where, "audited")),
+    markdownDir: library,
+    audit: (event, fields) => lines.push({ event, ...fields })
+  });
+
+  watched.ensureBaseline({ actor: "aza" });
+  check("the migration says it ran, and how much it made",
+    lines.filter((one) => one.event === "access.baseline"),
+    [{ event: "access.baseline", spaces: 3, actor: "aza" }]);
+  check("...and names each space it created",
+    lines.filter((one) => one.event === "access.space.created").map((one) => one.space).sort(),
+    ["<ungrouped>", "Contra NES Extension", "Elections"]);
+  check("...and the group it had to have",
+    lines.filter((one) => one.event === "access.group.created").map((one) => one.group),
+    ["everyone"]);
+  check("...and the statement it wrote, in words",
+    lines.filter((one) => one.event === "access.statement.written").map((one) => one.statement),
+    ["allow manage group:everyone on <root>"]);
+
+  lines.length = 0;
+  const written = watched.write({
+    effect: "deny",
+    subject: { kind: "group", id: watched.groupByName("everyone").id },
+    spaceDir: "Elections",
+    level: "read",
+    actor: "aza"
+  });
+
+  check("closing a space is one line that reads as the policy",
+    lines.map((one) => [one.event, one.statement, one.actor]),
+    [["access.statement.written", "deny read group:everyone on Elections", "aza"]]);
+
+  lines.length = 0;
+  watched.remove(written.id);
+  check("...and opening it again says what was taken away",
+    lines.map((one) => [one.event, one.statement]),
+    [["access.statement.removed", "deny read group:everyone on Elections"]]);
+
+  lines.length = 0;
+  const temp = watched.insertGroup("temps");
+  watched.deleteGroup(temp.id);
+  check("a group coming and going is two lines",
+    lines.map((one) => [one.event, one.group]),
+    [["access.group.created", "temps"], ["access.group.deleted", "temps"]]);
+
+  lines.length = 0;
+  check("a statement written for a group that does not exist says so in the log",
+    (() => {
+      watched.write({ effect: "allow", subject: { kind: "group", id: "grp_vanished" }, level: "read" });
+      return lines.map((one) => one.statement);
+    })(),
+    ["allow read group:grp_vanished on <root>"]);
+
+  lines.length = 0;
+  check("a statement that was not there is not a change",
+    [watched.remove("stmt_nope"), lines], [false, []]);
+  check("...nor is a group that was not there",
+    [watched.deleteGroup("grp_nope"), lines], [false, []]);
+
+  lines.length = 0;
+  check("asking a question is not a change, however many times it is asked",
+    (() => {
+      watched.decide(editor, DOC, "doc:read");
+      watched.effectiveLevel(editor, DOC);
+      watched.visibleSpaces(editor);
+      return lines;
+    })(),
+    []);
+
+  check("a store made without an audit hook does not fall over",
+    (() => {
+      const quiet = new AccessStore({
+        db: db.open(path.join(where, "quiet")),
+        markdownDir: library
+      });
+      quiet.ensureBaseline({});
+      return quiet.statements().length;
+    })(),
+    1);
+}
+
+console.log("=== a space you can read part of is a space you can see ===");
+{
+  /* The tree's half of the rule: an ancestor of something readable has to be
+   * listed, or the readable thing cannot be reached. A space granted at one
+   * folder and nowhere wider was invisible, which made the one document
+   * somebody could read unreachable.
+   */
+  const everyone = store.groupByName("everyone");
+  const partly = new AccessStore({
+    db: db.open(path.join(where, "partly")),
+    markdownDir: library
+  });
+  partly.ensureBaseline({});
+  // Nothing at the root, so the only statements are the ones written here.
+  partly.db.prepare("DELETE FROM grants").run();
+  partly.forget();
+
+  const theirEveryone = partly.groupByName("everyone");
+  partly.write({
+    effect: "allow",
+    subject: { kind: "group", id: theirEveryone.id },
+    spaceDir: "Contra NES Extension",
+    prefix: "06-release",
+    level: "read"
+  });
+
+  check("the document inside that folder can be read",
+    partly.decide(editor, "Contra NES Extension/06-release/notes.md", "doc:read").allowed, true);
+  check("...and nothing else in the space can",
+    partly.decide(editor, DOC, "doc:read").allowed, false);
+  check("...and the space is listed, or that document is unreachable",
+    partly.visibleSpaces(editor).has(partly.spaceByDir("Contra NES Extension").id), true);
+  check("...while a space with nothing readable in it is not listed",
+    partly.visibleSpaces(editor).has(partly.spaceByDir("Elections").id), false);
+
+  check("a space closed by a deny is not listed, whatever is allowed beneath it",
+    (() => {
+      partly.write({
+        effect: "deny",
+        subject: { kind: "group", id: theirEveryone.id },
+        spaceDir: "Contra NES Extension",
+        level: "read"
+      });
+      return partly.visibleSpaces(editor).has(partly.spaceByDir("Contra NES Extension").id);
+    })(),
+    false);
+
+  check("a document named .probe is a document, not a question about a space",
+    (() => {
+      partly.db.prepare("DELETE FROM grants").run();
+      partly.forget();
+      partly.write({
+        effect: "allow",
+        subject: { kind: "group", id: theirEveryone.id },
+        spaceDir: "Elections",
+        prefix: ".probe",
+        level: "read"
+      });
+      return [
+        partly.decide(editor, "Elections/.probe", "doc:read").allowed,
+        partly.visibleSpaces(editor).has(partly.spaceByDir("Elections").id)
+      ];
+    })(),
+    [true, true]);
+
+  check("every space is still visible under the statement the migration writes",
+    (() => {
+      void everyone;
+      return store.visibleSpaces(editor).size;
+    })(),
+    3);
+}
+
+console.log("=== a statement cannot outlive what it names ===");
+{
+  /* A foreign key would have done this, if subject_id could have one — it
+   * holds a user id, a group id or nothing, and a column that means three
+   * things cannot reference one table. So the cascade is a trigger in the
+   * schema, rather than a method somebody has to remember.
+   *
+   * What it prevents: an unresolvable statement applies to nobody, so an
+   * allow silently stops allowing and a deny silently stops denying. Measured
+   * before the trigger existed, deleting the everyone group left two
+   * statements in place and took the whole library's policy with it.
+   */
+  const locked = store.insertGroup("locked-out");
+  metadata.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at)
+                    VALUES ('u_other', 'other', 'x', 'editor', '2026-01-01')`).run();
+
+  store.write({
+    effect: "deny",
+    subject: { kind: "group", id: locked.id },
+    spaceDir: "Elections",
+    level: "read"
+  });
+  store.write({
+    effect: "allow",
+    subject: { kind: "user", id: "u_other" },
+    spaceDir: "Elections",
+    level: "write"
+  });
+
+  const before = store.statements().length;
+  check("(a statement for a group and one for an account)", before >= 3, true);
+
+  check("deleting the group takes its statement with it",
+    [store.deleteGroup(locked.id), store.statements().length],
+    [true, before - 1]);
+  check("...and deleting the account takes its statement too",
+    (() => {
+      metadata.prepare("DELETE FROM users WHERE id = 'u_other'").run();
+      store.forget();
+      return store.statements().length;
+    })(),
+    before - 2);
+  check("deleting a group that is not there changes nothing",
+    [store.deleteGroup("grp_nope"), store.statements().length], [false, before - 2]);
+
+  check("nothing is left naming something that is gone", store.unresolved(), []);
+
+  /* And if one ever does appear — a hand-edited database, or a restore from a
+   * backup made before the triggers existed — it is visible rather than
+   * quietly inert.
+   */
+  check("a statement that names nothing is reported rather than ignored",
+    (() => {
+      metadata.prepare(`INSERT INTO grants
+        (id, effect, subject_kind, subject_id, space_id, path_prefix, level, granted_at)
+        VALUES ('stmt_orphan', 'deny', 'group', 'grp_vanished', NULL, NULL, 'read', '2026-01-01')`).run();
+      store.forget();
+      return [store.unresolved().length, store.unresolved()[0].id];
+    })(),
+    [1, "stmt_orphan"]);
+  check("...and applies to nobody while it is there, which is why it is reported",
+    store.decide(editor, DOC, "doc:read").allowed, true);
+  check("...and the same for one that names an account rather than a group",
+    (() => {
+      metadata.prepare(`INSERT INTO grants
+        (id, effect, subject_kind, subject_id, space_id, path_prefix, level, granted_at)
+        VALUES ('stmt_orphan_user', 'allow', 'user', NULL, NULL, NULL, 'read', '2026-01-01')`).run();
+      store.forget();
+      return store.unresolved().map((one) => one.id).sort();
+    })(),
+    ["stmt_orphan", "stmt_orphan_user"]);
+
+  metadata.prepare("DELETE FROM grants WHERE id = 'stmt_orphan_user'").run();
+
+  metadata.prepare("DELETE FROM grants WHERE id = 'stmt_orphan'").run();
+  store.forget();
 }
 
 console.log("=== the cache, which must never answer with a permission that is gone ===");

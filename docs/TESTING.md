@@ -705,6 +705,24 @@ stored for the public principal, a statement written at the root through the
 store rather than as a literal, one written with an expiry, and the store's own
 `effectiveLevel`.
 
+Two branches were **deleted rather than covered**, which is the other half of
+that number meaning anything: a fallback in `remove` and one in `deleteGroup`
+that could not be reached, because each read its row before deleting it. Both
+became an early return instead. Writing a check for a branch that cannot fail
+is how a suite fills with noise.
+
+A review of the module before any route consulted it then found four more
+things, each measured before it was believed:
+
+| | Found | Measured |
+| --- | --- | --- |
+| security | a path containing `..` was attributed to the wrong space | a deny on `Secret` was walked around by `Public/../Secret/notes.md` |
+| security | deleting a group left statements naming nothing, and an unresolvable statement applies to nobody | deleting `everyone` left two statements in place and took the library's whole policy with it |
+| correctness | a space granted at one folder was invisible | the document was readable and the space was not listed, so it could not be reached |
+| operations | the store took an audit hook and never called it | zero calls, so a policy could change without a trace |
+
+Eight more deliberate breaks over those four, none of which survived.
+
 ### A diagram a reader can actually look at
 
 Inside the app a diagram in a document can be opened in the editor. A reader
