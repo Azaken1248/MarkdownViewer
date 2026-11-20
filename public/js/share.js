@@ -53,6 +53,14 @@
     token: shareTokenFromLocation()
   });
 
+  /* Opening a diagram on its own.
+   *
+   * A shared document has no editor to send one to, and the copy in the
+   * column of words is small. The view is of the drawing only, and it is
+   * drawn from the same source the page drew it from.
+   */
+  const diagrams = DiagramView.create({ content: elements.content });
+
   /* Writing on it.
    *
    * Filed under the share token, so two shared documents open in the same
@@ -221,6 +229,10 @@
 
     // Diagrams, code and math, exactly as the app renders them.
     await MarkdownCore.renderMermaidBlocks(elements.content);
+
+    // After the diagrams, because a block that has not been drawn yet has no
+    // drawing to open and gets no button.
+    diagrams.bind();
 
     // The headings exist once the document has rendered, so the outline is
     // built from what is actually on the page rather than from the markdown.

@@ -1018,6 +1018,99 @@ module.exports = async (ctx) => {
       [...asPublished.problems, ...refused.problems, ...half.problems]
         .filter((one) => !/Could not parse CSS/.test(one)), []);
   }
+
+  console.log("=== a diagram in a shared document opens on its own ===");
+  {
+    /* In the app a diagram can be opened in the editor. A shared document has
+     * nowhere like that to send one — the document belongs to whoever sent
+     * the link, and a stranger has no session — and the copy in the column of
+     * words is a slot in a page of prose. So the drawing gets a view of its
+     * own, drawn again from the source kept on the block.
+     */
+    const drawing = [
+      "# How it goes",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "    A[Write it] --> B[Ship it]",
+      "```",
+      "",
+      "Text after the diagram.",
+      ""
+    ].join("\n");
+
+    const made = await asAdmin("POST", "/api/docs", { fileName: "drawn.md", content: drawing });
+    check("(a document with a diagram in it)", made.status, 201);
+    const drawnFile = made.body.file;
+
+    const drawnShare = await asAdmin("POST", `/api/docs/${drawnFile}/share`);
+    check("(and a link to it)", drawnShare.status, 201);
+    const drawnToken = drawnShare.body.url.split("/").pop();
+
+    const opened = shareWindow(`${ORIGIN}/s/${drawnToken}`);
+    const doc = opened.window.document;
+    await waitUntil(() => doc.getElementById("shareContent").classList.contains("visible"));
+    // The drawing is what the button hangs off, so the wait is for the
+    // drawing rather than for the words.
+    await waitUntil(() => doc.querySelector("#shareContent .mermaid-block .diagram-open"));
+
+    const block = doc.querySelector("#shareContent .mermaid-block");
+    const opener = /** @type {HTMLElement} */ (block.querySelector(".diagram-open"));
+
+    check("the diagram is offered on its own", Boolean(opener), true);
+    check("...by a control that says what it does",
+      opener.getAttribute("aria-label"), "Open this diagram");
+    check("...and that an export of the document does not carry",
+      opener.dataset.export, "skip");
+
+    opener.dispatchEvent(new opened.window.MouseEvent("click", { bubbles: true }));
+    await waitUntil(() => doc.querySelector(".diagram-view:not([hidden])"));
+
+    const view = /** @type {HTMLElement} */ (doc.querySelector(".diagram-view"));
+    check("clicking it opens a view of the drawing", view.hidden, false);
+    check("...which is a dialog, and says so",
+      [view.getAttribute("role"), view.getAttribute("aria-modal")], ["dialog", "true"]);
+    check("...with the focus on the way out of it",
+      doc.activeElement.classList.contains("diagram-view-close"), true);
+    check("...and the page behind it held still",
+      doc.body.classList.contains("is-viewing-diagram"), true);
+
+    // The block is put in place at once and drawn a moment later, which is
+    // the moment worth waiting for.
+    await waitUntil(() => view.querySelector(".diagram-view-stage .mermaid-block svg"));
+    const shown = /** @type {HTMLElement} */ (view.querySelector(".diagram-view-stage .mermaid-block"));
+
+    check("the view holds the same drawing, from the same source",
+      shown.dataset.mermaidSource.includes("flowchart TD"), true);
+    check("...drawn, rather than left as its source text",
+      Boolean(shown.querySelector("svg")), true);
+    check("...and the document still has its own copy",
+      Boolean(block.querySelector("svg")), true);
+
+    view.dispatchEvent(new opened.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    check("Escape puts it away", view.hidden, true);
+    check("...letting the page move again",
+      doc.body.classList.contains("is-viewing-diagram"), false);
+    check("...and giving the focus back to the control that opened it",
+      doc.activeElement === opener, true);
+    check("...with nothing of the drawing left in it",
+      view.querySelector(".diagram-view-stage").childNodes.length, 0);
+
+    // Again, because a view that can only be opened once is a view that
+    // leaked something on the way out.
+    opener.dispatchEvent(new opened.window.MouseEvent("click", { bubbles: true }));
+    await waitUntil(() => !view.hidden);
+    check("it opens again afterwards", view.hidden, false);
+
+    // The backdrop, which is the frame itself; a click inside the drawing is
+    // how a pan ends and must not close anything.
+    view.dispatchEvent(new opened.window.MouseEvent("click", { bubbles: true }));
+    check("...and a click on the page behind closes it", view.hidden, true);
+
+    check("none of it logged an error",
+      opened.problems.filter((one) => !/Could not parse CSS/.test(one)), []);
+  }
 };
 
 // A GET with no cookies at all, which is what a visitor following a link is.

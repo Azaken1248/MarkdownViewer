@@ -765,6 +765,13 @@ and zoom, `<details>` sections, ticking the boxes in a task list, and writing
 on it with the pen. A checklist that cannot be ticked is a picture of a
 checklist, and a checklist is one of the things people share.
 
+**A diagram opens on its own.** Point at one and a control appears in its
+corner; it puts the drawing over the page at the size of the window, with the
+same pan and zoom it has in the column. `Esc` or a click on the page behind
+puts it away. Inside the app a diagram can be opened in the editor instead,
+which a reader of a link has no way to reach and no business reaching — the
+document is not theirs. This is the part of it that is just looking.
+
 None of it reaches the document. A reader's ticks and pen marks are a layer
 of their own, kept in their browser under the share token and never sent
 anywhere — you cannot see them, and two shared documents open in one browser

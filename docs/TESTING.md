@@ -621,6 +621,31 @@ turning one back on leaving the other alone, and replacing the link keeping
 what it allowed — rotating a URL is republishing the same document. A switch
 has to be true or false, and a request has to name at least one.
 
+### A diagram a reader can actually look at
+
+Inside the app a diagram in a document can be opened in the editor. A reader
+following a link has no way there and no business there — the document is not
+theirs — and the copy in the page is a slot in a column of prose, which for
+anything past a handful of nodes is a drawing nobody can read. So the drawing
+gets a view of its own: the page over, the diagram at the size of the window,
+with the pan and zoom it already had.
+
+It is drawn again from the source kept on the block rather than moved or
+copied. What is in the block is an SVG with svg-pan-zoom's sizing and viewport
+transform written into it, so a copy of it is a copy of the box it was
+squeezed into, and moving the live one leaves a hole in the document while the
+view is open. Rendering from source is the path every diagram on the page
+already took, which is also why there is nothing new to test about the
+drawing itself.
+
+What the checks are about is the view as a dialog: the control appears only on
+a block that has a drawing in it, is marked as furniture so an export of the
+document does not carry it, says what it does, opens a thing that announces
+itself as a dialog, takes the focus and gives it back to the control it came
+from, holds the page behind it still, closes on `Esc` and on a click on the
+page behind but not on a click inside the drawing — which is how a pan ends —
+and opens again afterwards with nothing of the last drawing left in it.
+
 ### A paste that is words, and a drop that says where
 
 The pasted-pictures story in `editing.js` stopped at pictures. What a paste
