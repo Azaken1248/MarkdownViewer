@@ -314,6 +314,147 @@ async function aDocumentRenders(browser, server) {
     /katex|Main|Math/i.test(maths.styled), true);
   check("typesetting it complained about nothing", problems, []);
 
+  /* And a diagram, which only a browser can answer for — because what is
+   * being checked is what happens when the drawing is rasterised.
+   *
+   * Word and PDF turn each diagram into a PNG the same way: serialise the
+   * SVG, load it through an <img>, draw it on a canvas. Inside an <img> an
+   * SVG is on its own, with none of the page's CSS — so a drawing that is
+   * styled from the page rather than from itself comes out as an empty
+   * frame. Mermaid writes its own <style> into the SVG, which is what makes
+   * this work, and this is the check that says so.
+   *
+   * jsdom cannot answer any of it: no layout, no rasteriser and a stubbed
+   * Mermaid, so the suites that stub it would pass either way.
+   */
+  const diagramMade = await page.evaluate(async () => {
+    const session = await (await fetch("/api/session")).json();
+    const answer = await fetch("/api/docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
+      body: JSON.stringify({
+        fileName: "drawn.md",
+        overwrite: true,
+        content: "# Drawn\n\n```mermaid\nflowchart TD\n    A[Run the tests] --> B[Ship it<br/>today]\n```\n"
+      })
+    });
+    return answer.status;
+  });
+  check("(a document with a diagram in it)", [200, 201].includes(diagramMade), true);
+
+  await page.goto(`${server.origin}/drawn.md`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#docContent .mermaid-block svg", { state: "attached", timeout: 30000 });
+
+  const diagram = await page.evaluate(async () => {
+    const svg = /** @type {SVGGraphicsElement} */ (
+      document.querySelector("#docContent .mermaid-block svg"));
+    const box = svg.getBBox();
+
+    // The export's own steps, on the same drawing, with and without its
+    // words — so the answer is the picture rather than the markup.
+    const pixelsOf = async (wordless) => {
+      const clone = /** @type {SVGElement} */ (svg.cloneNode(true));
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("width", String(Math.round(box.width)));
+      clone.setAttribute("height", String(Math.round(box.height)));
+
+      if (wordless) {
+        for (const words of clone.querySelectorAll("text, foreignObject")) {
+          words.remove();
+        }
+      }
+
+      const source = new XMLSerializer().serializeToString(clone);
+      const picture = new Image();
+      const loaded = new Promise((done) => {
+        picture.onload = () => done(true);
+        picture.onerror = () => done(false);
+      });
+
+      picture.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+      if (!(await loaded)) {
+        return null;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(box.width);
+      canvas.height = Math.round(box.height);
+      const paper = canvas.getContext("2d");
+      paper.drawImage(picture, 0, 0, canvas.width, canvas.height);
+      return paper.getImageData(0, 0, canvas.width, canvas.height).data;
+    };
+
+    const withWords = await pixelsOf(false);
+    const without = await pixelsOf(true);
+
+    let differing = 0;
+    if (withWords && without) {
+      for (let at = 0; at < withWords.length; at += 4) {
+        if (withWords[at] !== without[at]
+          || withWords[at + 1] !== without[at + 1]
+          || withWords[at + 2] !== without[at + 2]
+          || withWords[at + 3] !== without[at + 3]) {
+          differing += 1;
+        }
+      }
+    }
+
+    return { rasterised: Boolean(withWords), pixelsTheWordsDraw: differing };
+  });
+
+  check("the drawing rasterises the way every export rasterises it",
+    diagram.rasterised, true);
+  check("...and its words are in the picture, not only in the markup",
+    diagram.pixelsTheWordsDraw > 0, true);
+
+  /* And the export's copy of it describes itself.
+   *
+   * On the page a Mermaid drawing is sized by the column it sits in: width
+   * "100%", no height, no viewBox, overflow hidden, a max-width in pixels,
+   * and a transform saying where the pan-and-zoom window is. All of that is
+   * about the app's layout and all of it used to travel into the export —
+   * where nothing scales a viewBox-less SVG, so a page narrower than the app
+   * took the right-hand side off the drawing. Measured before this changed:
+   * viewBox null, width "100%".
+   */
+  const exported = await page.evaluate(async () => {
+    const article = document.getElementById("docContent");
+    const built = await window.ExportSnapshot.build({ title: "Drawn", article });
+    const html = String(built.html || built);
+
+    // Dropped into a page narrower than the app's column, which is what a
+    // printed sheet and somebody else's window both are.
+    const holder = document.createElement("div");
+    holder.style.cssText = "position:fixed;left:-10000px;top:0;width:480px";
+    holder.innerHTML = html.replace(/<\/?(html|head|body)[^>]*>/g, "");
+    document.body.appendChild(holder);
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+
+    const svg = /** @type {SVGGraphicsElement} */ (holder.querySelector(".mermaid-block svg"));
+    const facts = svg
+      ? {
+        viewBox: svg.getAttribute("viewBox"),
+        width: svg.getAttribute("width"),
+        overflow: svg.style.overflow || "",
+        drawnWidth: Math.round(svg.getBBox().width),
+        shown: Math.round(svg.getBoundingClientRect().width)
+      }
+      : null;
+
+    holder.remove();
+    return facts;
+  });
+
+  check("the export's copy of a diagram carries its own bounds",
+    /^[\d.-]+ [\d.-]+ [\d.]+ [\d.]+$/.test(exported?.viewBox || ""), true);
+  check("...and a size in its own units rather than the column's",
+    /^\d+$/.test(exported?.width || ""), true);
+  check("...with the rule that did the cutting taken off",
+    exported?.overflow, "");
+  check("...so all of it is inside the box it is given",
+    exported.drawnWidth > 0 && exported.shown > 0, true);
+  check("drawing it complained about nothing", problems, []);
+
   await page.close();
 }
 

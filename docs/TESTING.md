@@ -56,15 +56,32 @@ anything. It does not run a Web Worker. It does not paint. And its event loop
 is not a browser's, so anything timing-dependent passes or fails for reasons
 that are not the app's.
 
-`browser` is five checks against exactly those gaps — the console is empty,
+`browser` is six checks against exactly those gaps — the console is empty,
 the CSP refuses an injected script, the layout measures what the stylesheet is
 read to mean, a document renders with the real libraries fetched and their SRI
-hashes enforced, and the theme toggle changes painted colours. The first page
-it ever loaded found a defect: the app's own icons, written as absolute URLs
+hashes enforced, a diagram survives being exported, and the theme toggle
+changes painted colours. The first page it ever loaded found a defect: the app's own icons, written as absolute URLs
 from `PUBLIC_BASE_URL`, were refused by the app's own `img-src 'self'` on any
 other hostname. `layout` and `mobile` keep their reasoning about the
 stylesheet — it is fast and it catches a different class — and `browser`
 measures the same claims, so the two have to agree.
+
+The diagram one is there because the defect it describes cannot be seen
+anywhere else. Word and PDF turn each drawing into a PNG by serialising the
+SVG, loading it through an `<img>` and painting it on a canvas; jsdom has no
+rasteriser, no layout and a stubbed Mermaid, so the suites that stub it pass
+either way. Two things are measured: that taking the labels out of the drawing
+changes the picture — which is the only way to say the words reach it rather
+than merely being in the markup — and that the export's copy of the SVG
+carries its own `viewBox` and size rather than the ones the app's column gave
+it. Before that was fixed the copy had no `viewBox` at all, and a page
+narrower than the column took the right-hand side off the drawing.
+
+It also recorded something worth keeping: an SVG rasterised through an `<img>`
+is widely said to drop `<foreignObject>`, which is where Mermaid puts its
+labels. Measured in this Chromium it does not — 1106 pixels of words with HTML
+labels against 1080 with SVG text — so that was not the defect, and the
+diagram configuration was left alone.
 
 Install the browser with `npx playwright install chromium --only-shell`. It is
 266MB, needs no system packages, and is the same one the server uses to draw

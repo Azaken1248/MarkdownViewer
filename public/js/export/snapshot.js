@@ -468,6 +468,67 @@ var ExportSnapshot = (function () {
    * nesting Chrome does not reliably draw, and a flowchart came out as the
    * empty box it was sitting in.
    */
+  /* A diagram that describes itself.
+   *
+   * On the page, Mermaid's SVG is sized by the column it sits in: width
+   * "100%", no height, no viewBox, `overflow: hidden` and a `max-width` in
+   * pixels — and, once the pan-and-zoom is on it, a transform on an inner
+   * group that says where in the drawing the window currently is. All of
+   * that is about the app's layout, and all of it travels with the SVG into
+   * an export.
+   *
+   * Which is why an exported diagram came out cut off. Nothing scales a
+   * viewBox-less SVG to fit: in a narrower page the box is narrower, the
+   * drawing is not, and `overflow: hidden` takes the difference off the
+   * right-hand side. A wide flowchart lost its last few boxes, and whatever
+   * the reader had panned away from was missing too.
+   *
+   * So the copy is given the drawing's own bounds as a viewBox and an
+   * explicit size, and the layout rules it was wearing are taken off. The
+   * bounds come from the live element because getBBox needs a rendered one,
+   * and they already account for the pan-and-zoom transform — so the
+   * transform can stay where it is and still be framed correctly.
+   */
+  function describeItself(live, copy) {
+    const bounds = boundsOfDrawing(live);
+    if (!bounds) {
+      return;
+    }
+
+    copy.setAttribute("viewBox", bounds.viewBox);
+    copy.setAttribute("width", String(Math.round(bounds.width)));
+    copy.setAttribute("height", String(Math.round(bounds.height)));
+    copy.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+    /* The styles that are about the app's column rather than the drawing.
+     * max-width in pixels stops it growing to the page it lands on, and
+     * overflow: hidden is what does the cutting.
+     */
+    copy.style.removeProperty("max-width");
+    copy.style.removeProperty("overflow");
+    copy.style.maxWidth = "100%";
+    copy.style.height = "auto";
+
+    for (const control of copy.querySelectorAll(".svg-pan-zoom-control")) {
+      control.remove();
+    }
+  }
+
+  // Every diagram in the copy, whatever the format: a cut-off picture and a
+  // cut-off inline drawing are the same defect, and the PNG is made from the
+  // same SVG.
+  function settleDiagrams(live, copy) {
+    const there = live.querySelectorAll(".mermaid-block svg");
+    const here = copy.querySelectorAll(".mermaid-block svg");
+
+    here.forEach((drawing, index) => {
+      const drawn = there[index];
+      if (drawn) {
+        describeItself(drawn, /** @type {SVGElement} */ (drawing));
+      }
+    });
+  }
+
   async function flattenDiagrams(live, copy) {
     const there = live.querySelectorAll(".mermaid-block");
     const here = copy.querySelectorAll(".mermaid-block");
@@ -951,6 +1012,7 @@ html, body {
     const copy = /** @type {HTMLElement} */ (article.cloneNode(true));
     recordSvgSizes(article, copy);
     stripLiveParts(copy);
+    settleDiagrams(article, copy);
     await embedImages(copy, budget);
 
     if (forWord || paged) {
