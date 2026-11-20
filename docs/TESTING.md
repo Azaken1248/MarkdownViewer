@@ -622,6 +622,32 @@ turning one back on leaving the other alone, and replacing the link keeping
 what it allowed — rotating a URL is republishing the same document. A switch
 has to be true or false, and a request has to name at least one.
 
+### The flake that was a defect
+
+Three full runs of the suite failed on `ECONNRESET` and "socket hang up" from
+requests the `dom` and `diagram-page` suites made, each time passing when run
+on their own. That pattern reads as contention and was filed as one for a
+while, which is the wrong answer: it was the server.
+
+Node holds an idle keep-alive connection for five seconds and then closes it,
+and nothing tells the client. The suite's own client pools connections — so
+does `http.globalAgent`, so does every browser and every proxy — so a request
+could be written into a socket at the moment the server closed it, and die
+with nothing wrong at either end. The fix is for the server not to be the side
+that closes first; `docs/OPERATIONS.md` has the numbers and why they are those
+numbers.
+
+The check that holds it is worth reading as an example of a check that
+measured nothing. The first version asked whether a second request on an idle
+connection was answered — and it passed with the defect in place, because an
+agent whose socket has gone simply opens another one and succeeds. The second
+version compared `res.socket` across two responses, which compared `null` to
+`null`: node detaches the socket from a response before `end` fires. What is
+checked now is the precondition rather than the race, since the race is a
+coincidence of timing and waiting for one is passing by luck: **the server
+does not close an idle connection**, measured by listening for `close` on the
+socket the request was given. With the default it fires after 6.3 seconds.
+
 ### A decision table, because a scenario cannot show this
 
 `access` checks `lib/access.js`, and it is in two halves on purpose.

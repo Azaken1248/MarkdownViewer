@@ -753,6 +753,30 @@ async function bootstrap() {
     }
   });
 
+  /* Who closes an idle connection, and when.
+   *
+   * Node keeps a connection alive for 5 seconds after the last response and
+   * then closes it. Every modern HTTP client keeps connections alive too —
+   * node's own globalAgent does, as do browsers, nginx and every load
+   * balancer — and none of them is told when the server decides a socket is
+   * finished. So there is a window: the client picks a pooled socket and
+   * writes a request into it at the moment the server is closing it, and the
+   * request dies as ECONNRESET or "socket hang up". Nothing is wrong with
+   * either side; the request is simply lost.
+   *
+   * The fix is to stop being the side that closes first. 65 seconds is longer
+   * than the idle timeout of the proxies this sits behind — nginx keeps a
+   * connection 75 seconds by default, AWS's load balancer 60 — so the client
+   * is what retires a connection, and a client retiring its own socket cannot
+   * race itself.
+   *
+   * headersTimeout must stay above keepAliveTimeout: it is measured from the
+   * first byte of a request, and set lower it would cut off a connection that
+   * is merely idle between requests.
+   */
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 70000;
+
   attachGracefulShutdown(server);
 }
 

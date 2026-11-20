@@ -78,6 +78,16 @@ the proxy's job. What it needs from the proxy is the original host and scheme,
 and what the proxy needs from you is `TRUST_PROXY` set — without it
 `X-Forwarded-*` is ignored, which is the safe default and the wrong one here.
 
+**Idle connections.** The server holds a keep-alive connection for 65 seconds
+and will not accept headers for 70, both deliberately longer than the idle
+timeout of what sits in front of it: nginx keeps a connection 75 seconds by
+default and AWS's load balancer 60. Node's own default is 5 seconds, and a
+server that closes first loses requests — the client picks a pooled socket and
+writes into it exactly as the server is closing it, and the request dies as
+`ECONNRESET` or "socket hang up" with nothing wrong at either end. If you put
+a proxy in front with an idle timeout **above** 65 seconds, raise these to
+match, or you will see those resets in its error log.
+
 ### nginx
 
 ```nginx

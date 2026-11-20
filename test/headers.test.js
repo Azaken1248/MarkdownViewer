@@ -223,6 +223,69 @@ const { pathToFileURL } = require("url");
     await plain.stop();
   }
 
+  console.log("=== and nobody loses a request to a connection the server closed ===");
+  {
+    /* The race this is about.
+     *
+     * Node holds an idle keep-alive connection for 5 seconds and then closes
+     * it. Every modern client pools connections — node's own globalAgent,
+     * browsers, nginx, every load balancer — and none of them is told when
+     * the server has decided a socket is finished. So a client can write a
+     * request into a socket at the moment the server closes it, and the
+     * request dies as ECONNRESET with nothing wrong at either end. It cost
+     * three full runs of this suite before it was understood.
+     *
+     * What is checked is the precondition rather than the race, because the
+     * race is a coincidence of timing and a check that waits for one is a
+     * check that passes by luck: **the server is not the side that closes an
+     * idle connection.** A socket the server never closes cannot be closed
+     * underneath a request.
+     *
+     * Not the status of the second request, which was the first version of
+     * this check and was worthless: an agent whose socket has gone opens
+     * another one and the request succeeds either way. Nor res.socket, which
+     * node has already detached by the time a response ends — it reads as
+     * null, so comparing two of them compared null to null. Measured with
+     * the default: closed after 6.3 seconds, and the second request on a new
+     * socket.
+     */
+    const kept = await startTestServer();
+    try {
+      const http = require("http");
+      const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+
+      // The socket is taken from the request, which is the only place it can
+      // still be read.
+      const once = (pathname) => new Promise((resolve, reject) => {
+        let socket = null;
+        const req = http.get(`${kept.origin}${pathname}`, { agent }, (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode, socket }));
+        });
+        req.on("socket", (s) => { socket = s; });
+        req.on("error", reject);
+      });
+
+      const first = await once("/healthz");
+      let closed = false;
+      first.socket.on("close", () => { closed = true; });
+
+      // Longer than the five seconds node would have waited, short enough
+      // that the suite is not paying much for the answer.
+      await new Promise((resolve) => setTimeout(resolve, 7000));
+      const second = await once("/healthz");
+
+      check("the server does not hang up on a connection left idle", closed, false);
+      check("...so the client's pooled socket is the one it gets back",
+        second.socket === first.socket, true);
+      check("...and the request on it is answered", second.status, 200);
+
+      agent.destroy();
+    } finally {
+      await kept.stop();
+    }
+  }
+
   process.exit(finish());
 })().catch((error) => {
   console.error(error);
