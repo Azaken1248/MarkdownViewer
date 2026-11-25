@@ -480,14 +480,66 @@ module.exports = async (ctx) => {
     const found = await admin.get("/api/docs/search?q=Delta");
     check("a search does not answer with it either",
       found.body.matches.some((match) => match.file === inProjects), false);
-    check("...and its count is the number of results it returned",
-      found.body.total, found.body.matches.length);
+    check("...and its count is what the caller may see, not what matched",
+      [found.body.total, found.body.matches.length], [0, 0]);
+    check("...while a search for something outside it is untouched",
+      (await admin.get("/api/docs/search?q=Beta")).body.matches.length > 0, true);
+
+    /* The index is the library's, the filter is the caller's.
+     *
+     * The search reconciles the index against the list of documents it is
+     * given, and anything in the index that is not in that list is gone. Hand
+     * it a list with somebody's unreadable documents taken out and those
+     * documents are deleted from the index — for everybody, because of who
+     * happened to search. The search above ran that reconcile with the space
+     * closed; this is the check that it did not eat anything.
+     */
+    /* The index is the library's, and this is where that is measured.
+     *
+     * reconcile works out what has changed by comparing the index against the
+     * list of documents it is handed, and anything in the index that is not in
+     * that list is gone. Hand it a list with somebody's unreadable documents
+     * taken out and it deletes them — and the damage hides, because the next
+     * search by anybody rebuilds them. So the row count is read straight
+     * after a search by somebody who may not see them, before anything can
+     * put them back.
+     */
+    const indexedNow = () => /** @type {any} */ (policy.db
+      .prepare("SELECT COUNT(*) AS n FROM document_index WHERE scope = 'docs'").get()).n;
+
+    const indexedBefore = indexedNow();
+    check("(the index holds the library)", indexedBefore > 50, true);
+    await admin.get("/api/docs/search?q=Delta");
+    check("a search by somebody who may not see them leaves the index alone",
+      indexedNow(), indexedBefore);
+
+    // The scan rather than the index: a token shorter than three characters
+    // is one trigrams cannot be asked about, and that path has its own filter.
+    const short = await admin.get("/api/docs/search?q=de");
+    check("...and the short-query path, which reads the documents itself, filters too",
+      short.body.matches.some((match) => match.file.startsWith("Projects/")), false);
+    check("...while still finding what is outside the closed space",
+      (await admin.get("/api/docs/search?q=be")).body.matches.length > 0, true);
+
+    policy.remove(closed.id);
+    check("with the space open again the document is found",
+      (await admin.get("/api/docs/search?q=Delta")).body.matches
+        .some((match) => match.file === inProjects),
+      true);
+
+    const reclosed = policy.write({
+      effect: "deny",
+      subject: { kind: "group", id: everyone.id },
+      spaceDir: "Projects",
+      level: "read"
+    });
+    check("(closed again, for the checks below)", reclosed.ok, true);
 
     check("a document outside the closed space is untouched",
       (await admin.get(`/api/docs/${unfiled}`)).status, 200);
 
     check("lifting the statement opens it again",
-      [policy.remove(closed.id), (await admin.get(`/api/docs/${inProjects}`)).status],
+      [policy.remove(reclosed.id), (await admin.get(`/api/docs/${inProjects}`)).status],
       [true, 200]);
 
     /* A deny on one account rather than on everyone, which is the shape that
@@ -543,10 +595,20 @@ module.exports = async (ctx) => {
       const entry = bin.body.docs.find((doc) => doc.originalFile === inProjects);
       check("(and is in the bin, under the path it came from)", Boolean(entry), true);
 
+      /* Scoped to the document itself, not to the space around it.
+       *
+       * Which is the shape that tells the two apart. A bin entry is stored
+       * under a stamped name — "Projects/20261125T…--delta.md" — so a deny on
+       * the *space* hides it whether the permission is read off the entry's
+       * own path or off the document's, because both begin with Projects. A
+       * deny on the document says which one is being asked about: the entry's
+       * own name does not match it and the document's does.
+       */
       policy.write({
         effect: "deny",
         subject: { kind: "group", id: everyone.id },
         spaceDir: "Projects",
+        prefix: "delta.md",
         level: "read"
       });
 
@@ -558,6 +620,21 @@ module.exports = async (ctx) => {
         (await admin.get(`/api/recycle-bin/${entry.file}/content`)).status, 404);
       check("...and so is restoring it, which would be a way back into the space",
         (await admin.post(`/api/recycle-bin/${entry.file}/restore`)).status, 404);
+
+      check("the bin's search answers by where the document was, not what the entry is called",
+        (await admin.get("/api/docs/search?q=Delta&scope=recycle-bin")).body.matches
+          .some((match) => match.originalFile === inProjects || match.file.includes("delta")),
+        false);
+
+      // And the folders, which need the space closed rather than one document
+      // in it: a folder's permission is asked about the directory.
+      policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
+      policy.write({
+        effect: "deny",
+        subject: { kind: "group", id: everyone.id },
+        spaceDir: "Projects",
+        level: "read"
+      });
 
       check("a folder in a closed space cannot be renamed",
         (await admin.put(`/api/folders/${server.folderIds.get("Projects")}`,

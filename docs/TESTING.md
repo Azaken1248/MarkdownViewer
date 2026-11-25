@@ -742,6 +742,24 @@ rest; a search does not answer with it and its count matches what it returned.
 A statement naming one account refuses that account and nobody else, and the
 refusal is in the audit log with the statement that caused it.
 
+The search's own checks earned their keep by failing. Four deliberate breaks
+over `lib/docs/search.js`, and **three of them survived the first time**: a bin
+entry asked about by its own name, the filter moved in front of the reconcile,
+and the short-query path forgetting to filter at all. Each named a check that
+was not there.
+
+The bin one is the instructive one. A bin entry is stored under a stamped name
+— `Projects/20261125T…--delta.md` — so a deny on the *space* hides it whether
+the permission is read off the entry's own path or off the document's, because
+both begin with `Projects`. Only a statement scoped to the document tells the
+two apart. The checks use one now.
+
+The index one hides differently: feeding the reconcile a filtered list deletes
+the missing documents from the index, and the next search by anybody puts them
+back, so nothing is visibly wrong a moment later. The row count is therefore
+read straight after a search by somebody who may not see them, before anything
+can rebuild it.
+
 Three more families are checked the same way, because each could have been
 assumed and each would have been wrong in a different place. A **bin entry** is
 not the document it was, so the bin leaves out what was deleted from a closed
