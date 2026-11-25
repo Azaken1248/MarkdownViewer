@@ -167,7 +167,7 @@ module.exports = async (ctx) => {
     /* The block, not the flag: pageEditActive() is true as soon as the editor
      * is on, which is before it has painted anything to type into.
      */
-    await waitUntil(() => Boolean(doc.querySelector('#docContent .ve-block[contenteditable="true"]')), 4000);
+    await waitUntil(() => Boolean(doc.querySelector('#docContent .ve-block[contenteditable="true"]')));
 
     const block = doc.querySelector('#docContent .ve-block[contenteditable="true"]');
     check("(the editor has something to type into)", Boolean(block), true);

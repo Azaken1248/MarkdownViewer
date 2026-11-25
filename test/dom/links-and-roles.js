@@ -575,7 +575,11 @@ module.exports = async (ctx) => {
     const typedInto = '#docContent .ve-block[contenteditable="true"]';
     const editing = async () => {
       await run("window.__t.startPageEdit()");
-      await waitUntil(() => Boolean(doc.querySelector(typedInto)), 6000);
+      // No ceiling of its own: the suite's own default is fifteen seconds,
+      // and six was shorter than this machine takes to paint a block while
+      // four suites are running. It is a condition wait, so a longer one
+      // costs nothing when the block arrives on time.
+      await waitUntil(() => Boolean(doc.querySelector(typedInto)));
 
       const block = doc.querySelector(typedInto);
       check("(the editor has something to type into)", Boolean(block), true);
