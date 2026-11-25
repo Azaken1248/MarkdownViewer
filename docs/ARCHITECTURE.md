@@ -296,6 +296,34 @@ them, and a review before anything was wired found each one:
   logged — a line per permission check is a line per request — which is what
   the explain endpoint is for instead.
 
+### One guard, one filter
+
+Every request carries `req.access`, built once by `attachAccess` from the one
+store. Two things ask it, and nothing else does:
+
+- **`requireAccess(action, locate)`** guards a route that names one document.
+  `locate` says where the document is in that request — a wildcard path, the
+  name and folder a new document is being created under — and may answer with
+  a promise, because some of those have to read the folder tree to know.
+- **`req.access.filter(action)`** is a predicate for a handler that answers
+  with a list. A collection is filtered rather than refused: a library with one
+  document somebody may not read is still a library.
+
+A refusal is deliberately two different answers. **404 for something you may
+not read**, because telling somebody a document exists but is not theirs is
+telling them about a space they have no access to — the same choice a private
+repository makes. **403 for something you may read but not do**, since they
+already know it is there and the useful answer is that the action is refused.
+Neither says *which* statement refused: that goes to the audit log, and to an
+admin through explain. A refusal that recites the policy to the person it
+refused is a policy that leaks.
+
+`PUBLIC_READS` is read as a statement rather than as a branch — `allow read to
+public at the root`, handed to the decision for that request and not written to
+the database, because it is the operator's setting and not the owner's policy.
+Which also means a space carrying an explicit `deny read public` stays closed
+with `PUBLIC_READS` on, since a deny beats everything.
+
 `PERMISSIONS_PLAN.md` records the twenty decisions behind this and what is
 built next.
 

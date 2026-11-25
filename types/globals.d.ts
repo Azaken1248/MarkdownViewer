@@ -50,5 +50,20 @@ declare namespace Express {
     // Set by the export route when a share link, rather than a session, is
     // what authorised the request.
     exporting?: { share: string };
+    /* attachAccess (lib/guards.js) sets this on every request too: the one
+     * place a route asks who may do what. The guard on a single document and
+     * the filter inside a handler that returns a list both come from here, so
+     * that there is one answer rather than two that drift.
+     */
+    access: {
+      decide: (docPath: string, action: string) => {
+        allowed: boolean,
+        reason: string,
+        considered: unknown[]
+      },
+      filter: (action?: string) => (docPath: string) => boolean,
+      level: (docPath: string) => "none" | "read" | "write" | "manage",
+      visibleSpaces: () => Set<string>
+    };
   }
 }

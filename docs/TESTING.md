@@ -723,6 +723,25 @@ things, each measured before it was believed:
 
 Eight more deliberate breaks over those four, none of which survived.
 
+### The policy, enforced
+
+`access` checks the decision; the `auth` suite checks that the routes ask it.
+Over real HTTP, as an account with a session: a space is closed by writing a
+statement **into the running server's database from the suite**, through
+`AccessStore` rather than by hand, because no route writes one yet. Which makes
+it the end-to-end check for the part of the caching that worried me most — the
+server is a different process, and it has to notice. It does.
+
+Then: a document in a closed space is **404 and not 403**, and its answer
+carries no permission code, because a 403 would confirm the document is there.
+Writing to it, renaming it and publishing a link to it are refused the same
+way — that last one found a real hole while being written, since the share
+routes were still on the role check alone and would have handed the whole
+document to anybody with a link. The list leaves the space out and keeps the
+rest; a search does not answer with it and its count matches what it returned.
+A statement naming one account refuses that account and nobody else, and the
+refusal is in the audit log with the statement that caused it.
+
 ### A diagram a reader can actually look at
 
 Inside the app a diagram in a document can be opened in the editor. A reader

@@ -74,6 +74,15 @@ function aLibraryThatWillNotAnswer(overrides = {}) {
       session: { id: "a-session" },
       token: "a-token"
     };
+    // What attachAccess puts there in the app proper. Allowed, because what is
+    // being driven here is a library that will not answer and not a policy
+    // that refuses; the one that refuses is the auth suite's.
+    req.access = {
+      decide: () => ({ allowed: true, reason: "allowed by: the fault harness", considered: [] }),
+      filter: () => () => true,
+      level: () => "manage",
+      visibleSpaces: () => new Set()
+    };
     next();
   };
   const refusesToAnswer = () => {
@@ -98,6 +107,10 @@ function aLibraryThatWillNotAnswer(overrides = {}) {
     requireAuth: pass,
     requireAdmin: pass,
     requirePermission: () => pass,
+    // The access guard asks the library where a document would go before it
+    // asks whether anybody may put one there, so a library that will not
+    // answer has to reach the route through it rather than be stopped by it.
+    requireAccess: () => pass,
     limit: pass,
     // Not under test: the audit log is written beside the answer, and a
     // throwing recorder would be a second fault in the same request.

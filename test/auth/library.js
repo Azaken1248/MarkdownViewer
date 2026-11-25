@@ -417,4 +417,118 @@ module.exports = async (ctx) => {
     check("a viewer cannot upload a folder", refused.status, 403);
   }
 
+  console.log("=== a space somebody may not read, over real HTTP ===");
+  {
+    /* The policy, enforced. lib/access.js is checked on its own as a decision
+     * table; this is the other half — that the routes actually ask it, that
+     * they ask it about the right document, and that a collection is filtered
+     * rather than refused.
+     *
+     * The statement is written straight into the server's database, through
+     * AccessStore itself rather than by hand, because there is no route for
+     * writing one yet. Which makes this also the end-to-end check for the
+     * thing that worried me most about caching a policy: the server is a
+     * different process, and it has to notice.
+     */
+    const { AccessStore } = require("../../lib/access.js");
+    const policy = new AccessStore({
+      db: new Database(path.join(server.stateDir, "data", "azadocs.db")),
+      markdownDir: path.join(server.stateDir, "docs")
+    });
+
+    const everyone = policy.groupByName("everyone");
+    check("(the baseline the server wrote at boot)",
+      policy.statements().map((one) => one.level), ["manage"]);
+
+    const inProjects = server.docPaths["delta.md"];
+    const unfiled = server.docPaths["beta.md"];
+    check("(a document in a space, and one in no space)",
+      [inProjects.startsWith("Projects/"), unfiled.includes("/")], [true, false]);
+
+    check("it can be read before anything is closed",
+      (await admin.get(`/api/docs/${inProjects}`)).status, 200);
+
+    const closed = policy.write({
+      effect: "deny",
+      subject: { kind: "group", id: everyone.id },
+      spaceDir: "Projects",
+      level: "read"
+    });
+    check("(the space is closed to everyone)", closed.ok, true);
+
+    const got = await admin.get(`/api/docs/${inProjects}`);
+    check("a document in a closed space is not found",
+      got.status, 404);
+    check("...and the answer says nothing about a permission, because saying so would say the document is there",
+      got.body.code, undefined);
+    check("...the server noticed a policy another process wrote",
+      got.status === 404, true);
+
+    check("writing to it is refused the same way",
+      (await admin.put(`/api/docs/${inProjects}`, { content: "# No\n" })).status, 404);
+    check("...and so is renaming it",
+      (await admin.post(`/api/docs/${inProjects}/rename`, { newName: "nope.md" })).status, 404);
+    check("...and publishing a link to it, which would have handed the whole document over",
+      (await admin.post(`/api/docs/${inProjects}/share`)).status, 404);
+
+    const listed = await admin.get("/api/docs");
+    check("the list leaves out what may not be read",
+      listed.body.docs.some((doc) => doc.file.startsWith("Projects/")), false);
+    check("...and keeps the rest",
+      listed.body.docs.some((doc) => doc.file === unfiled), true);
+
+    const found = await admin.get("/api/docs/search?q=Delta");
+    check("a search does not answer with it either",
+      found.body.matches.some((match) => match.file === inProjects), false);
+    check("...and its count is the number of results it returned",
+      found.body.total, found.body.matches.length);
+
+    check("a document outside the closed space is untouched",
+      (await admin.get(`/api/docs/${unfiled}`)).status, 200);
+
+    check("lifting the statement opens it again",
+      [policy.remove(closed.id), (await admin.get(`/api/docs/${inProjects}`)).status],
+      [true, 200]);
+
+    /* A deny on one account rather than on everyone, which is the shape that
+     * leaves an admin able to look: the group everyone has every account in
+     * it, this one names one.
+     */
+    const reader2 = makeClient(server.origin);
+    await admin.post("/api/users",
+      { username: "scoped-reader", password: "kettle-drum-twentytwo", role: "editor" });
+    await reader2.post("/api/auth/login",
+      { username: "scoped-reader", password: "kettle-drum-twentytwo" });
+    await reader2.post("/api/auth/password", {
+      currentPassword: "kettle-drum-twentytwo",
+      newPassword: "scoped-own-password-1"
+    });
+
+    const them = policy.db.prepare("SELECT id FROM users WHERE username = 'scoped-reader'").get();
+    policy.write({
+      effect: "deny",
+      subject: { kind: "user", id: them.id },
+      spaceDir: "Projects",
+      level: "read"
+    });
+
+    check("the account named is refused",
+      (await reader2.get(`/api/docs/${inProjects}`)).status, 404);
+    check("...and sees none of that space in the list",
+      (await reader2.get("/api/docs")).body.docs.some((doc) => doc.file.startsWith("Projects/")),
+      false);
+    check("...while everybody else still reads it",
+      (await admin.get(`/api/docs/${inProjects}`)).status, 200);
+    check("...and the refusal is written down, with the statement that caused it",
+      (await fsp.readFile(path.join(server.stateDir, "data", "audit.jsonl"), "utf8"))
+        .split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        .some((entry) => entry.event === "access.denied"
+          && entry.user === "scoped-reader"
+          && String(entry.reason || "").includes("deny read user:")),
+      true);
+
+    policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
+    policy.db.close();
+  }
+
 };

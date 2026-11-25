@@ -46,6 +46,7 @@ const { createAudit } = require("./lib/audit");
 const { createStaticAssets } = require("./lib/http/static-assets");
 const { createBundles } = require("./lib/http/bundles");
 const { createGuards } = require("./lib/guards");
+const { AccessStore } = require("./lib/access");
 const {
   createOrganizerFile
 } = require("./lib/docs/organizer");
@@ -279,18 +280,33 @@ const authStore = new AuthStore({ dataDir: DATA_DIR, db: metadata, audit });
 const shareStore = new ShareStore({ dataDir: DATA_DIR, db: metadata });
 const linkStore = new LinkStore({ dataDir: DATA_DIR, db: metadata });
 
+/* Who may do what, and where.
+ *
+ * The baseline runs on every boot and is idempotent: a space for each
+ * top-level directory, the reserved space for documents in no directory, and
+ * one statement — allow manage to everyone, at the root — which is what makes
+ * a library that has never been given a policy behave exactly as it did
+ * before there was one. lib/access.js says why each of those is shaped the way
+ * it is.
+ */
+const accessStore = new AccessStore({ db: metadata, markdownDir: MARKDOWN_DIR, audit });
+accessStore.ensureBaseline({ actor: null });
+
 
 const {
   attachSession,
+  attachAccess,
   requireAuth,
   requireRead,
   requirePermission,
+  requireAccess,
   requireCsrf,
   sessionPayload,
   issueSessionCookie,
   clearSessionCookie
 } = createGuards({
   authStore,
+  accessStore,
   publicReads: PUBLIC_READS,
   allowedOrigins: ALLOWED_ORIGINS,
   cookiesSecure: COOKIES_SECURE,
@@ -300,6 +316,9 @@ const {
 // Every request learns who it is from before any route runs; the guards decide
 // what that means. CSRF is checked globally so a new route cannot forget it.
 app.use(attachSession);
+// ...and then what they may reach, from the one store, so the guard on a route
+// and the filter inside a handler are asking the same question.
+app.use(attachAccess);
 app.use(requireCsrf);
 
 /* The ceilings, mounted here so that what is limited is answerable in one
@@ -498,6 +517,7 @@ app.use(createSharesRoutes({
   shareStore,
   audit,
   requirePermission,
+  requireAccess,
   getBaseUrl: getBaseUrlFromRequest,
   fileExists,
   readCachedTextFile,
@@ -565,6 +585,7 @@ app.use(createDocsRoutes({
   maxDocBytes: MAX_DOC_BYTES,
   requireRead,
   requirePermission,
+  requireAccess,
   shareStore,
   readOrganizerState,
   getDocs,
