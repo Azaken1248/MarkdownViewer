@@ -328,6 +328,7 @@ Which routes ask, and which cannot:
 | the recycle bin and the archive | the path the entry was **deleted from**, which it still carries. Otherwise the bin is a list of names in a space somebody cannot see, and a restore is a way back into it |
 | a folder — create, rename, delete | a document immediately inside it, which is the same question as "may this person put something here". A top-level folder is a space, so creating one asks about the root |
 | folder upload | every intended path, checked before a single folder is created, because an upload refused halfway is an upload that left folders behind |
+| the folder tree, in the listing and in `/graphql` | `visibleFolderIds`: a folder is shown if a document being answered with lives in it, or if its own directory may be read — **plus every ancestor of a shown folder**, or what somebody can see hangs off nothing and cannot be reached. Paths and depths are still computed from the whole tree, which is what keeps a kept ancestor's path right |
 | `/graphql` | the same `req.access.filter`, reached through the resolver context — it is a second way into every document, so a field that forgot to ask would undo the guard on `/api/docs` |
 | saved links | not documents. Global, as they were |
 

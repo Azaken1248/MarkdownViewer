@@ -760,6 +760,20 @@ back, so nothing is visibly wrong a moment later. The row count is therefore
 read straight after a search by somebody who may not see them, before anything
 can rebuild it.
 
+The tree's checks are made **as an editor and not as an admin**, which took one
+round of wrong answers to notice: an admin carries an implicit allow at the
+root, so an admin sees the library whatever the statements say and every check
+would have passed for the wrong reason.
+
+Four breaks over `visibleFolderIds`, and the one that survived first time is
+the one worth keeping: *a folder holding a readable document is forgotten*. The
+check that was there granted a whole folder, so the folder's own directory was
+readable and the tree kept it without ever needing the documents. The case that
+needs the other half is a statement on **one document** — then the folder's
+directory grants nothing, and a tree built from directory permissions alone
+loses the folder while still answering with the document, which would hang off
+nothing. There is a check for that now.
+
 Three more families are checked the same way, because each could have been
 assumed and each would have been wrong in a different place. A **bin entry** is
 not the document it was, so the bin leaves out what was deleted from a closed

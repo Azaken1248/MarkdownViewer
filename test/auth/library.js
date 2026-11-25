@@ -626,6 +626,113 @@ module.exports = async (ctx) => {
           .some((match) => match.originalFile === inProjects || match.file.includes("delta")),
         false);
 
+      console.log("=== the tree, and the ancestors that have to stay in it ===");
+      {
+        /* The fixture nests Projects > Cart > Frontend > Components > Design >
+         * Tokens, with alpha.md at the bottom. So a statement that grants the
+         * bottom and nothing else is the case the rule exists for: six folders
+         * are named for the sake of one document, because without them the
+         * document hangs off nothing.
+         */
+        /* Asked as the editor and not as the admin, which is the whole point
+         * of asking: an admin carries an implicit allow at the root, so an
+         * admin sees the library whatever the statements say and would have
+         * made every check below pass for the wrong reason.
+         */
+        /* Made here rather than assumed: earlier sections of this suite move
+         * and rename the fixture's documents, so the deepest folder is not
+         * reliably occupied by the time this runs.
+         */
+        const madeDeep = await admin.post("/api/docs", {
+          fileName: "deep.md",
+          content: "# Deep\n",
+          folderId: server.folderIds.get("Tokens")
+        });
+        check("(a document at the bottom of the tree)", madeDeep.status, 201);
+        const deepFile = madeDeep.body.file;
+
+        policy.db.prepare("DELETE FROM grants").run();
+        const theirEveryone = policy.groupByName("everyone");
+        policy.write({
+          effect: "allow",
+          subject: { kind: "group", id: theirEveryone.id },
+          spaceDir: "Projects",
+          prefix: "Cart/Frontend/Components/Design/Tokens",
+          level: "read"
+        });
+
+        const deep = await reader2.get("/api/docs");
+        const names = deep.body.folders.map((folder) => folder.name).sort();
+
+        check("only the document that was granted comes back",
+          deep.body.docs.map((doc) => doc.file), [deepFile]);
+        check("...and every folder above it, so it can be reached",
+          names, ["Cart", "Components", "Design", "Frontend", "Projects", "Tokens"]);
+        check("...and nothing beside them",
+          deep.body.folders.some((folder) => folder.name === "Notes"), false);
+        check("...with the path of a kept ancestor still right, because the whole tree computed it",
+          deep.body.folders.find((folder) => folder.name === "Tokens").path,
+          "Projects / Cart / Frontend / Components / Design / Tokens");
+        check("...and its depth with it",
+          deep.body.folders.find((folder) => folder.name === "Tokens").depth, 5);
+
+        check("graphql's tree answers the same way, from the same rule",
+          (await reader2.post("/graphql", { query: "{ folders { name } }" }))
+            .body.data.folders.map((folder) => folder.name).sort(),
+          names);
+
+        /* One document, and nothing about the folder it is in.
+         *
+         * This is the case the documents-based half of the rule exists for. A
+         * statement on the folder keeps the folder by itself — the directory
+         * is readable — so a tree built only from directory permissions would
+         * pass every check above and still lose a folder whose *single
+         * granted document* is the only thing in it that may be read.
+         */
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.write({
+          effect: "allow",
+          subject: { kind: "group", id: theirEveryone.id },
+          spaceDir: "Projects",
+          prefix: "Cart/Frontend/Components/Design/Tokens/deep.md",
+          level: "read"
+        });
+
+        const onlyOne = await reader2.get("/api/docs");
+        check("a grant on one document still shows the folders it lives in",
+          onlyOne.body.folders.map((folder) => folder.name).sort(),
+          ["Cart", "Components", "Design", "Frontend", "Projects", "Tokens"]);
+        check("...and the document itself, which would otherwise hang off nothing",
+          onlyOne.body.docs.map((doc) => doc.file), [deepFile]);
+
+        /* An empty folder somebody may write into stays on the screen: the
+         * folder is readable even though no document in it is.
+         */
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.write({
+          effect: "allow",
+          subject: { kind: "group", id: theirEveryone.id },
+          spaceDir: "",
+          level: "write"
+        });
+        policy.write({
+          effect: "allow",
+          subject: { kind: "group", id: theirEveryone.id },
+          spaceDir: "Notes",
+          level: "write"
+        });
+        check("a folder with nothing in it is still shown when it may be written into",
+          (await reader2.get("/api/docs")).body.folders
+            .some((folder) => folder.name === "Notes"),
+          true);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+        check("(the baseline is back, and with it the whole tree for everybody)",
+          (await reader2.get("/api/docs")).body.folders.length,
+          (await admin.get("/api/docs")).body.folders.length);
+      }
+
       // And the folders, which need the space closed rather than one document
       // in it: a folder's permission is asked about the directory.
       policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
