@@ -318,6 +318,36 @@ Neither says *which* statement refused: that goes to the audit log, and to an
 admin through explain. A refusal that recites the policy to the person it
 refused is a policy that leaks.
 
+Which routes ask, and which cannot:
+
+| Family | How |
+| --- | --- |
+| a document by its path — read, write, rename, file, delete, and the three that publish or withdraw a link | `requireAccess(action, paramDocPath)` |
+| creating one, and uploading one | the same guard, over the path it *would* have, resolved from the name and the destination folder |
+| the library listing, the search, the share list | `req.access.filter(action)` |
+| the recycle bin and the archive | the path the entry was **deleted from**, which it still carries. Otherwise the bin is a list of names in a space somebody cannot see, and a restore is a way back into it |
+| a folder — create, rename, delete | a document immediately inside it, which is the same question as "may this person put something here". A top-level folder is a space, so creating one asks about the root |
+| folder upload | every intended path, checked before a single folder is created, because an upload refused halfway is an upload that left folders behind |
+| `/graphql` | the same `req.access.filter`, reached through the resolver context — it is a second way into every document, so a field that forgot to ask would undo the guard on `/api/docs` |
+| saved links | not documents. Global, as they were |
+
+Two things are **not** scoped, and are written down rather than assumed:
+
+- **`GET /api/assets/:name`.** An asset is not a document: it is
+  content-addressed, so the same image in two documents is one file with one
+  name, and there is nothing behind it to ask about. Scoping it needs an index
+  of which documents embed which asset, maintained against documents that can
+  be edited outside the app — a feature, not a guard. What protects one
+  meanwhile is that its name is a hash of its contents and appears nowhere
+  except inside a document somebody could already read. That is the posture of
+  a share token and **not** a space boundary: somebody who knows the name of an
+  image in a space they were shut out of can still fetch that image. The
+  share-scoped route beside it does better, because it has a document to work
+  from and refuses a name that is not in it.
+- **`POST /api/export/pdf`.** What it is given is the HTML the page already
+  built, not a path, and the caller had to be allowed to read the document to
+  have it. The permission was enforced on the way in.
+
 `PUBLIC_READS` is read as a statement rather than as a branch — `allow read to
 public at the root`, handed to the decision for that request and not written to
 the database, because it is the operator's setting and not the owner's policy.

@@ -602,7 +602,7 @@ app.use(createDocsRoutes({
 app.use(createFoldersRoutes({
   markdownDir: MARKDOWN_DIR,
   maxFolderDepth: MAX_FOLDER_DEPTH,
-  requirePermission,
+  requireAccess,
   shareStore,
   readOrganizerState,
   mutateOrganizerState,
@@ -620,6 +620,7 @@ app.use(createRecycleRoutes({
   hardDeletedDir: DELETED_HARD_DIR,
   requireRead,
   requirePermission,
+  requireAccess,
   shareStore,
   readOrganizerState,
   fileExists,

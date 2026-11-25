@@ -742,6 +742,16 @@ rest; a search does not answer with it and its count matches what it returned.
 A statement naming one account refuses that account and nobody else, and the
 refusal is in the audit log with the statement that caused it.
 
+Three more families are checked the same way, because each could have been
+assumed and each would have been wrong in a different place. A **bin entry** is
+not the document it was, so the bin leaves out what was deleted from a closed
+space, and reading or restoring it is refused — a restore being the way back
+in. A **folder** is not a document at all, so the question asked is about a
+document immediately inside it: one in a closed space cannot be renamed or
+deleted, one elsewhere still can. And **`/graphql`** is a second way into every
+document in the library, so it is asked for the closed document by name, in a
+listing, in a count and in a search, and answers with none of them.
+
 ### A diagram a reader can actually look at
 
 Inside the app a diagram in a document can be opened in the editor. A reader

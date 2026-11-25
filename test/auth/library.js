@@ -528,6 +528,71 @@ module.exports = async (ctx) => {
       true);
 
     policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
+
+    console.log("=== the bin, the folders and the other way in ===");
+    {
+      /* Three more families, and the reason each is checked rather than
+       * assumed: a bin entry is not the document it was, a folder is not a
+       * document at all, and /graphql is a second way to read every document
+       * in the library.
+       */
+      const deleted = await admin.post(`/api/docs/${inProjects}/delete`, { mode: "soft" });
+      check("(a document in the space is deleted)", deleted.status, 200);
+
+      const bin = await admin.get("/api/recycle-bin");
+      const entry = bin.body.docs.find((doc) => doc.originalFile === inProjects);
+      check("(and is in the bin, under the path it came from)", Boolean(entry), true);
+
+      policy.write({
+        effect: "deny",
+        subject: { kind: "group", id: everyone.id },
+        spaceDir: "Projects",
+        level: "read"
+      });
+
+      check("the bin leaves out what was deleted from a closed space",
+        (await admin.get("/api/recycle-bin")).body.docs
+          .some((doc) => doc.originalFile === inProjects),
+        false);
+      check("...reading its content is refused",
+        (await admin.get(`/api/recycle-bin/${entry.file}/content`)).status, 404);
+      check("...and so is restoring it, which would be a way back into the space",
+        (await admin.post(`/api/recycle-bin/${entry.file}/restore`)).status, 404);
+
+      check("a folder in a closed space cannot be renamed",
+        (await admin.put(`/api/folders/${server.folderIds.get("Projects")}`,
+          { name: "Projects Renamed" })).status, 404);
+      check("...nor deleted",
+        (await admin.del(`/api/folders/${server.folderIds.get("Projects")}`)).status, 404);
+      check("...while a folder elsewhere still can be",
+        (await admin.put(`/api/folders/${server.folderIds.get("Notes")}`,
+          { name: "Notes" })).status, 200);
+
+      const asked = await admin.post("/graphql", {
+        query: `{ docsCount document(file: "${inProjects}") { file } documents(limit: 200) { file } }`
+      });
+      check("graphql does not hand over a document from a closed space",
+        asked.body.data.document, null);
+      check("...nor list one",
+        asked.body.data.documents.some((doc) => doc.file.startsWith("Projects/")), false);
+      check("...nor count one",
+        asked.body.data.docsCount,
+        (await admin.get("/api/docs")).body.docs.length);
+
+      const searched = await admin.post("/graphql",
+        { query: '{ search(query: "Delta") { file } }' });
+      check("...nor find one",
+        searched.body.data.search.some((hit) => hit.file.startsWith("Projects/")), false);
+
+      policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
+      check("and with the space open again, the bin has it back",
+        (await admin.get("/api/recycle-bin")).body.docs
+          .some((doc) => doc.originalFile === inProjects),
+        true);
+      check("...and it can be restored",
+        (await admin.post(`/api/recycle-bin/${entry.file}/restore`)).status, 200);
+    }
+
     policy.db.close();
   }
 
