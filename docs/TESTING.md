@@ -774,6 +774,14 @@ directory grants nothing, and a tree built from directory permissions alone
 loses the folder while still answering with the document, which would hang off
 nothing. There is a check for that now.
 
+One case was found by asking what the lifecycle did *not* cover: a directory
+moved into the library with ordinary tools, which this app's whole storage
+model invites. It had no space row until the next boot, so the documents in it
+were readable — the root statement covers them — with no way to close them. Not
+a hole, an operational gap, and the check is the shape of the complaint: make a
+directory on disk behind the server's back, list the library, then write a
+statement about it and watch it close.
+
 The lifecycle is checked twice over, and the split is deliberate. The store's
 own suite drives the five shapes directly — a space renamed, a folder inside
 one renamed, a space moved into another, a folder promoted to the top level, a

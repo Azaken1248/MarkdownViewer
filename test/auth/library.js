@@ -733,6 +733,41 @@ module.exports = async (ctx) => {
           (await admin.get("/api/docs")).body.folders.length);
       }
 
+      console.log("=== a directory somebody moved in with mv ===");
+      {
+        /* The library is ordinary files in ordinary directories and is meant
+         * to be worked on with ordinary tools. So a top-level directory can
+         * appear without any route having been called — and until it has a
+         * space row nobody can write a statement about it, which means the
+         * documents in it are readable with no way to close them.
+         */
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+
+        await fsp.mkdir(path.join(server.stateDir, "docs", "Dropped In"), { recursive: true });
+        await fsp.writeFile(
+          path.join(server.stateDir, "docs", "Dropped In", "note.md"), "# Dropped\n");
+
+        const seen = await admin.get("/api/docs");
+        check("the listing sees the document that was moved in",
+          seen.body.docs.some((doc) => doc.file === "Dropped In/note.md"), true);
+        check("...and it is a space now, without a restart",
+          Boolean(policy.spaceByDir("Dropped In")), true);
+
+        const closed = policy.write({
+          effect: "deny",
+          subject: { kind: "group", id: policy.groupByName("everyone").id },
+          spaceDir: "Dropped In",
+          level: "read"
+        });
+        check("...so its policy can be written", closed.ok, true);
+        check("...and it closes",
+          (await reader2.get("/api/docs/Dropped%20In/note.md")).status, 404);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+      }
+
       console.log("=== a folder that moves takes its policy with it ===");
       {
         /* The statements are the one thing in this app that names a path and

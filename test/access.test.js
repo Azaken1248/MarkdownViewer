@@ -956,6 +956,28 @@ console.log("=== the policy follows the directories ===");
     .map((one) => (one.prefix ? `${one.space}/${one.prefix}` : one.space))
     .sort();
 
+  check("directories that arrived from outside the app are picked up",
+    moved.reconcileSpaces(["Agendas", "Agendas", "Papers", ""], { actor: "aza" }).sort(),
+    ["Agendas", "Papers"]);
+  check("...and asking again adds nothing",
+    moved.reconcileSpaces(["Agendas", "Papers"]), []);
+  check("...and a statement can be written about one straight away",
+    moved.write({
+      effect: "deny",
+      subject: { kind: "group", id: theirEveryone.id },
+      spaceDir: "Agendas",
+      level: "read"
+    }).ok,
+    true);
+  check("...which refuses the documents in it",
+    moved.decide(editor, "Agendas/june.md", "doc:read").allowed, false);
+
+  (() => {
+    for (const row of moved.statements().filter((one) => one.space === "Agendas")) {
+      moved.remove(row.id);
+    }
+  })();
+
   check("a new top-level directory gets a space",
     Boolean(moved.ensureSpaceForDir("Minutes", { actor: "aza" })), true);
   check("...and is then the space it already has",

@@ -343,6 +343,7 @@ moved or deleted changes the policy's own vocabulary:
 | a folder inside a space is renamed or moved | every statement at or under its old path is rewritten to the same place under the new one |
 | a space is moved inside another space | its statements become prefixes in that one, and its row goes **last** — the foreign key would otherwise have taken them with it |
 | a folder is promoted to the top level | it becomes a space, created before anything is scoped into it |
+| a top-level directory arrives from outside the app — `mv`, a restore, a sync | the document listing reconciles the spaces against what its walk saw, so it is a space without a restart. The library is ordinary files in ordinary directories and is meant to be worked on with ordinary tools; this is where the policy catches up with that, the same way the search index catches up with the disk |
 | a top-level folder is deleted | the space goes, and with it everything said about paths inside it. The documents it held were moved to the top level by the route that deleted it, where the reserved space covers them |
 | a folder deeper in is deleted | its statements are left alone, deliberately: a path that comes back because somebody makes that folder again comes back to the policy it had |
 

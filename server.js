@@ -589,6 +589,7 @@ app.use(createDocsRoutes({
   requireRead,
   requirePermission,
   requireAccess,
+  accessStore,
   shareStore,
   readOrganizerState,
   getDocs,
