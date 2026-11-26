@@ -34,7 +34,7 @@ plain files in real directories, readable and editable without this app.
 
 ## Requirements
 
-Node 20 or newer. No database server, no external services.
+Node 22 or newer. No database server, no external services.
 
 ## Quick start
 

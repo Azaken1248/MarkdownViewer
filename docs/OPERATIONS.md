@@ -29,7 +29,35 @@ TRUST_PROXY=true \
 node server.js
 ```
 
-Node 20 or newer (`engines` says `>=20`; CI runs 20 and 22).
+Node 22 or newer (`engines` says `>=22`; CI runs 22 and 26).
+
+**Why 22 is the floor and 26 is what to run.** Node 20 reached end of life on
+2026-04-30 and gets no security patches, so it is not a runtime to be on.
+`better-sqlite3` 13 — the one native dependency — declares `>=22`, and `jsdom`,
+which the test suites run in, wants `^22.22.2 || ^24.15.0 || >=26`. 26 is the
+current LTS line ("Lithium"); run that unless something stops you. The matrix
+is the floor and the newest LTS, which is what it has always been.
+
+**Upgrading the Node a running deployment uses.** `node_modules` holds one
+native module, `better-sqlite3`, and a native module is built for one Node
+ABI — so the install and the process have to agree. The order is: install the
+new Node, `npm install` (which rebuilds it), run the suite, then move the
+process. Doing it the other way round leaves a server that cannot start,
+because the module it loads was built for the Node it is no longer running.
+
+Under PM2 there is one more wrinkle. An app started with `exec_interpreter:
+node` resolves that name from the **daemon's** PATH, which is whatever Node the
+daemon itself was started with — so `pm2 restart` alone keeps the old version.
+Either pin the app:
+
+```
+pm2 restart mdviewer --interpreter "$HOME/.nvm/versions/node/v26.13.1/bin/node"
+```
+
+...which moves one app and records an absolute path that the next upgrade has
+to be given again. Or run `pm2 update`, which restarts the daemon and with it
+**every app it manages** — the right answer on a box that only runs this one,
+and a decision for somebody else to make on a box that does not.
 
 The first boot with no accounts prints a generated admin password **once**, to
 stdout. Catch it, or set `SEED_ADMIN_PASSWORD` beforehand — either way the
