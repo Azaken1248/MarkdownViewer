@@ -332,6 +332,25 @@ Which routes ask, and which cannot:
 | `/graphql` | the same `req.access.filter`, reached through the resolver context — it is a second way into every document, so a field that forgot to ask would undo the guard on `/api/docs` |
 | saved links | not documents. Global, as they were |
 
+**The policy follows the directories.** A space owns one top-level directory
+and a statement is scoped by a path inside one, so a folder created, renamed,
+moved or deleted changes the policy's own vocabulary:
+
+| What happens | What the policy does |
+| --- | --- |
+| a top-level folder is created, by hand or by a folder upload | it gets a space row **now**, not at the next boot — otherwise there is a space nobody can write a statement about until the server restarts |
+| a top-level folder is renamed | one row changes. Statements are stored against the row rather than against the name, so there is nothing else to do |
+| a folder inside a space is renamed or moved | every statement at or under its old path is rewritten to the same place under the new one |
+| a space is moved inside another space | its statements become prefixes in that one, and its row goes **last** — the foreign key would otherwise have taken them with it |
+| a folder is promoted to the top level | it becomes a space, created before anything is scoped into it |
+| a top-level folder is deleted | the space goes, and with it everything said about paths inside it. The documents it held were moved to the top level by the route that deleted it, where the reserved space covers them |
+| a folder deeper in is deleted | its statements are left alone, deliberately: a path that comes back because somebody makes that folder again comes back to the policy it had |
+
+Statements are the one thing in this app that names a path and is not derived
+from the folder tree, which is exactly why they have to be rewritten when a
+directory moves. A statement left behind stops applying silently — an allow
+that quietly stops allowing, a deny that quietly stops denying.
+
 Two things are **not** scoped, and are written down rather than assumed:
 
 - **`GET /api/assets/:name`.** An asset is not a document: it is

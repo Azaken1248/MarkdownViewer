@@ -936,6 +936,124 @@ console.log("=== a statement cannot outlive what it names ===");
   store.forget();
 }
 
+console.log("=== the policy follows the directories ===");
+{
+  /* A space owns one top-level directory and a statement is scoped by a path
+   * inside one, so a folder created, renamed, moved or deleted changes the
+   * policy's own vocabulary. A statement left behind stops applying silently:
+   * an allow that quietly stops allowing, a deny that quietly stops denying.
+   */
+  const moved = new AccessStore({
+    db: db.open(path.join(where, "moved")),
+    markdownDir: library
+  });
+  moved.ensureBaseline({ actor: "aza" });
+  const theirEveryone = moved.groupByName("everyone");
+  const asGroup = { kind: "group", id: theirEveryone.id };
+
+  const scopes = () => moved.statements()
+    .filter((one) => one.space !== null)
+    .map((one) => (one.prefix ? `${one.space}/${one.prefix}` : one.space))
+    .sort();
+
+  check("a new top-level directory gets a space",
+    Boolean(moved.ensureSpaceForDir("Minutes", { actor: "aza" })), true);
+  check("...and is then the space it already has",
+    moved.ensureSpaceForDir("Minutes"), null);
+  check("a folder inside a space is a path, not a space",
+    [moved.ensureSpaceForDir("Elections/2026"), moved.spaceByDir("Elections/2026")],
+    [null, null]);
+  check("...and nothing at all is not a space either",
+    moved.ensureSpaceForDir(""), null);
+
+  moved.write({ effect: "deny", subject: asGroup, spaceDir: "Elections", level: "read" });
+  moved.write({ effect: "deny", subject: asGroup, spaceDir: "Elections", prefix: "2026/notes.md", level: "read" });
+  check("(two statements about that space)", scopes(), ["Elections", "Elections/2026/notes.md"]);
+
+  check("renaming the space renames one row and leaves the statements alone",
+    moved.followFolderMove("Elections", "Ballots", { actor: "aza" }),
+    { renamedSpace: true, rewritten: 0 });
+  check("...and they are about the new name now",
+    scopes(), ["Ballots", "Ballots/2026/notes.md"]);
+  check("...so the document under it is still refused",
+    moved.decide(editor, "Ballots/2026/notes.md", "doc:read").allowed, false);
+  check("...and nothing is refused under the name it used to have",
+    moved.decide(editor, "Elections/2026/notes.md", "doc:read").allowed, true);
+
+  check("renaming a folder inside a space rewrites the statements under it",
+    moved.followFolderMove("Ballots/2026", "Ballots/2027"),
+    { renamedSpace: false, rewritten: 1 });
+  check("...to the same place under the new name",
+    scopes(), ["Ballots", "Ballots/2027/notes.md"]);
+
+  /* A space moved inside another space. Its statements become prefixes in
+   * that one, and the row goes last — the foreign key would otherwise have
+   * taken the statements with it.
+   */
+  check("a space moved into another space keeps its statements",
+    moved.followFolderMove("Ballots", "Minutes/Ballots"),
+    { renamedSpace: false, rewritten: 2 });
+  check("...as prefixes in the space it moved into",
+    scopes(), ["Minutes/Ballots", "Minutes/Ballots/2027/notes.md"]);
+  check("...and the space it was stops being one",
+    moved.spaceByDir("Ballots"), null);
+  check("...while the documents under it are still refused",
+    moved.decide(editor, "Minutes/Ballots/2027/notes.md", "doc:read").allowed, false);
+
+  check("a folder promoted to the top level becomes a space",
+    moved.followFolderMove("Minutes/Ballots", "Ballots"),
+    { renamedSpace: false, rewritten: 2 });
+  check("...with its statements in it",
+    scopes(), ["Ballots", "Ballots/2027/notes.md"]);
+  check("...and a row of its own",
+    Boolean(moved.spaceByDir("Ballots")), true);
+
+  check("a move to nowhere in particular changes nothing",
+    [moved.followFolderMove("Ballots", "Ballots"), moved.followFolderMove("", "x"),
+      moved.followFolderMove("Ballots", "")],
+    [{ renamedSpace: false, rewritten: 0 }, { renamedSpace: false, rewritten: 0 },
+      { renamedSpace: false, rewritten: 0 }]);
+
+  /* And a directory that has gone. Its statements go with it, because the
+   * paths they are about do not exist any more — the documents that were in
+   * it were moved to the top level by the route that deleted the folder, and
+   * the reserved space is what covers them there.
+   */
+  check("deleting a space takes its statements with it",
+    [moved.forgetSpace("Ballots"), scopes()], [true, []]);
+  check("...and the root statement is untouched, being about the library",
+    moved.statements().map(renderStatement), ["allow manage group:everyone on <root>"]);
+  check("a space that is not there cannot be forgotten",
+    moved.forgetSpace("Nowhere"), false);
+  check("...and neither can a folder inside one",
+    moved.forgetSpace("Minutes/Ballots"), false);
+
+  /* A destination whose space does not have a row yet.
+   *
+   * It has to be made, not worked around. Placing the statement in the
+   * reserved space instead would leave it resolving to nothing — a deny that
+   * had quietly stopped denying, which is the one outcome here worth
+   * preventing.
+   */
+  check("a destination with no space of its own gets one, and keeps the statement",
+    (() => {
+      moved.write({ effect: "deny", subject: asGroup, spaceDir: "Minutes", level: "read" });
+      const before = scopes();
+      const result = moved.followFolderMove("Minutes", "Unregistered/Minutes");
+      return [before, result.rewritten, scopes(), Boolean(moved.spaceByDir("Unregistered"))];
+    })(),
+    [["Minutes"], 1, ["Unregistered/Minutes"], true]);
+  check("...and the document under it is refused, which is the whole point",
+    moved.decide(editor, "Unregistered/Minutes/a.md", "doc:read").allowed, false);
+
+  // The one way a scope cannot be placed: a database with no reserved space
+  // in it at all, which is a library that has never had the migration run.
+  check("a path that nothing can own is not placed anywhere",
+    new AccessStore({ db: db.open(path.join(where, "bare-scope")), markdownDir: library })
+      .placeScope("notes.md"),
+    null);
+}
+
 console.log("=== the cache, which must never answer with a permission that is gone ===");
 {
   const first = store.statements();

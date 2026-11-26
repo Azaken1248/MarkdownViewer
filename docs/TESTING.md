@@ -774,6 +774,27 @@ directory grants nothing, and a tree built from directory permissions alone
 loses the folder while still answering with the document, which would hang off
 nothing. There is a check for that now.
 
+The lifecycle is checked twice over, and the split is deliberate. The store's
+own suite drives the five shapes directly — a space renamed, a folder inside
+one renamed, a space moved into another, a folder promoted to the top level, a
+space deleted — because each is a different arrangement of rows and reading
+them as rows is the only way to see that. The `auth` suite then does it over
+real HTTP, through the folder routes, which is the only way to see that the
+routes call any of it.
+
+Two of my own bugs were caught there before anything was wired. A pure space
+rename was rewriting every statement in the space to what it already said —
+and mangling it, because `placeScope` decided which space a path belonged to by
+counting segments: one meant the library root, more meant a space. So a
+statement about the whole of a space called `Ballots` became one about a file
+named `Ballots` in the reserved space. Which space owns a path is a question
+for the rows, not for the shape of the path.
+
+The HTTP checks took two rounds of wrong answers of a different kind: closing
+a space to `everyone` stops the **admin** renaming the folder too, since a deny
+beats the implicit allow. That is the design, so the checks that are about what
+a rename does to the policy close the space to one account instead.
+
 Three more families are checked the same way, because each could have been
 assumed and each would have been wrong in a different place. A **bin entry** is
 not the document it was, so the bin leaves out what was deleted from a closed

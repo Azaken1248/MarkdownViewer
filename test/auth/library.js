@@ -733,6 +733,82 @@ module.exports = async (ctx) => {
           (await admin.get("/api/docs")).body.folders.length);
       }
 
+      console.log("=== a folder that moves takes its policy with it ===");
+      {
+        /* The statements are the one thing in this app that names a path and
+         * is not derived from the folder tree. Renaming a folder moves its
+         * directory and every document comes along without a path being
+         * rewritten anywhere — which is exactly why these have to be. A
+         * statement left behind stops applying silently.
+         */
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+        /* The deny names one account rather than everyone.
+         *
+         * A deny on a space refuses the admin as well — it beats the implicit
+         * allow, which is the design and is checked elsewhere — so closing it
+         * to everyone would have stopped the admin renaming the folder, and
+         * these checks are about what the rename does to the policy.
+         */
+        const them = /** @type {any} */ (policy.db
+          .prepare("SELECT id FROM users WHERE username = 'scoped-reader'").get());
+
+        const made = await admin.post("/api/folders", { name: "Minutes" });
+        check("(a new top-level folder)", made.status, 201);
+        const minutes = made.body.folder.id;
+        check("...which is a space straight away, not after a restart",
+          Boolean(policy.spaceByDir("Minutes")), true);
+
+        const inside = await admin.post("/api/docs",
+          { fileName: "january.md", content: "# January\n", folderId: minutes });
+        check("(with a document in it)", inside.status, 201);
+
+        policy.write({
+          effect: "deny",
+          subject: { kind: "user", id: them.id },
+          spaceDir: "Minutes",
+          level: "read"
+        });
+        check("the document is refused while the space is closed",
+          (await reader2.get(`/api/docs/${inside.body.file}`)).status, 404);
+
+        const renamed = await admin.put(`/api/folders/${minutes}`, { name: "Records" });
+        check("(the folder is renamed)", renamed.status, 200);
+        check("...the space is the same row under a new name",
+          [Boolean(policy.spaceByDir("Records")), policy.spaceByDir("Minutes")],
+          [true, null]);
+        check("...and the document is still refused at the path it now has",
+          (await reader2.get("/api/docs/Records/january.md")).status, 404);
+        check("...while the admin can still read it, as before",
+          (await admin.get("/api/docs/Records/january.md")).status, 200);
+
+        // A folder moved inside another folder: the statement becomes a
+        // prefix in the space it moved into.
+        const moved = await admin.put(`/api/folders/${minutes}`,
+          { name: "Records", parentId: server.folderIds.get("Notes") });
+        check("(the folder is moved under another one)", moved.status, 200);
+        check("...and the statement moved with it",
+          policy.statements()
+            .filter((one) => one.space !== null)
+            .map((one) => (one.prefix ? `${one.space}/${one.prefix}` : one.space)),
+          ["Notes/Records"]);
+        check("...so the document is refused at its new path too",
+          (await reader2.get("/api/docs/Notes/Records/january.md")).status, 404);
+        check("...and nothing else in that space became unreadable",
+          (await reader2.get("/api/docs")).body.docs.some((doc) => doc.file === unfiled), true);
+
+        const removed = await admin.del(`/api/folders/${server.folderIds.get("Notes")}`);
+        check("(the folder above it is deleted)", removed.status, 200);
+        check("...and the space goes, with everything said about paths inside it",
+          [policy.spaceByDir("Notes"), policy.statements().filter((one) => one.space !== null)],
+          [null, []]);
+        check("...while the document it rescued is readable at the top level",
+          (await reader2.get("/api/docs/january.md")).status, 200);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+      }
+
       // And the folders, which need the space closed rather than one document
       // in it: a folder's permission is asked about the directory.
       policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
@@ -748,9 +824,11 @@ module.exports = async (ctx) => {
           { name: "Projects Renamed" })).status, 404);
       check("...nor deleted",
         (await admin.del(`/api/folders/${server.folderIds.get("Projects")}`)).status, 404);
+      // Its own folder, because the block above deletes the fixture's.
+      const elsewhere = await admin.post("/api/folders", { name: "Elsewhere" });
       check("...while a folder elsewhere still can be",
-        (await admin.put(`/api/folders/${server.folderIds.get("Notes")}`,
-          { name: "Notes" })).status, 200);
+        (await admin.put(`/api/folders/${elsewhere.body.folder.id}`,
+          { name: "Elsewhere Renamed" })).status, 200);
 
       const asked = await admin.post("/graphql", {
         query: `{ docsCount document(file: "${inProjects}") { file } documents(limit: 200) { file } }`
