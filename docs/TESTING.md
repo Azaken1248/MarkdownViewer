@@ -699,7 +699,11 @@ every time — is caught by the unique index raising rather than by a check
 failing, which is the suite being held up by the schema rather than by itself,
 and worth knowing.
 
-`lib/access.js` is at **100% of lines, branches and functions.** Four of those
+`lib/access.js` is at **100% of lines, branches and functions** — re-measured
+after the lifecycle work, which had quietly left three branches behind:
+PUBLIC_READS as an injected statement, a space asked to forget nothing, and a
+path nothing owns being placed in the space that holds loose documents. A
+number that was true once is not a number. Four of those
 branches were reached only after the first measurement said so: a statement
 stored for the public principal, a statement written at the root through the
 store rather than as a literal, one written with an expiry, and the store's own

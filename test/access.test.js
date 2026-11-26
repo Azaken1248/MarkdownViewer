@@ -1068,12 +1068,68 @@ console.log("=== the policy follows the directories ===");
   check("...and the document under it is refused, which is the whole point",
     moved.decide(editor, "Unregistered/Minutes/a.md", "doc:read").allowed, false);
 
-  // The one way a scope cannot be placed: a database with no reserved space
-  // in it at all, which is a library that has never had the migration run.
+  // The two ways a scope cannot be placed: nothing to place, and a database
+  // with no reserved space in it at all — a library that never had the
+  // migration run.
+  check("a path nothing owns is placed in the space that holds loose documents",
+    (() => {
+      const placed = moved.placeScope("loose-note.md");
+      return [Boolean(placed), placed.prefix, placed.spaceId === moved.spaceByDir("").id];
+    })(),
+    [true, "loose-note.md", true]);
+  check("nothing is not a space to forget either",
+    [moved.forgetSpace(""), moved.forgetSpace(null)], [false, false]);
+  check("nothing is not a scope",
+    [moved.placeScope(""), moved.placeScope("/"), moved.placeScope(null)],
+    [null, null, null]);
   check("a path that nothing can own is not placed anywhere",
     new AccessStore({ db: db.open(path.join(where, "bare-scope")), markdownDir: library })
       .placeScope("notes.md"),
     null);
+}
+
+console.log("=== a statement that is true of the request rather than of the library ===");
+{
+  /* PUBLIC_READS is the operator saying the whole library is readable without
+   * an account, which is exactly `allow read to public at the root`. The guard
+   * hands it to the decision for that request rather than writing it down,
+   * because it is not the owner's policy — it goes away when the variable
+   * does — and it is said as a statement so the one algorithm still explains
+   * the answer.
+   */
+  const { PUBLIC_READS_STATEMENT } = require("../lib/guards.js");
+  const asIfPublicReads = { extra: [PUBLIC_READS_STATEMENT] };
+
+  check("a request with no account is refused without it",
+    store.decide(null, DOC, "doc:read").allowed, false);
+  check("...and allowed with it",
+    store.decide(null, DOC, "doc:read", asIfPublicReads).allowed, true);
+  check("...which says where the answer came from",
+    store.decide(null, DOC, "doc:read", asIfPublicReads).reason,
+    "allowed by: allow read public on <root>");
+  check("...and still does not let it write",
+    store.decide(null, DOC, "doc:write", asIfPublicReads).allowed, false);
+
+  check("a space closed to the public stays closed, variable or no variable",
+    (() => {
+      const shut = store.write({
+        effect: "deny",
+        subject: { kind: "public" },
+        spaceDir: "Elections",
+        level: "read"
+      });
+      const answer = store.decide(null, "Elections/a.md", "doc:read", asIfPublicReads);
+      store.remove(shut.id);
+      return [answer.allowed, answer.reason];
+    })(),
+    [false, "denied by: deny read public on Elections"]);
+
+  check("...and an account is unaffected by it either way",
+    [store.decide(editor, DOC, "doc:read").allowed,
+      store.decide(editor, DOC, "doc:read", asIfPublicReads).allowed],
+    [true, true]);
+  check("a filter takes it too, so a listing agrees with a guard",
+    store.allowFilter(null, "doc:read", asIfPublicReads)(DOC), true);
 }
 
 console.log("=== the cache, which must never answer with a permission that is gone ===");
