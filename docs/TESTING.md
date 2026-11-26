@@ -42,6 +42,36 @@ where its absence is visible.
 | `browser` | The six things jsdom cannot answer, in a real browser |
 | `accessibility` | axe over six page states in both themes, the skip link, reduced motion, 200% zoom and forced colours |
 
+### What a jsdom upgrade said about these suites
+
+jsdom 25 to 31 broke seventeen checks and not one line of the app, which is
+worth writing down because of *why*. jsdom resolves CSS the way a browser does
+now: `var(--dd-font-size, 13px)` computes to `13px`, `0` to `0px`, `9.5rem` to
+`152px`, `flex-direction` reports the `row` it defaults to, `max-width` and
+`max-height` serialise as the `max-size` shorthand, and a `<p>` carries the
+margin the default stylesheet gives it.
+
+So the checks that broke were the ones reading the DOM's *implementation*
+rather than the app's behaviour, and most of them are better now:
+
+- **The effective value is the claim** — the font size the drawing measures
+  by, the columns a table's grid has. The columns one gained something: the
+  element sets `--dd-columns: 3` and the computed value is now
+  `repeat(3, …)`, so the check shows the variable actually drives the grid
+  instead of quoting the rule back.
+- **"This comes from a custom property" is a claim about the text**, and a
+  resolved value cannot carry it: a width baked into the rule computes to the
+  same `196px` and is a panel whose bar moves nothing. Those read the
+  stylesheet source now — including the paper's `fill`, where "nothing
+  declares it" and "a rule paints it black" compute identically.
+- **A colour is compared against its token** rather than against a hex
+  written out here, by painting a reference element with the same variable.
+  The claim is "the same colour as the canvas", not "this particular grey".
+- The export suite's layout stand-in neutralises the default stylesheet
+  instead of ignoring it. Both it and the paginator read computed styles, so
+  the two have to agree — and the way to make them agree is a document with no
+  default margins, not one side pretending they are not there.
+
 ### jsdom, and the two that are not
 
 Every client suite but two runs in jsdom, which is a JavaScript implementation

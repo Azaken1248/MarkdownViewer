@@ -661,14 +661,37 @@ console.log("=== the type a diagram is set in is real Mermaid ===");
     <text class="dd-text dd-row" id="row">x</text></svg>`);
   const typed = (id) => set.window.getComputedStyle(set.window.document.getElementById(id));
 
+  /* The resolved size, which is the number the drawing measures with. jsdom
+   * works out custom properties now, so this asks the question directly
+   * instead of comparing the declaration's text to a constant and hoping the
+   * two were about the same thing.
+   */
   check("the size the stylesheet sets is the size the drawing measures by",
-    typed("one").fontSize, `var(--dd-font-size, ${DD.TEXT_SIZE}px)`);
+    typed("one").fontSize, `${DD.TEXT_SIZE}px`);
   check("...and a row in a table is set in the same one, so there is one number",
     typed("row").fontSize, typed("one").fontSize);
   check("...with what a box was told to be beating it",
     [typed("one").fontWeight, typed("one").fontFamily, typed("one").fontStyle],
-    ["var(--dd-font-weight, 400)", "var(--dd-font-family, inherit)",
-      "var(--dd-font-style, normal)"]);
+    ["400", "Inter, sans-serif", "normal"]);
+
+  /* ...and that each of those arrives through a custom property, which the
+   * resolved value cannot show. It is the mechanism a box's own styling uses:
+   * DiagramDraw hands the exporter `--dd-font-*` for exactly this, so a
+   * number written straight into the rule would compute the same and quietly
+   * ignore what a box was told to be.
+   */
+  const fontRule = stylesheet
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(/[{}]/)
+    .reduce((found, part, index, parts) =>
+      (index > 0 && parts[index - 1].split(",").some((one) => one.trim() === ".dd .dd-text")
+        ? part
+        : found), "");
+
+  check("...each of them through a property a box can be given",
+    ["--dd-font-size", "--dd-font-weight", "--dd-font-family", "--dd-font-style"]
+      .filter((name) => fontRule.includes(`var(${name}`)),
+    ["--dd-font-size", "--dd-font-weight", "--dd-font-family", "--dd-font-style"]);
 }
 
 };

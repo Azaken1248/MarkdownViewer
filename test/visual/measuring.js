@@ -7,6 +7,23 @@
 // Everything it needs is handed to it: the suite's own check(), the three
 // modules under test, and the fixtures walker. Split out of one file only
 // because that file had grown past a thousand lines.
+/* What the stylesheet *says*, as against what it computes to.
+ *
+ * Most of what these checks want is the computed value — that is what a
+ * reader sees. Two kinds of claim cannot be read there, because jsdom 31
+ * resolves custom properties the way a browser does: "this length comes from
+ * a variable, so the editor can change it at runtime" and "nothing declares
+ * this property at all". Both are claims about the text, so the text is what
+ * they are asked of.
+ */
+const declarationsFor = (stylesheet, selector) =>
+  // Comments first: they sit between one rule and the next, so a rule's
+  // selector arrives with the paragraph explaining it stuck to the front.
+  [...String(stylesheet).replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(([, selectors]) => selectors.split(",").some((one) => one.trim() === selector))
+    .map(([, , body]) => body)
+    .join(";");
+
 module.exports = (ctx) => {
   const {
     check, DM, DD, ROOT, JSDOM, styleSource
@@ -610,8 +627,15 @@ console.log("=== the previews are actually on the screen ===");
     </svg>`);
   const painted = (id) => drawn.window.getComputedStyle(drawn.window.document.getElementById(id));
 
+  /* Asked of the stylesheet rather than of the computed value: with no rule
+   * declaring a fill, what computes is the initial one — black — which cannot
+   * be told apart from a rule that paints it black. The claim is that nothing
+   * declares it.
+   */
   check("nothing in the stylesheet paints over the paper's pattern",
-    painted("paper").fill, "");
+    /(^|;)\s*fill\s*:/.test(declarationsFor(stylesheet, ".dd .dd-paper")
+      + declarationsFor(stylesheet, ".dd-paper")),
+    false);
 
   // The pattern carries the paper's own colour, or the paper is transparent and
   // whatever is behind the canvas shows through the grid.
@@ -625,10 +649,28 @@ console.log("=== the previews are actually on the screen ===");
     /<pattern[^>]*><rect class="dd-grid-back" width="\d+" height="\d+"\/>/.test(sheet), true);
   check("...with the lines drawn over it",
     /dd-grid-back[^>]*\/><path class="dd-grid-line"/.test(sheet), true);
+  /* Compared against the token itself rather than against a colour written
+   * out here. jsdom resolves var() now, so the computed fill is the canvas
+   * colour in rgb() while the token is a hex — the same colour said two ways.
+   * A reference element painted with the token on purpose settles it, and the
+   * claim stays "the same colour as the canvas" rather than becoming "this
+   * particular grey", which would have to be edited every time the palette
+   * moves.
+   */
+  const reference = drawn.window.document.createElement("style");
+  reference.textContent = ".ref-canvas { fill: var(--canvas); } .ref-border { stroke: var(--border); }";
+  drawn.window.document.head.appendChild(reference);
+  const refFill = drawn.window.document.createElement("rect");
+  refFill.className = "ref-canvas";
+  const refStroke = drawn.window.document.createElement("path");
+  refStroke.className = "ref-border";
+  drawn.window.document.querySelector("svg").append(refFill, refStroke);
+
   check("...and the paper's colour is inside the pattern instead",
-    painted("back").fill, "var(--canvas)");
+    painted("back").fill, drawn.window.getComputedStyle(refFill).fill);
   check("...with the lines faint enough to be paper rather than graph paper",
-    [painted("line").stroke, painted("line").opacity], ["var(--border)", "0.55"]);
+    [painted("line").stroke, painted("line").opacity],
+    [drawn.window.getComputedStyle(refStroke).stroke, "0.55"]);
 
   /* The editor is four regions, and each one holds one kind of thing: the bar
    * across the top is what is done to the whole diagram, the rail down one side
@@ -664,13 +706,13 @@ console.log("=== the previews are actually on the screen ===");
     editor.window.getComputedStyle(editor.window.document.getElementById(id));
 
   check("the bar is across the top and the two rails are beside each other",
-    [region("shell").flexDirection, region("body").flexDirection], ["column", ""]);
+    [region("shell").flexDirection, region("body").flexDirection], ["column", "row"]);
   check("the paper takes what the rails leave",
     [region("stage").flex, region("paper").flex], ["1 1 0%", "1 1 0%"]);
   check("...all of it, rather than the strip's share of a document",
     region("paper").maxHeight, "none");
   check("...and can be narrower than the diagram on it, so the panel stays put",
-    [region("stage").minWidth, region("paper").minWidth], ["0", "0"]);
+    [region("stage").minWidth, region("paper").minWidth], ["0px", "0px"]);
 
   /* One scroller per region. The page cannot scroll — a page that scrolls is a
    * page whose Save button can be pushed off the bottom — so the rail and the
@@ -681,10 +723,17 @@ console.log("=== the previews are actually on the screen ===");
    * panel whose bar moves nothing.
    */
   check("a side is as wide as it was left rather than as wide as it was built",
-    [region("rail").flex, region("side").flex],
-    ["0 0 var(--dd-rail, 196px)", "0 0 var(--dd-side, 300px)"]);
+    [region("rail").flex, region("side").flex], ["0 0 196px", "0 0 300px"]);
+  /* ...and that those numbers arrive through a variable, which the computed
+   * value can no longer show: a width baked into the rule would compute to
+   * exactly the same 196px and be a panel whose bar moves nothing.
+   */
+  check("...through the property the bar writes, not a number in the rule",
+    [/var\(--dd-rail/.test(declarationsFor(stylesheet, ".ve-diagram-rail")),
+      /var\(--dd-side/.test(declarationsFor(stylesheet, ".ve-diagram-side"))],
+    [true, true]);
   check("...and can be narrower than what is in it, so the bar can reach",
-    [region("rail").minWidth, region("side").minWidth], ["0", "0"]);
+    [region("rail").minWidth, region("side").minWidth], ["0px", "0px"]);
 
   check("nothing scrolls the page the editor is on", region("host").overflow, "hidden");
   /* The rail is two things stacked — the shapes to put down and the tree of
@@ -696,7 +745,7 @@ console.log("=== the previews are actually on the screen ===");
     [region("rail").overflow, region("palette").overflowY, region("branches").overflowY],
     ["hidden", "auto", "auto"]);
   check("...with the tree taking whatever the shapes leave",
-    [region("tree").flex, region("tree").minHeight], ["1 1 auto", "0"]);
+    [region("tree").flex, region("tree").minHeight], ["1 1 auto", "0px"]);
   check("...and so does the panel", region("side").overflowY, "auto");
 
   // The zoom is about the view rather than about the diagram, so it belongs to
@@ -738,8 +787,10 @@ console.log("=== the previews are actually on the screen ===");
    * and the padding took back the room that caret needs — so the words ran
    * under where it should have been.
    */
+  // 9.5rem, resolved: jsdom works the root font size out now, where it used
+  // to hand the declaration back as written.
   check("...and is wide enough for the longest thing it can say",
-    control("flow").minWidth, "9.5rem");
+    control("flow").minWidth, "152px");
   check("...with the room the caret needs still reserved beside them",
     control("flow").paddingRight, "26px");
   check("...and the caret itself still drawn",
@@ -762,8 +813,10 @@ console.log("=== the previews are actually on the screen ===");
   const laid = (id) => cells.window.getComputedStyle(cells.window.document.getElementById(id));
 
   check("the cells are laid out as a grid", laid("cells").display, "grid");
+  // Resolved, which says more than the rule's text did: the element carries
+  // --dd-columns: 3 and the grid is three columns because of it.
   check("...of as many columns as the table has",
-    laid("cells").gridTemplateColumns, "repeat(var(--dd-columns, 1), minmax(0, 1fr))");
+    laid("cells").gridTemplateColumns, "repeat(3, minmax(0px, 1fr))");
   check("...with the title spanning the whole of it, the way it is drawn",
     laid("title").gridColumn, "1 / -1");
 }

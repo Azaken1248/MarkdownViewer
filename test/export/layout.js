@@ -16,6 +16,20 @@
 function install(window) {
   const { document } = window;
 
+  /* No margins but the ones a test writes.
+   *
+   * jsdom 31 applies the default stylesheet, so a <p> computes 1em of margin
+   * and an <h2> rather more, where 25 computed nothing at all. Both this
+   * stand-in and the paginator it stands in for read computed styles — so the
+   * two have to agree, and the way to make them agree is to have no default
+   * margins in the document rather than to have one side ignore them. An
+   * element is as tall as the test said it was, which is this file's whole
+   * contract.
+   */
+  const noDefaults = document.createElement("style");
+  noDefaults.textContent = "* { margin: 0; padding: 0; }";
+  (document.head || document.documentElement).appendChild(noDefaults);
+
   const px = (el, which) => parseFloat(window.getComputedStyle(el)[which]) || 0;
 
   /* As tall as the test said, or as tall as what is in it. A zoom shrinks the

@@ -435,10 +435,21 @@ module.exports = async (check) => {
      * the clamp are both for a window, and here the picture is already drawn
      * and its own proportions are the right ones.
      */
+    /* Read back through the CSSOM rather than matched in the serialised text.
+     *
+     * What a stylesheet declaration looks like when it is written back out is
+     * the DOM's business and it changes: jsdom 31 collapses max-width and
+     * max-height into the `max-size` shorthand, so `max-width: 666px` is
+     * nowhere in the string while being exactly what the element says. The
+     * claim here is about the values, so the values are what is asked for.
+     */
+    const asShipped = /** @type {HTMLElement} */ (new JSDOM(built.html).window.document
+      .querySelector(".mermaid-block")).style;
+
     check("the box stops deciding the diagram's shape",
-      /aspect-ratio:\s*auto/.test(built.html) && /max-height:\s*none/.test(built.html), true);
+      [asShipped.aspectRatio, asShipped.maxHeight], ["auto", "none"]);
     check("...and is no wider than the drawing plus its frame",
-      built.html.includes("max-width: 666px"), true);
+      asShipped.maxWidth, "666px");
 
     // An SVG that is not laid out has no bounds to give, and the box it sits
     // in is the fallback.
