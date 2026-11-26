@@ -11,8 +11,12 @@ npm install
 npm test
 ```
 
-Node 20 or newer (`.nvmrc` pins 20; CI runs 20 and 22). The suites start real
-servers against temporary directories, so they never touch your own documents.
+Node 22 or newer (`.nvmrc` pins 26, the current LTS; CI runs 22 and 26). The
+suites start real servers against temporary directories, so they never touch
+your own documents.
+
+`better-sqlite3` is built for one Node ABI, so switching Node means
+`npm install` again before the suites will run.
 
 ## The three commands that must pass
 
