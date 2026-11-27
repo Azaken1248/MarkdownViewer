@@ -291,6 +291,16 @@ async function startTestServer({ stateDir: existingStateDir = null, env = {} } =
     await Promise.race([waitForHealth(origin), exitedEarly]);
     return {
       origin, stateDir, folderIds, docPaths, stop,
+      /* Everything the server itself has said, stdout and stderr together.
+       *
+       * Collected anyway for the "it never became healthy" message; handed
+       * out as well because a check that fails on a 500 has no way to say
+       * *which* 500 — the page is told "the error has been logged" and the
+       * log is in this process's sibling. A suite that can print the server's
+       * own line turns an unrepeatable flake into something with a stack
+       * trace attached.
+       */
+      log: () => startupLog.join(""),
       // What the server printed while starting: the one place a generated
       // first-admin password is ever shown.
       startupLog: () => startupLog.join(""),

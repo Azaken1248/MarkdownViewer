@@ -22,7 +22,7 @@
  * by terminating the worker — that is what "Restart" does.
  */
 
-const PYODIDE_VERSION = "314.0.3";
+const PYODIDE_VERSION = "314.0.8";
 const PYODIDE_ORIGIN = "https://cdn.jsdelivr.net";
 const PYODIDE_INDEX = `${PYODIDE_ORIGIN}/npm/pyodide@${PYODIDE_VERSION}/`;
 

@@ -652,6 +652,26 @@ turning one back on leaving the other alone, and replacing the link keeping
 what it allowed — rotating a URL is republishing the same document. A switch
 has to be true or false, and a request has to name at least one.
 
+### A 500 that would not say why
+
+Twice now a full parallel run has had one request answer 500 and then never
+done it again on demand — once reading a recycle-bin entry, once reading a
+document. Both times the only evidence was a URL, because the page is told
+"the error has been logged" and nothing more, which is right for a reader and
+useless to a failing run. The server had written the stack to its own stderr,
+in a sibling process, where nothing was reading it.
+
+So the test server hands out its log, and the DOM suite prints the server's
+own account of it when a 500 was seen — and only then, so a passing run stays
+quiet. The next occurrence explains itself instead of being argued about.
+
+Guessing was tried first and is worth recording as a dead end: `reconcileSpaces`
+writes on a read path, so two listings racing between "does this space exist"
+and "insert it" looked like the answer. It cannot be, inside one process —
+better-sqlite3 is synchronous, so that check and that insert are one block
+that nothing interleaves — and forty-eight concurrent listings against a
+library gaining directories produced no failure at all.
+
 ### The flake that was a defect
 
 Three full runs of the suite failed on `ECONNRESET` and "socket hang up" from

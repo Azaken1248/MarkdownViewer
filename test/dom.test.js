@@ -587,6 +587,23 @@ async function run(server) {
   check("no errors logged during load", realErrors, []);
   /* And which request, if one of them was a 500. The page logs the server's
    * own sentence, which says nothing about what was asked for.
+   *
+   * The server's own log goes out with it. A 500 here has twice been a thing
+   * that happened once under a full parallel run and never again on demand,
+   * and both times the only evidence was a URL — while the server had written
+   * the stack to its stderr, in a sibling process, where nothing was reading
+   * it. Printed only when something failed, so a passing run stays quiet.
    */
+  if (serverFailures.length > 0) {
+    const said = server.log()
+      .split("\n")
+      .filter((line) => /ERROR|Error|at /.test(line))
+      .slice(-25);
+    console.log("  the server's own account of it:");
+    for (const line of said) {
+      console.log(`    ${line}`);
+    }
+  }
+
   check("...and nothing the page asked for answered with a 500", serverFailures, []);
 }
