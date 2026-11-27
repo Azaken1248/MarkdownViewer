@@ -621,6 +621,7 @@ app.use(createFoldersRoutes({
 app.use(createRecycleRoutes({
   markdownDir: MARKDOWN_DIR,
   audit,
+  accessStore,
   softDeletedDir: DELETED_SOFT_DIR,
   hardDeletedDir: DELETED_HARD_DIR,
   requireRead,
