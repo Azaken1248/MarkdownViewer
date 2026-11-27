@@ -844,6 +844,122 @@ module.exports = async (ctx) => {
         policy.ensureBaseline({ actor: "aza" });
       }
 
+      console.log("=== moving something is a question about where it is going ===");
+      {
+        /* Write on the source is not enough.
+         *
+         * A move takes a document out of one policy and puts it under
+         * another, so the answer has to be yes on both sides — and before
+         * anything is renamed on disk, because a file that has already moved
+         * is under the destination's policy whatever the answer was. The one
+         * guard is asked twice rather than a second copy of the rule being
+         * written into the handler.
+         */
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+
+        const open = await admin.post("/api/folders", { name: "Open Ground" });
+        const shut = await admin.post("/api/folders", { name: "No Entry" });
+        check("(two top-level folders, which are two spaces)",
+          [open.status, shut.status], [201, 201]);
+
+        const made = await admin.post("/api/docs",
+          { fileName: "memo.md", content: "# Memo\n", folderId: open.body.folder.id });
+        check("(a document in the open one)", [made.status, made.body.file],
+          [201, "Open Ground/memo.md"]);
+
+        /* Denied at write rather than at read, so the refusal is the one worth
+         * reading: the destination is somewhere the mover can see and may not
+         * put anything, which is 403. A deny on reading would answer 404 and
+         * check less — any mistake in the guard would look the same as the
+         * document not being there.
+         */
+        policy.write({
+          effect: "deny",
+          subject: { kind: "group", id: policy.groupByName("everyone").id },
+          spaceDir: "No Entry",
+          level: "write"
+        });
+
+        const into = await admin.put("/api/docs/Open%20Ground/memo.md/folder",
+          { folderId: shut.body.folder.id });
+        check("a document cannot be moved into a space its mover may not write",
+          into.status, 403);
+        check("...and nothing was moved before the answer",
+          [(await admin.get("/api/docs/Open%20Ground/memo.md")).status,
+            (await admin.get("/api/docs/No%20Entry/memo.md")).status],
+          [200, 404]);
+
+        const out = await admin.put("/api/docs/Open%20Ground/memo.md/folder",
+          { folderId: null });
+        check("...while a move to somewhere it may write is allowed",
+          [out.status, out.body.file], [200, "memo.md"]);
+        check("(and back again)",
+          (await admin.put("/api/docs/memo.md/folder",
+            { folderId: open.body.folder.id })).status,
+          200);
+
+        const folderInto = await admin.put(`/api/folders/${open.body.folder.id}`,
+          { parentId: shut.body.folder.id });
+        check("a folder cannot be moved into that space either, since its documents go with it",
+          folderInto.status, 403);
+        check("...and its documents are still where they were",
+          (await admin.get("/api/docs/Open%20Ground/memo.md")).status, 200);
+
+        const renamed = await admin.put(`/api/folders/${open.body.folder.id}`,
+          { name: "Open Range" });
+        check("...while a rename asks nothing about anywhere else",
+          renamed.status, 200);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+      }
+
+      console.log("=== a document restored into a space that lost its row ===");
+      {
+        /* Restoring recreates the directory the document was deleted from,
+         * which can be a top-level directory whose space was deleted while
+         * the document sat in the bin. A directory with no space row is a
+         * directory nobody can write a statement about: the documents in it
+         * are readable, by the root statement, and there is no way to close
+         * them. So the route that recreates the directory registers it, the
+         * same way creating a folder and uploading one do.
+         */
+        const folder = await admin.post("/api/folders", { name: "Wound Down" });
+        const doc = await admin.post("/api/docs",
+          { fileName: "last.md", content: "# Last\n", folderId: folder.body.folder.id });
+        check("(a document in a top-level folder)",
+          [folder.status, doc.body.file], [201, "Wound Down/last.md"]);
+
+        check("(deleted)",
+          (await admin.post(`/api/docs/${doc.body.file}/delete`, { mode: "soft" })).status, 200);
+        const binned = (await admin.get("/api/recycle-bin")).body.docs
+          .find((one) => one.originalFile === "Wound Down/last.md");
+        check("(and in the bin under the path it came from)", Boolean(binned), true);
+
+        check("(the folder is deleted while it sits there)",
+          (await admin.del(`/api/folders/${folder.body.folder.id}`)).status, 200);
+        check("...so the space is gone", policy.spaceByDir("Wound Down"), null);
+
+        check("restoring it puts it back",
+          (await admin.post(`/api/recycle-bin/${binned.file}/restore`)).body.file,
+          "Wound Down/last.md");
+        check("...and the directory it recreated is a space again, straight away",
+          Boolean(policy.spaceByDir("Wound Down")), true);
+        check("...so its policy can be written",
+          policy.write({
+            effect: "deny",
+            subject: { kind: "group", id: policy.groupByName("everyone").id },
+            spaceDir: "Wound Down",
+            level: "read"
+          }).ok,
+          true);
+        check("...and it closes",
+          (await reader2.get("/api/docs/Wound%20Down/last.md")).status, 404);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+      }
       // And the folders, which need the space closed rather than one document
       // in it: a folder's permission is asked about the directory.
       policy.db.prepare("DELETE FROM grants WHERE effect = 'deny'").run();
