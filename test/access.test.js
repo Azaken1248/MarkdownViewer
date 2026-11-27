@@ -81,6 +81,50 @@ console.log("=== the scopes a document is subject to ===");
     ["Elections|a.md", "Elections|null", "null|null"]);
 }
 
+console.log("=== the reserved space is a space, and not the library ===");
+{
+  /* The space whose directory name is the empty string holds the documents
+   * that are in no directory at all. `null` — both scope columns unset — is
+   * the root, which is about the whole library. They are two different
+   * scopes and the empty string is not a missing value, which is the one
+   * thing the comparison has to get right: it was reducing `""` to `null`
+   * on one side of itself only.
+   *
+   * What that cost, in both directions. A statement on the reserved space
+   * read as a statement on the root, so `deny read on Ungrouped` closed
+   * every document in the library; and a statement naming one loose document
+   * matched nothing at all, so a deny on it quietly stopped denying.
+   */
+  const asked = (statements, docPath) => decide({
+    user: editor,
+    groups: ["everyone"],
+    statements: [EVERYONE_AT_ROOT, ...statements],
+    docPath,
+    action: "doc:read"
+  });
+
+  const ungrouped = stmt("deny", "read", group("everyone"), "");
+  check("a space closed to everyone closes the documents in it",
+    asked([ungrouped], LOOSE).allowed, false);
+  check("...and nothing else, the reserved space being a space like any other",
+    [asked([ungrouped], DOC).allowed, asked([ungrouped], "Elections/a.md").allowed],
+    [true, true]);
+
+  const oneDocument = stmt("deny", "read", group("everyone"), "", { prefix: LOOSE });
+  check("a statement naming one loose document applies to it",
+    asked([oneDocument], LOOSE).allowed, false);
+  check("...and to nothing beside it",
+    asked([oneDocument], "other.md").allowed, true);
+  check("...which is what it says it did",
+    asked([oneDocument], LOOSE).reason,
+    "denied by: deny read group:everyone on <ungrouped>/notes.md");
+
+  check("the root is still the whole library, and is not the reserved space",
+    [asked([stmt("deny", "read", group("everyone"))], LOOSE).allowed,
+      asked([stmt("deny", "read", group("everyone"))], DOC).allowed],
+    [false, false]);
+}
+
 console.log("=== a path this will not decide about ===");
 {
   /* `..` is not a name. `Public/../Secret/notes.md` names a document in
