@@ -427,7 +427,7 @@ state added later cannot forget to.
 
 **The critical path is a budget, not a habit.** A `<script defer>` blocks every
 later `<script defer>`, so anything in the head sits in front of `app.js`, the
-file that draws the whole interface. Mermaid alone is 3.5MB, and with KaTeX,
+file that draws the whole interface. Mermaid alone is 5.5MB, and with KaTeX,
 highlight.js and svg-pan-zoom beside it every visit was downloading close to 4MB
 of rendering libraries before it could show a word — including the visits to
 documents with no diagram, no equation and no code in them.

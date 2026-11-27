@@ -326,7 +326,7 @@ as it always did. **Here it is drawn where it was left** — this app draws thos
 diagrams itself, in the editor and in the document, from
 `public/js/diagram-draw.js`: the shapes, the table boxes, and orthogonal arrows
 that route around whatever is in the way. Which also means a diagram carrying its
-own layout never downloads the 3.5MB Mermaid engine at all, and never needs
+own layout never downloads the 5.5MB Mermaid engine at all, and never needs
 redrawing when the theme changes — it is ordinary SVG in ordinary CSS colours.
 
 The trade is worth being explicit about: **a diagram you arrange here will look

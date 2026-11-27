@@ -4,7 +4,7 @@
 // accident: a <script defer> blocks every later <script defer>, so one library
 // added to the head sits in front of app.js — the file that draws the entire
 // interface — for every visit, whether or not any document needs it. Mermaid
-// alone is 3.5MB, and for a while it was loaded that way.
+// alone is 5.5MB, and for a while it was loaded that way.
 //
 // So this suite is mostly a budget. It asserts what may appear in the head, not
 // what may not: a list of forbidden libraries only catches the four that were

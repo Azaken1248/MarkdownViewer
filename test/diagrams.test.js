@@ -214,7 +214,7 @@ check("no path selector in the stray-fill shape list", /"path"/.test(themeCss), 
 // stylesheet as the diagram's source, fail to parse it, and replace the diagram
 // with a wall of CSS ending in the node labels. Two passes over one root is not
 // exotic: the flowchart builder redraws its preview on every pause in typing
-// while an earlier render of the block around it is still waiting on the 3.5MB
+// while an earlier render of the block around it is still waiting on the 5.5MB
 // engine, and both of them call renderMermaidBlocks.
 console.log("=== rendering a root twice draws the diagram, not its stylesheet ===");
 {

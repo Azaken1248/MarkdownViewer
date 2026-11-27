@@ -5,7 +5,7 @@
  * each box is and how big it is, and what is left is arithmetic: a shape per
  * box, a route per arrow, and text in the middle of both.
  *
- * Which means a diagram that carries its own layout never downloads the 3.5MB
+ * Which means a diagram that carries its own layout never downloads the 5.5MB
  * engine at all. It also means the drawing is made of ordinary elements with
  * ordinary classes on them, so the theme colours it the way it colours
  * everything else, and a box can be dragged without anything being re-rendered

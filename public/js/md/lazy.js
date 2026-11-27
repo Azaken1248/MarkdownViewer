@@ -47,7 +47,7 @@ var MdLazy = (function () {
 
   /* --- The heavy half, fetched only when a document needs it ---------------
    *
-   * Mermaid is 3.5MB. As a <script defer> in the head it had to arrive and
+   * Mermaid is 5.5MB. As a <script defer> in the head it had to arrive and
    * parse before app.js — the file that draws the entire interface — was
    * allowed to run, so every visit paid for a diagram engine, a maths
    * typesetter and a syntax highlighter before it could show a word of text,
@@ -68,8 +68,8 @@ var MdLazy = (function () {
       loaded: () => Boolean(window.mermaid),
       assets: [
         {
-          js: "https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js",
-          integrity: "sha384-aBQXj4hK6Jm05i7aQAsUV3bLdSUrHX1BGYfMB0166TtWt/RRaw+h0Eelme9OCOvy"
+          js: "https://cdn.jsdelivr.net/npm/mermaid@12.3.0/dist/mermaid.min.js",
+          integrity: "sha384-HHW54r639fK42Ip0coGF3mz8oSiGn0eEoWNTLs75X7H63pLSDBa0Tqs0RwGmLlXE"
         }
       ]
     },

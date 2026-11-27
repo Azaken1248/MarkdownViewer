@@ -133,7 +133,7 @@ var MdMermaid = (function () {
   async function renderSingleMermaidNode(node) {
     // Already on screen. Two passes over one root is not exotic — the flowchart
     // builder redraws its preview as it is typed into while an earlier render
-    // of the block around it is still waiting on the 3.5MB engine — and without
+    // of the block around it is still waiting on the 5.5MB engine — and without
     // this the second pass would redraw a diagram that is already correct, or,
     // before the source was recorded, feed the parser the first one's stylesheet
     // and leave a wall of CSS where the diagram was.

@@ -219,7 +219,7 @@
      * the link was published with ticking allowed.
      *
      * Before the diagrams, because it is the words the reader is already
-     * looking at, and it does not wait on a 3.5MB engine arriving. Left as
+     * looking at, and it does not wait on a 5.5MB engine arriving. Left as
      * marked rendered them when it is not allowed: a box that cannot be
      * ticked looks like one that cannot be ticked.
      */

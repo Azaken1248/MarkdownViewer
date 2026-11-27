@@ -209,7 +209,7 @@ module.exports = async (check) => {
 
   /* A diagram that says where its own boxes go has already been arranged, by
    * hand, in the file — so it is drawn here rather than by the engine, and a
-   * page whose diagrams are all like this never asks the CDN for the 3.5MB
+   * page whose diagrams are all like this never asks the CDN for the 5.5MB
    * engine at all.
    */
   const laidOut = "flowchart TD\n    %% layout v1\n    %% @ A 10,10 160x56"
@@ -306,7 +306,7 @@ module.exports = async (check) => {
 
     /* Already on screen. Two passes over one root is not exotic — the
      * flowchart builder redraws its preview as it is typed into while an
-     * earlier render is still waiting on the 3.5MB engine — and without this
+     * earlier render is still waiting on the 5.5MB engine — and without this
      * the second pass would feed the parser the first one's stylesheet and
      * leave a wall of CSS where the diagram was.
      */
@@ -519,7 +519,7 @@ module.exports = async (check) => {
     Object.assign(window, { svgPanZoom: waiting });
 
     /* And a diagram drawn before the library has arrived, which is the
-     * ordinary case: the engine is 3.5MB and this one is fetched after it.
+     * ordinary case: the engine is 5.5MB and this one is fetched after it.
      */
     const dragging = window.svgPanZoom;
     delete /** @type {any} */ (window).svgPanZoom;
@@ -830,7 +830,7 @@ module.exports = async (check) => {
     /* And a diagram that says where its own boxes go, on that same page: it is
      * drawn here without the engine, and it still gets pan and zoom — which
      * is the whole point of drawing it ourselves rather than waiting for
-     * 3.5MB that this page will never need.
+     * 5.5MB that this page will never need.
      */
     instances.splice(0);
     const own = panel(fenced(laidOut));

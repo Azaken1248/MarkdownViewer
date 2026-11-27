@@ -170,6 +170,24 @@ var MdDiagramTheme = (function () {
       // on the markdown, so "loose" lets an uploaded document execute script.
       securityLevel: "antiscript",
       theme: "base",
+      /* The look and the layout, said out loud because version 12 changed
+       * both defaults.
+       *
+       * Mermaid 12 draws with `look: "neo"` and lays out with ELK unless told
+       * otherwise, and either would redraw every diagram in every document
+       * the first time somebody opened one. The palette below is tuned to the
+       * classic renderer's output — themeCSS patches the gaps that renderer
+       * leaves, down to the stray fills it emits — and this app also draws
+       * some diagrams itself, from the same arithmetic, so the two have to
+       * agree about where a box goes.
+       *
+       * So this is a pin rather than a preference: the upgrade was taken for
+       * the patched KaTeX inside it, and a library upgrade should not change
+       * what a reader sees. Moving to ELK and the new look is its own change,
+       * with the diagram suites as the judge of it.
+       */
+      look: "classic",
+      layout: "dagre",
       darkMode: theme === "dark",
       fontFamily: '"Inter", sans-serif',
       // Colours belong in themeVariables, not in blanket !important overrides.
@@ -219,7 +237,7 @@ var MdDiagramTheme = (function () {
    * way they were left.
    *
    * Which also means a page whose diagrams are all like this never asks the CDN
-   * for the 3.5MB engine at all. That is why this runs before the question of
+   * for the 5.5MB engine at all. That is why this runs before the question of
    * loading it comes up.
    */
   function drawLaidOutDiagrams(root) {
