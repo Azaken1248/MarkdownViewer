@@ -915,6 +915,79 @@ module.exports = async (ctx) => {
         policy.ensureBaseline({ actor: "aza" });
       }
 
+      console.log("=== the archive answers by where the document was, like the bin ===");
+      {
+        /* A hard delete moves the document to the archive, which is outside
+         * the library and is not a space. Its permission is still the
+         * document's own: the entry carries the path it was deleted from, and
+         * if the archive answered on the entry's own stamped name instead, it
+         * would be a list of what is in a space somebody cannot see — and a
+         * restore would be a way back into it, which is the whole reason the
+         * bin works this way.
+         *
+         * Checked rather than assumed because the archive is the one place
+         * where a route can destroy a file, and because it had no coverage
+         * here at all while the bin had six checks.
+         */
+        const folder = await admin.post("/api/folders", { name: "Wound Up" });
+        const doc = await admin.post("/api/docs",
+          { fileName: "ledger.md", content: "# Ledger\n", folderId: folder.body.folder.id });
+        check("(a document in a top-level folder)", [folder.status, doc.status], [201, 201]);
+
+        check("(archived straight away, rather than through the bin)",
+          (await admin.post(`/api/docs/${doc.body.file}/delete`, { mode: "hard" })).status, 200);
+        const entry = (await admin.get("/api/archive")).body.docs
+          .find((one) => one.originalFile === "Wound Up/ledger.md");
+        check("(and it is in the archive, under the path it came from)", Boolean(entry), true);
+
+        policy.write({
+          effect: "deny",
+          subject: { kind: "group", id: policy.groupByName("everyone").id },
+          spaceDir: "Wound Up",
+          level: "read"
+        });
+
+        check("the archive leaves out what was deleted from a closed space",
+          (await admin.get("/api/archive")).body.docs
+            .some((one) => one.originalFile === "Wound Up/ledger.md"),
+          false);
+        check("...reading its content is refused",
+          (await admin.get(`/api/archive/${entry.file}/content`)).status, 404);
+        check("...restoring it is refused, which would be a way back into the space",
+          (await admin.post(`/api/archive/${entry.file}/restore`)).status, 404);
+        check("...and so is erasing it, which is the one thing that cannot be undone",
+          (await admin.del(`/api/archive/${entry.file}`,
+            { confirmFile: "Wound Up/ledger.md" })).status,
+          404);
+
+        policy.db.prepare("DELETE FROM grants").run();
+        policy.ensureBaseline({ actor: "aza" });
+
+        /* And a restore out of the archive recreates the directory, so it
+         * registers the space — exactly as the bin's does, and for the same
+         * reason: the folder can have been deleted while the document sat
+         * there, and a directory with no space row is one nobody can write a
+         * statement about.
+         */
+        check("(the folder is deleted while the document sits in the archive)",
+          (await admin.del(`/api/folders/${folder.body.folder.id}`)).status, 200);
+        check("...so the space is gone", policy.spaceByDir("Wound Up"), null);
+        check("restoring it out of the archive puts it back",
+          (await admin.post(`/api/archive/${entry.file}/restore`)).body.file,
+          "Wound Up/ledger.md");
+        check("...and the directory it recreated is a space again",
+          Boolean(policy.spaceByDir("Wound Up")), true);
+
+        check("(archived once more)",
+          (await admin.post("/api/docs/Wound%20Up/ledger.md/delete", { mode: "hard" })).status,
+          200);
+        const last = (await admin.get("/api/archive")).body.docs
+          .find((one) => one.originalFile === "Wound Up/ledger.md");
+        check("...and with the space open it can be erased, which is the one thing that cannot be undone",
+          (await admin.del(`/api/archive/${last.file}`,
+            { confirmFile: "Wound Up/ledger.md" })).status,
+          200);
+      }
       console.log("=== a document restored into a space that lost its row ===");
       {
         /* Restoring recreates the directory the document was deleted from,
@@ -925,25 +998,33 @@ module.exports = async (ctx) => {
          * them. So the route that recreates the directory registers it, the
          * same way creating a folder and uploading one do.
          */
+        /* Nested on purpose: what has to be registered is the **space**,
+         * which is the first segment of the path and not the directory the
+         * document is in. A document restored two folders deep recreates
+         * both, and `Wound Down/Q4` is not something a space can own.
+         */
         const folder = await admin.post("/api/folders", { name: "Wound Down" });
+        const inner = await admin.post("/api/folders",
+          { name: "Q4", parentId: folder.body.folder.id });
         const doc = await admin.post("/api/docs",
-          { fileName: "last.md", content: "# Last\n", folderId: folder.body.folder.id });
-        check("(a document in a top-level folder)",
-          [folder.status, doc.body.file], [201, "Wound Down/last.md"]);
+          { fileName: "last.md", content: "# Last\n", folderId: inner.body.folder.id });
+        check("(a document two folders deep)",
+          [folder.status, inner.status, doc.body.file],
+          [201, 201, "Wound Down/Q4/last.md"]);
 
         check("(deleted)",
           (await admin.post(`/api/docs/${doc.body.file}/delete`, { mode: "soft" })).status, 200);
         const binned = (await admin.get("/api/recycle-bin")).body.docs
-          .find((one) => one.originalFile === "Wound Down/last.md");
+          .find((one) => one.originalFile === "Wound Down/Q4/last.md");
         check("(and in the bin under the path it came from)", Boolean(binned), true);
 
-        check("(the folder is deleted while it sits there)",
+        check("(the folder above it is deleted while it sits there)",
           (await admin.del(`/api/folders/${folder.body.folder.id}`)).status, 200);
         check("...so the space is gone", policy.spaceByDir("Wound Down"), null);
 
         check("restoring it puts it back",
           (await admin.post(`/api/recycle-bin/${binned.file}/restore`)).body.file,
-          "Wound Down/last.md");
+          "Wound Down/Q4/last.md");
         check("...and the directory it recreated is a space again, straight away",
           Boolean(policy.spaceByDir("Wound Down")), true);
         check("...so its policy can be written",
@@ -955,7 +1036,7 @@ module.exports = async (ctx) => {
           }).ok,
           true);
         check("...and it closes",
-          (await reader2.get("/api/docs/Wound%20Down/last.md")).status, 404);
+          (await reader2.get("/api/docs/Wound%20Down/Q4/last.md")).status, 404);
 
         policy.db.prepare("DELETE FROM grants").run();
         policy.ensureBaseline({ actor: "aza" });
