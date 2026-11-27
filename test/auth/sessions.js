@@ -587,6 +587,164 @@ module.exports = async (ctx) => {
 
     await admin.del("/api/docs/beta.md/share");
     check("revoking kills the link", (await stranger.get(`/api/share/${newToken}`)).status, 404);
+
+    console.log("=== a share link is a statement, not an authority ===");
+    {
+      /* Possession of the token used to *be* the permission. Now the token
+       * says which document the request is about and which audience the link
+       * names, and decide() answers — which is what makes one row able to
+       * close every public link in the library, and what stops a link being
+       * a way into a space somebody was shut out of.
+       *
+       * The statements are written straight into the server's database,
+       * through AccessStore itself: there is no route for writing one yet,
+       * and the server is a different process, so this is also the check that
+       * it notices.
+       */
+      // Named apart from the handle the sessions block above opens, which is
+      // the same module in another scope and reads as a redeclaration.
+      const Sqlite = require("better-sqlite3");
+      const { AccessStore } = require("../../lib/access.js");
+      const policy = new AccessStore({
+        db: new Sqlite(path.join(server.stateDir, "data", "azadocs.db")),
+        markdownDir: path.join(server.stateDir, "docs")
+      });
+
+      const link = await admin.post("/api/docs/beta.md/share");
+      const token = link.body.url.split("/s/")[1];
+      const reader = makeClient(server.origin);
+      check("(a public link to a document in no space)",
+        [link.status, link.body.share.audience], [201, "public"]);
+      check("a stranger holding it reads the document",
+        (await reader.get(`/api/share/${token}`)).status, 200);
+
+      /* AWS's "block public access", in one row: an explicit deny beats
+       * everything, so it kills every public link in the library at once —
+       * existing ones included, which is the whole reason the row is a
+       * statement rather than a flag on each link.
+       */
+      const blocked = policy.write({
+        effect: "deny",
+        subject: { kind: "public" },
+        level: "read"
+      });
+      check("(deny read public, at the root)", blocked.ok, true);
+
+      const refused = await reader.get(`/api/share/${token}`);
+      check("...and the link stops working without being revoked", refused.status, 404);
+      check("...saying exactly what a made-up token says, since anything else would confirm the document is there",
+        refused.body,
+        (await reader.get("/api/share/not-a-real-token")).body);
+
+      const page = await reader.get(`/s/${token}`);
+      check("...the page says the same", page.status, 404);
+      check("...and names neither the document nor why",
+        [page.raw.includes("beta"), page.raw.includes("no longer")], [false, false]);
+
+      /* The other refusal, and the rule for which: saying "you no longer
+       * have access" confirms the document exists, so it is served only to a
+       * request carrying a valid session. Somebody who once qualified already
+       * knew it was there; a stranger learns nothing.
+       */
+      const seen = await admin.get(`/s/${token}`);
+      check("a request with a session is told what happened", seen.status, 403);
+      check("...in a page of its own", seen.raw.includes("You no longer have access"), true);
+      const seenJson = await admin.get(`/api/share/${token}`);
+      check("...and the API says it too", [seenJson.status, seenJson.body.code], [403, "share_closed"]);
+
+
+      await admin.patch("/api/docs/beta.md/share", { allowExport: true });
+      check("...and so does drawing a PDF off the link",
+        (await reader.post("/api/export/pdf",
+          { html: "<!doctype html><p>hi</p>", share: token })).status,
+        401);
+
+      check("(the block is lifted)", policy.remove(blocked.id), true);
+      check("...and the same link works again, never having been touched",
+        (await reader.get(`/api/share/${token}`)).status, 200);
+
+      /* A space-level switch rather than a statement: the operator saying
+       * links out of this space may not be published to the world at all.
+       * Said as a deny so the one algorithm explains it, which is also what
+       * makes it beat an `allow read public` written on the space.
+       */
+      const made = await admin.post("/api/folders", { name: "Embargoed" });
+      const inside = await admin.post("/api/docs",
+        { fileName: "draft.md", content: "# Draft\n", folderId: made.body.folder.id });
+      const insideLink = await admin.post(`/api/docs/${inside.body.file}/share`);
+      check("(a link to a document in a space)", insideLink.status, 201);
+      const insideToken = insideLink.body.url.split("/s/")[1];
+      check("...which works", (await reader.get(`/api/share/${insideToken}`)).status, 200);
+
+      policy.db.prepare("UPDATE spaces SET public_links_allowed = 0 WHERE dir_name = ?")
+        .run("Embargoed");
+      policy.forget();
+      check("a space that does not allow public links closes the ones it has",
+        (await reader.get(`/api/share/${insideToken}`)).status, 404);
+      check("...and refuses a new one being made",
+        (await admin.post(`/api/docs/${inside.body.file}/share`)).status, 403);
+      check("...while a document elsewhere is unaffected",
+        (await reader.get(`/api/share/${token}`)).status, 200);
+
+      policy.db.prepare("UPDATE spaces SET public_links_allowed = 1 WHERE dir_name = ?")
+        .run("Embargoed");
+      policy.forget();
+      check("...and switching it back on restores them",
+        (await reader.get(`/api/share/${insideToken}`)).status, 200);
+
+      /* A link for people rather than for the world. The token identifies
+       * the document and the audience; the session identifies the account,
+       * the group qualifies it, and then their own access decides — so a
+       * link is never a way into a space somebody was shut out of.
+       */
+      check("an audience nothing understands is refused rather than read as public",
+        (await admin.post("/api/docs/beta.md/share", { audience: "everyone" })).status, 400);
+      check("...and so is a group that does not exist",
+        (await admin.post("/api/docs/beta.md/share", { audience: "group:nobodies" })).status, 400);
+
+      const forEveryone = await admin.post("/api/docs/beta.md/share",
+        { audience: "group:everyone" });
+      check("a link can name a group", [forEveryone.status, forEveryone.body.share.audience],
+        [201, "group:everyone"]);
+      const groupToken = forEveryone.body.url.split("/s/")[1];
+
+      check("a stranger holding it is told nothing, since it is not for them",
+        (await reader.get(`/api/share/${groupToken}`)).status, 404);
+      check("...and the page is the generic one",
+        (await reader.get(`/s/${groupToken}`)).status, 404);
+      check("an account in the group reads it",
+        (await admin.get(`/api/share/${groupToken}`)).status, 200);
+
+      const shut = policy.write({
+        effect: "deny",
+        subject: { kind: "group", id: policy.groupByName("everyone").id },
+        spaceDir: "",
+        prefix: "beta.md",
+        level: "read"
+      });
+      check("(the document is closed to the group the link names)", shut.ok, true);
+      check("...so the link stops working for them too, link or no link",
+        (await admin.get(`/api/share/${groupToken}`)).status, 403);
+      policy.remove(shut.id);
+
+      // Rotation keeps the audience: replacing the URL of a link shared with
+      // a group must not quietly publish it to the world.
+      const rotated = await admin.post("/api/docs/beta.md/share");
+      check("rotating a group link keeps it a group link",
+        rotated.body.share.audience, "group:everyone");
+      check("...and a stranger still cannot read it",
+        (await reader.get(`/api/share/${rotated.body.url.split("/s/")[1]}`)).status, 404);
+
+      await admin.del("/api/docs/beta.md/share");
+      await admin.del(`/api/docs/${inside.body.file}/share`);
+      // The document first: deleting a folder rescues what is in it to the
+      // top level rather than deleting it, which would leave this one there.
+      await admin.post(`/api/docs/${inside.body.file}/delete`, { mode: "soft" });
+      await admin.del(`/api/folders/${made.body.folder.id}`);
+      policy.db.prepare("DELETE FROM grants").run();
+      policy.ensureBaseline({ actor: "aza" });
+      policy.db.close();
+    }
   }
 
   console.log("=== the preview describes the document, not the app ===");

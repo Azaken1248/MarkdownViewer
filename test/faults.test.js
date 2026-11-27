@@ -81,7 +81,8 @@ function aLibraryThatWillNotAnswer(overrides = {}) {
       decide: () => ({ allowed: true, reason: "allowed by: the fault harness", considered: [] }),
       filter: () => () => true,
       level: () => "manage",
-      visibleSpaces: () => new Set()
+      visibleSpaces: () => new Set(),
+      forShare: () => ({ allowed: true, reason: "allowed by: the fault harness", considered: [] })
     };
     next();
   };

@@ -1176,6 +1176,196 @@ console.log("=== a statement that is true of the request rather than of the libr
     store.allowFilter(null, "doc:read", asIfPublicReads)(DOC), true);
 }
 
+console.log("=== a share link is a statement, not an authority ===");
+{
+  /* Possession of the token used to *be* the permission. Here the row reads
+   * as one statement at that one document's scope and `decide()` answers,
+   * which is what makes `deny read public` at the root AWS's "block public
+   * access": one row that kills every public link in the library, existing
+   * ones included.
+   *
+   * Started from the migration's own state, because what every check below
+   * is about is a link working or not working on its own terms rather than
+   * on whatever the sections above left behind.
+   */
+  store.db.prepare("DELETE FROM grants").run();
+  store.ensureBaseline({ actor: "aza" });
+
+  const { shareStatement, audiencePrincipal } = access;
+  const link = (file, audience = "public") => ({ file, audience });
+  const everyoneId = () => store.groupByName("everyone").id;
+
+  // The fields a statement is read by, so the check reads as the statement.
+  const asFields = (one) =>
+    [one.space, one.prefix, one.effect, one.level, one.subject.kind];
+
+  check("a link reads as one statement, at the document and not at the space",
+    asFields(shareStatement(link(DOC))),
+    ["Contra NES Extension", "decisions/ADR-004.md", "allow", "read", "public"]);
+  check("...and a document in no directory is in the reserved space, not at the root",
+    asFields(shareStatement(link(LOOSE))).slice(0, 2),
+    ["", "notes.md"]);
+  check("a row naming no document is no statement, the alternative being a whole space",
+    [shareStatement(link("")), shareStatement(link("/")), shareStatement(link(null))],
+    [null, null, null]);
+
+  check("a stranger holding the link reads that document",
+    store.decideShare(link(DOC)).allowed, true);
+  check("...and the answer says the link is what allowed it",
+    store.decideShare(link(DOC)).reason,
+    "allowed by: allow read public on Contra NES Extension/decisions/ADR-004.md");
+  check("...while the document beside it stays shut",
+    store.decide(null, "Contra NES Extension/decisions/ADR-005.md", "doc:read",
+      { extra: [shareStatement(link(DOC))] }).allowed,
+    false);
+  check("...and the link does not hand over anything but reading",
+    store.decide(null, DOC, "doc:write", { extra: [shareStatement(link(DOC))] }).allowed,
+    false);
+  check("a link to a loose document works too, which is what the reserved space is for",
+    store.decideShare(link(LOOSE)).allowed, true);
+
+  const blocked = store.write({ effect: "deny", subject: { kind: "public" }, level: "read" });
+  check("one deny at the root closes every public link at once",
+    [store.decideShare(link(DOC)).allowed, store.decideShare(link(LOOSE)).allowed],
+    [false, false]);
+  check("...saying which statement refused",
+    store.decideShare(link(DOC)).reason, "denied by: deny read public on <root>");
+  check("...and an account is unaffected by it, the deny naming the public principal",
+    store.decide(editor, DOC, "doc:read").allowed, true);
+  store.remove(blocked.id);
+  check("...and lifting it brings every link back, none having been touched",
+    store.decideShare(link(DOC)).allowed, true);
+
+  const oneSpace = store.write({
+    effect: "deny", subject: { kind: "public" },
+    spaceDir: "Contra NES Extension", level: "read"
+  });
+  check("a space closed to the public closes the links into it",
+    [store.decideShare(link(DOC)).allowed, store.decideShare(link(LOOSE)).allowed],
+    [false, true]);
+  store.remove(oneSpace.id);
+
+  /* The space-level switch, which is not a statement in the table but is
+   * answered as one: the operator saying links out of here may not be
+   * published to the world at all. Said that way so the one algorithm
+   * explains it, and so that it beats an `allow read public` on the space —
+   * a block an allow could outvote would not be a block.
+   */
+  const published = store.write({
+    effect: "allow", subject: { kind: "public" },
+    spaceDir: "Elections", level: "read"
+  });
+  check("a space can be published without any link being made",
+    store.decideShare(link("Elections/a.md")).allowed, true);
+
+  store.db.prepare("UPDATE spaces SET public_links_allowed = 0 WHERE dir_name = ?")
+    .run("Elections");
+  store.forget();
+  check("...until the space says public links are not allowed",
+    store.decideShare(link("Elections/a.md")).allowed, false);
+  check("...which beats the allow, rather than tying with it",
+    store.decideShare(link("Elections/a.md")).reason,
+    "denied by: deny read public on Elections");
+  check("...and leaves the account that may read it alone",
+    store.decide(editor, "Elections/a.md", "doc:read").allowed, true);
+  check("...and every other space alone",
+    store.decideShare(link(DOC)).allowed, true);
+  check("a path no space owns has no switch to read, rather than throwing",
+    store.publicLinkBlock("Nowhere At All/a.md"), []);
+
+  store.db.prepare("UPDATE spaces SET public_links_allowed = 1 WHERE dir_name = ?")
+    .run("Elections");
+  store.forget();
+  check("...and switching it back on restores the links",
+    store.decideShare(link("Elections/a.md")).allowed, true);
+  store.remove(published.id);
+
+  check("which space a path belongs to is the rows' answer, not the path's shape",
+    [store.spaceOfPath(DOC).dir_name, store.spaceOfPath(LOOSE).dir_name,
+      store.spaceOfPath("Nowhere At All/a.md")],
+    ["Contra NES Extension", "", null]);
+  check("...and no path at all is the reserved space, rather than a throw",
+    [store.spaceOfPath(null).dir_name, store.spaceOfPath("").dir_name], ["", ""]);
+
+  /* A link for people rather than for the world. Nothing is injected for
+   * this kind: a group link publishes nothing, it only says who may use it,
+   * so the account's own access is what decides — which is what stops a link
+   * being a way into a space somebody was shut out of.
+   */
+  const minutes = store.insertGroup("minutes");
+  check("a link for a group is refused for a request with no account",
+    store.decideShare(link(DOC, "group:everyone")).allowed, false);
+  check("...saying what it wanted",
+    store.decideShare(link(DOC, "group:everyone")).reason,
+    "the link is for group:everyone, which needs an account");
+  check("...and for an account that is not in the group",
+    [store.decideShare(link(DOC, "group:minutes"), editor).allowed,
+      store.decideShare(link(DOC, "group:minutes"), editor).reason],
+    [false, "the account is not in group:minutes"]);
+  check("an account in the group reads it",
+    [store.decideShare(link(DOC, "group:everyone"), editor).allowed,
+      store.decideShare(link(DOC, "group:contributors"), editor).allowed],
+    [true, true]);
+
+  const shut = store.write({
+    effect: "deny", subject: { kind: "group", id: everyoneId() },
+    spaceDir: "Contra NES Extension", level: "read"
+  });
+  check("...and the link is no way around a space they were shut out of",
+    store.decideShare(link(DOC, "group:everyone"), editor).allowed, false);
+  check("...while the public link to the same document is a different question",
+    store.decideShare(link(DOC)).allowed, true);
+  store.remove(shut.id);
+
+  /* A group that is deleted takes its statements with it, by the trigger in
+   * lib/db.js, and its members with it, by the foreign key. A link naming it
+   * is then a link for nobody — which is the direction it has to fail in.
+   */
+  store.deleteGroup(minutes.id);
+  store.deleteGroup(store.groupByName("contributors").id);
+  check("a link for a group that no longer exists works for nobody",
+    store.decideShare(link(DOC, "group:contributors"), editor).allowed, false);
+
+  /* An audience nothing understands is a link that does not work, never a
+   * link to the world: the one direction a parsing mistake must not take is
+   * towards publishing.
+   */
+  check("an audience this cannot read is refused rather than read as public",
+    ["everyone", "group:", "", "Public", "user:u_edit", null]
+      .map((audience) => store.decideShare(link(DOC, audience)).allowed),
+    [false, false, false, false, false, false]);
+  check("...and says so rather than naming a statement",
+    store.decideShare(link(DOC, "everyone")).reason,
+    "the link names no audience this can decide about");
+  check("a group link naming no document is refused, rather than asking about nowhere",
+    store.decideShare(link("", "group:everyone"), editor).allowed, false);
+  check("a row with no document is refused too",
+    [store.decideShare(link("")).allowed, store.decideShare(link("/")).allowed,
+      store.decideShare(null).allowed],
+    [false, false, false]);
+  check("...and says which of the two it was",
+    [store.decideShare(link("")).reason, store.decideShare(link("/")).reason],
+    ["the link names no document", "the link names no document"]);
+
+  check("the principals an audience can name, and the ones it cannot",
+    ["public", "group:everyone", "group:x", "", "group:", "nonsense"]
+      .map((audience) => JSON.stringify(audiencePrincipal(audience))),
+    ['{"kind":"public"}', '{"kind":"group","id":"everyone"}', '{"kind":"group","id":"x"}',
+      "null", "null", "null"]);
+  check("an audience a link may be given is public, or a group that exists",
+    ["public", "group:everyone", "group:nobodies", "nonsense"]
+      .map((audience) => store.audienceExists(audience)),
+    [true, true, false, false]);
+
+  check("PUBLIC_READS does not change what a link does",
+    store.decideShare(link(DOC),
+      null, { extra: [require("../lib/guards.js").PUBLIC_READS_STATEMENT] }).allowed,
+    true);
+
+  store.db.prepare("DELETE FROM grants").run();
+  store.ensureBaseline({ actor: "aza" });
+}
+
 console.log("=== the cache, which must never answer with a permission that is gone ===");
 {
   const first = store.statements();

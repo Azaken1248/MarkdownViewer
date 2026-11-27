@@ -732,10 +732,13 @@ The share page is a separate page, not a mode of the app: no explorer, no
 editor, no search, and no route back into the library. It is served `noindex`,
 since an unguessable URL stops being unguessable once a crawler files it.
 
-The token is the credential, so the server stores only its hash and shows you
-the full URL exactly once. Losing it means creating a new link, which revokes
-the old one. Renaming a document carries its share across; deleting one revokes
-it.
+The token is a secret, so the server stores only its hash and shows you the
+full URL exactly once. Losing it means creating a new link, which revokes the
+old one. Renaming a document carries its share across; deleting one revokes it.
+
+What the token is **not** is the whole permission. It says which document the
+request is about and who the link is for; whether that person may read it is
+still the policy's answer, which is the next section.
 
 The link preview describes **the document**, not the app: `og:title` is the
 document's own H1 (falling back to its filename) and `og:description` is the
@@ -756,6 +759,59 @@ there is now a PNG: see [Link preview images](#link-preview-images).
 
 Revoking a link takes the preview with it: a dead token renders a generic
 "not found" page that names neither the document nor its contents.
+
+### Who the link is for
+
+Who may read what is a set of **statements** — an `allow` or a `deny`, a person
+or a group, and where it applies; [ARCHITECTURE.md](ARCHITECTURE.md) has the
+model and the order they are evaluated in. There is no page for editing them
+yet, so for now they are rows somebody writes into the database. What follows
+is what they mean for a link.
+
+A link is a **statement** too, rather than an authority. The token says which document the
+request is about and which audience the link names; the policy answers. Which
+is the difference between "whoever has the URL" and "whoever has the URL *and*
+is still allowed", and it is what makes a link possible to close without
+having to find it.
+
+| Audience | Who can open it | What closes it |
+| --- | --- | --- |
+| **Anyone with the link** | no account needed, which is what every link was before there was a choice | `deny read public` written anywhere above the document, or a space that does not allow public links |
+| **A group** | an account in that group, re-checked every time the page is served | leaving the group, the group being deleted, or losing access to the document itself |
+
+One row closes every public link in the library at once, the ones that already
+exist included, because an explicit deny beats everything:
+
+```
+deny read public on <root>
+```
+
+That is the same idea as a cloud provider's "block public access", and it is
+one row rather than a walk over every link anybody has ever made. A space can
+be published the same way, with no link made per document:
+
+```
+allow read public on Elections
+```
+
+A space can also refuse to be published at all, which is a switch on the space
+rather than a statement: a public link out of it is refused when somebody tries
+to make one, and the ones that exist stop working until it is switched back on.
+
+Replacing a link keeps the audience it had: rotating a URL is republishing the
+same document, and a link shared with one group quietly becoming a link to the
+world is the one direction a silent change must not go. So **changing who a
+link is for gives it a new URL** — naming a different audience republishes the
+document, which is also the moment you would want the old URL to stop working.
+
+A link that has stopped working says one of two things, and which one depends
+on what the person asking already knows:
+
+- **"You no longer have access to this document"** — for a request carrying a
+  sign-in. Somebody who once qualified already knew the document was there.
+- **"This share link is not valid"** — for everybody else, word for word what
+  a revoked link and a mistyped URL say. Anything else would confirm the
+  document exists.
 
 ### What a reader can do with it
 

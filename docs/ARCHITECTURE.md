@@ -62,6 +62,8 @@ see [USAGE.md](USAGE.md); for the HTTP surface see [API.md](API.md).
 │   │   └── auth.js users.js docs.js folders.js recycle.js shares.js
 │   │       links.js assets.js upload.js meta.js pages.js
 │   ├── guards.js             # Who may: sessions, CSRF, permissions
+│   ├── access.js             # Spaces, groups, statements, and decide()
+│   ├── share-access.js       # What a request holding a share token is told
 │   ├── auth.js               # Accounts, sessions, RBAC, login rate limiting
 │   ├── excerpt.js            # Title and summary for link previews
 │   ├── link-preview.js       # Fetches a URL safely and reads its og: tags
@@ -330,6 +332,7 @@ Which routes ask, and which cannot:
 | folder upload | every intended path, checked before a single folder is created, because an upload refused halfway is an upload that left folders behind |
 | the folder tree, in the listing and in `/graphql` | `visibleFolderIds`: a folder is shown if a document being answered with lives in it, or if its own directory may be read — **plus every ancestor of a shown folder**, or what somebody can see hangs off nothing and cannot be reached. Paths and depths are still computed from the whole tree, which is what keeps a kept ancestor's path right |
 | `/graphql` | the same `req.access.filter`, reached through the resolver context — it is a second way into every document, so a field that forgot to ask would undo the guard on `/api/docs` |
+| a share link — its page, its API, the images in it, and a PDF drawn off it | `req.access.forShare(share)`. The token says which document and which audience; the policy answers |
 | saved links | not documents. Global, as they were |
 
 **The policy follows the directories.** A space owns one top-level directory
@@ -343,6 +346,8 @@ moved or deleted changes the policy's own vocabulary:
 | a folder inside a space is renamed or moved | every statement at or under its old path is rewritten to the same place under the new one |
 | a space is moved inside another space | its statements become prefixes in that one, and its row goes **last** — the foreign key would otherwise have taken them with it |
 | a folder is promoted to the top level | it becomes a space, created before anything is scoped into it |
+| a document or a folder is moved between spaces | write on **both** sides, asked before anything is renamed on disk: a file that has already moved is under the destination's policy whatever the answer was |
+| a document is restored out of the bin or the archive | the top-level directory the restore recreates becomes a space again, rather than waiting for the next listing to notice |
 | a top-level directory arrives from outside the app — `mv`, a restore, a sync | the document listing reconciles the spaces against what its walk saw, so it is a space without a restart. The library is ordinary files in ordinary directories and is meant to be worked on with ordinary tools; this is where the policy catches up with that, the same way the search index catches up with the disk |
 | a top-level folder is deleted | the space goes, and with it everything said about paths inside it. The documents it held were moved to the top level by the route that deleted it, where the reserved space covers them |
 | a folder deeper in is deleted | its statements are left alone, deliberately: a path that comes back because somebody makes that folder again comes back to the policy it had |
@@ -360,11 +365,12 @@ Two things are **not** scoped, and are written down rather than assumed:
   of which documents embed which asset, maintained against documents that can
   be edited outside the app — a feature, not a guard. What protects one
   meanwhile is that its name is a hash of its contents and appears nowhere
-  except inside a document somebody could already read. That is the posture of
-  a share token and **not** a space boundary: somebody who knows the name of an
-  image in a space they were shut out of can still fetch that image. The
-  share-scoped route beside it does better, because it has a document to work
-  from and refuses a name that is not in it.
+  except inside a document somebody could already read. That is unguessability
+  and **not** a space boundary: somebody who knows the name of an image in a
+  space they were shut out of can still fetch that image. The share-scoped
+  route beside it does better, because it has a document to work from: it
+  refuses a name that is not in that document, and it asks the policy about
+  the link, so a picture stops being served when the link does.
 - **`POST /api/export/pdf`.** What it is given is the HTML the page already
   built, not a path, and the caller had to be allowed to read the document to
   have it. The permission was enforced on the way in.
@@ -374,6 +380,34 @@ public at the root`, handed to the decision for that request and not written to
 the database, because it is the operator's setting and not the owner's policy.
 Which also means a space carrying an explicit `deny read public` stays closed
 with `PUBLIC_READS` on, since a deny beats everything.
+
+**A share link is a statement too.** Possession of the token used to *be* the
+permission. Now the token says which document the request is about and which
+audience the link names — `shares.audience` holds the principal: `public`, or
+`group:<name>` — and `decide()` answers. A `public` row reads as one statement
+at that one document's scope, which is why every link that already existed
+keeps working with no migration, and why `deny read public` at the root is one
+row that closes all of them at once. A group audience injects nothing: a group
+link publishes nothing, it only says who may use it, so the session identifies
+the account, the group qualifies it, and then its own access decides — a link
+is never a way into a space somebody was shut out of. An audience this cannot
+read is refused rather than treated as `public`, because the one direction a
+parsing mistake must not take is towards publishing.
+
+`spaces.public_links_allowed` is the operator's switch for a space, answered as
+an injected `deny read public` on it rather than as a branch: the one algorithm
+then explains the refusal in the same words as any other, and the switch beats
+an `allow read public` written on the same space. A block an allow could
+outvote would not be a block. It applies to the link path only, which is what
+the column is named after.
+
+A refusal there is two answers, spelled once in `lib/share-access.js`:
+**"You no longer have access to this document"** for a request carrying a
+session, because saying so confirms the document exists and somebody who once
+qualified already knew that; and the generic **"This share link is not
+valid"** for everybody else — word for word what a revoked token and a typo
+get, since a closed link that read differently would tell anybody holding a URL
+that the document is there.
 
 `PERMISSIONS_PLAN.md` records the twenty decisions behind this and what is
 built next.

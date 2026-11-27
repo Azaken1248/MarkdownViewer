@@ -157,8 +157,16 @@
       const response = await fetch(`/api/share/${encodeURIComponent(token)}`, { cache: "no-store" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        /* A link can stop working without being revoked: the token says which
+         * document and which audience, and the policy answers, so the answer
+         * can change while the page is open. Which of the two refusals it is
+         * comes from the server rather than being guessed here — 403 is the
+         * policy having changed, 404 is a link that is not valid, and
+         * anything else is this page's own problem.
+         */
+        const titles = { 403: "You no longer have access", 404: "This link is not valid" };
         showError(
-          response.status === 404 ? "This link is not valid" : "Could not load the document",
+          titles[response.status] || "Could not load the document",
           body.error || "The link may have been revoked, or the document may have been deleted."
         );
         return;

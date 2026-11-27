@@ -245,6 +245,36 @@ const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("he
 
       const nonsense = await guest.get(`/api/share/not-a-token/assets/${uploaded.name}`);
       check("nor will a token that is not a share", nonsense.status, 404);
+
+      /* ...and the link is a statement, so the picture closes with it.
+       *
+       * An image inside a shared document loads for somebody holding the
+       * link and nothing else. If it outlived the link, closing the link
+       * would leave the pictures in the document still being served — and
+       * the statement is written for the policy rather than for this route,
+       * so it has to be this route that asks.
+       */
+      const Database = require("better-sqlite3");
+      const { AccessStore } = require("../lib/access.js");
+      const policy = new AccessStore({
+        db: new Database(path.join(server.stateDir, "data", "azadocs.db")),
+        markdownDir: path.join(server.stateDir, "docs")
+      });
+
+      const blocked = policy.write({
+        effect: "deny", subject: { kind: "public" }, level: "read"
+      });
+      check("(deny read public, at the root)", blocked.ok, true);
+      check("the picture stops being served when the link stops working",
+        (await guest.get(`/api/share/${token}/assets/${uploaded.name}`)).status, 404);
+      check("...saying what a picture that is not there says, and nothing more",
+        (await guest.get(`/api/share/${token}/assets/${uploaded.name}`)).body,
+        nonsense.body);
+
+      policy.remove(blocked.id);
+      check("...and comes back with it",
+        (await guest.getBytes(`/api/share/${token}/assets/${uploaded.name}`)).status, 200);
+      policy.db.close();
     }
   } finally {
     await server.stop();

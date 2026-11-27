@@ -518,6 +518,7 @@ app.use(createAuthRoutes({
 app.use(createSharesRoutes({
   markdownDir: MARKDOWN_DIR,
   shareStore,
+  accessStore,
   audit,
   requirePermission,
   requireAccess,
